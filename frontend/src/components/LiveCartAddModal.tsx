@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
@@ -549,7 +549,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
 
         if (prData && (prData as any).isError) {
           mergedList.push({
-            medicine_name: `âš ï¸ ${(prData as any).message}`,
+            medicine_name: `⚠️ ${(prData as any).message}`,
             isPharmarack: true,
             isErrorMessage: true
           });
@@ -808,16 +808,16 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                             <td className="py-2 px-1 text-right text-muted font-mono">{order.qty}</td>
                             <td className="py-2 px-1 text-right">
                               {inCart ? (
-                                <span className="text-[8px] font-bold text-emerald-400">âœ“</span>
+                                <span className="text-[8px] font-bold text-emerald-400">✓</span>
                               ) : isPickingForOrder ? (
                                 <button type="button" onClick={() => { setDistributorPickerOrderId(null); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">âœ•</button>
+                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
                               ) : (
                                 <button type="button"
                                   onClick={() => handleSearchDistributorsForOrder(order)}
                                   disabled={addingOrderId === order.id || distributorPickerLoading}
                                   className="text-[9px] font-bold text-red hover:text-red/80 disabled:opacity-40 transition-colors">
-                                  {addingOrderId === order.id ? 'â€¦' : 'Add'}
+                                  {addingOrderId === order.id ? '...' : 'Add'}
                                 </button>
                               )}
                             </td>
@@ -830,7 +830,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                                   {distributorPickerLoading ? (
                                     <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
                                       <Loader2 size={10} className="animate-spin text-primary" />
-                                      Searching distributorsâ€¦
+                                      Searching distributors...
                                     </div>
                                   ) : distributorPickerResults.length === 0 ? (
                                     <p className="text-[10px] text-muted py-1">No distributors found.</p>
@@ -850,7 +850,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                                           </div>
                                           {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
                                         </div>
-                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">â‚¹{dist.rate}</span>}
+                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
                                       </button>
                                     );
                                   })}
@@ -886,16 +886,16 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                             <td className="py-2 px-1 text-right text-muted font-mono">1</td>
                             <td className="py-2 px-1 text-right">
                               {inCart ? (
-                                <span className="text-[8px] font-bold text-emerald-400">âœ“</span>
+                                <span className="text-[8px] font-bold text-emerald-400">✓</span>
                               ) : isPickingForRefill ? (
                                 <button type="button" onClick={() => { setDistributorPickerRefillId(null); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">âœ•</button>
+                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
                               ) : (
                                 <button type="button"
                                   onClick={() => handleSearchDistributorsForRefill(refill)}
                                   disabled={addingRefillId === refill.id || distributorPickerLoading}
                                   className="text-[9px] font-bold text-amber-400 hover:text-amber-300 disabled:opacity-40 transition-colors">
-                                  {addingRefillId === refill.id ? 'â€¦' : 'Add'}
+                                  {addingRefillId === refill.id ? '...' : 'Add'}
                                 </button>
                               )}
                             </td>
@@ -908,7 +908,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                                   {distributorPickerLoading ? (
                                     <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
                                       <Loader2 size={10} className="animate-spin text-primary" />
-                                      Searching distributorsâ€¦
+                                      Searching distributors...
                                     </div>
                                   ) : distributorPickerResults.length === 0 ? (
                                     <p className="text-[10px] text-muted py-1">No distributors found.</p>
@@ -928,7 +928,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                                           </div>
                                           {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
                                         </div>
-                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">â‚¹{dist.rate}</span>}
+                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
                                       </button>
                                     );
                                   })}
@@ -951,11 +951,11 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                             {recon.extracted_distributor || 'Unknown Dist.'}
                           </div>
                           <div className="text-muted truncate max-w-[130px]">
-                            {recon.medicine_names?.slice(0, 2).join(', ') || recon.subject || 'â€”'}
+                            {recon.medicine_names?.slice(0, 2).join(', ') || recon.subject || '—'}
                             {recon.medicine_names?.length > 2 && ` +${recon.medicine_names.length - 2}`}
                           </div>
                         </td>
-                        <td className="py-2 px-1 text-right text-muted font-mono">â€”</td>
+                        <td className="py-2 px-1 text-right text-muted font-mono">—</td>
                         <td className="py-2 px-1 text-right">
                           <span className="text-[8px] font-bold uppercase text-purple-400">Missing</span>
                         </td>
@@ -983,7 +983,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                     <span className="text-[10px] bg-bg3 border border-border text-muted px-1.5 py-0.5 rounded font-mono">Alt + L</span>
                     {prMode !== 'Unknown' && (
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-                        â— LIVE
+                        ● LIVE
                       </span>
                     )}
                   </h3>
@@ -1058,7 +1058,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                                 ) : (
                                   'No Distributor'
                                 )}
-                                {med.packaging ? ` â€¢ ${med.packaging}` : ''}
+                                {med.packaging ? ` • ${med.packaging}` : ''}
                               </span>
                             )}
                           </div>
@@ -1066,10 +1066,10 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                             {!med.isErrorMessage && (
                               <div className="text-xs font-mono font-bold text-text flex flex-col items-end">
                                 {med.rate !== undefined && med.rate !== null ? (
-                                  <span className="text-emerald-400">PTR: â‚¹{med.rate}</span>
+                                  <span className="text-emerald-400">PTR: ₹{med.rate}</span>
                                 ) : null}
                                 {med.mrp !== undefined && med.mrp !== null ? (
-                                  <span className="text-muted text-[10px]">MRP: â‚¹{med.mrp}</span>
+                                  <span className="text-muted text-[10px]">MRP: ₹{med.mrp}</span>
                                 ) : null}
                               </div>
                             )}
@@ -1103,8 +1103,8 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div className="font-mono font-bold whitespace-nowrap flex flex-col items-end gap-0.5 text-right shrink-0">
-                        {selectedRate !== '' && <span className="text-emerald-400 text-sm">PTR: â‚¹{selectedRate}</span>}
-                        {selectedMrp !== '' && <span className="text-muted text-[10px]">MRP: â‚¹{selectedMrp}</span>}
+                        {selectedRate !== '' && <span className="text-emerald-400 text-sm">PTR: ₹{selectedRate}</span>}
+                        {selectedMrp !== '' && <span className="text-muted text-[10px]">MRP: ₹{selectedMrp}</span>}
                       </div>
                       <button
                         type="button"
@@ -1145,7 +1145,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                         <span>Cheaper Distributor Offer Available!</span>
                       </div>
                       <div className="text-text/90 leading-relaxed text-[11px]">
-                        <span className="font-bold">{cheaperDistributor.distributor}</span> has this for an effective PTR of <span className="font-black text-emerald-400">â‚¹{cheaperDistributor.effectiveRate.toFixed(2)}</span>
+                        <span className="font-bold">{cheaperDistributor.distributor}</span> has this for an effective PTR of <span className="font-black text-emerald-400">₹{cheaperDistributor.effectiveRate.toFixed(2)}</span>
                         {cheaperDistributor.scheme && ` (${cheaperDistributor.scheme} scheme)`}.
                       </div>
                     </div>
@@ -1274,7 +1274,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                           </div>
                           <div className="text-right shrink-0 flex flex-col items-end">
                             <span className="font-bold text-text">Qty: {item.qty}</span>
-                            {item.ptr > 0 && <span className="text-[9px] text-muted font-mono mt-0.5">â‚¹{(item.ptr * item.qty).toFixed(2)}</span>}
+                            {item.ptr > 0 && <span className="text-[9px] text-muted font-mono mt-0.5">₹{(item.ptr * item.qty).toFixed(2)}</span>}
                           </div>
                         </div>
                       ))}
@@ -1284,7 +1284,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                     {dist.lineTotal > 0 && (
                       <div className="flex justify-between items-center pt-1.5 border-t border-glass-border/15 text-[11px]">
                         <span className="text-muted uppercase tracking-wider font-bold">Subtotal</span>
-                        <span className="font-bold text-emerald-400 font-mono">â‚¹{dist.lineTotal.toFixed(2)}</span>
+                        <span className="font-bold text-emerald-400 font-mono">₹{dist.lineTotal.toFixed(2)}</span>
                       </div>
                     )}
                   </div>
@@ -1306,7 +1306,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                   </div>
                   <div>
                     <span className="text-muted block uppercase text-[8px] tracking-wider mb-0.5">Est. Total</span>
-                    <span className="font-bold text-emerald-400 font-mono text-xs">â‚¹{totalAmount.toFixed(2)}</span>
+                    <span className="font-bold text-emerald-400 font-mono text-xs">₹{totalAmount.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
