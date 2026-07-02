@@ -1,0 +1,639 @@
+# 🏥 AI Pharmacy OS — Comprehensive Audit & Implementation Plan
+
+## Executive Summary
+
+This is a **deep, line-by-line audit** of the entire AI Pharmacy project. The system is a Node.js/TypeScript Express server that powers a 19-page pharmacy management OS. The backend has good bones, but there are **critical bugs, incomplete wiring, missing DB columns, duplicate exports, and broken UI↔API contracts** throughout. This plan catalogs every issue and provides exact fixes.
+
+---
+
+## 🔴 CRITICAL BUGS (Must Fix First — These Break Core Functions)
+
+### BUG-01: `emailService.ts` — Duplicate Export (Server Won't Start)
+**File:** [`emailService.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/services/emailService.ts#L486-L492)  
+**Error:** Lines 486–492 have `export const emailService` and `export default emailService` duplicated twice. This is a **syntax error** that will crash the TypeScript compiler.
+```diff
+- // Export singleton instance (lines 490-492 are duplicates)
+- export const emailService = new EmailService();
+- export default emailService;
+```
+**Fix:** Delete lines 490–492 (the second duplicate block).
+
+---
+
+### BUG-02: `email.ts` Route — Missing `.js` Extension on Import
+**File:** [`email.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/email.ts#L7)  
+**Error:** `import { emailService } from '../services/emailService'` — missing `.js` extension. In ESM (`"type": "module"`), all imports need explicit `.js`.
+```diff
+- import { emailService } from '../services/emailService';
++ import { emailService } from '../services/emailService.js';
+```
+
+---
+
+### BUG-03: `emailPoller.ts` — Missing `.js` Extension on Import
+**File:** [`emailPoller.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/worker/emailPoller.ts#L1)
+```diff
+- import { emailService } from '../services/emailService';
++ import { emailService } from '../services/emailService.js';
+```
+
+---
+
+### BUG-04: `telegramBot.ts` — Missing `.js` on i18n Import + `this.lang` Not Declared
+**File:** [`telegramBot.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/telegramBot.ts#L6-L18)
+- Line 6: `import { getMessage } from './i18n/getMessage'` — missing `.js`
+- Line 18: `this.lang = process.env.TELEGRAM_LANG || 'en'` — `lang` property is never declared in the class, causing TypeScript error
+- DB_PATH points to wrong depth: `path.resolve(__dirname, '..', '..', 'data', 'app.db')` should be `path.resolve(__dirname, '..', 'data', 'app.db')` since `src/telegramBot.ts` is one level deep.
+
+---
+
+### BUG-05: `inventory.ts` Route — Missing Column `reorder_level` in DB Schema
+**File:** [`inventory.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/inventory.ts#L103), [`database.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/database.ts#L49-L57)  
+**Error:** `PUT /:id` tries to update `reorder_level` and `unit_price` columns that **do not exist** in the `inventory_master` schema in `database.ts`. Also, `peek/:medicine_id` JOINs `purchases p` to `inventory_master im ON im.id = p.id` which is logically wrong (should join via distributor or item).
+```diff
+# database.ts — inventory_master table needs extra columns:
+CREATE TABLE IF NOT EXISTS inventory_master (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  medicine_id INTEGER,
+  quantity INTEGER DEFAULT 0,
++ unit_price REAL DEFAULT 0,
++ cost_price REAL DEFAULT 0,
++ reorder_level INTEGER DEFAULT 10,
+  rack_location TEXT,
+  batch_no TEXT,
+  expiry_date DATETIME,
+  FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+);
+```
+
+---
+
+### BUG-06: `compliance.ts` — Wrong `action_logs` Schema
+**File:** [`compliance.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/compliance.ts#L32-L54)  
+**Error:** `action_logs` schema only has `(id, action_type, description, created_at)` but the compliance route inserts `(date, product, patient_id, doctor_id, license_no, qty, bill_no)` — columns that **don't exist**.  
+**Fix:** Either add a dedicated `compliance_logs` table or add those columns to `action_logs`.
+
+---
+
+### BUG-07: `purchases.ts` Route — Wrong Column Name in UPDATE
+**File:** [`purchases.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/purchases.ts#L31)  
+**Error:** `UPDATE purchases SET distributor = ?` — the column is `distributor_id` (an integer FK), not `distributor`. This will silently fail or error.
+
+---
+
+### BUG-08: `inventory.ts` — `bulk-action` Uses Wrong `action_logs` Columns
+**File:** [`inventory.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/inventory.ts#L131)  
+Same as BUG-06 — inserts `(date, product, patient_id, doctor_id, license_no, qty, bill_no)` which don't exist in `action_logs`.
+
+---
+
+### BUG-09: `returns.ts` — Imports `uuid` Which Is Not Installed
+**File:** [`returns.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/returns.ts#L7)  
+**Error:** `import { v4 as uuidv4 } from 'uuid'` — `uuid` is NOT in `package.json` dependencies. Will crash at runtime.  
+**Fix:** Add `uuid` to deps OR remove the import (it's not used anywhere in the file).
+
+---
+
+### BUG-10: `server.ts` — Dynamic `import` After Code (ESM Violation)
+**File:** [`server.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/server.ts#L59)  
+`import { ensureSchema }` on line 59 is a top-level `import` statement placed in the **middle of code** after `const app = express()`. In ESM, all imports must be at the top.  
+Also line 189: `import { startEmailPoller }` — again, mid-code import.
+
+---
+
+### BUG-11: `utilities.ts` — Uses `require()` in ESM Module
+**File:** [`utilities.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/utilities.ts#L99)  
+```js
+const AWS = require('aws-sdk'); // This will fail in ESM!
+```
+In a `"type": "module"` project, `require()` is not available. Must use `import`.
+
+---
+
+### BUG-12: `reports.ts` — Wrong Table Name in SQL Queries
+**File:** [`reports.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/reports.ts#L47)  
+Line 47: `SELECT item_name, expiry_date, quantity FROM inventory` — the table is called `inventory_master`, not `inventory`. Will return empty or throw error.  
+Line 50: `SELECT invoice_number ...` — the column is `invoice_no`, not `invoice_number`.
+
+---
+
+### BUG-13: `page1.html` — Invoice Fetch Hits Wrong Endpoint
+**File:** [`page1.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page1.html#L233)  
+Line 233: `fetch('/api/next-invoice')` — but the route is registered as `GET /api/sales/next-invoice`. Wrong URL.
+
+---
+
+### BUG-14: `page19.html` — WhatsApp QR Check Uses Wrong Response Key
+**File:** [`page19.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page19.html#L249)  
+The server returns `{ isReady, qrUrl }` but the UI checks `data.connected` and `data.qrDataUrl`. Mismatch means QR code will never display.
+
+---
+
+### BUG-15: `whatsappClient.ts` — `sendMessage()` Has Wrong API Usage
+**File:** [`whatsappClient.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/whatsappClient.ts#L71-L78)  
+`sendMessage()` calls `clientInstance.sendMessage(to, options)` where `options` is an object with `caption` and `media`. But the whatsapp-web.js API requires `sendMessage(to, content, options)` where content is the actual message string. This means messages will fail to send.
+
+---
+
+## 🟠 INCOMPLETE WIRING (Feature Exists But Not Connected)
+
+### WIRE-01: POS Billing — Cart Items Never Actually Saved to DB
+**File:** [`page1.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page1.html#L217)  
+`processSale()` shows an `alert()` but never calls `POST /api/sales`. Bill items exist only in DOM — refreshing loses everything.  
+**Fix:** `processSale()` must collect table rows and POST to `/api/sales` with `{items, patient_id, doctor_id, discount}`.
+
+---
+
+### WIRE-02: Settings Page — "Save" Buttons Not Properly Wired
+**File:** [`page14.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page14.html#L143-L168)  
+`saveSettings(section)` queries `.${section} input` but section is always `'card'` — every card has class `card` so all inputs across all cards get saved in one blob. Needs section-specific logic (e.g., by card title or data attribute).
+
+---
+
+### WIRE-03: Feature Flags — Not Persisted to Backend
+**File:** [`page14.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page14.html#L16)  
+Feature flag toggles (ai_camera, email_parser, etc.) call `updateFlags()` in-memory only. They are **never saved** via `POST /api/settings`. On refresh, all flags reset to their HTML `checked` defaults.
+
+---
+
+### WIRE-04: Dashboard — `grossProfit` and Delta Fields Not Returned by API
+**File:** [`page2.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page2.html#L10)  
+Dashboard UI expects `data.grossProfit`, `data.salesDelta`, `data.profitDelta`, `data.tasksDelta` — the API only returns `{ todaySales, lowStock, pendingTasks }`. Fields will remain at their hardcoded placeholder values.
+
+---
+
+### WIRE-05: Dashboard — "Backup Now" Button Not Wired
+**File:** [`page2.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page2.html#L62)  
+`<button>🔄 Backup Now</button>` has no `onclick` handler. Clicking does nothing.
+
+---
+
+### WIRE-06: CRM Page — No API Integration
+**File:** [`page8.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page8.html)  
+CRM route exists at `/api/crm` but the page likely shows only static HTML. Needs to fetch customer list from `GET /api/crm` and allow creating customers via `POST /api/crm`.
+
+---
+
+### WIRE-07: Inventory Page — Stub HTML Only
+**File:** [`src/ui/inventory/index.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/inventory/index.html)  
+This file only has `<h1>Inventory</h1>`. It is a stub. The actual inventory UI lives in `page3.html` — but the inventory folder files are not connected to anything.
+
+---
+
+### WIRE-08: Sales/Inventory Stub Pages
+**Files:** [`src/ui/sales/index.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/sales/index.html), [`src/ui/inventory/index.html`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/inventory/index.html)  
+Both are stub files with 10 lines. Not served or used by anything.
+
+---
+
+### WIRE-09: Telegram Bot — `handleMedicineQuery` Method Missing
+**File:** [`telegramBot.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/telegramBot.ts#L77)  
+The bot calls `this.handleMedicineQuery(chatId, medicineName)` in multiple places — but the method **is never defined** in the class. This will throw a runtime error.
+
+---
+
+### WIRE-10: `messaging.ts` — `initClient` Called But Never Re-attempted on Disconnect
+**File:** [`messaging.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/messaging.ts#L3)  
+WhatsApp `initClient` is called in `server.ts` but if it disconnects, there's no reconnect logic. QR page won't show a fresh QR.
+
+---
+
+### WIRE-11: Email Parser — Attachment Processing Has Missing `fs` Import
+**File:** [`emailService.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/services/emailService.ts#L316-L321)  
+`processAttachments` calls `fs.existsSync`, `fs.mkdirSync`, `fs.writeFileSync` — but `fs` is **never imported** in `emailService.ts`. Will crash when processing attachments.
+
+---
+
+### WIRE-12: `archive.ts` — Archived Logs Table Uses Wrong Column (`timestamp`)
+**File:** [`archive.ts`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/archive.ts#L66)  
+`INSERT INTO archived_action_logs ... row.timestamp` — but `action_logs` has column `created_at`, not `timestamp`. Will insert `undefined` silently.
+
+---
+
+### WIRE-13: `common/script.js` — Empty/Stub File
+**File:** [`src/ui/common/script.js`](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/common/script.js)  
+Only 511 bytes. May contain minimal stubs. Not imported by any HTML page. Dead code.
+
+---
+
+## 🟡 INCOMPLETE FEATURES (Placeholder / Simulated Logic)
+
+| Feature | File | Status | What's Missing |
+|---------|------|--------|---------------|
+| Cloud Push to S3 | `utilities.ts` L97 | ❌ Uses `require()` (broken) + no real bucket | Real ESM import + env var validation |
+| Backup Restore | `utilities.ts` L130 | ⚠️ Simulated | Actual file restore logic |
+| Encrypt/Rotate Key | `utilities.ts` L154 | ⚠️ Simulated | Real encryption implementation |
+| Orders Route | `orders.ts` | ⚠️ Returns `sales_invoices` | Needs separate `purchase_orders` table |
+| Expiry Monitor | `expiry.ts` | ⚠️ Only 30 days | Should support configurable window |
+| Reports PDF | `reports.ts` | ⚠️ Column name bugs + no real data | Fix SQL + proper report templates |
+| Barcode Labels | `utilities.ts` L42 | ⚠️ Text-only PDF, no real barcode | Use `qrcode` or barcode lib |
+| WIRE-03 Feature Flags | `page14.html` | ⚠️ Memory only | Persist to `settings` table |
+| Learning Engine | `learning.ts` | ⚠️ Just logs to action_logs | Real AI suggestion model |
+| Email CSV Parser | `emailService.ts` L311 | ⚠️ Simulated (TODO comment) | Real CSV parsing with `csv-parse` |
+| Doctor Suggestions | `page1.html` | ⚠️ Hardcoded data | Real `learning_engine` API |
+| Refill Reminder Button | `page1.html` L219 | ⚠️ `sendRefillReminder()` not defined | Define function + call `/api/patients/send-refill` |
+| WhatsApp Send | `messaging.ts` L32 | ⚠️ Broken send API (BUG-15) | Fix `sendMessage()` signature |
+
+---
+
+## 🔵 DATABASE SCHEMA GAPS
+
+| Missing Table/Column | Needed By | Fix |
+|---------------------|-----------|-----|
+| `inventory_master.unit_price` | `inventory.ts` peek, POS | Add column |
+| `inventory_master.cost_price` | Reports, margin calc | Add column |
+| `inventory_master.reorder_level` | `inventory.ts` PUT, dashboard | Add column |
+| `compliance_logs` table | `compliance.ts` | Create dedicated table |
+| `purchase_order_items` table | Orders & purchases | Create table |
+| `held_bills` table | `sales.ts` hold | Created inline (risky) — move to schema |
+| `doctors` table | POS billing | Add table (currently just string) |
+| `patients` table | POS billing, CRM | Extend `customers` table or create `patients` |
+| `medicines.mrp` | POS, inventory | Add column |
+| `medicines.hsn_code` | Compliance, GST | Add column |
+| `medicines.schedule_type` | Compliance H1 | Add column |
+| `medicines.manufacturer` | Inventory | Add column |
+| Two `settings` tables | `settings.ts` L50 creates `app_settings` while `database.ts` creates `settings` | Merge into one |
+
+---
+
+## 🟢 WHAT IS WORKING CORRECTLY
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| Express Server Boot | ✅ Works (with fixes) | After fixing imports |
+| SQLite Schema Init | ✅ Works | Core tables created |
+| `GET /api/inventory` | ✅ Works | Returns joined data |
+| `POST /api/sales` | ✅ Works | Creates invoice + items |
+| `GET /api/sales/next-invoice` | ✅ Works | Sequential invoice gen |
+| `GET /api/dashboard` | ✅ Works | Basic aggregates |
+| `POST /api/utilities/backup` | ✅ Works | DB file copy |
+| `GET /api/expiry` | ✅ Works | 30-day window |
+| `POST /api/crm` | ✅ Works | Customer creation |
+| `GET /api/crm` | ✅ Works | Customer list |
+| `POST /api/learning/analyze` | ✅ Works | Claude AI integration |
+| `GET /api/messaging/qr` | ✅ Works | QR code generation |
+| Migration Worker | ✅ Works | ZIP + SQL parsing |
+| AI Camera OCR | ✅ Works | Tesseract backend |
+| `GET /api/compliance` | ✅ Works | Expired item count |
+| Archive/Sweep | ✅ Works (mostly) | Timestamp bug |
+| Telegram Bot (polling) | ✅ Starts | Missing `handleMedicineQuery` method |
+
+---
+
+## 📋 IMPLEMENTATION PLAN — PHASED EXECUTION
+
+---
+
+### PHASE 1: Critical Bug Fixes (Priority: BLOCKER)
+> All bugs here must be fixed before any feature work begins.
+
+#### 1.1 — Fix Duplicate Export in emailService.ts
+**File:** [emailService.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/services/emailService.ts)
+- Delete the duplicate `export const emailService` + `export default emailService` block at lines 490–492
+
+#### 1.2 — Fix Missing `.js` Extensions on All Internal Imports
+**Files:** `email.ts`, `emailPoller.ts`, `telegramBot.ts`, `migrationWorker.ts` parsers
+- Add `.js` to all `../services/emailService`, `./i18n/getMessage`, `./parsers/*` imports
+
+#### 1.3 — Fix `telegramBot.ts` Property & DB Path Issues
+**File:** [telegramBot.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/telegramBot.ts)
+- Declare `private lang: string` in class properties
+- Fix DB_PATH depth: `path.resolve(__dirname, '..', 'data', 'app.db')`
+- Implement `private handleMedicineQuery(chatId, medicineName)` — query `inventory_master` JOIN `medicines` for the medicine
+
+#### 1.4 — Fix `returns.ts` — Remove `uuid` Import
+**File:** [returns.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/returns.ts)
+- Remove `import { v4 as uuidv4 } from 'uuid'` (it's unused)
+
+#### 1.5 — Fix `server.ts` — Move Imports to Top
+**File:** [server.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/server.ts)
+- Move `import { ensureSchema }` (line 59) to top of file
+- Move `import { startEmailPoller }` (line 189) to top of file
+
+#### 1.6 — Fix `utilities.ts` — Replace `require()` with ESM Import
+**File:** [utilities.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/utilities.ts)
+- Replace `const AWS = require('aws-sdk')` with `import AWS from 'aws-sdk'` at top of file
+
+#### 1.7 — Fix `purchases.ts` — Wrong Column in UPDATE
+**File:** [purchases.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/purchases.ts)
+- Change `UPDATE purchases SET distributor = ?` to use `distributor_id` (require distributor name lookup first)
+
+#### 1.8 — Fix `reports.ts` — Wrong Table/Column Names  
+**File:** [reports.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/reports.ts)
+- `inventory` → `inventory_master` with JOIN to `medicines`
+- `item_name` → `m.name`
+- `invoice_number` → `invoice_no`
+
+#### 1.9 — Fix `emailService.ts` — Add `fs` Import
+**File:** [emailService.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/services/emailService.ts)
+- Add `import fs from 'fs'` at top
+
+#### 1.10 — Fix `whatsappClient.ts` — Correct `sendMessage()` API
+**File:** [whatsappClient.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/whatsappClient.ts)
+- Fix `sendMessage()` to use correct whatsapp-web.js v1.22 API:
+  ```ts
+  await clientInstance.sendMessage(to, caption ?? '', mediaPath ? { media: MediaFile } : {})
+  ```
+
+---
+
+### PHASE 2: Database Schema Completion
+> Expand the schema without breaking existing data.
+
+#### 2.1 — Expand `database.ts` Schema
+**File:** [database.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/database.ts)
+
+Add to `ensureSchema()`:
+```sql
+-- Inventory enhancements
+ALTER TABLE inventory_master ADD COLUMN unit_price REAL DEFAULT 0;
+ALTER TABLE inventory_master ADD COLUMN cost_price REAL DEFAULT 0;
+ALTER TABLE inventory_master ADD COLUMN reorder_level INTEGER DEFAULT 10;
+
+-- Medicine enhancements
+ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0;
+ALTER TABLE medicines ADD COLUMN hsn_code TEXT;
+ALTER TABLE medicines ADD COLUMN schedule_type TEXT DEFAULT 'None';
+ALTER TABLE medicines ADD COLUMN manufacturer TEXT;
+ALTER TABLE medicines ADD COLUMN category TEXT;
+
+-- Doctors table
+CREATE TABLE IF NOT EXISTS doctors (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  degree TEXT,
+  reg_no TEXT,
+  hospital TEXT,
+  phone TEXT,
+  address TEXT
+);
+
+-- Compliance logs (dedicated)
+CREATE TABLE IF NOT EXISTS compliance_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT,
+  drug_name TEXT,
+  patient_name TEXT,
+  doctor_name TEXT,
+  license_no TEXT,
+  qty INTEGER,
+  bill_no TEXT,
+  schedule_type TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Held bills (move from inline creation)
+CREATE TABLE IF NOT EXISTS held_bills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_no TEXT,
+  data TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Purchase orders
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  distributor_id INTEGER,
+  status TEXT CHECK(status IN ('draft','sent','received','cancelled')) DEFAULT 'draft',
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(distributor_id) REFERENCES distributors(id)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_id INTEGER,
+  medicine_id INTEGER,
+  quantity INTEGER,
+  unit_price REAL,
+  FOREIGN KEY(po_id) REFERENCES purchase_orders(id),
+  FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+);
+```
+
+Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` pattern with try/catch for each column addition to handle existing databases gracefully.
+
+#### 2.2 — Fix `compliance.ts` — Use New Table
+**File:** [compliance.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/compliance.ts)
+- Change all `INSERT INTO action_logs (date, product...)` to `INSERT INTO compliance_logs`
+- Add `GET /api/compliance/logs` endpoint returning `compliance_logs`
+
+#### 2.3 — Fix `inventory.ts` and `purchases.ts` Bulk Actions
+- Change `action_logs` inserts to use correct 2-column schema `(action_type, description)`
+
+---
+
+### PHASE 3: UI ↔ API Wiring
+> Connect all UI pages to their respective API endpoints.
+
+#### 3.1 — Fix POS Billing `processSale()` Function
+**File:** [page1.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page1.html)
+- Implement `processSale(print)` to collect items from table rows
+- POST to `/api/sales` with `{items, patient_id, doctor_id, discount}`
+- On success: show receipt or print dialog if `print=true`
+- Implement `sendRefillReminder()` → POST `/api/patients/send-refill`
+
+#### 3.2 — Fix Invoice URL in POS Page
+**File:** [page1.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page1.html#L233)
+- Change `fetch('/api/next-invoice')` → `fetch('/api/sales/next-invoice')`
+
+#### 3.3 — Fix Dashboard API Gaps
+**File:** [dashboard.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/dashboard.ts), [page2.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page2.html)
+- Add `grossProfit`, `salesDelta`, `profitDelta`, `tasksDelta` to dashboard API response
+- Wire "Backup Now" button to `POST /api/utilities/backup`
+
+#### 3.4 — Fix QR Code Display in page19.html
+**File:** [page19.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page19.html#L249)
+- Change `data.connected` → `data.isReady`  
+- Change `data.qrDataUrl` → `data.qrUrl`
+
+#### 3.5 — Wire Feature Flags to Backend Persistence
+**File:** [page14.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page14.html)
+- On flag toggle change: POST to `/api/settings` with `{key: "flag_ai_camera", value: "true"}`
+- On page load: GET `/api/settings/flag_*` keys and restore toggle states
+
+#### 3.6 — Wire Settings Save Buttons Properly
+**File:** [page14.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page14.html)
+- Fix `saveSettings()` to use card-specific input collection (by `data-section` attribute on each card)
+- Wire each card's Save button to its own section
+
+#### 3.7 — Wire CRM Page (page8.html)
+**File:** [page8.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page8.html)
+- On load: `GET /api/crm` to populate customer table
+- Add Customer form → `POST /api/crm`
+- Customer history view → `GET /api/crm/:id/history`
+
+#### 3.8 — Wire Inventory Page (page3.html)
+**File:** [page3.html](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/ui/pages/page3.html)
+- On load: `GET /api/inventory` to populate table
+- Edit row → `PUT /api/inventory/:id`
+- Stock override → `POST /api/inventory/override`
+
+---
+
+### PHASE 4: Incomplete Features Completion
+
+#### 4.1 — Implement `handleMedicineQuery` in TelegramBot
+**File:** [telegramBot.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/telegramBot.ts)
+```ts
+private async handleMedicineQuery(chatId: number, medicineName: string) {
+  const db = await open({ filename: DB_PATH, driver: sqlite3.Database });
+  const medicine = await db.get(
+    `SELECT m.name, m.mrp, im.quantity FROM medicines m 
+     LEFT JOIN inventory_master im ON im.medicine_id = m.id 
+     WHERE LOWER(m.name) LIKE ? ORDER BY im.quantity DESC LIMIT 1`,
+    [`%${medicineName}%`]
+  );
+  await db.close();
+  if (!medicine) {
+    this.bot?.sendMessage(chatId, `❌ Medicine "${medicineName}" not found in database.`);
+  } else if (medicine.quantity > 0) {
+    this.bot?.sendMessage(chatId, `✅ ${medicine.name}\n💰 MRP: ₹${medicine.mrp}\n📦 Stock: ${medicine.quantity} units`);
+  } else {
+    this.bot?.sendMessage(chatId, `⚠️ ${medicine.name} is OUT OF STOCK.\n💰 MRP: ₹${medicine.mrp}`);
+  }
+}
+```
+
+#### 4.2 — Fix WhatsApp `sendMessage()` API
+**File:** [whatsappClient.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/whatsappClient.ts)
+- Fix send API to properly pass text content as second parameter
+
+#### 4.3 — Implement Real Barcode/Label Generation
+**File:** [utilities.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/utilities.ts)
+- Use `qrcode` (already installed) to generate QR images per item in the PDF
+
+#### 4.4 — Complete Email CSV Attachment Parsing
+**File:** [emailService.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/services/emailService.ts)
+- Implement `processMedicineListAttachment()` using `csv-parse` (already installed) to actually parse CSV and insert rows into `medicines`/`inventory_master`
+
+#### 4.5 — Complete Orders Route
+**File:** [orders.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/orders.ts)
+- Create proper `purchase_orders` CRUD (list, create, update status)
+- Remove the `sales_invoices` proxy
+
+#### 4.6 — Add Expiry Configurable Window
+**File:** [expiry.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/expiry.ts)
+- Accept `?days=30` query param (default 30, allow 7, 30, 60, 90)
+
+#### 4.7 — Fix Archive `row.timestamp` Bug
+**File:** [archive.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/routes/archive.ts)
+- Change `row.timestamp` → `row.created_at`
+
+---
+
+### PHASE 5: API Documentation & Env Config
+
+#### 5.1 — Complete `.env.example` with ALL Required Keys
+**File:** [.env.example](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/.env.example)
+```env
+# Database
+DB_PATH=./data/app.db
+PORT=3000
+
+# IMAP (Email Receiving)
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USER=pharmacy@gmail.com
+IMAP_PASS=your-app-password
+IMAP_TLS=true
+
+# SMTP (Email Sending)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=pharmacy@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=pharmacy@gmail.com
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=-1001234567890
+TELEGRAM_LANG=en
+
+# AI (Claude)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# AWS S3 (Cloud Backup)
+S3_BUCKET_NAME=ai-pharmacy-backups
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=ap-south-1
+
+# Feature Flags
+EMAIL_PARSER_ENABLED=true
+```
+
+#### 5.2 — Add Health Check Endpoint
+**File:** [server.ts](file:///E:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY/src/server.ts)
+- Add `GET /api/health` returning `{ status: "ok", db: "connected", telegram: bool, whatsapp: bool }`
+
+---
+
+### PHASE 6: Testing & Verification
+
+#### 6.1 — Fix Failing Tests
+- Sales parser timeout tests: increase timeout to 30s
+- Fix `medicine_id` mapping issue in inventory parser
+
+#### 6.2 — Add Smoke Tests for Critical Paths
+- `POST /api/sales` with valid cart
+- `GET /api/inventory`
+- `GET /api/dashboard`
+- `POST /api/utilities/backup`
+- `GET /api/messaging/qr`
+
+---
+
+## 📊 ISSUE COUNT SUMMARY
+
+| Severity | Category | Count |
+|----------|----------|-------|
+| 🔴 Critical Bugs (crash/data corruption) | Bugs | **15** |
+| 🟠 Incomplete Wiring (UI↔API) | Wiring | **13** |
+| 🟡 Placeholder/Simulated Features | Incomplete | **14** |
+| 🔵 DB Schema Gaps | Schema | **13** |
+| **TOTAL ISSUES** | | **55** |
+
+---
+
+## 🗂️ FILE-BY-FILE FIX REFERENCE
+
+| File | Issues | Phase |
+|------|--------|-------|
+| `emailService.ts` | Duplicate export, missing `fs` import | 1.1, 1.9 |
+| `email.ts` | Missing `.js` import | 1.2 |
+| `emailPoller.ts` | Missing `.js` import | 1.2 |
+| `telegramBot.ts` | Missing `.js`, `lang` prop, wrong DB path, missing method | 1.3 |
+| `returns.ts` | Unused `uuid` import | 1.4 |
+| `server.ts` | Mid-file imports | 1.5 |
+| `utilities.ts` | `require()` in ESM | 1.6 |
+| `purchases.ts` | Wrong column name | 1.7 |
+| `reports.ts` | Wrong table/column names | 1.8 |
+| `whatsappClient.ts` | Wrong send API | 1.10 |
+| `database.ts` | Missing columns/tables | 2.1 |
+| `compliance.ts` | Wrong table for inserts | 2.2 |
+| `inventory.ts` | Wrong bulk action columns | 2.3 |
+| `archive.ts` | `timestamp` vs `created_at` | 4.7 |
+| `page1.html` | `processSale()` not wired, wrong invoice URL, `sendRefillReminder()` missing | 3.1, 3.2 |
+| `page2.html` | Missing API fields, backup button not wired | 3.3 |
+| `page14.html` | Flags not persisted, save broken | 3.5, 3.6 |
+| `page19.html` | Wrong QR response keys | 3.4 |
+| `src/ui/inventory/index.html` | Stub only | 3.7 |
+| `src/ui/sales/index.html` | Stub only | — |
+| `orders.ts` | Returns wrong data | 4.5 |
+| `expiry.ts` | Hardcoded 30 days | 4.6 |
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> Please confirm before implementation begins:
+
+1. **Database migrations on existing data**: Should we run `ALTER TABLE` statements with try/catch (safe for existing DB) or wipe and recreate the schema?
+2. **Backup Restore**: Should actual restore logic replace the current DB file, or should it import data into existing tables?
+3. **Encryption**: Is the "Rotate Encryption Key" feature meant to be SQLite encryption (e.g., SQLCipher) or application-level field encryption?
+4. **Purchase Orders**: Should the existing "orders" route be repurposed or a new `/api/purchase-orders` endpoint created?
+5. **Feature Flags Persistence**: Should flags be stored in the `settings` table in DB, or in a local JSON config file so they persist across restarts?
+6. **POS Medicine Search**: Should typing in the medicine search field do a live `GET /api/inventory?search=...` query, or search pre-loaded data?

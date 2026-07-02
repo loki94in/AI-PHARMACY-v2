@@ -1,0 +1,20 @@
+Sample WhatsApp Messages (text only, no PDF attachments)
+
+1. Expiry Alert (sent to admin):
+   ⚠️ *Medicine Expiry Alert*
+   The following medicines are nearing expiry (within 2 months):
+   - Paracetamol 500mg (Batch: PCT2024) – Expires: 2026-07-15
+   - Amoxicillin 250mg (Batch: AMX2023) – Expires: 2026-08-01
+   Please review stock and consider returning to supplier.
+
+2. Refill Reminder (sent to patient):
+   🙏 *Refill Reminder from AI Pharmacy*
+   Hi John, this is a friendly reminder that your refill for *Cetirizine 10mg* is due on 2026-06-01.
+   You have 5 tablets left. Please visit the pharmacy or reply with "REFILL" to confirm your pickup.
+   Thank you!
+
+3. Order Status Update (example of two‑way chat):
+   📦 *Order Update*
+   Your order #ORD‑2026‑0589 has been received and is being prepared.
+   Expected ready for pickup: 2026-05-26 10:30 AM.
+   Reply with any questions.

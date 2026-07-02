@@ -1,0 +1,39 @@
+Sample Telegram Messages (plain text, no PDFs)
+
+1. /start / help response:
+   Welcome to AI Pharmacy Bot!
+
+   You can check medicine availability in two ways:
+   1. Use command: /check <medicine>
+   2. Just type the medicine name directly (e.g., paracetamol)
+
+   Other commands:
+   /help - Show this help message
+   /status - Check application status
+
+2. Medicine available response:
+   Paracetamol – available
+   - MRP: ₹ 24.0 per unit
+   - Quantity in stock: 120 units
+
+3. Medicine out of stock with alternative:
+   Paracetamol – out of stock
+   - MRP: ₹ 24.0 per unit
+   - Quantity in stock: 0 units
+   - Alternative suggested: Acetoflex (MRP: ₹ 26.0, Quantity: 45 units)
+
+4. Medicine not found:
+   Sorry, I couldn't find information for "xyzmed". Please check the spelling or try another name.
+
+5. /status response:
+   🤖 AI Pharmacy Bot Status: Online
+   📊 Database: Connected (1500 medicines registered)
+   ⏰ Uptime: Running since startup
+   🔄 Polling: Active
+
+6. Order notification (if extended):
+   🛒 Your order #ORD-2026-0589 has been confirmed.
+   Items: Paracetamol x2, Cetirizine x1
+   Total: ₹ 84.00
+   Expected pickup: 2026-05-26 11:00 AM
+   Reply with any questions.

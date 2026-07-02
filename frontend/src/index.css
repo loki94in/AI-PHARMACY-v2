@@ -1,0 +1,593 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════
+   DARK THEME (Default)
+   ═══════════════════════════════════════════ */
+:root {
+  --bg: #09090b;
+  --bg2: #18181b;
+  --bg3: #27272a;
+  --border: #3f3f46;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --glass-bg: rgba(24, 24, 27, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  /* Notification/toast accent (dark mode) */
+  --notif-border: rgba(139, 92, 246, 0.3);
+}
+
+/* ═══════════════════════════════════════════
+   DAY (LIGHT) THEME
+   Pure White base · Clean crisp look
+   Green accents · Purple notification borders
+   ═══════════════════════════════════════════ */
+:root.light, html.light, body.light, .light {
+  /* Backgrounds — pure white palette */
+  --bg:         #ffffff;          /* pure white base */
+  --bg2:        #f9fafb;          /* near-white for cards/surfaces */
+  --bg3:        #f3f4f6;          /* light grey for nested panels */
+
+  /* Borders & lines */
+  --border:     rgba(34, 197, 94, 0.3);   /* fresh green border */
+
+  /* Typography */
+  --text:       #111827;          /* near-black — maximum readability */
+  --muted:      #6b7280;          /* medium grey for secondary text */
+
+  /* Glass panels — pure white frosted */
+  --glass-bg:   rgba(255, 255, 255, 0.97);
+  --glass-border: rgba(34, 197, 94, 0.2); /* soft green glass border */
+
+  /* Notification / Toast borders — soft purple */
+  --notif-border: rgba(167, 139, 250, 0.55);
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — BODY BACKGROUND
+   ═══════════════════════════════════════════ */
+.light body,
+html.light body {
+  background-image:
+    radial-gradient(circle at 10% 60%, rgba(34, 197, 94, 0.05),  transparent 30%),
+    radial-gradient(circle at 90% 20%, rgba(59, 130, 246, 0.04), transparent 30%),
+    radial-gradient(circle at 55% 90%, rgba(167, 139, 250, 0.04), transparent 25%);
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — GLASS PANELS
+   ═══════════════════════════════════════════ */
+.light .glass-panel {
+  background-color: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06),
+              0 1px 6px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — HARDCODED DARK BACKGROUNDS
+   [AI/AGENT INSTRUCTION: DO NOT USE THESE IN NEW COMPONENTS!]
+   [Use semantic classes instead: `bg-bg`, `bg-bg2`, `bg-bg3`, `text-text`]
+   ═══════════════════════════════════════════ */
+.light .bg-white\/5 {
+  background-color: rgba(99, 179, 135, 0.06) !important;
+}
+.light .bg-white\/10 {
+  background-color: rgba(99, 179, 135, 0.1) !important;
+}
+.light .bg-white\/15 {
+  background-color: rgba(99, 179, 135, 0.12) !important;
+}
+.light .bg-black\/10 {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+.light .bg-black\/20 {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+.light .bg-black\/30 {
+  background-color: rgba(0, 0, 0, 0.045) !important;
+}
+.light .bg-black\/40 {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+.light .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Hardcoded hex backgrounds → pure white card */
+.light .bg-\[\#18181b\]\/95,
+.light .bg-\[\#18181b\]\/98 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: var(--glass-border) !important;
+}
+.light .bg-\[\#18181b\] {
+  background-color: var(--bg2) !important;
+  border-color: var(--glass-border) !important;
+}
+.light .bg-\[\#18181b\]\/50 {
+  background-color: rgba(249, 250, 251, 0.8) !important;
+  border-color: var(--glass-border) !important;
+}
+.light .bg-\[\#121214\]\/95 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: var(--glass-border) !important;
+}
+.light .bg-\[\#121214\] {
+  background-color: var(--bg2) !important;
+}
+
+/* bg-bg2 */
+.light .bg-bg2 {
+  background-color: var(--bg2) !important;
+}
+
+/* premium-input background override */
+.light .premium-input {
+  background-color: #ffffff !important;
+  border-color: rgba(34, 197, 94, 0.35) !important;
+}
+.light .premium-input:focus {
+  border-color: #16a34a !important;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — SELECT / OPTION ELEMENTS
+   ═══════════════════════════════════════════ */
+.light select {
+  background-color: #ffffff !important;
+  border-color: rgba(34, 197, 94, 0.35) !important;
+  color: var(--text) !important;
+}
+.light option,
+.light select option {
+  background-color: #ffffff !important;
+  color: var(--text) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — TEXT COLORS
+   ═══════════════════════════════════════════ */
+/* Override elements that hardcode text-white */
+/* Override elements that hardcode text-white */
+.light .bg-glass-bg h1,
+.light .bg-glass-bg h2,
+.light .bg-glass-bg a,
+.light header h2,
+.light header button {
+  color: var(--text) !important;
+}
+
+/* Smarter text-white override: turns to black EXCEPT if it has a colored background */
+.light .text-white:not([class*="bg-primary"]):not([class*="bg-red"]):not([class*="bg-green"]):not([class*="bg-blue"]):not([class*="bg-purple"]):not([class*="bg-emerald"]):not([class*="from-primary"]):not([class*="bg-sky"]):not([class*="bg-indigo"]):not([class*="bg-yellow"]):not([class*="bg-amber"]):not([class*="bg-cyan"]):not([class*="bg-orange"]) {
+  color: var(--text) !important;
+}
+.light .hover\:text-white:hover:not([class*="bg-primary"]):not([class*="bg-red"]):not([class*="bg-green"]):not([class*="bg-blue"]):not([class*="bg-purple"]):not([class*="bg-emerald"]):not([class*="from-primary"]):not([class*="bg-sky"]):not([class*="bg-indigo"]):not([class*="bg-yellow"]):not([class*="bg-amber"]):not([class*="bg-cyan"]):not([class*="bg-orange"]) {
+  color: var(--text) !important;
+}
+
+.light .text-text   { color: var(--text)   !important; }
+.light .text-muted  { color: var(--muted)  !important; }
+.light .text-gray-100 { color: #1f2937 !important; }
+.light .text-gray-200 { color: #374151 !important; }
+
+/* Bulletproof Select & Option overrides for Day & Night Modes to prevent white-on-white native option text bugs */
+select,
+option,
+select option {
+  background-color: #18181b !important;
+  color: #fafafa !important;
+}
+
+.light select,
+.light select *,
+.light option,
+.light select option,
+.light select option * {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Semantic colour overrides — stay vivid but readable on white */
+.light .text-sky    { color: #0284c7 !important; }
+.light .text-green  { color: #16a34a !important; }
+.light .text-red    { color: #dc2626 !important; }
+.light .text-amber-500 { color: #d97706 !important; }
+.light .text-primary   { color: #2563eb !important; }
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — HOVER OVERRIDES
+   ═══════════════════════════════════════════ */
+.light .hover\:bg-white\/5:hover {
+  background-color: rgba(99, 179, 135, 0.06) !important;
+}
+.light .hover\:bg-white\/10:hover {
+  background-color: rgba(99, 179, 135, 0.1) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — NOTIFICATION / TOAST BORDERS
+   Soft purple accent borders
+   ═══════════════════════════════════════════ */
+.light [class*="border-primary"],
+.light [class*="border-primary\/"] {
+  border-color: rgba(167, 139, 250, 0.5) !important;
+}
+/* Toast / notification boxes */
+.light .bg-primary\/10 {
+  background-color: rgba(167, 139, 250, 0.1) !important;
+  border-color: rgba(167, 139, 250, 0.35) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — INPUTS, TABLES
+   ═══════════════════════════════════════════ */
+.light input,
+.light textarea,
+.light table,
+.light th,
+.light td {
+  color: var(--text);
+}
+.light th {
+  background-color: rgba(243, 244, 246, 0.95) !important;
+}
+.light tr:hover td {
+  background-color: rgba(243, 244, 246, 0.6) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — SCROLLBAR
+   ═══════════════════════════════════════════ */
+.light ::-webkit-scrollbar-thumb {
+  background-color: rgba(34, 197, 94, 0.35) !important;
+}
+.light ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(34, 197, 94, 0.6) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — MODAL / POPUP CARD BACKGROUNDS
+   (bg-gray-800, bg-gray-900, etc.)
+   ═══════════════════════════════════════════ */
+.light .bg-gray-800,
+.light .bg-gray-800\/90,
+.light .bg-gray-800\/95 {
+  background-color: #ffffff !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+  color: var(--text) !important;
+}
+.light .bg-gray-900,
+.light .bg-gray-900\/90,
+.light .bg-gray-900\/95 {
+  background-color: #f9fafb !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+  color: var(--text) !important;
+}
+/* Cancel / neutral gray buttons inside modals */
+.light .bg-gray-600,
+.light .bg-gray-700 {
+  background-color: #e5e7eb !important;
+  color: #374151 !important;
+}
+.light .hover\:bg-gray-700:hover,
+.light .hover\:bg-gray-600:hover {
+  background-color: #d1d5db !important;
+  color: #111827 !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — AUTOCOMPLETE / DROPDOWN POPUPS
+   bg-[#18181b]/95  bg-[#18181b]/98  bg-zinc-950/95  bg-zinc-900/90
+   ═══════════════════════════════════════════ */
+.light .bg-\[\#18181b\]\/95,
+.light .bg-\[\#18181b\]\/98 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: rgba(34, 197, 94, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+}
+/* Dropdown hover rows */
+.light .bg-\[\#18181b\]\/95 > *:hover,
+.light .bg-\[\#18181b\]\/98 > *:hover {
+  background-color: rgba(34, 197, 94, 0.08) !important;
+}
+/* zinc-950 dropdown */
+.light .bg-zinc-950\/95 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: rgba(34, 197, 94, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+}
+/* zinc-900/90 — QuickOrderModal panel */
+.light .bg-zinc-900\/90 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — STICKY TABLE HEADERS
+   bg-[#18181b]/95  used in many pages
+   ═══════════════════════════════════════════ */
+.light thead.sticky,
+.light thead .sticky,
+.light thead[class*="sticky"] {
+  background-color: rgba(243, 244, 246, 0.98) !important;
+  border-bottom-color: rgba(34, 197, 94, 0.2) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — INVENTORY SIDE PANEL
+   bg-[#121214]/95
+   ═══════════════════════════════════════════ */
+.light .bg-\[\#121214\]\/95 {
+  background-color: rgba(255, 255, 255, 0.99) !important;
+  border-color: rgba(34, 197, 94, 0.25) !important;
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — TOGGLE / SWITCH TRACK
+   bg-zinc-700  (unchecked state)
+   ═══════════════════════════════════════════ */
+.light .bg-zinc-700 {
+  background-color: #d1d5db !important;
+}
+.light .bg-zinc-700.peer-checked\:bg-green,
+.light .peer:checked ~ .bg-zinc-700 {
+  background-color: #16a34a !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — FILE INPUT BUTTON (Settings)
+   file:bg-zinc-700  file:text-zinc-300
+   ═══════════════════════════════════════════ */
+.light input[type="file"]::file-selector-button {
+  background-color: #e5e7eb !important;
+  color: #374151 !important;
+  border-color: transparent !important;
+}
+.light input[type="file"]:hover::file-selector-button {
+  background-color: #d1d5db !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — DROPDOWN <option> with bg-[#18181b]
+   ═══════════════════════════════════════════ */
+.light option.bg-\[\#18181b\],
+.light select option.bg-\[\#18181b\] {
+  background-color: #ffffff !important;
+  color: var(--text) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — EXPIRY STAT CARDS
+   bg-[#18181b]/50
+   ═══════════════════════════════════════════ */
+.light .bg-\[\#18181b\]\/50 {
+  background-color: rgba(249, 250, 251, 0.9) !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — GRAY TEXT INSIDE POPUPS/MODALS
+   text-gray-400, text-gray-300 → use muted var
+   ═══════════════════════════════════════════ */
+.light .text-gray-400 { color: var(--muted) !important; }
+.light .text-gray-300 { color: #4b5563 !important; }
+.light .text-gray-500 { color: var(--muted) !important; }
+.light .text-slate-400 { color: var(--muted) !important; }
+.light .text-slate-500 { color: var(--muted) !important; }
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — MODAL OVERLAY BACKDROP
+   bg-black/50, bg-black/60, bg-black/80
+   Slightly softer in light mode
+   ═══════════════════════════════════════════ */
+.light .bg-black\/80 {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — BORDER OVERRIDES FOR POPUPS
+   border-white/20  border-white/10 in popups
+   ═══════════════════════════════════════════ */
+.light .border-white\/20 {
+  border-color: rgba(34, 197, 94, 0.25) !important;
+}
+.light .border-white\/10 {
+  border-color: rgba(34, 197, 94, 0.15) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — PURCHASES INLINE POPUPS
+   bg-gray-900 with blue/purple borders
+   ═══════════════════════════════════════════ */
+.light .border-blue-500 {
+  border-color: #3b82f6 !important;
+}
+.light .border-purple-500 {
+  border-color: #a855f7 !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — CRM WhatsApp CHAT PANEL
+   bg-[#0b141a]  (custom dark teal-green)
+   ═══════════════════════════════════════════ */
+.light .bg-\[\#0b141a\] {
+  background-color: #f0fdf4 !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — TABLE / CART SCROLL CONTAINERS
+   bg-black/10  bg-black/20  bg-black/40  bg-black/50
+   Used as scrollable region backgrounds in POS, Orders, Reports
+   ═══════════════════════════════════════════ */
+.light .bg-black\/10 { background-color: rgba(0, 0, 0, 0.015) !important; }
+.light .bg-black\/20 { background-color: rgba(0, 0, 0, 0.02)  !important; }
+.light .bg-black\/40 { background-color: rgba(0, 0, 0, 0.03)  !important; }
+.light .bg-black\/50 { background-color: rgba(0, 0, 0, 0.04)  !important; }
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — QUICKORDERMODAL PRIORITY BADGE
+   bg-zinc-700 text-zinc-300 (inactive low priority)
+   ═══════════════════════════════════════════ */
+.light .bg-zinc-700    { background-color: #e5e7eb !important; }
+.light .text-zinc-300  { color: #6b7280 !important; }
+.light .text-zinc-700  { color: #374151 !important; }
+
+/* ═══════════════════════════════════════════
+   LIGHT MODE — PLACEHOLDER TEXT
+   ═══════════════════════════════════════════ */
+.light ::placeholder {
+  color: #9ca3af !important;
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════
+   BASE LAYER
+   ═══════════════════════════════════════════ */
+@layer base {
+  body {
+    @apply bg-bg text-text min-h-screen font-sans transition-all duration-500 ease-in-out;
+    background-image:
+      radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08), transparent 30%),
+      radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.08), transparent 30%);
+  }
+
+  * {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar        { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { @apply bg-border rounded-full transition-all duration-300; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted; }
+}
+
+/* ═══════════════════════════════════════════
+   COMPONENT LAYER
+   ═══════════════════════════════════════════ */
+@layer components {
+  .glass-panel {
+    @apply bg-glass-bg border border-glass-border backdrop-blur-xl rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-500 hover:-translate-y-1;
+  }
+
+  .premium-input {
+    @apply bg-black/5 border border-border rounded-2xl px-4 py-3 text-text text-sm
+           outline-none transition-all duration-300 ease-out shadow-sm hover:shadow-md hover:bg-black/10
+           focus:border-primary focus:ring-4 focus:ring-primary-glow/40 focus:-translate-y-0.5 focus:shadow-lg focus:bg-transparent;
+  }
+
+  .premium-btn {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl
+           text-sm font-semibold transition-all duration-300 ease-out relative overflow-hidden
+           shadow-sm hover:shadow-lg hover:-translate-y-0.5 active:scale-95 active:translate-y-0;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   HIDE NUMBER INPUT SPINNERS
+   ═══════════════════════════════════════════ */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ═══════════════════════════════════════════
+   GLOBAL INPUT SIZE & PADDING ENHANCEMENTS
+   ═══════════════════════════════════════════ */
+
+/* Target form text, search, date, and general input fields globally, except those inside table grids */
+.premium-input:not(table *):not(td *):not(input[type="number"]):not(.font-mono):not(.text-xs):not([class*="py-"]),
+input[type="text"]:not(table *):not(td *):not(.font-mono):not(.text-xs):not([class*="py-"]),
+input[type="search"]:not(table *):not(td *):not(.text-xs):not([class*="py-"]),
+input[type="date"]:not(table *):not(td *):not(.text-xs):not([class*="py-"]),
+input[type="tel"]:not(table *):not(td *):not(.text-xs):not([class*="py-"]),
+input[type="email"]:not(table *):not(td *):not(.text-xs):not([class*="py-"]),
+select:not(table *):not(td *):not(.w-10):not(.w-12):not(.w-16):not(.text-xs):not([class*="py-"]) {
+  padding-top: 0.625rem !important; /* ~ py-2.5 equivalent */
+  padding-bottom: 0.625rem !important;
+  padding-left: 0.875rem !important; /* ~ px-3.5 equivalent */
+  padding-right: 0.875rem !important;
+  font-size: 0.9375rem !important; /* Clean text-sm/base transition (15px) */
+  line-height: 1.25rem !important;
+  min-height: 2.75rem !important; /* Consistent, comfortable height */
+}
+
+/* Specific focus state transition to keep them visible and premium */
+.premium-input:focus,
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="date"]:focus {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15) !important;
+}
+
+/* ═══════════════════════════════════════════
+   POS SCANNER & CHECKOUT ANIMATIONS
+   ═══════════════════════════════════════════ */
+@keyframes scanSlow {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 100%; }
+}
+
+@keyframes scanBar {
+  0% { top: 2%; }
+  50% { top: 96%; }
+  100% { top: 2%; }
+}
+
+@keyframes pulseSubtle {
+  0%, 100% { transform: scale(1); box-shadow: 0 4px 14px rgba(16,185,129,0.3); }
+  50% { transform: scale(0.985); box-shadow: 0 2px 8px rgba(16,185,129,0.15); }
+}
+
+.animate-scan-slow {
+  animation: scanSlow 12s linear infinite;
+}
+
+.animate-scan-bar {
+  animation: scanBar 3s ease-in-out infinite;
+}
+
+.animate-pulse-subtle {
+  animation: pulseSubtle 2.5s ease-in-out infinite;
+}
+
+/* ──────────────────────────────────────────────
+   SOFT & SLOW TOAST LIFECYCLE ANIMATION
+   ────────────────────────────────────────────── */
+@keyframes softToastLifecycle {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -16px) scale(0.96);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  88% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.98);
+  }
+}
+
+.animate-soft-toast {
+  animation: softToastLifecycle 4.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

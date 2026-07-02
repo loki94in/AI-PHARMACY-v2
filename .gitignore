@@ -1,0 +1,73 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# local env
+.env
+.env*.local
+.env.development
+*/.env.development
+
+# SQLite Database & Backups
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.db.bak*
+data/*.db.bak*-shm
+data/*.db.bak*-wal
+backup/
+data/temp_migration/
+data/migration_reports/
+
+
+# Media Uploads & Temp files
+uploads/
+**/uploads/
+uploads/temp/
+
+# Build outputs & cache
+dist/
+**/dist/
+.expo/
+**/.expo/
+web-build/
+**/web-build/
+
+# WhatsApp Auth Cache
+.wwebjs_auth/
+.wwebjs_cache/
+**/.wwebjs_auth/
+**/.wwebjs_cache/
+
+# OCR Models & Training Data (large binaries — download at runtime)
+data/models/
+eng.traineddata
+
+# SQL dumps & staging databases
+*.sql
+data/staging.db
+
+# Temp OCR & audit images
+data/temp_ocr/
+data/audit_images/
+
+# IDE / Tool caches
+.understand-anything/
+.codegraph/
+
+# Logs
+*.log
+
+# Misc temp/test artifacts
+temp.json
+test.csv
+
+# Large archives and database backups
+*.zip
+*.bak
+MIGRATION SAMPEL/
+data/archived_migrations/
+catalogue/raw/
+
+# Puppeteer Pharmarack browser session profiles
+data/pharmarack_profile/

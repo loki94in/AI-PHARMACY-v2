@@ -1,0 +1,18 @@
+# Cursor Rules
+
+## Auto-Knowledge Graph
+
+Before starting work, ALWAYS read these files first:
+
+1. `AGENTS.md` - Agent rules and auto-update instructions
+2. `.understand-anything/knowledge-graph.json` - Full project architecture (274 nodes, 338 edges)
+3. `.understand-anything/PROJECT_AUDIT.md` - Human-readable project audit
+
+## After Code Changes
+
+Run this command to keep the knowledge graph updated:
+```bash
+node scripts/quick-update.mjs
+```
+
+This takes ~30 seconds and updates the project map.

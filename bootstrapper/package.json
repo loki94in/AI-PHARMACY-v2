@@ -1,0 +1,21 @@
+{
+  "name": "ai-pharmacy-bootstrapper",
+  "version": "1.0.0",
+  "description": "AI Pharmacy OS — License-gated installer bootstrapper",
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "tsx main.ts",
+    "build": "pkg . --targets node18-win-x64 --output ../dist/AIPharmacySetup.exe"
+  },
+  "pkg": {
+    "scripts": "main.ts",
+    "targets": ["node18-win-x64"],
+    "outputPath": "../dist"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1",
+    "tsx": "^4.22.3",
+    "@types/node": "^25.9.1"
+  }
+}

@@ -1,0 +1,14 @@
+# Windsurf Rules
+
+## Project Knowledge
+
+Before starting work, read these files:
+- `AGENTS.md` - Agent collaboration rules
+- `.understand-anything/knowledge-graph.json` - Project architecture map
+
+## Keep Updated
+
+After code changes, run:
+```bash
+node scripts/quick-update.mjs
+```

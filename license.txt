@@ -1,0 +1,22 @@
+TERMS AND CONDITIONS & END USER LICENSE AGREEMENT (EULA)
+======================================================
+
+Please read this Agreement carefully before installing or using the AI Pharmacy OS application.
+
+1. PROPRIETARY RIGHTS
+---------------------
+AI Pharmacy OS ("Software"), including its source code, design layouts, frontend components, and backend database integrations, is the exclusive proprietary property of the Author. This Software is protected by copyright laws and international treaties.
+
+2. LICENSE GRANT & RESTRICTIONS
+-------------------------------
+You are granted a non-exclusive, non-transferable license to run this Software solely for retail pharmacy business management purposes. You are strictly prohibited from:
+a) Copying, distributing, selling, or leasing the Software to any third party.
+b) Reverse engineering, decompiling, or disassembling the Software.
+c) Creating derivative works, identical clones, or substantially similar software applications based on the design layouts, assets, or logic of this Software.
+d) Distributing the standalone executable or any packaged installer outside of official channels.
+
+3. INTELLECTUAL PROPERTY INDEMNITY
+----------------------------------
+All UI design aesthetics, database structures, AI camera processing scripts, and integration components remain intellectual property of the developer. Unauthorized replication of the interface styles, layout flows, or backend service connections will be subject to legal action.
+
+By selecting "I accept the agreement", you agree to be bound by the terms of this license.

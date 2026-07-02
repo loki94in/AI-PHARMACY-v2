@@ -1,0 +1,8 @@
+{
+  "instructions": "Before starting work, read AGENTS.md and .understand-anything/knowledge-graph.json to understand this project. After ANY code change, run: node scripts/quick-update.mjs",
+  "contextFiles": [
+    "AGENTS.md",
+    ".understand-anything/meta.json",
+    ".understand-anything/knowledge-graph.json"
+  ]
+}
