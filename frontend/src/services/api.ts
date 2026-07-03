@@ -180,6 +180,9 @@ export const api = {
     loose?: string;
     mrp?: string;
     rack?: string;
+    id?: string;
+    date_from?: string;
+    date_to?: string;
   }) => apiClient.get<any>('/inventory', { params }).then(res => res.data),
   addMedicine: (data: Partial<InventoryItem>) => apiClient.post('/inventory', data).then(res => res.data),
   updateMedicine: (id: number, data: Partial<InventoryItem>) => apiClient.put(`/inventory/${id}`, data).then(res => res.data),
@@ -196,7 +199,7 @@ export const api = {
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
   
   // Sells (invoice list/edit)
-  listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number }) =>
+  listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number; page?: number }) =>
     apiClient.get('/sales/list', { params }).then(res => res.data),
   getSale: (id: number) => apiClient.get(`/sales/${id}`).then(res => res.data),
   updateSale: (id: number, data: any) => apiClient.put(`/sales/${id}`, data).then(res => res.data),
@@ -449,7 +452,12 @@ export const api = {
     apiClient.post('/orders/convert-to-refill', { orderId, refillIntervalDays }).then(res => res.data),
 
   // Expiry Monitor
-  getExpiryList: (days?: number) => apiClient.get('/expiry', { params: { days } }).then(res => res.data),
+  getExpiryList: (paramsOrDays?: number | { days?: number; date_from?: string; date_to?: string }) => {
+    const params = typeof paramsOrDays === 'number' 
+      ? { days: paramsOrDays } 
+      : paramsOrDays;
+    return apiClient.get('/expiry', { params }).then(res => res.data);
+  },
   sendExpiryAlerts: (data: { phone?: string, days?: number }) => apiClient.post('/expiry/send-alerts', data).then(res => res.data),
 
   // Dispatch Orders

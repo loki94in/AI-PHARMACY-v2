@@ -11,18 +11,28 @@ const router = express.Router();
 
 // Get items nearing expiry / already expired
 router.get('/', async (req, res) => {
+  const date_from = req.query.date_from as string;
+  const date_to = req.query.date_to as string;
   const days = req.query.days ? parseInt(req.query.days as string, 10) : 90;
   try {
     const db = await dbManager.getConnection();
-    const rows = await db.all(`
+    let query = `
       SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
-      WHERE date(im.expiry_date) <= date('now', '+' || ? || ' days')
-      AND im.quantity > 0
-      ORDER BY im.expiry_date ASC
-    `, [days]);
-        res.json(rows);
+      WHERE im.quantity > 0
+    `;
+    const params: any[] = [];
+    if (date_from && date_to) {
+      query += ` AND date(im.expiry_date) >= date(?) AND date(im.expiry_date) <= date(?)`;
+      params.push(date_from, date_to);
+    } else {
+      query += ` AND date(im.expiry_date) <= date('now', '+' || ? || ' days')`;
+      params.push(days);
+    }
+    query += ` ORDER BY im.expiry_date ASC`;
+    const rows = await db.all(query, params);
+    res.json(rows);
   } catch (err) {
     console.error('Expiry fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });

@@ -126,6 +126,8 @@ interface AppNotification {
   time: Date;
   read: boolean;
   link?: string;
+  distributor?: string;
+  qty?: string | number;
 }
 
 // ──────────────────────────────────────────────
@@ -458,6 +460,22 @@ const NotificationPanel = ({
                     <p className={`text-sm leading-snug ${!notif.read ? 'text-text font-medium' : 'text-muted'}`}>
                       {notif.message}
                     </p>
+                    {/* Distributor + Qty badges */}
+                    {(notif.distributor || notif.qty !== undefined) && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {notif.distributor && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold">
+                            <Building2 size={9} />
+                            {notif.distributor}
+                          </span>
+                        )}
+                        {notif.qty !== undefined && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                            Qty: {notif.qty}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className={`text-[10px] font-bold uppercase tracking-wide ${cfg.text}`}>{cfg.label}</span>
                       <span className="text-[10px] text-muted/50">·</span>
@@ -1445,7 +1463,7 @@ const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
-  const isFitPage = ['/pos', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales'].includes(location.pathname);
+  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {
@@ -1673,9 +1691,12 @@ const Layout = ({
       time: new Date(),
       read: false,
       link: detail.link,
+      distributor: detail.distributor,
+      qty: detail.qty,
     };
     setNotifications(prev => [newNotif, ...prev].slice(0, 50));
     setHasUnread(true);
+
 
     // Show native desktop notification if permission is granted
     if ('Notification' in window && Notification.permission === 'granted') {

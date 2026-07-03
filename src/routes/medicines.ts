@@ -34,24 +34,6 @@ router.get('/medicines', async (req, res) => {
 
     const db = await dbManager.getConnection();
     
-    let query = `
-      WITH latest_purchase AS (
-        SELECT pi.medicine_id,
-               pi.cost_price,
-               pi.mrp,
-               d.name AS last_distributor_name,
-               ROW_NUMBER() OVER (PARTITION BY pi.medicine_id ORDER BY p.date DESC) AS rn
-        FROM purchase_items pi
-        JOIN purchases p ON pi.purchase_id = p.id
-        LEFT JOIN distributors d ON p.distributor_id = d.id
-      )
-      SELECT medicines.*,
-             lp.cost_price AS last_purchase_rate,
-             lp.mrp AS last_purchase_mrp,
-             lp.last_distributor_name
-      FROM medicines
-      LEFT JOIN latest_purchase lp ON lp.medicine_id = medicines.id AND lp.rn = 1
-    `;
     let countQuery = 'SELECT COUNT(*) as total FROM medicines';
     const params: any[] = [];
     const letter = (req.query.letter as string) || '';
@@ -59,39 +41,39 @@ router.get('/medicines', async (req, res) => {
     let whereClauses = [];
     
     if (letter) {
-      whereClauses.push('name LIKE ?');
+      whereClauses.push('medicines.name LIKE ?');
       params.push(`${letter}%`);
     }
     
     if (search) {
       const prefixParam = `${search}%`;
-      whereClauses.push('(name LIKE ? OR item_code LIKE ? OR manufacturer LIKE ? OR api_reference LIKE ?)');
+      whereClauses.push('(medicines.name LIKE ? OR medicines.item_code LIKE ? OR medicines.manufacturer LIKE ? OR medicines.api_reference LIKE ?)');
       params.push(prefixParam, prefixParam, prefixParam, prefixParam);
     }
 
     if (productName) {
-      whereClauses.push('name LIKE ?');
+      whereClauses.push('medicines.name LIKE ?');
       params.push(`%${productName}%`);
     }
 
     if (apiFilter) {
-      whereClauses.push('api_reference LIKE ?');
+      whereClauses.push('medicines.api_reference LIKE ?');
       params.push(`%${apiFilter}%`);
     }
 
     if (mrpFilter) {
-      whereClauses.push('CAST(COALESCE(mrp, 0) AS TEXT) LIKE ?');
+      whereClauses.push('CAST(COALESCE(medicines.mrp, 0) AS TEXT) LIKE ?');
       params.push(`%${normalizeNumericSearch(mrpFilter)}%`);
     }
 
     if (packagingFilter) {
-      whereClauses.push('(packaging LIKE ? OR strength LIKE ?)');
+      whereClauses.push('(medicines.packaging LIKE ? OR medicines.strength LIKE ?)');
       const packParam = `%${packagingFilter}%`;
       params.push(packParam, packParam);
     }
 
     if (distributorFilter) {
-      whereClauses.push(`id IN (
+      whereClauses.push(`medicines.id IN (
         SELECT DISTINCT pi.medicine_id 
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
@@ -102,29 +84,50 @@ router.get('/medicines', async (req, res) => {
     }
 
     if (categoryFilter) {
-      whereClauses.push('category LIKE ?');
+      whereClauses.push('medicines.category LIKE ?');
       params.push(`%${categoryFilter}%`);
     }
     
-    if (whereClauses.length > 0) {
-      const whereString = ' WHERE ' + whereClauses.join(' AND ');
-      query += whereString;
-      countQuery += whereString;
-    }
+    const whereString = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
+    countQuery += whereString;
     
     const sort = (req.query.sort as string) || 'id_desc';
+    const orderString = sort === 'name_asc' ? 'ORDER BY name ASC' : 'ORDER BY id DESC';
+
+    const buildQuery = (limitVal: number, offsetVal: number) => `
+      WITH target_medicines AS (
+        SELECT * FROM medicines
+        ${whereString}
+        ${orderString}
+        LIMIT ${limitVal} OFFSET ${offsetVal}
+      ),
+      latest_purchase AS (
+        SELECT pi.medicine_id,
+               pi.cost_price,
+               pi.mrp,
+               d.name AS last_distributor_name,
+               ROW_NUMBER() OVER (PARTITION BY pi.medicine_id ORDER BY p.date DESC) AS rn
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN distributors d ON p.distributor_id = d.id
+        WHERE pi.medicine_id IN (SELECT id FROM target_medicines)
+      )
+      SELECT tm.*,
+             lp.cost_price AS last_purchase_rate,
+             lp.mrp AS last_purchase_mrp,
+             lp.last_distributor_name
+      FROM target_medicines tm
+      LEFT JOIN latest_purchase lp ON lp.medicine_id = tm.id AND lp.rn = 1
+    `;
     
-    if (sort === 'name_asc') {
-      query += ' ORDER BY name ASC LIMIT ? OFFSET ?';
-    } else {
-      query += ' ORDER BY id DESC LIMIT ? OFFSET ?';
-    }
-    
+    console.log('COUNT QUERY:', countQuery, 'PARAMS:', params);
     const countRow = await db.get(countQuery, ...params);
     const totalItems = countRow ? countRow.total : 0;
     const totalPages = Math.ceil(totalItems / limit);
     
-    let medicines = await db.all(query, ...[...params, limit, offset]);
+    const querySql = buildQuery(limit, offset);
+    console.log('BUILD QUERY:', querySql, 'PARAMS:', params);
+    let medicines = await db.all(querySql, ...params);
     
     // Fallback: if prefix search returns < 15 results, try middle-word search
     if (search && medicines.length < 15) {
@@ -136,7 +139,7 @@ router.get('/medicines', async (req, res) => {
         }
       }
       // Execute same query with fallback params
-      const fallbackMedicines = await db.all(query, ...[...fallbackParams, limit, offset]);
+      const fallbackMedicines = await db.all(buildQuery(limit, offset), ...fallbackParams);
       // Merge results, avoiding duplicates by id
       const seenIds = new Set(medicines.map((m: any) => m.id));
       for (const med of fallbackMedicines) {

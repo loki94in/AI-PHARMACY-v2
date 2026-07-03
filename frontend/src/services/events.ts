@@ -2,14 +2,16 @@
 export interface ToastEventDetail {
   message: string;
   type: 'success' | 'error' | 'info' | 'mail' | 'automation';
-  link?: string; // optional route to navigate to
+  link?: string;
+  distributor?: string;
+  qty?: string | number;
 }
 
 export const toastEvent = {
-  trigger: (message: string, type: 'success' | 'error' | 'info' | 'mail' | 'automation' = 'info', link?: string) => {
+  trigger: (message: string, type: 'success' | 'error' | 'info' | 'mail' | 'automation' = 'info', link?: string, distributor?: string, qty?: string | number) => {
     window.dispatchEvent(
       new CustomEvent<ToastEventDetail>('app-show-toast', {
-        detail: { message, type, link },
+        detail: { message, type, link, distributor, qty },
       })
     );
   },

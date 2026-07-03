@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { DateRangeFilter } from '../../components/DateRangeFilter';
+import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 
 interface ExpiryItem {
   id: number;
@@ -45,19 +47,25 @@ let cachedExpiryItems: ExpiryItem[] | null = null;
 
 const Expiry = () => {
   const navigate = useNavigate();
+  const todayStr = getTodayString();
+  const dateRangeHelper = usePersistedDateRange({
+    storageKey: 'expiry-date-range',
+    defaultFrom: todayStr,
+    defaultTo: getNDaysAgoString(-90),
+    minDate: '2020-01-01',
+    maxDate: '2035-12-31',
+    futurePresets: true,
+  });
+  
   const [items, setItems] = useState<ExpiryItem[]>(cachedExpiryItems || []);
   const [loading, setLoading] = useState(!cachedExpiryItems);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [daysFilter, setDaysFilter] = useState(90);
   const [customPhone, setCustomPhone] = useState('');
   const [sendingAlerts, setSendingAlerts] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   
   // Custom Filters
-  const [dateFrom, setDateFrom] = useState(getNDaysAgoString(15));
-  const [dateTo, setDateTo] = useState(getTodayString());
-  const [manualToDate, setManualToDate] = useState(false);
   const [minQty, setMinQty] = useState('');
   const [maxQty, setMaxQty] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -71,46 +79,29 @@ const Expiry = () => {
   const [colFilterMaxMrp, setColFilterMaxMrp] = useState('');
   const [colFilterLocation, setColFilterLocation] = useState('');
 
-  useEffect(() => {
-    if (!manualToDate) {
-      setDateTo(getTodayString());
-    }
-  }, [manualToDate]);
-
-  const handleDateFromChange = (val: string) => {
-    if (val && val < '2020-01-01') {
-      setDateFrom('2020-01-01');
-    } else {
-      setDateFrom(val);
-    }
-  };
-
-  const handleDateToChange = (val: string) => {
-    if (val && val < '2020-01-01') {
-      setDateTo('2020-01-01');
-    } else {
-      setDateTo(val);
-    }
-  };
+  // Dynamically calculate daysFilter for WhatsApp and UI digests
+  const daysFilter = Math.max(
+    1,
+    Math.ceil(
+      (new Date(dateRangeHelper.dateRange.to).getTime() -
+        new Date(dateRangeHelper.dateRange.from).getTime()) /
+        (1000 * 60 * 60 * 24)
+    )
+  );
   
 
 
-  const fetchExpiryItems = async (days = daysFilter, showRefresh = false) => {
+  const fetchExpiryItems = async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     if (!cachedExpiryItems && !showRefresh) setLoading(true);
     try {
-      const data = await api.getExpiryList(days);
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
+      const data = await api.getExpiryList({
+        date_from: dateRangeHelper.dateRange.from,
+        date_to: dateRangeHelper.dateRange.to,
+      });
       if (Array.isArray(data)) {
-        // STRICT RULE: Only show present month
-        const filtered = data.filter((r: any) => {
-          if (!r.expiry_date) return true;
-          const d = new Date(r.expiry_date);
-          return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-        });
-        setItems(filtered);
-        cachedExpiryItems = filtered;
+        setItems(data);
+        cachedExpiryItems = data;
       }
     } catch (err) {
       console.error('Error fetching near-expiry items:', err);
@@ -122,12 +113,14 @@ const Expiry = () => {
   };
 
   useEffect(() => {
-    fetchExpiryItems(daysFilter);
-    
+    fetchExpiryItems();
+  }, [dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to]);
+
+  useEffect(() => {
     // Attempt to load settings to prefill owner/pharmacist phone number
     api.getLicenseStatus() // we can fetch details from licensing/settings if available
       .catch(err => console.error(err));
-  }, [daysFilter]);
+  }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
     toastEvent.trigger(message, type, '/expiry');
@@ -216,22 +209,10 @@ const Expiry = () => {
     const matchesSearch = item.medicine_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           item.batch_no.toLowerCase().includes(searchQuery.toLowerCase());
     
-    let matchesDate = true;
-    if (dateFrom || dateTo) {
-      if (!item.expiry_date) {
-        matchesDate = false;
-      } else {
-        const itemDate = item.expiry_date.substring(0, 10);
-        const start = dateFrom || '0000-00-00';
-        const end = dateTo || '9999-99-99';
-        matchesDate = itemDate >= start && itemDate <= end;
-      }
-    }
-
     const matchesMinQty = !minQty || item.quantity >= Number(minQty);
     const matchesMaxQty = !maxQty || item.quantity <= Number(maxQty);
 
-    if (!(matchesSearch && matchesDate && matchesMinQty && matchesMaxQty)) {
+    if (!(matchesSearch && matchesMinQty && matchesMaxQty)) {
       return false;
     }
 
@@ -291,7 +272,7 @@ const Expiry = () => {
             </button>
           )}
           <button 
-            onClick={() => fetchExpiryItems(daysFilter, true)} 
+            onClick={() => fetchExpiryItems(true)} 
             disabled={refreshing}
             className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white transition-all text-muted"
           >
@@ -412,22 +393,16 @@ const Expiry = () => {
           <div className="p-4 border-b border-glass-border bg-black/10 flex flex-col gap-4">
             
             {/* Filter Tabs for Expiry Thresholds */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none select-none">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider mr-1.5 hidden sm:inline">Scope Days:</span>
-              {[30, 60, 90, 180].map(days => (
-                <button
-                  key={days}
-                  onClick={() => setDaysFilter(days)}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
-                    daysFilter === days
-                      ? 'bg-primary/20 border-primary text-primary font-bold shadow-[0_0_12px_rgba(14,165,233,0.15)]'
-                      : 'bg-white/5 border-glass-border/60 text-muted hover:text-text hover:bg-white/10'
-                  }`}
-                >
-                  {days} Days
-                </button>
-              ))}
-            </div>
+            <DateRangeFilter
+              helper={dateRangeHelper}
+              label="Expiry Date Range"
+              presets={[
+                { label: '30d', days: 30 },
+                { label: '60d', days: 60 },
+                { label: '90d', days: 90 },
+                { label: '180d', days: 180 }
+              ]}
+            />
             
             <div className="flex items-center justify-between gap-4">
               <div className="relative flex-1">
@@ -452,38 +427,6 @@ const Expiry = () => {
             
             {showFilters && (
               <div className="pt-4 border-t border-glass-border flex flex-wrap gap-4">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-semibold text-muted">From</label>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    min="2020-01-01"
-                    max={getTodayString()}
-                    onChange={e => handleDateFromChange(e.target.value)}
-                    className="px-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-semibold text-muted">To</label>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    min="2020-01-01"
-                    max={getTodayString()}
-                    disabled={!manualToDate}
-                    onChange={e => handleDateToChange(e.target.value)}
-                    className="px-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50 disabled:opacity-50"
-                  />
-                  <label className="text-xs text-muted flex items-center gap-1 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={manualToDate}
-                      onChange={e => setManualToDate(e.target.checked)}
-                      className="rounded border-glass-border text-primary focus:ring-primary/20 bg-bg"
-                    />
-                    <span>Edit</span>
-                  </label>
-                </div>
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-semibold text-muted">Qty</label>
                   <input

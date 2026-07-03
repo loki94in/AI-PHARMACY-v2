@@ -33,14 +33,17 @@ router.get('/', async (req, res) => {
   const search = (req.query.search as string || '').trim();
   
   const medicine = (req.query.medicine as string || '').trim();
+  const id = (req.query.id as string || '').trim();
   const batch = (req.query.batch as string || '').trim();
   const expiry = (req.query.expiry as string || '').trim();
   const packs = (req.query.packs as string || '').trim();
   const loose = (req.query.loose as string || '').trim();
   const mrp = (req.query.mrp as string || '').trim();
   const rack = (req.query.rack as string || '').trim();
+  const date_from = (req.query.date_from as string || '').trim();
+  const date_to = (req.query.date_to as string || '').trim();
 
-  const hasFilters = !!(search || medicine || batch || expiry || packs || loose || mrp || rack);
+  const hasFilters = !!(search || medicine || id || batch || expiry || packs || loose || mrp || rack || date_from || date_to);
   const limit = req.query.limit !== undefined 
     ? parseInt(req.query.limit as string) 
     : (hasFilters ? 5000 : 100);
@@ -88,6 +91,18 @@ router.get('/', async (req, res) => {
     if (rack) {
       baseQuery += ` AND im.rack_location LIKE ?`;
       params.push(`%${rack}%`);
+    }
+    if (id) {
+      baseQuery += ` AND CAST(im.id AS TEXT) LIKE ?`;
+      params.push(`%${id}%`);
+    }
+    if (date_from) {
+      baseQuery += ` AND date(im.created_at) >= date(?)`;
+      params.push(date_from);
+    }
+    if (date_to) {
+      baseQuery += ` AND date(im.created_at) <= date(?)`;
+      params.push(date_to);
     }
     
     // If limit is 0, fetch all (warning: can cause frontend lag)

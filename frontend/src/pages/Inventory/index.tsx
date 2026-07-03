@@ -1,9 +1,17 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2 } from 'lucide-react';
+import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
+import { DateRangeFilter } from '../../components/DateRangeFilter';
+import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
+import { useVirtualizer } from '../../hooks/useVirtualizer';
+import { InfiniteTable } from '../../components/InfiniteTable';
+import { VirtualRow } from '../../components/VirtualRow';
+import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
+import { useRef } from 'react';
 
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
@@ -59,11 +67,59 @@ let cachedItems: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
 const Inventory = () => {
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [colFilters, setColFilters] = useState({
-    medicine: '', batch: '', expiry: '', packs: '', loose: '', mrp: '', rack: ''
+  const dateRangeHelper = usePersistedDateRange({
+    storageKey: 'inventory-date-range',
+    defaultFrom: '',
+    defaultTo: '',
   });
+  const [colFilters, setColFilters] = useState({
+    medicine: '', id: '', batch: '', expiry: '', packs: '', loose: '', mrp: '', rack: ''
+  });
+
+  // Column Visibility — persisted in localStorage
+  const COL_KEYS = [
+    { key: 'id',     label: 'ID' },
+    { key: 'batch',  label: 'Batch' },
+    { key: 'expiry', label: 'Expiry' },
+    { key: 'packs',  label: 'Packs' },
+    { key: 'loose',  label: 'Loose' },
+    { key: 'mrp',    label: 'MRP' },
+    { key: 'rack',   label: 'Rack' },
+  ] as const;
+  type ColKey = typeof COL_KEYS[number]['key'];
+  const defaultVisible = new Set<ColKey>(COL_KEYS.map(c => c.key));
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
+    try {
+      const saved = localStorage.getItem('inv-page-cols');
+      if (saved) {
+        const arr = JSON.parse(saved) as ColKey[];
+        return new Set(arr.filter(k => COL_KEYS.some(c => c.key === k)));
+      }
+    } catch { /* ignore */ }
+    return defaultVisible;
+  });
+  const [showColMenu, setShowColMenu] = useState(false);
+  const colMenuRef = useRef<HTMLDivElement>(null);
+  const toggleCol = (key: ColKey) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      localStorage.setItem('inv-page-cols', JSON.stringify([...next]));
+      return next;
+    });
+  };
+  const col = (key: ColKey) => visibleCols.has(key);
+
+  // Close col menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) {
+        setShowColMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Enriched Details Drawer states
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -79,64 +135,94 @@ const Inventory = () => {
 
   const [specialOrders, setSpecialOrders] = useState<any[]>(cachedSpecialOrders || []);
 
-  // Pagination and Range Filter States
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
-  const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
+  // Debounced column filter states for server search
+  const [debouncedFilters, setDebouncedFilters] = useState({
+    medicine: '', id: '', batch: '', expiry: '', packs: '', loose: '', mrp: '', rack: ''
+  });
 
-  // Debounced column filter states
-  const [debouncedFilters, setDebouncedFilters] = useState(colFilters);
-
-  // Debounce colFilters update to avoid database request saturation
+  // Debounce column searches to avoid database request saturation
   useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedFilters(colFilters);
+      setDebouncedFilters({
+        medicine: colFilters.medicine,
+        id: colFilters.id,
+        batch: colFilters.batch,
+        expiry: colFilters.expiry,
+        packs: colFilters.packs,
+        loose: colFilters.loose,
+        mrp: colFilters.mrp,
+        rack: colFilters.rack
+      });
     }, 300);
     return () => clearTimeout(handler);
   }, [colFilters]);
 
-  // Reset page to 1 when filters are updated
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedFilters]);
-
-  const loadInventory = useCallback(() => {
-    setLoading(true);
-    api.getInventory({ 
-      page: currentPage, 
-      limit: pageSize,
+  // Infinite Scroll hook setup
+  const {
+    items,
+    allItems,
+    totalItems,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+    sentinelRef,
+  } = useInfiniteScroll<InventoryItem>({
+    queryKey: 'inventory-list',
+    cacheKey: 'inventory-items-cache',
+    serverFilters: {
       medicine: debouncedFilters.medicine,
+      id: debouncedFilters.id,
       batch: debouncedFilters.batch,
       expiry: debouncedFilters.expiry,
       packs: debouncedFilters.packs,
       loose: debouncedFilters.loose,
       mrp: debouncedFilters.mrp,
-      rack: debouncedFilters.rack
-    })
-      .then(data => {
-        const fetchedItems = data && (data as any).data ? (data as any).data : data;
-        const list = Array.isArray(fetchedItems) ? fetchedItems : [];
-        setItems(list);
-        
-        if (data && (data as any).totalItems !== undefined) {
-          setTotalItems((data as any).totalItems);
-          setTotalPages((data as any).totalPages || 1);
-        } else {
-          setTotalItems(list.length);
-          setTotalPages(1);
-        }
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
+      rack: debouncedFilters.rack,
+      date_from: dateRangeHelper.dateRange.from,
+      date_to: dateRangeHelper.dateRange.to,
+    },
+    fetchPage: async (pageParam, filters) => {
+      const res = await api.getInventory({
+        page: pageParam,
+        limit: 150,
+        medicine: filters.medicine,
+        id: filters.id,
+        batch: filters.batch,
+        expiry: filters.expiry,
+        packs: filters.packs,
+        loose: filters.loose,
+        mrp: filters.mrp,
+        rack: filters.rack,
+        date_from: filters.date_from,
+        date_to: filters.date_to,
       });
-  }, [currentPage, pageSize, debouncedFilters]);
+      const data = res && res.data ? res.data : res;
+      const totalPages = res && res.totalPages ? res.totalPages : 1;
+      const totalItems = res && res.totalItems !== undefined ? res.totalItems : data.length;
+      return {
+        data,
+        totalItems,
+        totalPages,
+      };
+    },
+  });
 
-  useEffect(() => {
-    loadInventory();
-  }, [loadInventory]);
+  const parentRef = useRef<HTMLDivElement | null>(null);
+
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 52,
+    overscan: 5,
+  });
+
+  const loading = isFetching && items.length === 0;
+
+  const loadInventory = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
   useDeferredEffect(() => {
     api.getOrders()
@@ -199,196 +285,277 @@ const Inventory = () => {
   const filteredItems = items;
 
   return (
-    <div className="h-full flex flex-col fade-in relative px-4 pb-4 pt-4 gap-2">
+    <div className="h-full flex flex-col fade-in relative gap-2">
       <div className="glass-panel flex-1 flex flex-col overflow-hidden">
         
-        {/* Range Selector and Pagination Header */}
-        <div className="p-3 border-b border-glass-border flex flex-wrap items-center justify-between bg-white/5 gap-3 shrink-0 select-none text-xs">
-          <div className="flex items-center gap-2.5">
-            <span className="text-muted font-bold uppercase tracking-wider text-[10px]">Range:</span>
-            <div className="flex items-center gap-1.5 bg-black/20 border border-glass-border rounded-lg px-2 py-1">
-              <span className="text-muted">Show from row</span>
-              <input
-                type="number"
-                min="0"
-                max={Math.max(0, totalItems - 1)}
-                value={totalItems === 0 ? 0 : (currentPage - 1) * pageSize}
-                onChange={e => {
-                  const val = Math.max(0, parseInt(e.target.value) || 0);
-                  const newPage = Math.floor(val / pageSize) + 1;
-                  setCurrentPage(Math.min(totalPages, newPage));
-                }}
-                className="w-16 bg-transparent text-center font-mono font-bold outline-none text-primary border-0 p-0 focus:ring-0"
-              />
-              <span className="text-muted">to</span>
-              <span className="text-text font-mono font-bold">
-                {totalItems === 0 ? 0 : Math.min(totalItems, currentPage * pageSize)}
-              </span>
-            </div>
-            <span className="text-muted">
-              of <strong className="text-text font-bold">{totalItems.toLocaleString()}</strong> medicines in inventory
-            </span>
-          </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-muted">Packs:</span>
-              <select
-                value={pageSize}
-                onChange={e => {
-                  const newSize = parseInt(e.target.value);
-                  setPageSize(newSize);
-                  setCurrentPage(1);
-                }}
-                className="bg-black/40 border border-glass-border rounded-lg text-text px-2 py-1 outline-none focus:border-primary/50 cursor-pointer font-bold font-mono"
-              >
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-                <option value="250">250 rows</option>
-                <option value="500">500 rows</option>
-              </select>
-            </div>
 
-            <div className="flex items-center gap-1 bg-black/20 border border-glass-border rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setCurrentPage(1)}
-                disabled={currentPage === 1 || loading}
-                className="p-1.5 rounded-md hover:bg-white/5 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all"
-                title="First Page"
-              >
-                <ChevronsLeft size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1 || loading}
-                className="p-1.5 rounded-md hover:bg-white/5 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all flex items-center gap-1 font-bold text-[10px] uppercase tracking-wider"
-                title="Previous Page"
-              >
-                <ChevronLeft size={14} /> Prev
-              </button>
-              <div className="px-3 text-muted">
-                Page <span className="font-bold text-text font-mono">{currentPage}</span> of <span className="font-bold text-text font-mono">{totalPages}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages || loading}
-                className="p-1.5 rounded-md hover:bg-white/5 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all flex items-center gap-1 font-bold text-[10px] uppercase tracking-wider"
-                title="Next Page"
-              >
-                Next <ChevronRight size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentPage(totalPages)}
-                disabled={currentPage === totalPages || loading}
-                className="p-1.5 rounded-md hover:bg-white/5 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all"
-                title="Last Page"
-              >
-                <ChevronsRight size={14} />
-              </button>
-            </div>
-          </div>
-        </div>
 
-        <div className="flex-1 overflow-auto bg-black/20 relative">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-[#18181b]/95 backdrop-blur z-10">
-              <tr>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle w-16">ID</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Medicine Name..." value={colFilters.medicine} onChange={e => setColFilters({...colFilters, medicine: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-36" />
+        {/* Header bar — count + columns toggle */}
+        <div className="px-3 py-2 border-b border-glass-border/30 flex items-center justify-between bg-bg2/40 shrink-0 select-none text-xs">
+          <span className="text-muted">
+            Showing <strong className="text-text font-bold font-mono">{items.length.toLocaleString()}</strong>
+            {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} medicines
+          </span>
+          <div className="flex items-center gap-2">
+            {/* Column visibility toggle */}
+            <div className="relative" ref={colMenuRef}>
+              <button
+                onClick={() => setShowColMenu(p => !p)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all ${
+                  showColMenu
+                    ? 'bg-primary/15 border-primary/40 text-primary'
+                    : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
+                }`}
+                title="Toggle column visibility"
+              >
+                <Columns3 size={12} />
+                Columns
+                {visibleCols.size < COL_KEYS.length && (
+                  <span className="px-1 py-0 rounded-full bg-primary/20 text-primary font-mono">
+                    {COL_KEYS.length - visibleCols.size} hidden
+                  </span>
+                )}
+              </button>
+              {showColMenu && (
+                <div className="absolute right-0 top-full mt-1.5 z-[200] w-44 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-glass-border/30">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Visible Columns</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setVisibleCols(defaultVisible);
+                          localStorage.setItem('inv-page-cols', JSON.stringify([...defaultVisible]));
+                        }}
+                        className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
+                      >
+                        All
+                      </button>
+                      <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors">
+                        <X size={12} />
+                      </button>
+                    </div>
                   </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Batch..." value={colFilters.batch} onChange={e => setColFilters({...colFilters, batch: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-24" />
-                  </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Expiry..." value={colFilters.expiry} onChange={e => setColFilters({...colFilters, expiry: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-20" />
-                  </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Packs..." value={colFilters.packs} onChange={e => setColFilters({...colFilters, packs: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-16" />
-                  </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Loose..." value={colFilters.loose} onChange={e => setColFilters({...colFilters, loose: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-16" />
-                  </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="MRP (₹)..." value={colFilters.mrp} onChange={e => setColFilters({...colFilters, mrp: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-20" />
-                  </div>
-                </th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border align-middle">
-                  <div className="flex items-center">
-                    <input type="text" placeholder="Rack..." value={colFilters.rack} onChange={e => setColFilters({...colFilters, rack: e.target.value})} className="px-2 py-1 bg-black/20 border border-glass-border rounded text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/50 w-16" />
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="p-8 text-center text-muted">Loading inventory...</td></tr>
-              ) : filteredItems.length === 0 ? (
-                <tr><td colSpan={8} className="p-8 text-center text-muted">No medicines found.</td></tr>
-              ) : (
-                filteredItems.map(item => {
-                  const pendingMatches = specialOrders.filter(
-                    o => o.product.toLowerCase().trim() === item.name.toLowerCase().trim() ||
-                         item.name.toLowerCase().includes(o.product.toLowerCase().trim())
-                  );
-                  const hasPending = pendingMatches.length > 0;
-                  return (
-                    <tr 
-                      key={item.id} 
-                      className="hover:bg-white/5 cursor-pointer transition-colors border-b border-glass-border"
-                      onClick={() => handleRowClick(item)}
-                    >
-                      <td className="p-4 text-sm text-muted">{item.id}</td>
-                      <td className="p-4 text-sm font-semibold flex items-center gap-2">
-                        {item.name}
-                        {hasPending && (
-                          <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold animate-pulse">
-                            ⚠️ Requested ({pendingMatches[0].qty})
-                          </span>
-                        )}
-                      </td>
-                    <td className="p-4 text-sm">{item.batch_number || 'B-NEW'}</td>
-                    <td className="p-4 text-sm">{item.expiry_date || '12/2028'}</td>
-                    <td className="p-4 text-sm">
-                      <div className="flex items-center gap-1.5" title="Full Packs Available">
-                        <span className={`px-2 py-1 rounded-md border text-xs font-bold shadow-sm ${item.stock_quantity <= 0 ? 'bg-red/10 border-red/20 text-red' : item.stock_quantity < 20 ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-green/10 border-green/20 text-green'}`}>
-                          {item.stock_quantity || 0}
+                  <div className="py-1">
+                    {COL_KEYS.map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => toggleCol(key)}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/5 transition-colors text-left"
+                      >
+                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                          visibleCols.has(key)
+                            ? 'bg-primary border-primary'
+                            : 'bg-transparent border-glass-border/60'
+                        }`}>
+                          {visibleCols.has(key) && <Check size={9} className="text-white" />}
                         </span>
-                        <span className="text-[10px] text-muted font-semibold">Packs</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-sm">
-                      <div className="flex items-center gap-1.5" title="Loose Units Available">
-                        <span className={`px-2 py-1 rounded-md border text-xs font-bold shadow-sm ${!item.loose_quantity || item.loose_quantity <= 0 ? 'bg-white/5 border-glass-border text-muted opacity-50' : 'bg-primary/10 border-primary/20 text-primary'}`}>
-                          {item.loose_quantity || 0}
+                        <span className={`text-[11px] font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
+                          {label}
                         </span>
-                        <span className="text-[10px] text-muted font-semibold">Units</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-sm">₹{item.mrp?.toFixed(2) || '0.00'}</td>
-                    <td className="p-4 text-sm text-muted">{item.rack_location || '-'}</td>
-                    </tr>
-                  );
-                })
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
+
+        <InfiniteTable
+          totalSize={rowVirtualizer.getTotalSize()}
+          containerRef={parentRef}
+          header={
+            <tr className="flex items-center w-full bg-bg2/95 border-b border-glass-border select-none">
+              {/* Medicine — always visible, has search */}
+              <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider flex-1 align-middle">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-muted">Medicine</span>
+                  <input
+                    type="text"
+                    placeholder="Filter medicine..."
+                    value={colFilters.medicine}
+                    onChange={e => setColFilters({ ...colFilters, medicine: e.target.value })}
+                    className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  />
+                </div>
+              </th>
+              {col('id') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-16 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">ID</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.id}
+                      onChange={e => setColFilters({ ...colFilters, id: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('batch') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Batch</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.batch}
+                      onChange={e => setColFilters({ ...colFilters, batch: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('expiry') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Expiry</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.expiry}
+                      onChange={e => setColFilters({ ...colFilters, expiry: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('packs') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Packs</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.packs}
+                      onChange={e => setColFilters({ ...colFilters, packs: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('loose') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Loose</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.loose}
+                      onChange={e => setColFilters({ ...colFilters, loose: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('mrp') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">MRP</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.mrp}
+                      onChange={e => setColFilters({ ...colFilters, mrp: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+              {col('rack') && (
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0 align-middle">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Rack</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={colFilters.rack}
+                      onChange={e => setColFilters({ ...colFilters, rack: e.target.value })}
+                      className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                  </div>
+                </th>
+              )}
+            </tr>
+          }
+          body={
+            items.length === 0 ? (
+              <tr className="flex items-center justify-center p-8 text-muted text-sm w-full absolute top-0 left-0">
+                <td>No medicines found.</td>
+              </tr>
+            ) : (
+              rowVirtualizer.getVirtualItems().map(virtualRow => {
+                const item = items[virtualRow.index];
+                if (!item) return null;
+                const pendingMatches = specialOrders.filter(
+                  o => {
+                    const itemName = (item.name || '').toLowerCase().trim();
+                    const prodName = (o.product || '').toLowerCase().trim();
+                    return prodName === itemName || itemName.includes(prodName);
+                  }
+                );
+                const hasPending = pendingMatches.length > 0;
+                return (
+                  <VirtualRow
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    start={virtualRow.start}
+                    size={virtualRow.size}
+                    onClick={() => handleRowClick(item)}
+                  >
+                    {/* Medicine — always visible */}
+                    <td className="p-4 text-sm font-semibold flex-1 flex items-center gap-2 truncate">
+                      <span className="truncate">{item.name}</span>
+                      {hasPending && (
+                        <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold animate-pulse shrink-0">
+                          ⚠️ Requested ({pendingMatches[0].qty})
+                        </span>
+                      )}
+                    </td>
+                    {col('id') && <td className="p-4 text-sm text-muted w-16 shrink-0">{item.id}</td>}
+                    {col('batch') && <td className="p-4 text-sm w-24 shrink-0 truncate">{item.batch_number || 'B-NEW'}</td>}
+                    {col('expiry') && <td className="p-4 text-sm w-24 shrink-0">{formatExpiryToMMYY(item.expiry_date) || '12/28'}</td>}
+                    {col('packs') && (
+                      <td className="p-4 text-sm w-24 shrink-0">
+                        <div className="flex items-center gap-1.5 animate-in fade-in" title="Full Packs Available">
+                          <span className={`px-2 py-1 rounded-md border text-xs font-bold shadow-sm ${item.stock_quantity <= 0 ? 'bg-red/10 border-red/20 text-red' : item.stock_quantity < 20 ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-green/10 border-green/20 text-green'}`}>
+                            {item.stock_quantity || 0}
+                          </span>
+                        </div>
+                      </td>
+                    )}
+                    {col('loose') && (
+                      <td className="p-4 text-sm w-24 shrink-0">
+                        <div className="flex items-center gap-1.5 animate-in fade-in" title="Loose Units Available">
+                          <span className={`px-2 py-1 rounded-md border text-xs font-bold shadow-sm ${!item.loose_quantity || item.loose_quantity <= 0 ? 'bg-white/5 border-glass-border text-muted opacity-50' : 'bg-primary/10 border-primary/20 text-primary'}`}>
+                            {item.loose_quantity || 0}
+                          </span>
+                        </div>
+                      </td>
+                    )}
+                    {col('mrp') && <td className="p-4 text-sm w-24 shrink-0">₹{item.mrp?.toFixed(2) || '0.00'}</td>}
+                    {col('rack') && <td className="p-4 text-sm text-muted w-24 shrink-0 truncate">{item.rack_location || '-'}</td>}
+                  </VirtualRow>
+                );
+              })
+            )
+          }
+          footer={
+            <InfiniteScrollStatus
+              totalItems={totalItems}
+              loadedCount={items.length}
+              isFetching={isFetching}
+              isFetchingNextPage={isFetchingNextPage}
+              hasNextPage={hasNextPage}
+              onLoadMore={fetchNextPage}
+              sentinelRef={sentinelRef}
+              itemName="medicines"
+            />
+          }
+        />
       </div>
 
       {/* Sliding Details Drawer */}

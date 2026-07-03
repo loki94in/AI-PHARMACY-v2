@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Search, 
   Edit, 
@@ -7,10 +7,9 @@ import {
   Check, 
   AlertTriangle, 
   Package,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight
+  Loader2,
+  Columns3,
+  X
 } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -111,11 +110,68 @@ const InvestigationCenter = () => {
   const [loading, setLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
-  // Pagination States
+  // Infinite Scroll States
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const pageSize = 100;
   const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const isFetchingRef = useRef(false);
+
+  // Column Visibility — persisted in localStorage
+  const COL_KEYS = [
+    { key: 'batch',          label: 'Batch' },
+    { key: 'date',           label: 'Date' },
+    { key: 'invoice',        label: 'Invoice' },
+    { key: 'party',          label: 'Party' },
+    { key: 'openingStock',   label: 'Opening Stock' },
+    { key: 'purchase',       label: 'Purchase' },
+    { key: 'sales',          label: 'Sales' },
+    { key: 'purchaseReturn', label: 'Purchase Return' },
+    { key: 'salesReturn',    label: 'Sales Return' },
+    { key: 'adj',            label: 'Adj' },
+    { key: 'stockAudit',     label: 'Stock Audit' },
+    { key: 'b2bSales',       label: 'B2B Sales' },
+    { key: 'closingStock',   label: 'Closing Stock' },
+    { key: 'medicineStock',  label: 'Medicine Stock' },
+  ] as const;
+  type ColKey = typeof COL_KEYS[number]['key'];
+
+  const defaultVisible = new Set<ColKey>(COL_KEYS.map(c => c.key));
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
+    try {
+      const saved = localStorage.getItem('inv-ledger-cols');
+      if (saved) {
+        const arr = JSON.parse(saved) as ColKey[];
+        return new Set(arr.filter(k => COL_KEYS.some(c => c.key === k)));
+      }
+    } catch { /* ignore */ }
+    return defaultVisible;
+  });
+  const [showColMenu, setShowColMenu] = useState(false);
+  const colMenuRef = useRef<HTMLDivElement>(null);
+
+  const toggleCol = (key: ColKey) => {
+    setVisibleCols(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      localStorage.setItem('inv-ledger-cols', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  // Close col menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) {
+        setShowColMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const col = (key: ColKey) => visibleCols.has(key);
 
   // Modals / Confirmation State
   const [confirmModal, setConfirmModal] = useState<{
@@ -179,16 +235,16 @@ const InvestigationCenter = () => {
     return () => clearTimeout(handler);
   }, [colFilterMedicine, colFilterBatch, colFilterDateFrom, colFilterDateTo, colFilterInvoice, colFilterParty, colFilterType]);
 
-  // Reset page to 1 when filters are updated
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedFilters]);
 
-  const runSearch = useCallback(async () => {
+
+
+  const runSearch = useCallback(async (page: number, isAppend: boolean) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     try {
       const activeFilters = {
-        page: currentPage,
+        page,
         limit: pageSize,
         dateFrom: debouncedFilters.dateFrom ? debouncedFilters.dateFrom : getNDaysAgoString(15),
         dateTo: debouncedFilters.dateTo ? debouncedFilters.dateTo : getTodayString(),
@@ -203,25 +259,49 @@ const InvestigationCenter = () => {
       );
       const response = await api.getInvestigationTimeline(cleanFilters);
       if (response && response.data) {
-        setSearchResults(response.data);
+        setSearchResults(prev => isAppend ? [...prev, ...response.data] : response.data);
         setTotalItems(response.totalItems || 0);
-        setTotalPages(response.totalPages || 1);
+        const totalPages = response.totalPages || 1;
+        setHasMore(page < totalPages);
       } else {
         const list = Array.isArray(response) ? response : [];
-        setSearchResults(list);
+        setSearchResults(prev => isAppend ? [...prev, ...list] : list);
         setTotalItems(list.length);
-        setTotalPages(1);
+        setHasMore(false);
       }
     } catch (err) {
       showToast('Search failed. Please try again.', 'error');
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [currentPage, pageSize, debouncedFilters]);
+  }, [debouncedFilters]);
 
+  // Initial load & filter reset
   useEffect(() => {
-    runSearch();
-  }, [runSearch]);
+    setCurrentPage(1);
+    setSearchResults([]);
+    setHasMore(true);
+    runSearch(1, false);
+  }, [debouncedFilters]);
+
+  // Infinite scroll: load next page when sentinel enters viewport
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading && !isFetchingRef.current) {
+          const nextPage = currentPage + 1;
+          setCurrentPage(nextPage);
+          runSearch(nextPage, true);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, currentPage, runSearch]);
 
   // Direct Inventory Correction logic
   const handleAdjustStock = async (inventoryId: number) => {
@@ -269,7 +349,7 @@ const InvestigationCenter = () => {
           showToast('Inventory adjusted successfully.');
           setEditingType(null);
           setConfirmModal(null);
-          runSearch();
+          runSearch(1, false);
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to update inventory', 'error');
         }
@@ -450,7 +530,7 @@ const InvestigationCenter = () => {
           showToast(`${actionText} corrected successfully!`);
           setEditingType(null);
           setConfirmModal(null);
-          runSearch();
+          runSearch(1, false);
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to save correction.', 'error');
         }
@@ -761,93 +841,77 @@ const InvestigationCenter = () => {
         /* UNIFIED LEDGER SPREADSHEET TIMELINE */
         <div className="flex-1 bg-glass-bg border border-glass-border rounded-2xl flex flex-col min-h-0 overflow-hidden animate-in fade-in duration-300">
           
-          {/* Range Selector and Pagination Header */}
-          <div className="p-3 border-b border-glass-border/30 flex flex-wrap items-center justify-between bg-bg2/40 gap-3 shrink-0 select-none text-xs">
-            <div className="flex items-center gap-2.5">
-              <span className="text-muted font-bold uppercase tracking-wider text-[10px]">Range:</span>
-              <div className="flex items-center gap-1.5 bg-bg3 border border-glass-border rounded-lg px-2 py-1">
-                <span className="text-muted">Show from row</span>
-                <input
-                  type="number"
-                  min="0"
-                  max={Math.max(0, totalItems - 1)}
-                  value={totalItems === 0 ? 0 : (currentPage - 1) * pageSize}
-                  onChange={e => {
-                    const val = Math.max(0, parseInt(e.target.value) || 0);
-                    const newPage = Math.floor(val / pageSize) + 1;
-                    setCurrentPage(Math.min(totalPages, newPage));
-                  }}
-                  className="w-16 bg-transparent text-center font-mono font-bold outline-none text-primary border-0 p-0 focus:ring-0 text-text"
-                />
-                <span className="text-muted">to</span>
-                <span className="text-text font-mono font-bold">
-                  {totalItems === 0 ? 0 : Math.min(totalItems, currentPage * pageSize)}
-                </span>
-              </div>
-              <span className="text-muted">
-                of <strong className="text-text font-bold">{totalItems.toLocaleString()}</strong> transaction entries
-              </span>
-            </div>
+          {/* Count Header + Column Toggle */}
+          <div className="px-3 py-2 border-b border-glass-border/30 flex items-center justify-between bg-bg2/40 shrink-0 select-none text-xs">
+            <span className="text-muted">
+              Showing <strong className="text-text font-bold font-mono">{searchResults.length.toLocaleString()}</strong>
+              {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} transaction entries
+            </span>
+            <div className="flex items-center gap-2">
+              {loading && searchResults.length === 0 && (
+                <Loader2 size={13} className="animate-spin text-primary" />
+              )}
+              {/* Column visibility toggle */}
+              <div className="relative" ref={colMenuRef}>
+                <button
+                  onClick={() => setShowColMenu(p => !p)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all ${
+                    showColMenu
+                      ? 'bg-primary/15 border-primary/40 text-primary'
+                      : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
+                  }`}
+                  title="Toggle column visibility"
+                >
+                  <Columns3 size={12} />
+                  Columns
+                  {visibleCols.size < COL_KEYS.length && (
+                    <span className="px-1 py-0 rounded-full bg-primary/20 text-primary font-mono">
+                      {COL_KEYS.length - visibleCols.size} hidden
+                    </span>
+                  )}
+                </button>
 
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-muted">Rows:</span>
-                <select
-                  value={pageSize}
-                  onChange={e => {
-                    const newSize = parseInt(e.target.value);
-                    setPageSize(newSize);
-                    setCurrentPage(1);
-                  }}
-                  className="bg-bg3 border border-glass-border rounded-lg text-text px-2 py-1 outline-none focus:border-primary/50 cursor-pointer font-bold font-mono"
-                >
-                  <option value="50">50 rows</option>
-                  <option value="100">100 rows</option>
-                  <option value="250">250 rows</option>
-                  <option value="500">500 rows</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-1 bg-bg3 border border-glass-border rounded-lg p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage === 1 || loading}
-                  className="p-1.5 rounded-md hover:bg-bg2/40 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all cursor-pointer"
-                  title="First Page"
-                >
-                  <ChevronsLeft size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1 || loading}
-                  className="p-1.5 rounded-md hover:bg-bg2/40 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all flex items-center gap-1 font-bold text-[10px] uppercase tracking-wider cursor-pointer"
-                  title="Previous Page"
-                >
-                  <ChevronLeft size={14} /> Prev
-                </button>
-                <div className="px-3 text-muted">
-                  Page <span className="font-bold text-text font-mono">{currentPage}</span> of <span className="font-bold text-text font-mono">{totalPages}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages || loading}
-                  className="p-1.5 rounded-md hover:bg-bg2/40 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all flex items-center gap-1 font-bold text-[10px] uppercase tracking-wider cursor-pointer"
-                  title="Next Page"
-                >
-                  Next <ChevronRight size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={currentPage === totalPages || loading}
-                  className="p-1.5 rounded-md hover:bg-bg2/40 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-muted hover:text-text transition-all cursor-pointer"
-                  title="Last Page"
-                >
-                  <ChevronsRight size={14} />
-                </button>
+                {showColMenu && (
+                  <div className="absolute right-0 top-full mt-1.5 z-[200] w-52 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-glass-border/30">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-muted">Visible Columns</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setVisibleCols(defaultVisible);
+                            localStorage.setItem('inv-ledger-cols', JSON.stringify([...defaultVisible]));
+                          }}
+                          className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
+                        >
+                          All
+                        </button>
+                        <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="py-1 max-h-72 overflow-y-auto custom-scrollbar">
+                      {COL_KEYS.map(({ key, label }) => (
+                        <button
+                          key={key}
+                          onClick={() => toggleCol(key)}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/5 transition-colors text-left"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                            visibleCols.has(key)
+                              ? 'bg-primary border-primary'
+                              : 'bg-transparent border-glass-border/60'
+                          }`}>
+                            {visibleCols.has(key) && <Check size={9} className="text-white" />}
+                          </span>
+                          <span className={`text-[11px] font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
+                            {label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -874,7 +938,7 @@ const InvestigationCenter = () => {
                 <table className="w-full text-left border-collapse text-[11px] font-semibold text-text min-w-full">
                   <thead>
                     <tr className="bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] align-top">
-                      {/* Medicine Header */}
+                      {/* Medicine Header — always visible */}
                       <th className="p-2 border-r border-glass-border/20 min-w-[150px]">
                         <div className="flex flex-col gap-1">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Medicine</span>
@@ -888,6 +952,7 @@ const InvestigationCenter = () => {
                         </div>
                       </th>
                       {/* Batch Header */}
+                      {col('batch') && (
                       <th className="p-2 border-r border-glass-border/20 min-w-[70px]">
                         <div className="flex flex-col gap-1">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Batch</span>
@@ -900,7 +965,9 @@ const InvestigationCenter = () => {
                           />
                         </div>
                       </th>
+                      )}
                       {/* Date Header */}
+                      {col('date') && (
                       <th className="p-2 border-r border-glass-border/20 min-w-[110px]">
                         <div className="flex flex-col gap-1">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Date</span>
@@ -920,7 +987,9 @@ const InvestigationCenter = () => {
                           />
                         </div>
                       </th>
+                      )}
                       {/* Invoice Header */}
+                      {col('invoice') && (
                       <th className="p-2 border-r border-glass-border/20 min-w-[80px]">
                         <div className="flex flex-col gap-1">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Invoice</span>
@@ -933,7 +1002,9 @@ const InvestigationCenter = () => {
                           />
                         </div>
                       </th>
+                      )}
                       {/* Party Header */}
+                      {col('party') && (
                       <th className="p-2 border-r border-glass-border/20 min-w-[90px]">
                         <div className="flex flex-col gap-1">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Party</span>
@@ -946,7 +1017,9 @@ const InvestigationCenter = () => {
                           />
                         </div>
                       </th>
+                      )}
                       {/* Opening Stock Header (with Type Selector) */}
+                      {col('openingStock') && (
                       <th className="p-2 border-r border-glass-border/20 text-center min-w-[90px]">
                         <div className="flex flex-col gap-1 items-center">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Opening Stock</span>
@@ -963,35 +1036,18 @@ const InvestigationCenter = () => {
                           </select>
                         </div>
                       </th>
-                      {/* Static Columns without any placeholders */}
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[60px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Purchase
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[60px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Sales
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Purchase Return
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Sales Return
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[45px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Adj
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[70px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Stock Audit
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[75px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        B2B Sales
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Closing Stock
-                      </th>
-                      <th className="p-2 border-r border-glass-border/20 text-center min-w-[85px] uppercase text-[10px] tracking-wider text-muted font-black">
-                        Medicine Stock
-                      </th>
-                      {/* Actions Header with Reset button */}
+                      )}
+                      {/* Static Columns */}
+                      {col('purchase') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[60px] uppercase text-[10px] tracking-wider text-muted font-black">Purchase</th>}
+                      {col('sales') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[60px] uppercase text-[10px] tracking-wider text-muted font-black">Sales</th>}
+                      {col('purchaseReturn') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">Purchase Return</th>}
+                      {col('salesReturn') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">Sales Return</th>}
+                      {col('adj') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[45px] uppercase text-[10px] tracking-wider text-muted font-black">Adj</th>}
+                      {col('stockAudit') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[70px] uppercase text-[10px] tracking-wider text-muted font-black">Stock Audit</th>}
+                      {col('b2bSales') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[75px] uppercase text-[10px] tracking-wider text-muted font-black">B2B Sales</th>}
+                      {col('closingStock') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[80px] uppercase text-[10px] tracking-wider text-muted font-black">Closing Stock</th>}
+                      {col('medicineStock') && <th className="p-2 border-r border-glass-border/20 text-center min-w-[85px] uppercase text-[10px] tracking-wider text-muted font-black">Medicine Stock</th>}
+                      {/* Actions Header — always visible */}
                       <th className="p-2 text-center min-w-[70px]">
                         <div className="flex flex-col gap-1 items-center justify-center">
                           <span className="uppercase text-[10px] tracking-wider text-muted font-black">Actions</span>
@@ -1029,98 +1085,47 @@ const InvestigationCenter = () => {
                         key={index} 
                         className="odd:bg-bg3/20 even:bg-transparent hover:bg-primary/5 transition-colors"
                       >
-                        {/* Medicine */}
+                        {/* Medicine — always visible */}
                         <td className="px-2 py-1.5 border-r border-glass-border/20 text-text" title={item.medicine_name}>
                           <div className="truncate max-w-[150px]">
                             {item.medicine_name || 'System Activity'}
                           </div>
                         </td>
-                        
-                        {/* Batch */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 font-mono font-bold text-muted">
-                          {item.batch_no || 'N/A'}
-                        </td>
-
-                        {/* Date */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 font-mono whitespace-nowrap text-muted">
-                          {formatDate(item.date)}
-                        </td>
-
-                        {/* Invoice Link */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20">
-                          {item.invoice_id || item.purchase_id ? (
-                            <button 
-                              onClick={() => {
-                                  if (item.type === 'Sale') handleStartSaleBillEdit(item);
-                                  if (item.type === 'Purchase') handleStartPurchaseBillEdit(item);
-                              }}
-                              className="text-primary hover:underline font-bold text-left cursor-pointer underline decoration-dotted"
-                            >
-                              {item.reference}
-                            </button>
-                          ) : (
-                            <span className="text-muted">{item.reference}</span>
-                          )}
-                        </td>
-
-                        {/* Party */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20">
-                          <div className="truncate max-w-[120px]">
-                            {item.party}
-                          </div>
-                        </td>
-
-                        {/* Opening Stock */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted">
-                          {formatOpeningStock(item.opening_qty, item.opening_loose)}
-                        </td>
-
-                        {/* Purchase */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-green-400">
-                          {item.type === 'Purchase' ? formatTxQty(item.purchase_qty, item.free_qty || 0) : '0'}
-                        </td>
-
-                        {/* Sales */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-sky-400">
-                          {item.type === 'Sale' ? formatTxQty(item.sale_qty, item.sale_loose) : '0'}
-                        </td>
-
-                        {/* Purchase Return */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-orange-400">
-                          {(item.type === 'Return' && item.return_type === 'purchase') ? formatTxQty(item.purchase_return_qty, 0) : '0'}
-                        </td>
-
-                        {/* Sales Return */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-purple-400">
-                          {(item.type === 'Return' && item.return_type === 'sale') ? formatTxQty(item.sales_return_qty, 0) : '0'}
-                        </td>
-
-                        {/* Adj */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-amber-500">
-                          {item.type === 'Adjustment' ? formatTxQty(item.adj_qty, item.adj_loose) : '0'}
-                        </td>
-
-                        {/* Stock Audit */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted/50">
-                          0
-                        </td>
-
-                        {/* B2B Sales */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted/50">
-                          0
-                        </td>
-
-                        {/* Closing Stock */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono font-bold text-text">
-                          {formatTxQty(item.closing_qty, item.closing_loose)}
-                        </td>
-
-                        {/* Medicine Stock */}
-                        <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono font-bold text-text/80">
-                          {formatTxQty(item.medicine_stock_qty, item.medicine_stock_loose)}
-                        </td>
-
-                        {/* Actions */}
+                        {col('batch') && <td className="px-2 py-1.5 border-r border-glass-border/20 font-mono font-bold text-muted">{item.batch_no || 'N/A'}</td>}
+                        {col('date') && <td className="px-2 py-1.5 border-r border-glass-border/20 font-mono whitespace-nowrap text-muted">{formatDate(item.date)}</td>}
+                        {col('invoice') && (
+                          <td className="px-2 py-1.5 border-r border-glass-border/20">
+                            {item.invoice_id || item.purchase_id ? (
+                              <button 
+                                onClick={() => {
+                                    if (item.type === 'Sale') handleStartSaleBillEdit(item);
+                                    if (item.type === 'Purchase') handleStartPurchaseBillEdit(item);
+                                }}
+                                className="text-primary hover:underline font-bold text-left cursor-pointer underline decoration-dotted"
+                              >
+                                {item.reference}
+                              </button>
+                            ) : (
+                              <span className="text-muted">{item.reference}</span>
+                            )}
+                          </td>
+                        )}
+                        {col('party') && (
+                          <td className="px-2 py-1.5 border-r border-glass-border/20">
+                            <div className="truncate max-w-[120px]">{item.party}</div>
+                          </td>
+                        )}
+                        {col('openingStock') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted">{formatOpeningStock(item.opening_qty, item.opening_loose)}</td>}
+                        {col('purchase') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-green-400">{item.type === 'Purchase' ? formatTxQty(item.purchase_qty, item.free_qty || 0) : '0'}</td>}
+                        {col('sales') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-sky-400">{item.type === 'Sale' ? formatTxQty(item.sale_qty, item.sale_loose) : '0'}</td>}
+                        {col('purchaseReturn') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-orange-400">{(item.type === 'Return' && item.return_type === 'purchase') ? formatTxQty(item.purchase_return_qty, 0) : '0'}</td>}
+                        {col('salesReturn') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-purple-400">{(item.type === 'Return' && item.return_type === 'sale') ? formatTxQty(item.sales_return_qty, 0) : '0'}</td>}
+                        {col('adj') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-amber-500">{item.type === 'Adjustment' ? formatTxQty(item.adj_qty, item.adj_loose) : '0'}</td>}
+                        {col('stockAudit') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted/50">0</td>}
+                        {col('b2bSales') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono text-muted/50">0</td>}
+                        {col('closingStock') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono font-bold text-text">{formatTxQty(item.closing_qty, item.closing_loose)}</td>}
+                        {col('medicineStock') && <td className="px-2 py-1.5 border-r border-glass-border/20 text-center font-mono font-bold text-text/80">{formatTxQty(item.medicine_stock_qty, item.medicine_stock_loose)}</td>}
+                        {/* Actions — always visible */}
                         <td className="px-1.5 py-1 text-center">
                           {item.inventory_id ? (
                             <button
@@ -1138,6 +1143,18 @@ const InvestigationCenter = () => {
                     )))}
                   </tbody>
                 </table>
+                {/* Infinite scroll sentinel */}
+                <div ref={sentinelRef} className="flex items-center justify-center py-4">
+                  {loading && searchResults.length > 0 && (
+                    <div className="flex items-center gap-2 text-muted text-xs">
+                      <Loader2 size={14} className="animate-spin text-primary" />
+                      <span>Loading more entries...</span>
+                    </div>
+                  )}
+                  {!hasMore && searchResults.length > 0 && (
+                    <span className="text-muted/40 text-[10px] font-bold uppercase tracking-wider">— End of records —</span>
+                  )}
+                </div>
               </div>
             )}
           </div>
