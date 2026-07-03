@@ -505,14 +505,22 @@ router.get('/recommend-quantity/batch', async (req, res) => {
       medIds.push(m.id);
     });
 
-    // For any name that didn't have an exact match, try a quick LIKE query
+    // For any name that didn't have an exact match, try a quick LIKE query (prefix first, then middle-word fallback)
     const exactMatchedNames = new Set(meds.map(m => m.name.toLowerCase()));
     for (const name of medicineNames) {
       if (!exactMatchedNames.has(name.toLowerCase())) {
-        const partialMed = await db.get(
+        // Try prefix search first (uses index)
+        let partialMed = await db.get(
           'SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 1',
-          `%${name}%`
+          `${name}%`
         );
+        // Fallback to middle-word search if prefix returns nothing
+        if (!partialMed) {
+          partialMed = await db.get(
+            'SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 1',
+            `%${name}%`
+          );
+        }
         if (partialMed) {
           medIds.push(partialMed.id);
           medIdToName[partialMed.id] = name;

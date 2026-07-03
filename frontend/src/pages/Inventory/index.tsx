@@ -1,9 +1,31 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2 } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
-import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
+// import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
+
+const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
+
+const ModalSkeleton = () => (
+  <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 fade-in">
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+    <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden slide-up">
+      <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary animate-pulse" />
+          <div className="space-y-1">
+            <div className="h-5 w-48 bg-bg2/50 rounded animate-pulse" />
+            <div className="h-3 w-32 bg-bg2/50 rounded animate-pulse" />
+          </div>
+        </div>
+      </div>
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-primary" />
+      </div>
+    </div>
+  </div>
+);
 
 const formatExpiryToMMYY = (val: string): string => {
   if (!val) return '';
@@ -661,18 +683,20 @@ const Inventory = () => {
       )}
 
       {universalEditMedicineId && (
-        <UniversalMedicineEditModal 
-          medicineId={universalEditMedicineId} 
-          onClose={() => setUniversalEditMedicineId(null)} 
-          onSave={() => {
-            loadInventory();
-            if (selectedItem) {
-              // Optionally reload enriched data
-              setPanelOpen(false);
-              setTimeout(() => handleRowClick(selectedItem), 300);
-            }
-          }} 
-        />
+        <Suspense fallback={<ModalSkeleton />}>
+          <UniversalMedicineEditModal 
+            medicineId={universalEditMedicineId} 
+            onClose={() => setUniversalEditMedicineId(null)} 
+            onSave={() => {
+              loadInventory();
+              if (selectedItem) {
+                // Optionally reload enriched data
+                setPanelOpen(false);
+                setTimeout(() => handleRowClick(selectedItem), 300);
+              }
+            }} 
+          />
+        </Suspense>
       )}
 
     </div>

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, ClipboardList, Sparkles, Loader2, ShoppingCart, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent } from '../services/events';
+import { useApiQuery } from '../hooks/useApiQuery';
 
 interface SuggestionMedicine {
   inventory_id?: number;
@@ -347,7 +348,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   // Medicine autocomplete search
   useEffect(() => {
-    if (ignoreNextSearchRef.current) {
+if (ignoreNextSearchRef.current) {
       ignoreNextSearchRef.current = false;
       return;
     }
@@ -358,65 +359,82 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
       setShowSuggestions(false);
       return;
     }
+  }, [product]);
+
+  // React Query for local search with dedup + abort
+  const { data: localSearchData, isLoading: isLocalSearchLoading } = useApiQuery(
+    ['medicine-search-local', product.trim()],
+    () => api.searchMedicine(product.trim()),
+    { enabled: product.trim().length >= 3, staleTime: 10_000 }
+  );
+
+  // Process local search results and combine with Pharmarack
+  useEffect(() => {
+    if (!localSearchData || !Array.isArray(localSearchData)) {
+      setSuggestions(prev => {
+        const prOnly = prev.filter(s => s.isPharmarack);
+        return prOnly;
+      });
+      return;
+    }
+
+    let localSuggestions: SuggestionMedicine[] = [];
+
+    const groupedLocal: Record<string, {
+      medicine_id?: number;
+      medicine_name: string;
+      quantity: number;
+      mrp?: number;
+    }> = {};
+
+    localSearchData.forEach((item: any) => {
+      const name = item.medicine_name || item.name || '';
+      const key = name.toLowerCase().trim();
+      const qty = Number(item.quantity) || 0;
+      
+      if (!groupedLocal[key]) {
+        groupedLocal[key] = {
+          medicine_id: item.medicine_id,
+          medicine_name: name,
+          quantity: qty,
+          mrp: item.mrp
+        };
+      } else {
+        groupedLocal[key].quantity += qty;
+        if (item.mrp && (!groupedLocal[key].mrp || item.mrp > groupedLocal[key].mrp)) {
+          groupedLocal[key].mrp = item.mrp;
+        }
+      }
+    });
+
+    Object.values(groupedLocal).forEach((med) => {
+      localSuggestions.push({
+        medicine_id: med.medicine_id,
+        medicine_name: med.medicine_name,
+        quantity: med.quantity,
+        mrp: med.mrp,
+        isPharmarack: false
+      });
+    });
+
+    setSuggestions(prev => {
+      const prOnly = prev.filter(s => s.isPharmarack);
+      return [...localSuggestions, ...prOnly];
+    });
+    setShowSuggestions(true);
+    setActiveSuggestionIndex(-1);
+    setSearchLoading(false);
+  }, [localSearchData]);
+
+  // Pharmarack search (keep existing async logic but simplify)
+  useEffect(() => {
+    const query = product.trim();
+    if (query.length < 3) return;
 
     let active = true;
 
     const delayDebounce = setTimeout(async () => {
       setSearchLoading(true);
-      let localSuggestions: SuggestionMedicine[] = [];
-
-      // 1. Run local search immediately and render results instantly
-      try {
-        const localData = await api.searchMedicine(query).catch(() => []);
-        if (!active) return;
-
-        if (Array.isArray(localData)) {
-          const groupedLocal: Record<string, {
-            medicine_id?: number;
-            medicine_name: string;
-            quantity: number;
-            mrp?: number;
-          }> = {};
-
-          localData.forEach((item: any) => {
-            const name = item.medicine_name || item.name || '';
-            const key = name.toLowerCase().trim();
-            const qty = Number(item.quantity) || 0;
-            
-            if (!groupedLocal[key]) {
-              groupedLocal[key] = {
-                medicine_id: item.medicine_id,
-                medicine_name: name,
-                quantity: qty,
-                mrp: item.mrp
-              };
-            } else {
-              groupedLocal[key].quantity += qty;
-              if (item.mrp && (!groupedLocal[key].mrp || item.mrp > groupedLocal[key].mrp)) {
-                groupedLocal[key].mrp = item.mrp;
-              }
-            }
-          });
-
-          Object.values(groupedLocal).forEach((med) => {
-            localSuggestions.push({
-              medicine_id: med.medicine_id,
-              medicine_name: med.medicine_name,
-              quantity: med.quantity,
-              mrp: med.mrp,
-              isPharmarack: false
-            });
-          });
-        }
-
-        setSuggestions(localSuggestions);
-        setShowSuggestions(localSuggestions.length > 0);
-        setActiveSuggestionIndex(-1);
-      } catch (err) {
-        console.error('Error searching local medicines:', err);
-      }
-
-      // 2. Run Pharmarack search in parallel and stream results when ready
       try {
         const prData = await api.searchPharmarack(query).catch((err: any) => {
           const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
@@ -449,21 +467,22 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
               distributor: item.distributor,
               rate: item.rate,
               mapped: item.mapped,
-              packaging: item.packaging,
-              stock: item.stock,
               scheme: item.scheme,
               productId: item.productId,
               storeId: item.storeId,
               productCode: item.productCode,
-              company: item.company
+              company: item.company,
+              packaging: item.packaging,
+              stock: item.stock,
             });
           });
         }
 
-        // Merge local suggestions and new Pharmarack suggestions
-        const merged = [...localSuggestions, ...prSuggestions];
-        setSuggestions(merged);
-        setShowSuggestions(merged.length > 0);
+        setSuggestions(prev => {
+          const localOnly = prev.filter(s => !s.isPharmarack);
+          return [...localOnly, ...prSuggestions];
+        });
+        setShowSuggestions(true);
       } catch (err) {
         console.error('Error searching Pharmarack:', err);
       } finally {
@@ -471,7 +490,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
           setSearchLoading(false);
         }
       }
-    }, 300); // Snape-fast 300ms debounce
+    }, 300);
 
     return () => {
       active = false;

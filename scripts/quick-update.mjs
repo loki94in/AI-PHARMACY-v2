@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, relative, extname, dirname } from 'path';
 import { execSync } from 'child_process';
+import { generate3DGraph } from './generate-3d-graph.mjs';
 
 const ROOT = process.cwd();
 const KNOWLEDGE_DIR = join(ROOT, '.understand-anything');
@@ -43,7 +44,7 @@ function getAllFiles(dir, files = []) {
           const ext = extname(entry).toLowerCase();
           if (INCLUDE_EXTS.has(ext) && !SKIP_FILES.has(entry)) {
             files.push({
-              path: relative(ROOT, fullPath),
+              path: relative(ROOT, fullPath).replace(/\\/g, '/'),
               size: stat.size,
               mtime: stat.mtime.getTime()
             });
@@ -121,12 +122,12 @@ function resolveImport(fromFile, importPath) {
     for (const ext of exts) {
       const fullPath = resolved + ext;
       if (existsSync(join(ROOT, fullPath))) {
-        return relative(ROOT, join(ROOT, fullPath));
+        return relative(ROOT, join(ROOT, fullPath)).replace(/\\/g, '/');
       }
     }
     
     if (existsSync(join(ROOT, resolved))) {
-      return relative(ROOT, join(ROOT, resolved));
+      return relative(ROOT, join(ROOT, resolved)).replace(/\\/g, '/');
     }
   } catch (e) {}
   return null;
@@ -197,6 +198,15 @@ function main() {
   if (existsSync(GRAPH_PATH)) {
     try {
       graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8'));
+      // Normalize all existing graph node paths and IDs to forward slashes for cross-platform compatibility
+      graph.nodes.forEach(node => {
+        if (node.filePath) node.filePath = node.filePath.replace(/\\/g, '/');
+        if (node.id) node.id = node.id.replace(/\\/g, '/');
+      });
+      graph.edges.forEach(edge => {
+        if (edge.source) edge.source = edge.source.replace(/\\/g, '/');
+        if (edge.target) edge.target = edge.target.replace(/\\/g, '/');
+      });
     } catch (e) {
       console.log('Starting fresh graph');
     }
@@ -341,6 +351,13 @@ function main() {
     version: '1.0.0',
     analyzedFiles: files.length
   }, null, 2));
+
+  // Generate the 3D Graph HTML
+  try {
+    generate3DGraph();
+  } catch (err) {
+    console.error('Failed to generate 3D graph HTML:', err);
+  }
   
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\nDone in ${elapsed}s | Nodes: ${graph.nodes.length} | Edges: ${graph.edges.length} | Layers: ${graph.layers.length}`);

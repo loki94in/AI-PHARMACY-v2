@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Pharmacy OS - 3D Knowledge Graph</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- 3D Force Graph & Three.js via CDN -->
+  <script src="https://unpkg.com/3d-force-graph"></script>
+  <!-- Optional for custom styling/nodes if needed, but 3d-force-graph is self-contained -->
+
+  <style>
+    :root {
+      --bg-base: #08080c;
+      --bg-panel: rgba(13, 13, 20, 0.75);
+      --bg-panel-hover: rgba(20, 20, 30, 0.85);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-color-focus: rgba(139, 92, 246, 0.4);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #8b5cf6;
+      --accent-hover: #a78bfa;
+      --accent-glow: rgba(139, 92, 246, 0.3);
+      --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #3d-graph {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+
+    /* Glassmorphism Common Styles */
+    .glass-panel {
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      z-index: 10;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-panel:hover {
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    /* Header styling */
+    header {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      padding: 16px 24px;
+      pointer-events: auto;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: linear-gradient(135deg, #fff 30%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+    }
+
+    header p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* Left Sidebar: Controls & Legend */
+    #left-sidebar {
+      position: absolute;
+      top: 96px;
+      left: 20px;
+      bottom: 20px;
+      width: 320px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+
+    /* Right Sidebar: Node Details */
+    #right-sidebar {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      bottom: 20px;
+      width: 360px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      transform: translateX(400px); /* Hidden by default */
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+
+    #right-sidebar.open {
+      transform: translateX(0);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* UI Group elements */
+    .sidebar-section {
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 16px;
+    }
+
+    .sidebar-section:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Search Input styling */
+    .search-container {
+      position: relative;
+    }
+
+    .search-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 36px 10px 12px;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .search-icon {
+      position: absolute;
+      right: 12px;
+      color: var(--text-muted);
+      pointer-events: none;
+      width: 16px;
+      height: 16px;
+    }
+
+    .autocomplete-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #0f0f15;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      margin-top: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 100;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      display: none;
+    }
+
+    .autocomplete-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      transition: background 0.15s;
+    }
+
+    .autocomplete-item:hover {
+      background: rgba(139, 92, 246, 0.15);
+      color: #fff;
+    }
+
+    .autocomplete-item-path {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Filters Layout */
+    .filter-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .filter-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      user-select: none;
+      padding: 4px 0;
+    }
+
+    .filter-item input {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .layer-color-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    /* Sliders / Controls */
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .control-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .control-label-wrapper {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+    }
+
+    .control-value {
+      color: var(--accent-hover);
+      font-weight: 500;
+    }
+
+    .slider-input {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+      accent-color: var(--accent);
+    }
+
+    .slider-input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+
+    .slider-input::-webkit-slider-thumb:hover {
+      transform: scale(1.3);
+    }
+
+    /* Toggle switches */
+    .toggle-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider-toggle {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.1);
+      transition: .3s;
+      border-radius: 20px;
+    }
+
+    .slider-toggle:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider-toggle {
+      background-color: var(--accent);
+    }
+
+    input:checked + .slider-toggle:before {
+      transform: translateX(16px);
+    }
+
+    /* Details Panel */
+    .details-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .details-name {
+      font-size: 1.25rem;
+      font-weight: 600;
+      word-break: break-all;
+      line-height: 1.2;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.25rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+
+    .close-btn:hover {
+      color: #fff;
+    }
+
+    .details-path {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      margin-bottom: 12px;
+    }
+
+    .details-meta-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .tag-badge {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--accent-hover);
+      border: 1px solid rgba(139, 92, 246, 0.25);
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+
+    .type-badge {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 12px;
+      text-transform: capitalize;
+    }
+
+    .details-desc {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: #d1d5db;
+      margin-bottom: 16px;
+    }
+
+    .dep-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.15);
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .dep-item {
+      font-size: 0.8rem;
+      color: var(--accent-hover);
+      text-decoration: none;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 4px 6px;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+
+    .dep-item:hover {
+      background: rgba(139, 92, 246, 0.15);
+      color: #fff;
+    }
+
+    .no-deps {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 4px 6px;
+    }
+
+    /* Drag & Drop Overlay */
+    #drop-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(8, 8, 12, 0.95);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      border: 4px dashed var(--accent);
+      margin: -4px; /* Fix borders */
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+
+    #drop-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drop-box {
+      border: 2px dashed rgba(255,255,255,0.15);
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      max-width: 450px;
+      background: rgba(255,255,255,0.02);
+      transition: all 0.3s;
+    }
+
+    .drop-box:hover {
+      border-color: var(--accent);
+      background: rgba(139, 92, 246, 0.03);
+    }
+
+    .drop-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      margin-top: 16px;
+      transition: background 0.2s;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Custom graph labels styling */
+    .graph-tooltip {
+      background: rgba(13, 13, 20, 0.9) !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      backdrop-filter: blur(8px);
+      border-radius: 8px !important;
+      color: #fff !important;
+      font-family: var(--font-sans) !important;
+      padding: 8px 12px !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+    }
+
+    .graph-tooltip-title {
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-bottom: 2px;
+    }
+
+    .graph-tooltip-path {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    /* Stats Indicator */
+    .stats-badge {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--accent-hover);
+      margin-left: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="3d-graph"></div>
+
+  <!-- Header Panel -->
+  <header class="glass-panel">
+    <h1>AI Pharmacy OS</h1>
+    <p>3D Knowledge Graph Structure <span class="stats-badge" id="global-stats">- Nodes | - Edges</span></p>
+  </header>
+
+  <!-- Left Sidebar (Controls) -->
+  <div id="left-sidebar" class="glass-panel">
+    <!-- Search Node -->
+    <div class="sidebar-section">
+      <div class="section-title">Search Workspace</div>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <input type="text" id="node-search" class="search-input" placeholder="Search files, routes, docs...">
+          <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </div>
+        <div id="search-results" class="autocomplete-results"></div>
+      </div>
+    </div>
+
+    <!-- Filter Layers -->
+    <div class="sidebar-section">
+      <div class="section-title">Architecture Layers <span id="layer-count" style="font-size: 0.75rem; color: var(--text-muted);"></span></div>
+      <div class="filter-list" id="layer-filters">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- Filter Types -->
+    <div class="sidebar-section">
+      <div class="section-title">Node Types</div>
+      <div class="filter-list" id="type-filters">
+        <label class="filter-item">
+          <input type="checkbox" id="type-file" checked data-type="file">
+          <span>Source Code</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" id="type-service" checked data-type="service">
+          <span>Services</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" id="type-test" checked data-type="test">
+          <span>Tests</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" id="type-config" checked data-type="config">
+          <span>Configuration</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" id="type-document" checked data-type="document">
+          <span>Documentation</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Visual Settings -->
+    <div class="sidebar-section">
+      <div class="section-title">Visual Settings</div>
+      <div class="control-group">
+        
+        <div class="toggle-wrapper">
+          <span>Auto-Rotation</span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-rotate">
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+
+        <div class="control-item">
+          <div class="control-label-wrapper">
+            <span>Dependency Flow Particles</span>
+            <span class="control-value" id="particle-val">3</span>
+          </div>
+          <input type="range" id="particle-slider" class="slider-input" min="0" max="6" step="1" value="3">
+        </div>
+
+        <div class="control-item">
+          <div class="control-label-wrapper">
+            <span>Connection Line Opacity</span>
+            <span class="control-value" id="opacity-val">0.3</span>
+          </div>
+          <input type="range" id="opacity-slider" class="slider-input" min="0.05" max="0.8" step="0.05" value="0.3">
+        </div>
+
+        <div class="toggle-wrapper">
+          <span>Size by Connection Count</span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-size-degree" checked>
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Load File Trigger -->
+    <div class="sidebar-section" style="margin-top: auto; border: none; padding-bottom: 0;">
+      <button class="btn-primary" style="width: 100%; margin-top: 0; padding: 8px 12px; font-size: 0.8rem;" onclick="showDropOverlay()">Load Custom Graph JSON</button>
+    </div>
+  </div>
+
+  <!-- Right Sidebar (Node Details) -->
+  <div id="right-sidebar" class="glass-panel">
+    <div class="details-header">
+      <div class="details-name" id="node-details-name">filename.ts</div>
+      <button class="close-btn" onclick="closeSidebar()">&times;</button>
+    </div>
+    <div class="details-path" id="node-details-path">src/services/filename.ts</div>
+    
+    <div class="details-meta-row" id="node-details-badges">
+      <span class="type-badge">file</span>
+      <span class="tag-badge">general</span>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-title">Summary</div>
+      <div class="details-desc" id="node-details-summary">No summary available.</div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-title" id="title-imports">Dependencies (Imports)</div>
+      <div class="dep-list" id="node-details-imports">
+        <!-- Clickable items -->
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-title" id="title-dependents">Imported By</div>
+      <div class="dep-list" id="node-details-dependents">
+        <!-- Clickable items -->
+      </div>
+    </div>
+
+    <div style="margin-top: auto;">
+      <button class="btn-primary" style="width: 100%; margin-top: 0;" id="btn-focus-node">Fly to Node</button>
+    </div>
+  </div>
+
+  <!-- Drop Zone Overlay -->
+  <div id="drop-overlay" onclick="hideDropOverlay()">
+    <div class="drop-box" onclick="event.stopPropagation()">
+      <div class="drop-title">Load Knowledge Graph</div>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px;">
+        Drag & Drop your <code>knowledge-graph.json</code> file here, or select it manually.
+      </p>
+      <input type="file" id="file-uploader" style="display: none;" accept=".json" onchange="handleFileSelect(this)">
+      <button class="btn-primary" onclick="document.getElementById('file-uploader').click()">Select JSON File</button>
+      <button class="btn-primary" style="background: rgba(255,255,255,0.06); color: var(--text-main); margin-left: 8px;" onclick="hideDropOverlay()">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    // Embedded initial graph data
+    const INITIAL_GRAPH_DATA = {"nodes":[{"id":"document:AGENTS.md","type":"document","name":"AGENTS.md","filePath":"AGENTS.md","summary":"Documentation: AGENTS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:index.js","type":"file","name":"index.js","filePath":"index.js","summary":"Source file: index.js","tags":["general"],"_mtime":1783000902026},{"id":"file:jest.config.js","type":"file","name":"jest.config.js","filePath":"jest.config.js","summary":"Source file: jest.config.js","tags":["general"],"_mtime":1782336396000},{"id":"file:license.txt","type":"file","name":"license.txt","filePath":"license.txt","summary":"Source file: license.txt","tags":["auth"],"_mtime":1782336396000},{"id":"config:package.json","type":"config","name":"package.json","filePath":"package.json","summary":"Configuration: package.json","tags":["config"],"_mtime":1782336396000},{"id":"document:README.md","type":"document","name":"README.md","filePath":"README.md","summary":"Documentation: README.md","tags":["documentation"],"_mtime":1782336396000},{"id":"config:tsconfig.json","type":"config","name":"tsconfig.json","filePath":"tsconfig.json","summary":"Configuration: tsconfig.json","tags":["config"],"_mtime":1782336396000},{"id":"document:.agents/rules/ponytail.md","type":"document","name":".agents\\rules\\ponytail.md","filePath":".agents/rules/ponytail.md","summary":"Documentation: .agents\\rules\\ponytail.md","tags":["documentation"],"_mtime":1782336396000},{"id":"config:.opencode/config.json","type":"config","name":".opencode\\config.json","filePath":".opencode/config.json","summary":"Configuration: .opencode\\config.json","tags":["config"],"_mtime":1782336396000},{"id":"config:.opencode/package.json","type":"config","name":".opencode\\package.json","filePath":".opencode/package.json","summary":"Configuration: .opencode\\package.json","tags":["config"],"_mtime":1783054428443},{"id":"config:.vscode/settings.json","type":"config","name":".vscode\\settings.json","filePath":".vscode/settings.json","summary":"Configuration: .vscode\\settings.json","tags":["config"],"_mtime":1782336396000},{"id":"document:AUDIT/01_PROJECT_OVERVIEW.md","type":"document","name":"AUDIT\\01_PROJECT_OVERVIEW.md","filePath":"AUDIT/01_PROJECT_OVERVIEW.md","summary":"Documentation: AUDIT\\01_PROJECT_OVERVIEW.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/02_ARCHITECTURE.md","type":"document","name":"AUDIT\\02_ARCHITECTURE.md","filePath":"AUDIT/02_ARCHITECTURE.md","summary":"Documentation: AUDIT\\02_ARCHITECTURE.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/03_DATA_FLOW.md","type":"document","name":"AUDIT\\03_DATA_FLOW.md","filePath":"AUDIT/03_DATA_FLOW.md","summary":"Documentation: AUDIT\\03_DATA_FLOW.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/04_WORKFLOWS.md","type":"document","name":"AUDIT\\04_WORKFLOWS.md","filePath":"AUDIT/04_WORKFLOWS.md","summary":"Documentation: AUDIT\\04_WORKFLOWS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/05_PROBLEMS_AND_SOLUTIONS.md","type":"document","name":"AUDIT\\05_PROBLEMS_AND_SOLUTIONS.md","filePath":"AUDIT/05_PROBLEMS_AND_SOLUTIONS.md","summary":"Documentation: AUDIT\\05_PROBLEMS_AND_SOLUTIONS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/06_PERFORMANCE_AND_RAM.md","type":"document","name":"AUDIT\\06_PERFORMANCE_AND_RAM.md","filePath":"AUDIT/06_PERFORMANCE_AND_RAM.md","summary":"Documentation: AUDIT\\06_PERFORMANCE_AND_RAM.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:AUDIT/07_IMPROVEMENTS.md","type":"document","name":"AUDIT\\07_IMPROVEMENTS.md","filePath":"AUDIT/07_IMPROVEMENTS.md","summary":"Documentation: AUDIT\\07_IMPROVEMENTS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:bootstrapper/main.ts","type":"file","name":"bootstrapper\\main.ts","filePath":"bootstrapper/main.ts","summary":"Source file: bootstrapper\\main.ts","tags":["general"],"_mtime":1782336396000},{"id":"config:bootstrapper/package.json","type":"config","name":"bootstrapper\\package.json","filePath":"bootstrapper/package.json","summary":"Configuration: bootstrapper\\package.json","tags":["config"],"_mtime":1782336396000},{"id":"config:data/audit_queue.json","type":"config","name":"data\\audit_queue.json","filePath":"data/audit_queue.json","summary":"Configuration: data\\audit_queue.json","tags":["config"],"_mtime":1782336396000},{"id":"config:data/ocr_corrections.json","type":"config","name":"data\\ocr_corrections.json","filePath":"data/ocr_corrections.json","summary":"Configuration: data\\ocr_corrections.json","tags":["config","ocr"],"_mtime":1782336396000},{"id":"config:data/pharmarack_profile/component_crx_cache/metadata.json","type":"config","name":"data\\pharmarack_profile\\component_crx_cache\\metadata.json","filePath":"data/pharmarack_profile/component_crx_cache/metadata.json","summary":"Configuration: data\\pharmarack_profile\\component_crx_cache\\metadata.json","tags":["config"],"_mtime":1783005905112},{"id":"config:data/pharmarack_profile/extensions_crx_cache/metadata.json","type":"config","name":"data\\pharmarack_profile\\extensions_crx_cache\\metadata.json","filePath":"data/pharmarack_profile/extensions_crx_cache/metadata.json","summary":"Configuration: data\\pharmarack_profile\\extensions_crx_cache\\metadata.json","tags":["config"],"_mtime":1783004182679},{"id":"document:docs/api_endpoints.md","type":"document","name":"docs\\api_endpoints.md","filePath":"docs/api_endpoints.md","summary":"Documentation: docs\\api_endpoints.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/DATABASE_ARCHITECTURE.md","type":"document","name":"docs\\DATABASE_ARCHITECTURE.md","filePath":"docs/DATABASE_ARCHITECTURE.md","summary":"Documentation: docs\\DATABASE_ARCHITECTURE.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/MOBILE_APP_CONTEXT.md","type":"document","name":"docs\\MOBILE_APP_CONTEXT.md","filePath":"docs/MOBILE_APP_CONTEXT.md","summary":"Documentation: docs\\MOBILE_APP_CONTEXT.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:docs/samples/telegram_sample_message.txt","type":"file","name":"docs\\samples\\telegram_sample_message.txt","filePath":"docs/samples/telegram_sample_message.txt","summary":"Source file: docs\\samples\\telegram_sample_message.txt","tags":["telegram"],"_mtime":1782336396000},{"id":"file:docs/samples/whatsapp_sample_message.txt","type":"file","name":"docs\\samples\\whatsapp_sample_message.txt","filePath":"docs/samples/whatsapp_sample_message.txt","summary":"Source file: docs\\samples\\whatsapp_sample_message.txt","tags":["whatsapp"],"_mtime":1782336396000},{"id":"document:docs/superpowers/plans/2026-05-24-medicine-name-extraction-plan.md","type":"document","name":"docs\\superpowers\\plans\\2026-05-24-medicine-name-extraction-plan.md","filePath":"docs/superpowers/plans/2026-05-24-medicine-name-extraction-plan.md","summary":"Documentation: docs\\superpowers\\plans\\2026-05-24-medicine-name-extraction-plan.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/plans/2026-05-24-whatsapp-automation-plan.md","type":"document","name":"docs\\superpowers\\plans\\2026-05-24-whatsapp-automation-plan.md","filePath":"docs/superpowers/plans/2026-05-24-whatsapp-automation-plan.md","summary":"Documentation: docs\\superpowers\\plans\\2026-05-24-whatsapp-automation-plan.md","tags":["documentation","whatsapp"],"_mtime":1782336396000},{"id":"document:docs/superpowers/plans/2026-05-25-ai-camera-product-name-filtering.md","type":"document","name":"docs\\superpowers\\plans\\2026-05-25-ai-camera-product-name-filtering.md","filePath":"docs/superpowers/plans/2026-05-25-ai-camera-product-name-filtering.md","summary":"Documentation: docs\\superpowers\\plans\\2026-05-25-ai-camera-product-name-filtering.md","tags":["documentation","ocr"],"_mtime":1782336396000},{"id":"document:docs/superpowers/plans/2026-05-25-ai-pharmacy-improvements.md","type":"document","name":"docs\\superpowers\\plans\\2026-05-25-ai-pharmacy-improvements.md","filePath":"docs/superpowers/plans/2026-05-25-ai-pharmacy-improvements.md","summary":"Documentation: docs\\superpowers\\plans\\2026-05-25-ai-pharmacy-improvements.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/plans/2026-05-26-delete-backup-files.md","type":"document","name":"docs\\superpowers\\plans\\2026-05-26-delete-backup-files.md","filePath":"docs/superpowers/plans/2026-05-26-delete-backup-files.md","summary":"Documentation: docs\\superpowers\\plans\\2026-05-26-delete-backup-files.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-23-cleanup-ai-pharmacy-md-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-23-cleanup-ai-pharmacy-md-design.md","filePath":"docs/superpowers/specs/2026-05-23-cleanup-ai-pharmacy-md-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-23-cleanup-ai-pharmacy-md-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-23-page-wise-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-23-page-wise-design.md","filePath":"docs/superpowers/specs/2026-05-23-page-wise-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-23-page-wise-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-24-medicine-name-extraction-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-24-medicine-name-extraction-design.md","filePath":"docs/superpowers/specs/2026-05-24-medicine-name-extraction-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-24-medicine-name-extraction-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-24-telegram-bot-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-24-telegram-bot-design.md","filePath":"docs/superpowers/specs/2026-05-24-telegram-bot-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-24-telegram-bot-design.md","tags":["documentation","telegram"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-24-whatsapp-automation-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-24-whatsapp-automation-design.md","filePath":"docs/superpowers/specs/2026-05-24-whatsapp-automation-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-24-whatsapp-automation-design.md","tags":["documentation","whatsapp"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-ai-camera-image-test-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-ai-camera-image-test-design.md","filePath":"docs/superpowers/specs/2026-05-25-ai-camera-image-test-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-ai-camera-image-test-design.md","tags":["documentation","ocr"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-ai-camera-product-name-filtering-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-ai-camera-product-name-filtering-design.md","filePath":"docs/superpowers/specs/2026-05-25-ai-camera-product-name-filtering-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-ai-camera-product-name-filtering-design.md","tags":["documentation","ocr"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-ai-pharmacy-audit-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-ai-pharmacy-audit-design.md","filePath":"docs/superpowers/specs/2026-05-25-ai-pharmacy-audit-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-ai-pharmacy-audit-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-email-triggered-notifications-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-email-triggered-notifications-design.md","filePath":"docs/superpowers/specs/2026-05-25-email-triggered-notifications-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-email-triggered-notifications-design.md","tags":["documentation","email"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-hybrid-online-offline-product-data-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-hybrid-online-offline-product-data-design.md","filePath":"docs/superpowers/specs/2026-05-25-hybrid-online-offline-product-data-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-hybrid-online-offline-product-data-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-memory-utility-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-memory-utility-design.md","filePath":"docs/superpowers/specs/2026-05-25-memory-utility-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-memory-utility-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-25-telegram-order-management-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-25-telegram-order-management-design.md","filePath":"docs/superpowers/specs/2026-05-25-telegram-order-management-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-25-telegram-order-management-design.md","tags":["documentation","telegram"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-26-frontend-redesign-light-attractive.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-26-frontend-redesign-light-attractive.md","filePath":"docs/superpowers/specs/2026-05-26-frontend-redesign-light-attractive.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-26-frontend-redesign-light-attractive.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-26-migration-enhancement-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-26-migration-enhancement-design.md","filePath":"docs/superpowers/specs/2026-05-26-migration-enhancement-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-26-migration-enhancement-design.md","tags":["documentation","migration"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-05-26-redesign-ui-demo.md","type":"document","name":"docs\\superpowers\\specs\\2026-05-26-redesign-ui-demo.md","filePath":"docs/superpowers/specs/2026-05-26-redesign-ui-demo.md","summary":"Documentation: docs\\superpowers\\specs\\2026-05-26-redesign-ui-demo.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-02-pos-billing-page-layout-spec.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-02-pos-billing-page-layout-spec.md","filePath":"docs/superpowers/specs/2026-06-02-pos-billing-page-layout-spec.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-02-pos-billing-page-layout-spec.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-03-mail-attachment-picker-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-03-mail-attachment-picker-design.md","filePath":"docs/superpowers/specs/2026-06-03-mail-attachment-picker-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-03-mail-attachment-picker-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-03-mail-implementation-quickstart.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-03-mail-implementation-quickstart.md","filePath":"docs/superpowers/specs/2026-06-03-mail-implementation-quickstart.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-03-mail-implementation-quickstart.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-03-mail-page-ui-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-03-mail-page-ui-design.md","filePath":"docs/superpowers/specs/2026-06-03-mail-page-ui-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-03-mail-page-ui-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-03-mail-page-workflow-design.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-03-mail-page-workflow-design.md","filePath":"docs/superpowers/specs/2026-06-03-mail-page-workflow-design.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-03-mail-page-workflow-design.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/2026-06-13-whatsapp-automation-agent-spec.md","type":"document","name":"docs\\superpowers\\specs\\2026-06-13-whatsapp-automation-agent-spec.md","filePath":"docs/superpowers/specs/2026-06-13-whatsapp-automation-agent-spec.md","summary":"Documentation: docs\\superpowers\\specs\\2026-06-13-whatsapp-automation-agent-spec.md","tags":["documentation","whatsapp"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/implementation_plan.md","type":"document","name":"docs\\superpowers\\specs\\implementation_plan.md","filePath":"docs/superpowers/specs/implementation_plan.md","summary":"Documentation: docs\\superpowers\\specs\\implementation_plan.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/incomplete_tasks_implementation_plan.md","type":"document","name":"docs\\superpowers\\specs\\incomplete_tasks_implementation_plan.md","filePath":"docs/superpowers/specs/incomplete_tasks_implementation_plan.md","summary":"Documentation: docs\\superpowers\\specs\\incomplete_tasks_implementation_plan.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/surgical_fixes.md","type":"document","name":"docs\\superpowers\\specs\\surgical_fixes.md","filePath":"docs/superpowers/specs/surgical_fixes.md","summary":"Documentation: docs\\superpowers\\specs\\surgical_fixes.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/walkthrough.md","type":"document","name":"docs\\superpowers\\specs\\walkthrough.md","filePath":"docs/superpowers/specs/walkthrough.md","summary":"Documentation: docs\\superpowers\\specs\\walkthrough.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/wsl_migration_report.md","type":"document","name":"docs\\superpowers\\specs\\wsl_migration_report.md","filePath":"docs/superpowers/specs/wsl_migration_report.md","summary":"Documentation: docs\\superpowers\\specs\\wsl_migration_report.md","tags":["documentation","migration"],"_mtime":1782336396000},{"id":"document:docs/superpowers/specs/wsl_setup_roadmap.md","type":"document","name":"docs\\superpowers\\specs\\wsl_setup_roadmap.md","filePath":"docs/superpowers/specs/wsl_setup_roadmap.md","summary":"Documentation: docs\\superpowers\\specs\\wsl_setup_roadmap.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:frontend/AGENTS.md","type":"document","name":"frontend\\AGENTS.md","filePath":"frontend/AGENTS.md","summary":"Documentation: frontend\\AGENTS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:frontend/eslint.config.js","type":"file","name":"frontend\\eslint.config.js","filePath":"frontend/eslint.config.js","summary":"Source file: frontend\\eslint.config.js","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/index.html","type":"file","name":"frontend\\index.html","filePath":"frontend/index.html","summary":"Source file: frontend\\index.html","tags":["general"],"_mtime":1782336396000},{"id":"config:frontend/package.json","type":"config","name":"package.json","filePath":"frontend/package.json","summary":"Configuration: package.json","tags":["config","frontend"],"_mtime":1783057244168},{"id":"file:frontend/postcss.config.js","type":"file","name":"frontend\\postcss.config.js","filePath":"frontend/postcss.config.js","summary":"Source file: frontend\\postcss.config.js","tags":["general"],"_mtime":1782336396000},{"id":"document:frontend/README.md","type":"document","name":"frontend\\README.md","filePath":"frontend/README.md","summary":"Documentation: frontend\\README.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:frontend/src/App.css","type":"file","name":"frontend\\src\\App.css","filePath":"frontend/src/App.css","summary":"Source file: frontend\\src\\App.css","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/App.tsx","type":"file","name":"frontend\\src\\App.tsx","filePath":"frontend/src/App.tsx","summary":"Source file: frontend\\src\\App.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/AICamera.tsx","type":"file","name":"frontend\\src\\components\\AICamera.tsx","filePath":"frontend/src/components/AICamera.tsx","summary":"Source file: frontend\\src\\components\\AICamera.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/BackupCenterModal.tsx","type":"file","name":"frontend\\src\\components\\BackupCenterModal.tsx","filePath":"frontend/src/components/BackupCenterModal.tsx","summary":"Source file: frontend\\src\\components\\BackupCenterModal.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/HoverPriceIntelTable.tsx","type":"file","name":"frontend\\src\\components\\HoverPriceIntelTable.tsx","filePath":"frontend/src/components/HoverPriceIntelTable.tsx","summary":"Source file: frontend\\src\\components\\HoverPriceIntelTable.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/LiveCartAddModal.tsx","type":"file","name":"frontend\\src\\components\\LiveCartAddModal.tsx","filePath":"frontend/src/components/LiveCartAddModal.tsx","summary":"Source file: frontend\\src\\components\\LiveCartAddModal.tsx","tags":["general"],"_mtime":1783009501929},{"id":"file:frontend/src/components/MobileConnectionModal.tsx","type":"file","name":"frontend\\src\\components\\MobileConnectionModal.tsx","filePath":"frontend/src/components/MobileConnectionModal.tsx","summary":"Source file: frontend\\src\\components\\MobileConnectionModal.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/POS/BrandBanner.tsx","type":"file","name":"frontend\\src\\components\\POS\\BrandBanner.tsx","filePath":"frontend/src/components/POS/BrandBanner.tsx","summary":"Source file: frontend\\src\\components\\POS\\BrandBanner.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/PriceIntelPanel.tsx","type":"file","name":"frontend\\src\\components\\PriceIntelPanel.tsx","filePath":"frontend/src/components/PriceIntelPanel.tsx","summary":"Source file: frontend\\src\\components\\PriceIntelPanel.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/QuickOrderModal.tsx","type":"file","name":"QuickOrderModal.tsx","filePath":"frontend/src/components/QuickOrderModal.tsx","summary":"React component","tags":["frontend"],"_mtime":1783059543462},{"id":"file:frontend/src/components/StagedReviewModal.tsx","type":"file","name":"frontend\\src\\components\\StagedReviewModal.tsx","filePath":"frontend/src/components/StagedReviewModal.tsx","summary":"Source file: frontend\\src\\components\\StagedReviewModal.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"file","name":"UniversalMedicineEditModal.tsx","filePath":"frontend/src/components/UniversalMedicineEditModal.tsx","summary":"React component","tags":["frontend"],"_mtime":1783058262877},{"id":"file:frontend/src/hooks/useDeferredEffect.ts","type":"file","name":"frontend\\src\\hooks\\useDeferredEffect.ts","filePath":"frontend/src/hooks/useDeferredEffect.ts","summary":"Source file: frontend\\src\\hooks\\useDeferredEffect.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/index.css","type":"file","name":"frontend\\src\\index.css","filePath":"frontend/src/index.css","summary":"Source file: frontend\\src\\index.css","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/main.tsx","type":"file","name":"main.tsx","filePath":"frontend/src/main.tsx","summary":"Source file: main.tsx","tags":["frontend"],"_mtime":1783057293159},{"id":"file:frontend/src/pages/AutomationCenter/index.tsx","type":"file","name":"frontend\\src\\pages\\AutomationCenter\\index.tsx","filePath":"frontend/src/pages/AutomationCenter/index.tsx","summary":"Source file: frontend\\src\\pages\\AutomationCenter\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/CatalogUpload/index.tsx","type":"file","name":"frontend\\src\\pages\\CatalogUpload\\index.tsx","filePath":"frontend/src/pages/CatalogUpload/index.tsx","summary":"Source file: frontend\\src\\pages\\CatalogUpload\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/CompositionQueue/index.tsx","type":"file","name":"frontend\\src\\pages\\CompositionQueue\\index.tsx","filePath":"frontend/src/pages/CompositionQueue/index.tsx","summary":"Source file: frontend\\src\\pages\\CompositionQueue\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/CRM/index.tsx","type":"file","name":"frontend\\src\\pages\\CRM\\index.tsx","filePath":"frontend/src/pages/CRM/index.tsx","summary":"Source file: frontend\\src\\pages\\CRM\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/CustomerReturn/index.tsx","type":"file","name":"frontend\\src\\pages\\CustomerReturn\\index.tsx","filePath":"frontend/src/pages/CustomerReturn/index.tsx","summary":"Source file: frontend\\src\\pages\\CustomerReturn\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/CustomerReturnHistory/index.tsx","type":"file","name":"frontend\\src\\pages\\CustomerReturnHistory\\index.tsx","filePath":"frontend/src/pages/CustomerReturnHistory/index.tsx","summary":"Source file: frontend\\src\\pages\\CustomerReturnHistory\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Dashboard/index.tsx","type":"file","name":"frontend\\src\\pages\\Dashboard\\index.tsx","filePath":"frontend/src/pages/Dashboard/index.tsx","summary":"Source file: frontend\\src\\pages\\Dashboard\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Database/index.tsx","type":"file","name":"frontend\\src\\pages\\Database\\index.tsx","filePath":"frontend/src/pages/Database/index.tsx","summary":"Source file: frontend\\src\\pages\\Database\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Dispatch/index.tsx","type":"file","name":"frontend\\src\\pages\\Dispatch\\index.tsx","filePath":"frontend/src/pages/Dispatch/index.tsx","summary":"Source file: frontend\\src\\pages\\Dispatch\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Doctors/index.tsx","type":"file","name":"frontend\\src\\pages\\Doctors\\index.tsx","filePath":"frontend/src/pages/Doctors/index.tsx","summary":"Source file: frontend\\src\\pages\\Doctors\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Expiry/index.tsx","type":"file","name":"frontend\\src\\pages\\Expiry\\index.tsx","filePath":"frontend/src/pages/Expiry/index.tsx","summary":"Source file: frontend\\src\\pages\\Expiry\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Inventory/index.tsx","type":"file","name":"index.tsx","filePath":"frontend/src/pages/Inventory/index.tsx","summary":"React page component","tags":["frontend"],"_mtime":1783058792003},{"id":"file:frontend/src/pages/Investigation/index.tsx","type":"file","name":"frontend\\src\\pages\\Investigation\\index.tsx","filePath":"frontend/src/pages/Investigation/index.tsx","summary":"Source file: frontend\\src\\pages\\Investigation\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Learning/index.tsx","type":"file","name":"frontend\\src\\pages\\Learning\\index.tsx","filePath":"frontend/src/pages/Learning/index.tsx","summary":"Source file: frontend\\src\\pages\\Learning\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/License/index.tsx","type":"file","name":"frontend\\src\\pages\\License\\index.tsx","filePath":"frontend/src/pages/License/index.tsx","summary":"Source file: frontend\\src\\pages\\License\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Mail/index.tsx","type":"file","name":"frontend\\src\\pages\\Mail\\index.tsx","filePath":"frontend/src/pages/Mail/index.tsx","summary":"Source file: frontend\\src\\pages\\Mail\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Migration/index.tsx","type":"file","name":"frontend\\src\\pages\\Migration\\index.tsx","filePath":"frontend/src/pages/Migration/index.tsx","summary":"Source file: frontend\\src\\pages\\Migration\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/NonMappedDistributors/index.tsx","type":"file","name":"frontend\\src\\pages\\NonMappedDistributors\\index.tsx","filePath":"frontend/src/pages/NonMappedDistributors/index.tsx","summary":"Source file: frontend\\src\\pages\\NonMappedDistributors\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"document:frontend/src/pages/NonMappedDistributors/README_changes.md","type":"document","name":"frontend\\src\\pages\\NonMappedDistributors\\README_changes.md","filePath":"frontend/src/pages/NonMappedDistributors/README_changes.md","summary":"Documentation: frontend\\src\\pages\\NonMappedDistributors\\README_changes.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Orders/index.tsx","type":"file","name":"frontend\\src\\pages\\Orders\\index.tsx","filePath":"frontend/src/pages/Orders/index.tsx","summary":"Source file: frontend\\src\\pages\\Orders\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/PharmarackCart/index.tsx","type":"file","name":"frontend\\src\\pages\\PharmarackCart\\index.tsx","filePath":"frontend/src/pages/PharmarackCart/index.tsx","summary":"Source file: frontend\\src\\pages\\PharmarackCart\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/PhoneSales/index.tsx","type":"file","name":"frontend\\src\\pages\\PhoneSales\\index.tsx","filePath":"frontend/src/pages/PhoneSales/index.tsx","summary":"Source file: frontend\\src\\pages\\PhoneSales\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/POS/index.tsx","type":"file","name":"index.tsx","filePath":"frontend/src/pages/POS/index.tsx","summary":"React page component","tags":["frontend"],"_mtime":1783059331876},{"id":"file:frontend/src/pages/PurchaseHistory/index.tsx","type":"file","name":"frontend\\src\\pages\\PurchaseHistory\\index.tsx","filePath":"frontend/src/pages/PurchaseHistory/index.tsx","summary":"Source file: frontend\\src\\pages\\PurchaseHistory\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Purchases/index.tsx","type":"file","name":"frontend\\src\\pages\\Purchases\\index.tsx","filePath":"frontend/src/pages/Purchases/index.tsx","summary":"Source file: frontend\\src\\pages\\Purchases\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Reports/index.tsx","type":"file","name":"frontend\\src\\pages\\Reports\\index.tsx","filePath":"frontend/src/pages/Reports/index.tsx","summary":"Source file: frontend\\src\\pages\\Reports\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Returns/index.tsx","type":"file","name":"frontend\\src\\pages\\Returns\\index.tsx","filePath":"frontend/src/pages/Returns/index.tsx","summary":"Source file: frontend\\src\\pages\\Returns\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Sells/index.tsx","type":"file","name":"frontend\\src\\pages\\Sells\\index.tsx","filePath":"frontend/src/pages/Sells/index.tsx","summary":"Source file: frontend\\src\\pages\\Sells\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/pages/Settings/index.tsx","type":"file","name":"frontend\\src\\pages\\Settings\\index.tsx","filePath":"frontend/src/pages/Settings/index.tsx","summary":"Source file: frontend\\src\\pages\\Settings\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/services/api.ts","type":"file","name":"frontend\\src\\services\\api.ts","filePath":"frontend/src/services/api.ts","summary":"Source file: frontend\\src\\services\\api.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/src/services/events.ts","type":"file","name":"frontend\\src\\services\\events.ts","filePath":"frontend/src/services/events.ts","summary":"Source file: frontend\\src\\services\\events.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:frontend/tailwind.config.js","type":"file","name":"frontend\\tailwind.config.js","filePath":"frontend/tailwind.config.js","summary":"Source file: frontend\\tailwind.config.js","tags":["general"],"_mtime":1782336396000},{"id":"config:frontend/tsconfig.app.json","type":"config","name":"frontend\\tsconfig.app.json","filePath":"frontend/tsconfig.app.json","summary":"Configuration: frontend\\tsconfig.app.json","tags":["config"],"_mtime":1782336396000},{"id":"config:frontend/tsconfig.json","type":"config","name":"frontend\\tsconfig.json","filePath":"frontend/tsconfig.json","summary":"Configuration: frontend\\tsconfig.json","tags":["config"],"_mtime":1782336396000},{"id":"config:frontend/tsconfig.node.json","type":"config","name":"frontend\\tsconfig.node.json","filePath":"frontend/tsconfig.node.json","summary":"Configuration: frontend\\tsconfig.node.json","tags":["config"],"_mtime":1782336396000},{"id":"file:frontend/vite.config.ts","type":"file","name":"frontend\\vite.config.ts","filePath":"frontend/vite.config.ts","summary":"Source file: frontend\\vite.config.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:gas/licenseServer.js","type":"file","name":"gas\\licenseServer.js","filePath":"gas/licenseServer.js","summary":"Source file: gas\\licenseServer.js","tags":["auth"],"_mtime":1782336396000},{"id":"document:gas/README.md","type":"document","name":"gas\\README.md","filePath":"gas/README.md","summary":"Documentation: gas\\README.md","tags":["documentation"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/.claude/settings.json","type":"config","name":"pharmacy-mobile\\.claude\\settings.json","filePath":"pharmacy-mobile/.claude/settings.json","summary":"Configuration: pharmacy-mobile\\.claude\\settings.json","tags":["config"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/.vscode/extensions.json","type":"config","name":"pharmacy-mobile\\.vscode\\extensions.json","filePath":"pharmacy-mobile/.vscode/extensions.json","summary":"Configuration: pharmacy-mobile\\.vscode\\extensions.json","tags":["config"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/.vscode/settings.json","type":"config","name":"pharmacy-mobile\\.vscode\\settings.json","filePath":"pharmacy-mobile/.vscode/settings.json","summary":"Configuration: pharmacy-mobile\\.vscode\\settings.json","tags":["config"],"_mtime":1782336396000},{"id":"document:pharmacy-mobile/AGENTS.md","type":"document","name":"pharmacy-mobile\\AGENTS.md","filePath":"pharmacy-mobile/AGENTS.md","summary":"Documentation: pharmacy-mobile\\AGENTS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"document:pharmacy-mobile/android-configs/README.md","type":"document","name":"pharmacy-mobile\\android-configs\\README.md","filePath":"pharmacy-mobile/android-configs/README.md","summary":"Documentation: pharmacy-mobile\\android-configs\\README.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\billing\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/billing/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\billing\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/inbox/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\inbox\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/inbox/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\inbox\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\inventory\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/inventory/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\inventory\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/more/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\more\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/more/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\more\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/purchases/index.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\purchases\\index.tsx","filePath":"pharmacy-mobile/app/(tabs)/purchases/index.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\purchases\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/(tabs)/_layout.tsx","type":"file","name":"pharmacy-mobile\\app\\(tabs)\\_layout.tsx","filePath":"pharmacy-mobile/app/(tabs)/_layout.tsx","summary":"Source file: pharmacy-mobile\\app\\(tabs)\\_layout.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/+not-found.tsx","type":"file","name":"pharmacy-mobile\\app\\+not-found.tsx","filePath":"pharmacy-mobile/app/+not-found.tsx","summary":"Source file: pharmacy-mobile\\app\\+not-found.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/camera/index.tsx","type":"file","name":"pharmacy-mobile\\app\\camera\\index.tsx","filePath":"pharmacy-mobile/app/camera/index.tsx","summary":"Source file: pharmacy-mobile\\app\\camera\\index.tsx","tags":["ocr"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/notifications/index.tsx","type":"file","name":"pharmacy-mobile\\app\\notifications\\index.tsx","filePath":"pharmacy-mobile/app/notifications/index.tsx","summary":"Source file: pharmacy-mobile\\app\\notifications\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/product-search/index.tsx","type":"file","name":"pharmacy-mobile\\app\\product-search\\index.tsx","filePath":"pharmacy-mobile/app/product-search/index.tsx","summary":"Source file: pharmacy-mobile\\app\\product-search\\index.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/app/_layout.tsx","type":"file","name":"pharmacy-mobile\\app\\_layout.tsx","filePath":"pharmacy-mobile/app/_layout.tsx","summary":"Source file: pharmacy-mobile\\app\\_layout.tsx","tags":["general"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/app.json","type":"config","name":"pharmacy-mobile\\app.json","filePath":"pharmacy-mobile/app.json","summary":"Configuration: pharmacy-mobile\\app.json","tags":["config"],"_mtime":1782336396000},{"id":"document:pharmacy-mobile/assets/data/README.md","type":"document","name":"pharmacy-mobile\\assets\\data\\README.md","filePath":"pharmacy-mobile/assets/data/README.md","summary":"Documentation: pharmacy-mobile\\assets\\data\\README.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/AppLock.tsx","type":"file","name":"pharmacy-mobile\\components\\AppLock.tsx","filePath":"pharmacy-mobile/components/AppLock.tsx","summary":"Source file: pharmacy-mobile\\components\\AppLock.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/Card.tsx","type":"file","name":"pharmacy-mobile\\components\\Card.tsx","filePath":"pharmacy-mobile/components/Card.tsx","summary":"Source file: pharmacy-mobile\\components\\Card.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/CartItem.tsx","type":"file","name":"pharmacy-mobile\\components\\CartItem.tsx","filePath":"pharmacy-mobile/components/CartItem.tsx","summary":"Source file: pharmacy-mobile\\components\\CartItem.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/DeviceStatusHeader.tsx","type":"file","name":"pharmacy-mobile\\components\\DeviceStatusHeader.tsx","filePath":"pharmacy-mobile/components/DeviceStatusHeader.tsx","summary":"Source file: pharmacy-mobile\\components\\DeviceStatusHeader.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/DrawerMenu.tsx","type":"file","name":"pharmacy-mobile\\components\\DrawerMenu.tsx","filePath":"pharmacy-mobile/components/DrawerMenu.tsx","summary":"Source file: pharmacy-mobile\\components\\DrawerMenu.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/EditScreenInfo.tsx","type":"file","name":"pharmacy-mobile\\components\\EditScreenInfo.tsx","filePath":"pharmacy-mobile/components/EditScreenInfo.tsx","summary":"Source file: pharmacy-mobile\\components\\EditScreenInfo.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/ExternalLink.tsx","type":"file","name":"pharmacy-mobile\\components\\ExternalLink.tsx","filePath":"pharmacy-mobile/components/ExternalLink.tsx","summary":"Source file: pharmacy-mobile\\components\\ExternalLink.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/MedicineRow.tsx","type":"file","name":"pharmacy-mobile\\components\\MedicineRow.tsx","filePath":"pharmacy-mobile/components/MedicineRow.tsx","summary":"Source file: pharmacy-mobile\\components\\MedicineRow.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/SearchBar.tsx","type":"file","name":"pharmacy-mobile\\components\\SearchBar.tsx","filePath":"pharmacy-mobile/components/SearchBar.tsx","summary":"Source file: pharmacy-mobile\\components\\SearchBar.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/ServerSetup.tsx","type":"file","name":"pharmacy-mobile\\components\\ServerSetup.tsx","filePath":"pharmacy-mobile/components/ServerSetup.tsx","summary":"Source file: pharmacy-mobile\\components\\ServerSetup.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/StatCard.tsx","type":"file","name":"pharmacy-mobile\\components\\StatCard.tsx","filePath":"pharmacy-mobile/components/StatCard.tsx","summary":"Source file: pharmacy-mobile\\components\\StatCard.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/StyledText.tsx","type":"file","name":"pharmacy-mobile\\components\\StyledText.tsx","filePath":"pharmacy-mobile/components/StyledText.tsx","summary":"Source file: pharmacy-mobile\\components\\StyledText.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/Themed.tsx","type":"file","name":"pharmacy-mobile\\components\\Themed.tsx","filePath":"pharmacy-mobile/components/Themed.tsx","summary":"Source file: pharmacy-mobile\\components\\Themed.tsx","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/useClientOnlyValue.ts","type":"file","name":"pharmacy-mobile\\components\\useClientOnlyValue.ts","filePath":"pharmacy-mobile/components/useClientOnlyValue.ts","summary":"Source file: pharmacy-mobile\\components\\useClientOnlyValue.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/useClientOnlyValue.web.ts","type":"file","name":"pharmacy-mobile\\components\\useClientOnlyValue.web.ts","filePath":"pharmacy-mobile/components/useClientOnlyValue.web.ts","summary":"Source file: pharmacy-mobile\\components\\useClientOnlyValue.web.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/useColorScheme.ts","type":"file","name":"pharmacy-mobile\\components\\useColorScheme.ts","filePath":"pharmacy-mobile/components/useColorScheme.ts","summary":"Source file: pharmacy-mobile\\components\\useColorScheme.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/components/useColorScheme.web.ts","type":"file","name":"pharmacy-mobile\\components\\useColorScheme.web.ts","filePath":"pharmacy-mobile/components/useColorScheme.web.ts","summary":"Source file: pharmacy-mobile\\components\\useColorScheme.web.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/constants/Colors.ts","type":"file","name":"pharmacy-mobile\\constants\\Colors.ts","filePath":"pharmacy-mobile/constants/Colors.ts","summary":"Source file: pharmacy-mobile\\constants\\Colors.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/lib/api.ts","type":"file","name":"pharmacy-mobile\\lib\\api.ts","filePath":"pharmacy-mobile/lib/api.ts","summary":"Source file: pharmacy-mobile\\lib\\api.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/lib/cartEvents.ts","type":"file","name":"pharmacy-mobile\\lib\\cartEvents.ts","filePath":"pharmacy-mobile/lib/cartEvents.ts","summary":"Source file: pharmacy-mobile\\lib\\cartEvents.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/lib/secureStore.ts","type":"file","name":"pharmacy-mobile\\lib\\secureStore.ts","filePath":"pharmacy-mobile/lib/secureStore.ts","summary":"Source file: pharmacy-mobile\\lib\\secureStore.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:pharmacy-mobile/lib/theme.ts","type":"file","name":"pharmacy-mobile\\lib\\theme.ts","filePath":"pharmacy-mobile/lib/theme.ts","summary":"Source file: pharmacy-mobile\\lib\\theme.ts","tags":["general"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/package.json","type":"config","name":"pharmacy-mobile\\package.json","filePath":"pharmacy-mobile/package.json","summary":"Configuration: pharmacy-mobile\\package.json","tags":["config"],"_mtime":1782336396000},{"id":"config:pharmacy-mobile/tsconfig.json","type":"config","name":"pharmacy-mobile\\tsconfig.json","filePath":"pharmacy-mobile/tsconfig.json","summary":"Configuration: pharmacy-mobile\\tsconfig.json","tags":["config"],"_mtime":1782336396000},{"id":"file:scratch/add-inderal.js","type":"file","name":"scratch\\add-inderal.js","filePath":"scratch/add-inderal.js","summary":"Source file: scratch\\add-inderal.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/add-to-real-cart.js","type":"file","name":"scratch\\add-to-real-cart.js","filePath":"scratch/add-to-real-cart.js","summary":"Source file: scratch\\add-to-real-cart.js","tags":["general"],"_mtime":1782336396000},{"id":"config:scratch/cart-response.json","type":"config","name":"scratch\\cart-response.json","filePath":"scratch/cart-response.json","summary":"Configuration: scratch\\cart-response.json","tags":["config"],"_mtime":1782336396000},{"id":"file:scratch/checkSalesInvoices.ts","type":"file","name":"scratch\\checkSalesInvoices.ts","filePath":"scratch/checkSalesInvoices.ts","summary":"Source file: scratch\\checkSalesInvoices.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/check_db.js","type":"file","name":"scratch\\check_db.js","filePath":"scratch/check_db.js","summary":"Source file: scratch\\check_db.js","tags":["general"],"_mtime":1783004276596},{"id":"file:scratch/countOrderItems.ts","type":"file","name":"scratch\\countOrderItems.ts","filePath":"scratch/countOrderItems.ts","summary":"Source file: scratch\\countOrderItems.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/debugCopyData.ts","type":"file","name":"scratch\\debugCopyData.ts","filePath":"scratch/debugCopyData.ts","summary":"Source file: scratch\\debugCopyData.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/get-schema.js","type":"file","name":"scratch\\get-schema.js","filePath":"scratch/get-schema.js","summary":"Source file: scratch\\get-schema.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/inspect_db.cjs","type":"file","name":"scratch\\inspect_db.cjs","filePath":"scratch/inspect_db.cjs","summary":"Source file: scratch\\inspect_db.cjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/inspect_db.js","type":"file","name":"scratch\\inspect_db.js","filePath":"scratch/inspect_db.js","summary":"Source file: scratch\\inspect_db.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/inspect_email_issues.cjs","type":"file","name":"scratch\\inspect_email_issues.cjs","filePath":"scratch/inspect_email_issues.cjs","summary":"Source file: scratch\\inspect_email_issues.cjs","tags":["email"],"_mtime":1782336396000},{"id":"file:scratch/inspect_pharmarack.cjs","type":"file","name":"scratch\\inspect_pharmarack.cjs","filePath":"scratch/inspect_pharmarack.cjs","summary":"Source file: scratch\\inspect_pharmarack.cjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/intercept-cart-page.js","type":"file","name":"scratch\\intercept-cart-page.js","filePath":"scratch/intercept-cart-page.js","summary":"Source file: scratch\\intercept-cart-page.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/intercept-cart.js","type":"file","name":"scratch\\intercept-cart.js","filePath":"scratch/intercept-cart.js","summary":"Source file: scratch\\intercept-cart.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/print_gmail_creds.cjs","type":"file","name":"scratch\\print_gmail_creds.cjs","filePath":"scratch/print_gmail_creds.cjs","summary":"Source file: scratch\\print_gmail_creds.cjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/probe-search.js","type":"file","name":"scratch\\probe-search.js","filePath":"scratch/probe-search.js","summary":"Source file: scratch\\probe-search.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/probe-stores.js","type":"file","name":"scratch\\probe-stores.js","filePath":"scratch/probe-stores.js","summary":"Source file: scratch\\probe-stores.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/query.js","type":"file","name":"scratch\\query.js","filePath":"scratch/query.js","summary":"Source file: scratch\\query.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/read-latest-orders.js","type":"file","name":"scratch\\read-latest-orders.js","filePath":"scratch/read-latest-orders.js","summary":"Test: scratch\\read-latest-orders.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/recreateCleanDb.ts","type":"file","name":"scratch\\recreateCleanDb.ts","filePath":"scratch/recreateCleanDb.ts","summary":"Source file: scratch\\recreateCleanDb.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/runMigrationTest.ts","type":"file","name":"scratch\\runMigrationTest.ts","filePath":"scratch/runMigrationTest.ts","summary":"Source file: scratch\\runMigrationTest.ts","tags":["general"],"_mtime":1782336396000},{"id":"config:scratch/store-list-response.json","type":"config","name":"scratch\\store-list-response.json","filePath":"scratch/store-list-response.json","summary":"Configuration: scratch\\store-list-response.json","tags":["config"],"_mtime":1782336396000},{"id":"file:scratch/test-cart-endpoints.js","type":"file","name":"scratch\\test-cart-endpoints.js","filePath":"scratch/test-cart-endpoints.js","summary":"Test: scratch\\test-cart-endpoints.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test-dolo-add.js","type":"file","name":"scratch\\test-dolo-add.js","filePath":"scratch/test-dolo-add.js","summary":"Test: scratch\\test-dolo-add.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test-integrity.ts","type":"file","name":"scratch\\test-integrity.ts","filePath":"scratch/test-integrity.ts","summary":"Test: scratch\\test-integrity.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/testDb.js","type":"file","name":"scratch\\testDb.js","filePath":"scratch/testDb.js","summary":"Test: scratch\\testDb.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_cart.cjs","type":"file","name":"scratch\\test_cart.cjs","filePath":"scratch/test_cart.cjs","summary":"Test: scratch\\test_cart.cjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_cart.js","type":"file","name":"scratch\\test_cart.js","filePath":"scratch/test_cart.js","summary":"Test: scratch\\test_cart.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_local_server.js","type":"file","name":"scratch\\test_local_server.js","filePath":"scratch/test_local_server.js","summary":"Test: scratch\\test_local_server.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_pharmarack_endpoints.cjs","type":"file","name":"scratch\\test_pharmarack_endpoints.cjs","filePath":"scratch/test_pharmarack_endpoints.cjs","summary":"Test: scratch\\test_pharmarack_endpoints.cjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_puppeteer.ts","type":"file","name":"scratch\\test_puppeteer.ts","filePath":"scratch/test_puppeteer.ts","summary":"Test: scratch\\test_puppeteer.ts","tags":["general"],"_mtime":1783004474543},{"id":"file:scratch/test_search.js","type":"file","name":"scratch\\test_search.js","filePath":"scratch/test_search.js","summary":"Test: scratch\\test_search.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/test_sync.ts","type":"file","name":"scratch\\test_sync.ts","filePath":"scratch/test_sync.ts","summary":"Test: scratch\\test_sync.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scratch/viewStagedData.ts","type":"file","name":"scratch\\viewStagedData.ts","filePath":"scratch/viewStagedData.ts","summary":"Source file: scratch\\viewStagedData.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/backup.mjs","type":"file","name":"scripts\\backup.mjs","filePath":"scripts/backup.mjs","summary":"Source file: scripts\\backup.mjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/build-medicine-dict.ts","type":"file","name":"scripts\\build-medicine-dict.ts","filePath":"scripts/build-medicine-dict.ts","summary":"Source file: scripts\\build-medicine-dict.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/clear-all-data.mjs","type":"file","name":"scripts\\clear-all-data.mjs","filePath":"scripts/clear-all-data.mjs","summary":"Source file: scripts\\clear-all-data.mjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/extract-styles.mjs","type":"file","name":"scripts\\extract-styles.mjs","filePath":"scripts/extract-styles.mjs","summary":"Source file: scripts\\extract-styles.mjs","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/generate-3d-graph.mjs","type":"file","name":"generate-3d-graph.mjs","filePath":"scripts/generate-3d-graph.mjs","summary":"Source file: generate-3d-graph.mjs","tags":["general"],"_mtime":1783055788431},{"id":"file:scripts/importCatalog.ts","type":"file","name":"scripts\\importCatalog.ts","filePath":"scripts/importCatalog.ts","summary":"Source file: scripts\\importCatalog.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/migrate.js","type":"file","name":"scripts\\migrate.js","filePath":"scripts/migrate.js","summary":"Source file: scripts\\migrate.js","tags":["general"],"_mtime":1782336396000},{"id":"file:scripts/quick-update.mjs","type":"file","name":"quick-update.mjs","filePath":"scripts/quick-update.mjs","summary":"Source file: quick-update.mjs","tags":["general"],"_mtime":1783055762393},{"id":"file:scripts/restore.mjs","type":"file","name":"scripts\\restore.mjs","filePath":"scripts/restore.mjs","summary":"Source file: scripts\\restore.mjs","tags":["general"],"_mtime":1782336396000},{"id":"document:src/AGENTS.md","type":"document","name":"src\\AGENTS.md","filePath":"src/AGENTS.md","summary":"Documentation: src\\AGENTS.md","tags":["documentation"],"_mtime":1782336396000},{"id":"file:src/cli/enqueueCatalog.ts","type":"file","name":"src\\cli\\enqueueCatalog.ts","filePath":"src/cli/enqueueCatalog.ts","summary":"Source file: src\\cli\\enqueueCatalog.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/cli/seedMockData.ts","type":"file","name":"src\\cli\\seedMockData.ts","filePath":"src/cli/seedMockData.ts","summary":"Source file: src\\cli\\seedMockData.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/cli/watchCatalog.ts","type":"file","name":"src\\cli\\watchCatalog.ts","filePath":"src/cli/watchCatalog.ts","summary":"Source file: src\\cli\\watchCatalog.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/config/index.ts","type":"file","name":"src\\config\\index.ts","filePath":"src/config/index.ts","summary":"Source file: src\\config\\index.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/database/connection.ts","type":"file","name":"connection.ts","filePath":"src/database/connection.ts","summary":"Source file: connection.ts","tags":["general"],"_mtime":1783070344215},{"id":"file:src/database/messageDAO.ts","type":"file","name":"src\\database\\messageDAO.ts","filePath":"src/database/messageDAO.ts","summary":"Source file: src\\database\\messageDAO.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/database/migrations/002_message_tables.sql","type":"file","name":"src\\database\\migrations\\002_message_tables.sql","filePath":"src/database/migrations/002_message_tables.sql","summary":"SQL migration: src\\database\\migrations\\002_message_tables.sql","tags":["migration"],"_mtime":1782336396000},{"id":"file:src/database/migrations/003_license_settings.sql","type":"file","name":"src\\database\\migrations\\003_license_settings.sql","filePath":"src/database/migrations/003_license_settings.sql","summary":"SQL migration: src\\database\\migrations\\003_license_settings.sql","tags":["migration","auth"],"_mtime":1782336396000},{"id":"file:src/database/sqlitePatch.ts","type":"file","name":"src\\database\\sqlitePatch.ts","filePath":"src/database/sqlitePatch.ts","summary":"Source file: src\\database\\sqlitePatch.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/database.ts","type":"file","name":"database.ts","filePath":"src/database.ts","summary":"Source file: database.ts","tags":["general"],"_mtime":1783057117821},{"id":"file:src/extractor.ts","type":"file","name":"src\\extractor.ts","filePath":"src/extractor.ts","summary":"Source file: src\\extractor.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/i18n/getMessage.ts","type":"file","name":"src\\i18n\\getMessage.ts","filePath":"src/i18n/getMessage.ts","summary":"Source file: src\\i18n\\getMessage.ts","tags":["general"],"_mtime":1782336396000},{"id":"config:src/i18n/messages.json","type":"config","name":"src\\i18n\\messages.json","filePath":"src/i18n/messages.json","summary":"Configuration: src\\i18n\\messages.json","tags":["config"],"_mtime":1782336396000},{"id":"file:src/license/gracePolicy.ts","type":"file","name":"src\\license\\gracePolicy.ts","filePath":"src/license/gracePolicy.ts","summary":"Source file: src\\license\\gracePolicy.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/license/licenseCheck.ts","type":"file","name":"src\\license\\licenseCheck.ts","filePath":"src/license/licenseCheck.ts","summary":"Source file: src\\license\\licenseCheck.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/license/machineId.ts","type":"file","name":"src\\license\\machineId.ts","filePath":"src/license/machineId.ts","summary":"Source file: src\\license\\machineId.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/license/startupCheck.ts","type":"file","name":"src\\license\\startupCheck.ts","filePath":"src/license/startupCheck.ts","summary":"Source file: src\\license\\startupCheck.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/license/tokenStore.ts","type":"file","name":"src\\license\\tokenStore.ts","filePath":"src/license/tokenStore.ts","summary":"Source file: src\\license\\tokenStore.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/middleware/asyncHandler.ts","type":"file","name":"src\\middleware\\asyncHandler.ts","filePath":"src/middleware/asyncHandler.ts","summary":"Source file: src\\middleware\\asyncHandler.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/middleware/auth.ts","type":"file","name":"src\\middleware\\auth.ts","filePath":"src/middleware/auth.ts","summary":"Source file: src\\middleware\\auth.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/middleware/errorHandler.ts","type":"file","name":"src\\middleware\\errorHandler.ts","filePath":"src/middleware/errorHandler.ts","summary":"Source file: src\\middleware\\errorHandler.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/middleware/licenseGate.ts","type":"file","name":"src\\middleware\\licenseGate.ts","filePath":"src/middleware/licenseGate.ts","summary":"Source file: src\\middleware\\licenseGate.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/middleware/notFoundHandler.ts","type":"file","name":"src\\middleware\\notFoundHandler.ts","filePath":"src/middleware/notFoundHandler.ts","summary":"Source file: src\\middleware\\notFoundHandler.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/middleware/validation.ts","type":"file","name":"src\\middleware\\validation.ts","filePath":"src/middleware/validation.ts","summary":"Source file: src\\middleware\\validation.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/process/processGuardian.ts","type":"file","name":"src\\process\\processGuardian.ts","filePath":"src/process/processGuardian.ts","summary":"Source file: src\\process\\processGuardian.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/aiCamera.ts","type":"file","name":"src\\routes\\aiCamera.ts","filePath":"src/routes/aiCamera.ts","summary":"Source file: src\\routes\\aiCamera.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/archive.ts","type":"file","name":"src\\routes\\archive.ts","filePath":"src/routes/archive.ts","summary":"Source file: src\\routes\\archive.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/automation.ts","type":"file","name":"src\\routes\\automation.ts","filePath":"src/routes/automation.ts","summary":"Source file: src\\routes\\automation.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/catalog.ts","type":"file","name":"src\\routes\\catalog.ts","filePath":"src/routes/catalog.ts","summary":"Source file: src\\routes\\catalog.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/compliance.ts","type":"file","name":"src\\routes\\compliance.ts","filePath":"src/routes/compliance.ts","summary":"Source file: src\\routes\\compliance.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/creditNotes.ts","type":"file","name":"src\\routes\\creditNotes.ts","filePath":"src/routes/creditNotes.ts","summary":"Source file: src\\routes\\creditNotes.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/crm.ts","type":"file","name":"src\\routes\\crm.ts","filePath":"src/routes/crm.ts","summary":"Source file: src\\routes\\crm.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/customerReturns.ts","type":"file","name":"src\\routes\\customerReturns.ts","filePath":"src/routes/customerReturns.ts","summary":"Source file: src\\routes\\customerReturns.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/dashboard.ts","type":"file","name":"src\\routes\\dashboard.ts","filePath":"src/routes/dashboard.ts","summary":"Source file: src\\routes\\dashboard.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/dispatch.ts","type":"file","name":"src\\routes\\dispatch.ts","filePath":"src/routes/dispatch.ts","summary":"Source file: src\\routes\\dispatch.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/distributors.ts","type":"file","name":"src\\routes\\distributors.ts","filePath":"src/routes/distributors.ts","summary":"Source file: src\\routes\\distributors.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/email.ts","type":"file","name":"src\\routes\\email.ts","filePath":"src/routes/email.ts","summary":"Source file: src\\routes\\email.ts","tags":["email"],"_mtime":1782336396000},{"id":"file:src/routes/enrichment.ts","type":"file","name":"src\\routes\\enrichment.ts","filePath":"src/routes/enrichment.ts","summary":"Source file: src\\routes\\enrichment.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/expiry.ts","type":"file","name":"src\\routes\\expiry.ts","filePath":"src/routes/expiry.ts","summary":"Source file: src\\routes\\expiry.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/inventory.ts","type":"file","name":"src\\routes\\inventory.ts","filePath":"src/routes/inventory.ts","summary":"Source file: src\\routes\\inventory.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/investigation.ts","type":"file","name":"src\\routes\\investigation.ts","filePath":"src/routes/investigation.ts","summary":"Source file: src\\routes\\investigation.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/learning.ts","type":"file","name":"src\\routes\\learning.ts","filePath":"src/routes/learning.ts","summary":"Source file: src\\routes\\learning.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/license.ts","type":"file","name":"src\\routes\\license.ts","filePath":"src/routes/license.ts","summary":"Source file: src\\routes\\license.ts","tags":["auth"],"_mtime":1782336396000},{"id":"file:src/routes/medicines.ts","type":"file","name":"medicines.ts","filePath":"src/routes/medicines.ts","summary":"API route handler","tags":["api"],"_mtime":1783056602563},{"id":"file:src/routes/messaging.ts","type":"file","name":"src\\routes\\messaging.ts","filePath":"src/routes/messaging.ts","summary":"Source file: src\\routes\\messaging.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/migration.ts","type":"file","name":"src\\routes\\migration.ts","filePath":"src/routes/migration.ts","summary":"Source file: src\\routes\\migration.ts","tags":["migration"],"_mtime":1782336396000},{"id":"file:src/routes/notifications.ts","type":"file","name":"src\\routes\\notifications.ts","filePath":"src/routes/notifications.ts","summary":"Source file: src\\routes\\notifications.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/orders.ts","type":"file","name":"src\\routes\\orders.ts","filePath":"src/routes/orders.ts","summary":"Source file: src\\routes\\orders.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/pharmarack.ts","type":"file","name":"src\\routes\\pharmarack.ts","filePath":"src/routes/pharmarack.ts","summary":"Source file: src\\routes\\pharmarack.ts","tags":["general"],"_mtime":1783007594950},{"id":"file:src/routes/purchases.ts","type":"file","name":"src\\routes\\purchases.ts","filePath":"src/routes/purchases.ts","summary":"Source file: src\\routes\\purchases.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/refills.ts","type":"file","name":"src\\routes\\refills.ts","filePath":"src/routes/refills.ts","summary":"Source file: src\\routes\\refills.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/reports.ts","type":"file","name":"src\\routes\\reports.ts","filePath":"src/routes/reports.ts","summary":"Source file: src\\routes\\reports.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/returns.ts","type":"file","name":"src\\routes\\returns.ts","filePath":"src/routes/returns.ts","summary":"Source file: src\\routes\\returns.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/sales.ts","type":"file","name":"sales.ts","filePath":"src/routes/sales.ts","summary":"API route handler","tags":["api"],"_mtime":1783056790396},{"id":"file:src/routes/security.ts","type":"file","name":"src\\routes\\security.ts","filePath":"src/routes/security.ts","summary":"Source file: src\\routes\\security.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/settings.ts","type":"file","name":"src\\routes\\settings.ts","filePath":"src/routes/settings.ts","summary":"Source file: src\\routes\\settings.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/telegramPrescription.ts","type":"file","name":"src\\routes\\telegramPrescription.ts","filePath":"src/routes/telegramPrescription.ts","summary":"Source file: src\\routes\\telegramPrescription.ts","tags":["telegram"],"_mtime":1782336396000},{"id":"file:src/routes/upload.ts","type":"file","name":"src\\routes\\upload.ts","filePath":"src/routes/upload.ts","summary":"Source file: src\\routes\\upload.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/utilities.ts","type":"file","name":"src\\routes\\utilities.ts","filePath":"src/routes/utilities.ts","summary":"Source file: src\\routes\\utilities.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/v1/sales.ts","type":"file","name":"src\\routes\\v1\\sales.ts","filePath":"src/routes/v1/sales.ts","summary":"Source file: src\\routes\\v1\\sales.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/routes/whatsappBusiness.ts","type":"file","name":"src\\routes\\whatsappBusiness.ts","filePath":"src/routes/whatsappBusiness.ts","summary":"Source file: src\\routes\\whatsappBusiness.ts","tags":["whatsapp"],"_mtime":1782336396000},{"id":"file:src/scripts/fixDb.ts","type":"file","name":"src\\scripts\\fixDb.ts","filePath":"src/scripts/fixDb.ts","summary":"Source file: src\\scripts\\fixDb.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/injectStyles.ts","type":"file","name":"src\\scripts\\injectStyles.ts","filePath":"src/scripts/injectStyles.ts","summary":"Source file: src\\scripts\\injectStyles.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/migrateItemCodes.ts","type":"file","name":"src\\scripts\\migrateItemCodes.ts","filePath":"src/scripts/migrateItemCodes.ts","summary":"Source file: src\\scripts\\migrateItemCodes.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedCompanies.ts","type":"file","name":"src\\scripts\\seedCompanies.ts","filePath":"src/scripts/seedCompanies.ts","summary":"Source file: src\\scripts\\seedCompanies.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedIndianMeds.ts","type":"file","name":"src\\scripts\\seedIndianMeds.ts","filePath":"src/scripts/seedIndianMeds.ts","summary":"Source file: src\\scripts\\seedIndianMeds.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedMassiveMeds.ts","type":"file","name":"src\\scripts\\seedMassiveMeds.ts","filePath":"src/scripts/seedMassiveMeds.ts","summary":"Source file: src\\scripts\\seedMassiveMeds.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedPdfs.ts","type":"file","name":"src\\scripts\\seedPdfs.ts","filePath":"src/scripts/seedPdfs.ts","summary":"Source file: src\\scripts\\seedPdfs.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedRealMeds.ts","type":"file","name":"src\\scripts\\seedRealMeds.ts","filePath":"src/scripts/seedRealMeds.ts","summary":"Source file: src\\scripts\\seedRealMeds.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/seedWhoMeds.ts","type":"file","name":"src\\scripts\\seedWhoMeds.ts","filePath":"src/scripts/seedWhoMeds.ts","summary":"Source file: src\\scripts\\seedWhoMeds.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/scripts/testMigration.ts","type":"file","name":"src\\scripts\\testMigration.ts","filePath":"src/scripts/testMigration.ts","summary":"Test: src\\scripts\\testMigration.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/server.ts","type":"file","name":"src\\server.ts","filePath":"src/server.ts","summary":"Source file: src\\server.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/aiCameraService.ts","type":"file","name":"src\\services\\aiCameraService.ts","filePath":"src/services/aiCameraService.ts","summary":"Source file: src\\services\\aiCameraService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/apiClients/baseApiClient.ts","type":"file","name":"src\\services\\apiClients\\baseApiClient.ts","filePath":"src/services/apiClients/baseApiClient.ts","summary":"Source file: src\\services\\apiClients\\baseApiClient.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/apiClients/openFdaClient.ts","type":"file","name":"src\\services\\apiClients\\openFdaClient.ts","filePath":"src/services/apiClients/openFdaClient.ts","summary":"Source file: src\\services\\apiClients\\openFdaClient.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/backupRecoveryService.ts","type":"file","name":"src\\services\\backupRecoveryService.ts","filePath":"src/services/backupRecoveryService.ts","summary":"Source file: src\\services\\backupRecoveryService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/backupService.ts","type":"file","name":"src\\services\\backupService.ts","filePath":"src/services/backupService.ts","summary":"Source file: src\\services\\backupService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/bouncedAlertService.ts","type":"file","name":"src\\services\\bouncedAlertService.ts","filePath":"src/services/bouncedAlertService.ts","summary":"Source file: src\\services\\bouncedAlertService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/cacheService.ts","type":"file","name":"src\\services\\cacheService.ts","filePath":"src/services/cacheService.ts","summary":"Source file: src\\services\\cacheService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/creditNoteService.ts","type":"file","name":"src\\services\\creditNoteService.ts","filePath":"src/services/creditNoteService.ts","summary":"Source file: src\\services\\creditNoteService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/customerService.ts","type":"file","name":"src\\services\\customerService.ts","filePath":"src/services/customerService.ts","summary":"Source file: src\\services\\customerService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/dataMerger.ts","type":"file","name":"src\\services\\dataMerger.ts","filePath":"src/services/dataMerger.ts","summary":"Source file: src\\services\\dataMerger.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/doctorReportingService.ts","type":"file","name":"src\\services\\doctorReportingService.ts","filePath":"src/services/doctorReportingService.ts","summary":"Source file: src\\services\\doctorReportingService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/emailService.ts","type":"file","name":"src\\services\\emailService.ts","filePath":"src/services/emailService.ts","summary":"Source file: src\\services\\emailService.ts","tags":["email"],"_mtime":1782336396000},{"id":"file:src/services/eventService.ts","type":"file","name":"src\\services\\eventService.ts","filePath":"src/services/eventService.ts","summary":"Source file: src\\services\\eventService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/expiryAlertService.ts","type":"file","name":"src\\services\\expiryAlertService.ts","filePath":"src/services/expiryAlertService.ts","summary":"Source file: src\\services\\expiryAlertService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/googleSearchService.ts","type":"file","name":"src\\services\\googleSearchService.ts","filePath":"src/services/googleSearchService.ts","summary":"Source file: src\\services\\googleSearchService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/imageArchiveService.ts","type":"file","name":"src\\services\\imageArchiveService.ts","filePath":"src/services/imageArchiveService.ts","summary":"Source file: src\\services\\imageArchiveService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/inventoryService.ts","type":"file","name":"src\\services\\inventoryService.ts","filePath":"src/services/inventoryService.ts","summary":"Source file: src\\services\\inventoryService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/invoiceService.ts","type":"file","name":"src\\services\\invoiceService.ts","filePath":"src/services/invoiceService.ts","summary":"Source file: src\\services\\invoiceService.ts","tags":["invoice"],"_mtime":1782336396000},{"id":"file:src/services/medicineService.ts","type":"file","name":"src\\services\\medicineService.ts","filePath":"src/services/medicineService.ts","summary":"Source file: src\\services\\medicineService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/messagingQueue.ts","type":"file","name":"src\\services\\messagingQueue.ts","filePath":"src/services/messagingQueue.ts","summary":"Source file: src\\services\\messagingQueue.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/nNotificationService.ts","type":"file","name":"src\\services\\nNotificationService.ts","filePath":"src/services/nNotificationService.ts","summary":"Source file: src\\services\\nNotificationService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/nonMovingReportService.ts","type":"file","name":"src\\services\\nonMovingReportService.ts","filePath":"src/services/nonMovingReportService.ts","summary":"Source file: src\\services\\nonMovingReportService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/notificationService.ts","type":"file","name":"src\\services\\notificationService.ts","filePath":"src/services/notificationService.ts","summary":"Source file: src\\services\\notificationService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/onlineDataEnricher.ts","type":"file","name":"src\\services\\onlineDataEnricher.ts","filePath":"src/services/onlineDataEnricher.ts","summary":"Source file: src\\services\\onlineDataEnricher.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/onnxOcrService.ts","type":"file","name":"src\\services\\onnxOcrService.ts","filePath":"src/services/onnxOcrService.ts","summary":"Source file: src\\services\\onnxOcrService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/orderFulfillmentService.ts","type":"file","name":"src\\services\\orderFulfillmentService.ts","filePath":"src/services/orderFulfillmentService.ts","summary":"Source file: src\\services\\orderFulfillmentService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/pdfInvoiceService.ts","type":"file","name":"src\\services\\pdfInvoiceService.ts","filePath":"src/services/pdfInvoiceService.ts","summary":"Source file: src\\services\\pdfInvoiceService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/productNameFilterService.ts","type":"file","name":"src\\services\\productNameFilterService.ts","filePath":"src/services/productNameFilterService.ts","summary":"Source file: src\\services\\productNameFilterService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/pushNotificationService.ts","type":"file","name":"src\\services\\pushNotificationService.ts","filePath":"src/services/pushNotificationService.ts","summary":"Source file: src\\services\\pushNotificationService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/refillService.ts","type":"file","name":"src\\services\\refillService.ts","filePath":"src/services/refillService.ts","summary":"Source file: src\\services\\refillService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/returnsService.ts","type":"file","name":"src\\services\\returnsService.ts","filePath":"src/services/returnsService.ts","summary":"Source file: src\\services\\returnsService.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/searchCache.ts","type":"file","name":"src\\services\\searchCache.ts","filePath":"src/services/searchCache.ts","summary":"Source file: src\\services\\searchCache.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/services/telegramPrescriptionService.ts","type":"file","name":"src\\services\\telegramPrescriptionService.ts","filePath":"src/services/telegramPrescriptionService.ts","summary":"Source file: src\\services\\telegramPrescriptionService.ts","tags":["telegram"],"_mtime":1782336396000},{"id":"file:src/services/tokenRefreshScheduler.ts","type":"file","name":"src\\services\\tokenRefreshScheduler.ts","filePath":"src/services/tokenRefreshScheduler.ts","summary":"Source file: src\\services\\tokenRefreshScheduler.ts","tags":["general"],"_mtime":1783004411793},{"id":"file:src/services/whatsappBusinessService.ts","type":"file","name":"src\\services\\whatsappBusinessService.ts","filePath":"src/services/whatsappBusinessService.ts","summary":"Source file: src\\services\\whatsappBusinessService.ts","tags":["whatsapp"],"_mtime":1782336396000},{"id":"file:src/services/whatsappInvoiceService.ts","type":"file","name":"src\\services\\whatsappInvoiceService.ts","filePath":"src/services/whatsappInvoiceService.ts","summary":"Source file: src\\services\\whatsappInvoiceService.ts","tags":["whatsapp"],"_mtime":1782336396000},{"id":"file:src/services/whatsappQueue.ts","type":"file","name":"src\\services\\whatsappQueue.ts","filePath":"src/services/whatsappQueue.ts","summary":"Source file: src\\services\\whatsappQueue.ts","tags":["whatsapp"],"_mtime":1782336396000},{"id":"file:src/telegramBot.ts","type":"file","name":"src\\telegramBot.ts","filePath":"src/telegramBot.ts","summary":"Source file: src\\telegramBot.ts","tags":["telegram"],"_mtime":1782336396000},{"id":"file:src/utils/activityTracker.ts","type":"file","name":"src\\utils\\activityTracker.ts","filePath":"src/utils/activityTracker.ts","summary":"Source file: src\\utils\\activityTracker.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/dateExtractor.ts","type":"file","name":"src\\utils\\dateExtractor.ts","filePath":"src/utils/dateExtractor.ts","summary":"Source file: src\\utils\\dateExtractor.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/migrationUtils.ts","type":"file","name":"src\\utils\\migrationUtils.ts","filePath":"src/utils/migrationUtils.ts","summary":"Source file: src\\utils\\migrationUtils.ts","tags":["migration"],"_mtime":1782336396000},{"id":"file:src/utils/migrationValidation.ts","type":"file","name":"src\\utils\\migrationValidation.ts","filePath":"src/utils/migrationValidation.ts","summary":"Source file: src\\utils\\migrationValidation.ts","tags":["migration"],"_mtime":1782336396000},{"id":"file:src/utils/nameNormalizer.ts","type":"file","name":"src\\utils\\nameNormalizer.ts","filePath":"src/utils/nameNormalizer.ts","summary":"Source file: src\\utils\\nameNormalizer.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/networkDetector.ts","type":"file","name":"src\\utils\\networkDetector.ts","filePath":"src/utils/networkDetector.ts","summary":"Source file: src\\utils\\networkDetector.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/notifications.ts","type":"file","name":"src\\utils\\notifications.ts","filePath":"src/utils/notifications.ts","summary":"Source file: src\\utils\\notifications.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/pdfGenerator.ts","type":"file","name":"src\\utils\\pdfGenerator.ts","filePath":"src/utils/pdfGenerator.ts","summary":"Source file: src\\utils\\pdfGenerator.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/preMigrationIntelligence.ts","type":"file","name":"src\\utils\\preMigrationIntelligence.ts","filePath":"src/utils/preMigrationIntelligence.ts","summary":"Source file: src\\utils\\preMigrationIntelligence.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/utils/reportExporter.ts","type":"file","name":"src\\utils\\reportExporter.ts","filePath":"src/utils/reportExporter.ts","summary":"Source file: src\\utils\\reportExporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/whatsappClient.ts","type":"file","name":"src\\whatsappClient.ts","filePath":"src/whatsappClient.ts","summary":"Source file: src\\whatsappClient.ts","tags":["whatsapp"],"_mtime":1782336396000},{"id":"file:src/worker/catalogWorker.ts","type":"file","name":"src\\worker\\catalogWorker.ts","filePath":"src/worker/catalogWorker.ts","summary":"Source file: src\\worker\\catalogWorker.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/compositionEnricher.ts","type":"file","name":"src\\worker\\compositionEnricher.ts","filePath":"src/worker/compositionEnricher.ts","summary":"Source file: src\\worker\\compositionEnricher.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/emailPoller.ts","type":"file","name":"src\\worker\\emailPoller.ts","filePath":"src/worker/emailPoller.ts","summary":"Source file: src\\worker\\emailPoller.ts","tags":["email"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgB2BImporter.ts","type":"file","name":"src\\worker\\importers\\pgB2BImporter.ts","filePath":"src/worker/importers/pgB2BImporter.ts","summary":"Source file: src\\worker\\importers\\pgB2BImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgExtrasImporter.ts","type":"file","name":"src\\worker\\importers\\pgExtrasImporter.ts","filePath":"src/worker/importers/pgExtrasImporter.ts","summary":"Source file: src\\worker\\importers\\pgExtrasImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgMasterImporter.ts","type":"file","name":"src\\worker\\importers\\pgMasterImporter.ts","filePath":"src/worker/importers/pgMasterImporter.ts","summary":"Source file: src\\worker\\importers\\pgMasterImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgPaymentsImporter.ts","type":"file","name":"src\\worker\\importers\\pgPaymentsImporter.ts","filePath":"src/worker/importers/pgPaymentsImporter.ts","summary":"Source file: src\\worker\\importers\\pgPaymentsImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgPurchaseImporter.ts","type":"file","name":"src\\worker\\importers\\pgPurchaseImporter.ts","filePath":"src/worker/importers/pgPurchaseImporter.ts","summary":"Source file: src\\worker\\importers\\pgPurchaseImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgReturnsImporter.ts","type":"file","name":"src\\worker\\importers\\pgReturnsImporter.ts","filePath":"src/worker/importers/pgReturnsImporter.ts","summary":"Source file: src\\worker\\importers\\pgReturnsImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/importers/pgSalesImporter.ts","type":"file","name":"src\\worker\\importers\\pgSalesImporter.ts","filePath":"src/worker/importers/pgSalesImporter.ts","summary":"Source file: src\\worker\\importers\\pgSalesImporter.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/migrationWorker.ts","type":"file","name":"src\\worker\\migrationWorker.ts","filePath":"src/worker/migrationWorker.ts","summary":"Source file: src\\worker\\migrationWorker.ts","tags":["migration"],"_mtime":1782336396000},{"id":"file:src/worker/parsers/inventoryParser.ts","type":"file","name":"src\\worker\\parsers\\inventoryParser.ts","filePath":"src/worker/parsers/inventoryParser.ts","summary":"Source file: src\\worker\\parsers\\inventoryParser.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/parsers/pgCopyParser.ts","type":"file","name":"src\\worker\\parsers\\pgCopyParser.ts","filePath":"src/worker/parsers/pgCopyParser.ts","summary":"Source file: src\\worker\\parsers\\pgCopyParser.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/parsers/returnsParser.ts","type":"file","name":"src\\worker\\parsers\\returnsParser.ts","filePath":"src/worker/parsers/returnsParser.ts","summary":"Source file: src\\worker\\parsers\\returnsParser.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/parsers/salesParser.ts","type":"file","name":"src\\worker\\parsers\\salesParser.ts","filePath":"src/worker/parsers/salesParser.ts","summary":"Source file: src\\worker\\parsers\\salesParser.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/runCatalogWorker.ts","type":"file","name":"src\\worker\\runCatalogWorker.ts","filePath":"src/worker/runCatalogWorker.ts","summary":"Source file: src\\worker\\runCatalogWorker.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/runEmailPoller.ts","type":"file","name":"src\\worker\\runEmailPoller.ts","filePath":"src/worker/runEmailPoller.ts","summary":"Source file: src\\worker\\runEmailPoller.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/securityWorker.ts","type":"file","name":"src\\worker\\securityWorker.ts","filePath":"src/worker/securityWorker.ts","summary":"Source file: src\\worker\\securityWorker.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:src/worker/workerSupervisor.ts","type":"file","name":"src\\worker\\workerSupervisor.ts","filePath":"src/worker/workerSupervisor.ts","summary":"Source file: src\\worker\\workerSupervisor.ts","tags":["general"],"_mtime":1782336396000},{"id":"file:tests/aiCamera.test.ts","type":"test","name":"tests\\aiCamera.test.ts","filePath":"tests/aiCamera.test.ts","summary":"Test: tests\\aiCamera.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/auth.test.ts","type":"test","name":"tests\\auth.test.ts","filePath":"tests/auth.test.ts","summary":"Test: tests\\auth.test.ts","tags":["test","auth"],"_mtime":1782336396000},{"id":"file:tests/automation.test.ts","type":"test","name":"tests\\automation.test.ts","filePath":"tests/automation.test.ts","summary":"Test: tests\\automation.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/backupRecovery.test.ts","type":"test","name":"tests\\backupRecovery.test.ts","filePath":"tests/backupRecovery.test.ts","summary":"Test: tests\\backupRecovery.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/catalogPipeline.test.ts","type":"test","name":"tests\\catalogPipeline.test.ts","filePath":"tests/catalogPipeline.test.ts","summary":"Test: tests\\catalogPipeline.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/crm.test.ts","type":"test","name":"tests\\crm.test.ts","filePath":"tests/crm.test.ts","summary":"Test: tests\\crm.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/dbIntegrity.test.ts","type":"test","name":"tests\\dbIntegrity.test.ts","filePath":"tests/dbIntegrity.test.ts","summary":"Test: tests\\dbIntegrity.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/distributorLearning.test.ts","type":"test","name":"tests\\distributorLearning.test.ts","filePath":"tests/distributorLearning.test.ts","summary":"Test: tests\\distributorLearning.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/distributorNotification.test.ts","type":"test","name":"tests\\distributorNotification.test.ts","filePath":"tests/distributorNotification.test.ts","summary":"Test: tests\\distributorNotification.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/duplicateCatalog.test.ts","type":"test","name":"tests\\duplicateCatalog.test.ts","filePath":"tests/duplicateCatalog.test.ts","summary":"Test: tests\\duplicateCatalog.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/email_attachments.test.ts","type":"test","name":"tests\\email_attachments.test.ts","filePath":"tests/email_attachments.test.ts","summary":"Test: tests\\email_attachments.test.ts","tags":["test","email"],"_mtime":1782336396000},{"id":"file:tests/inventoryParser.test.ts","type":"test","name":"tests\\inventoryParser.test.ts","filePath":"tests/inventoryParser.test.ts","summary":"Test: tests\\inventoryParser.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/investigation.test.ts","type":"test","name":"tests\\investigation.test.ts","filePath":"tests/investigation.test.ts","summary":"Test: tests\\investigation.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/migrationV2.test.ts","type":"test","name":"tests\\migrationV2.test.ts","filePath":"tests/migrationV2.test.ts","summary":"Test: tests\\migrationV2.test.ts","tags":["test","migration"],"_mtime":1782336396000},{"id":"file:tests/ocrParser.test.ts","type":"test","name":"tests\\ocrParser.test.ts","filePath":"tests/ocrParser.test.ts","summary":"Test: tests\\ocrParser.test.ts","tags":["test","ocr"],"_mtime":1782336396000},{"id":"file:tests/onlineEnrichment.test.ts","type":"test","name":"tests\\onlineEnrichment.test.ts","filePath":"tests/onlineEnrichment.test.ts","summary":"Test: tests\\onlineEnrichment.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/paddleOcr.test.ts","type":"test","name":"tests\\paddleOcr.test.ts","filePath":"tests/paddleOcr.test.ts","summary":"Test: tests\\paddleOcr.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/pdf/pdfGenerator.missing.test.ts","type":"test","name":"tests\\pdf\\pdfGenerator.missing.test.ts","filePath":"tests/pdf/pdfGenerator.missing.test.ts","summary":"Test: tests\\pdf\\pdfGenerator.missing.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/pdf/pdfGenerator.test.ts","type":"test","name":"tests\\pdf\\pdfGenerator.test.ts","filePath":"tests/pdf/pdfGenerator.test.ts","summary":"Test: tests\\pdf\\pdfGenerator.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/pharmarackCartNotif.test.ts","type":"test","name":"tests\\pharmarackCartNotif.test.ts","filePath":"tests/pharmarackCartNotif.test.ts","summary":"Test: tests\\pharmarackCartNotif.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/preMigration.test.ts","type":"test","name":"tests\\preMigration.test.ts","filePath":"tests/preMigration.test.ts","summary":"Test: tests\\preMigration.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/processGuardian.test.ts","type":"test","name":"tests\\processGuardian.test.ts","filePath":"tests/processGuardian.test.ts","summary":"Test: tests\\processGuardian.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/real_integration_test.mjs","type":"file","name":"tests\\real_integration_test.mjs","filePath":"tests/real_integration_test.mjs","summary":"Test: tests\\real_integration_test.mjs","tags":["general"],"_mtime":1782336396000},{"id":"file:tests/refills.test.ts","type":"test","name":"tests\\refills.test.ts","filePath":"tests/refills.test.ts","summary":"Test: tests\\refills.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/returnsParser.test.ts","type":"test","name":"tests\\returnsParser.test.ts","filePath":"tests/returnsParser.test.ts","summary":"Test: tests\\returnsParser.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/salesParser.test.ts","type":"test","name":"tests\\salesParser.test.ts","filePath":"tests/salesParser.test.ts","summary":"Test: tests\\salesParser.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/sampleImages.test.ts","type":"test","name":"tests\\sampleImages.test.ts","filePath":"tests/sampleImages.test.ts","summary":"Test: tests\\sampleImages.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/services/productNameFilterService.test.ts","type":"test","name":"tests\\services\\productNameFilterService.test.ts","filePath":"tests/services/productNameFilterService.test.ts","summary":"Test: tests\\services\\productNameFilterService.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/telegramBot.test.ts","type":"test","name":"tests\\telegramBot.test.ts","filePath":"tests/telegramBot.test.ts","summary":"Test: tests\\telegramBot.test.ts","tags":["test","telegram"],"_mtime":1782336396000},{"id":"file:tests/telegramPrescription.test.ts","type":"test","name":"tests\\telegramPrescription.test.ts","filePath":"tests/telegramPrescription.test.ts","summary":"Test: tests\\telegramPrescription.test.ts","tags":["test","telegram"],"_mtime":1782336396000},{"id":"file:tests/uiPages.test.ts","type":"test","name":"tests\\uiPages.test.ts","filePath":"tests/uiPages.test.ts","summary":"Test: tests\\uiPages.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/utilities.test.ts","type":"test","name":"tests\\utilities.test.ts","filePath":"tests/utilities.test.ts","summary":"Test: tests\\utilities.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/utilities_smoke.test.ts","type":"test","name":"tests\\utilities_smoke.test.ts","filePath":"tests/utilities_smoke.test.ts","summary":"Test: tests\\utilities_smoke.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/utils/pdfGenerator.test.ts","type":"test","name":"tests\\utils\\pdfGenerator.test.ts","filePath":"tests/utils/pdfGenerator.test.ts","summary":"Test: tests\\utils\\pdfGenerator.test.ts","tags":["test"],"_mtime":1782336396000},{"id":"file:tests/whatsapp/client.test.js","type":"test","name":"tests\\whatsapp\\client.test.js","filePath":"tests/whatsapp/client.test.js","summary":"Test: tests\\whatsapp\\client.test.js","tags":["test","whatsapp"],"_mtime":1782336396000},{"id":"file:tests/whatsapp/client.test.ts","type":"test","name":"tests\\whatsapp\\client.test.ts","filePath":"tests/whatsapp/client.test.ts","summary":"Test: tests\\whatsapp\\client.test.ts","tags":["test","whatsapp"],"_mtime":1782336396000},{"id":"file:tests/whatsapp/clientInit.test.js","type":"test","name":"tests\\whatsapp\\clientInit.test.js","filePath":"tests/whatsapp/clientInit.test.js","summary":"Test: tests\\whatsapp\\clientInit.test.js","tags":["test","whatsapp"],"_mtime":1782336396000},{"id":"file:tests/whatsapp/clientInit.test.ts","type":"test","name":"tests\\whatsapp\\clientInit.test.ts","filePath":"tests/whatsapp/clientInit.test.ts","summary":"Test: tests\\whatsapp\\clientInit.test.ts","tags":["test","whatsapp"],"_mtime":1782336396000},{"id":"file:tests/whatsappRouting.test.ts","type":"test","name":"tests\\whatsappRouting.test.ts","filePath":"tests/whatsappRouting.test.ts","summary":"Test: tests\\whatsappRouting.test.ts","tags":["test","whatsapp"],"_mtime":1782336396000},{"id":"file:tools/migration-extractor/index.js","type":"file","name":"tools\\migration-extractor\\index.js","filePath":"tools/migration-extractor/index.js","summary":"Source file: tools\\migration-extractor\\index.js","tags":["migration"],"_mtime":1782336396000},{"id":"config:tools/migration-extractor/package.json","type":"config","name":"tools\\migration-extractor\\package.json","filePath":"tools/migration-extractor/package.json","summary":"Configuration: tools\\migration-extractor\\package.json","tags":["config","migration"],"_mtime":1782336396000},{"id":"file:__mocks__/sqlite3.js","type":"file","name":"__mocks__\\sqlite3.js","filePath":"__mocks__/sqlite3.js","summary":"Source file: __mocks__\\sqlite3.js","tags":["general"],"_mtime":1782336396000},{"id":"file:3d-knowledge-graph.html","type":"file","name":"3d-knowledge-graph.html","filePath":"3d-knowledge-graph.html","summary":"Source file: 3d-knowledge-graph.html","tags":["general"],"_mtime":1783059674110},{"id":"file:scratch/auto-escape.mjs","type":"file","name":"scratch\\auto-escape.mjs","filePath":"scratch/auto-escape.mjs","summary":"Source file: scratch\\auto-escape.mjs","tags":["general"],"_mtime":1783055475505},{"id":"file:scratch/debug-repair.mjs","type":"file","name":"scratch\\debug-repair.mjs","filePath":"scratch/debug-repair.mjs","summary":"Source file: scratch\\debug-repair.mjs","tags":["general"],"_mtime":1783055462154},{"id":"file:scratch/fix-escapes.mjs","type":"file","name":"scratch\\fix-escapes.mjs","filePath":"scratch/fix-escapes.mjs","summary":"Source file: scratch\\fix-escapes.mjs","tags":["general"],"_mtime":1783055392028},{"id":"file:scratch/repair.mjs","type":"file","name":"scratch\\repair.mjs","filePath":"scratch/repair.mjs","summary":"Source file: scratch\\repair.mjs","tags":["general"],"_mtime":1783055437005},{"id":"file:scratch/inspect-graph-keys.mjs","type":"file","name":"inspect-graph-keys.mjs","filePath":"scratch/inspect-graph-keys.mjs","summary":"Source file: inspect-graph-keys.mjs","tags":["general"],"_mtime":1783055599652},{"id":"file:scratch/inspect-layers.mjs","type":"file","name":"inspect-layers.mjs","filePath":"scratch/inspect-layers.mjs","summary":"Source file: inspect-layers.mjs","tags":["general"],"_mtime":1783055730179},{"id":"file:scratch/server.mjs","type":"file","name":"server.mjs","filePath":"scratch/server.mjs","summary":"Source file: server.mjs","tags":["general"],"_mtime":1783055652176},{"id":"file:scratch/inspect-loaded-nodes.mjs","type":"file","name":"inspect-loaded-nodes.mjs","filePath":"scratch/inspect-loaded-nodes.mjs","summary":"Source file: inspect-loaded-nodes.mjs","tags":["general"],"_mtime":1783055861396},{"id":"file:frontend/src/hooks/useApiQuery.ts","type":"file","name":"useApiQuery.ts","filePath":"frontend/src/hooks/useApiQuery.ts","summary":"Source file: useApiQuery.ts","tags":["frontend"],"_mtime":1783057540231},{"id":"file:frontend/src/lib/queryClient.ts","type":"file","name":"queryClient.ts","filePath":"frontend/src/lib/queryClient.ts","summary":"Source file: queryClient.ts","tags":["frontend"],"_mtime":1783057254156},{"id":"file:data/archived_migrations/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","type":"file","name":"zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","filePath":"data/archived_migrations/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","summary":"SQL migration: zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","tags":["migration"],"_mtime":1783067504602},{"id":"file:data/migration_reports/migration_summary.json","type":"file","name":"migration_summary.json","filePath":"data/migration_reports/migration_summary.json","summary":"Configuration: migration_summary.json","tags":["migration"],"_mtime":1783067731809},{"id":"file:data/migration_reports/row_counts.json","type":"file","name":"row_counts.json","filePath":"data/migration_reports/row_counts.json","summary":"Configuration: row_counts.json","tags":["migration"],"_mtime":1783067731903},{"id":"file:data/temp_migration/proc_1783059990146_zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","type":"file","name":"proc_1783059990146_zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","filePath":"data/temp_migration/proc_1783059990146_zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","summary":"SQL migration: proc_1783059990146_zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","tags":["migration"],"_mtime":1783059976882},{"id":"file:MIGRATION SAMPEL/zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","type":"file","name":"zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","filePath":"MIGRATION SAMPEL/zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","summary":"SQL migration: zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","tags":["general"],"_mtime":1783059976882},{"id":"file:MIGRATION SAMPEL/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","type":"file","name":"zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","filePath":"MIGRATION SAMPEL/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","summary":"SQL migration: zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","tags":["general"],"_mtime":1783067504602}],"edges":[{"source":"document:docs/superpowers/plans/2026-05-25-ai-camera-product-name-filtering.md","target":"file:src/services/productNameFilterService.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/components/QuickOrderModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/components/LiveCartAddModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/components/StagedReviewModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/components/MobileConnectionModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/App.tsx","target":"file:frontend/src/components/BackupCenterModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/components/AICamera.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/BackupCenterModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/BackupCenterModal.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/HoverPriceIntelTable.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/LiveCartAddModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/LiveCartAddModal.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/MobileConnectionModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/PriceIntelPanel.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/QuickOrderModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/QuickOrderModal.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/StagedReviewModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/UniversalMedicineEditModal.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/main.tsx","target":"file:frontend/src/App.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/AutomationCenter/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/AutomationCenter/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/AutomationCenter/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CatalogUpload/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CompositionQueue/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CRM/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CRM/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CRM/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CustomerReturn/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/CustomerReturnHistory/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Dashboard/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Dashboard/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Database/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Database/index.tsx","target":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Dispatch/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Dispatch/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Doctors/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Expiry/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Expiry/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Inventory/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Inventory/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Inventory/index.tsx","target":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Investigation/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Learning/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Learning/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/License/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Mail/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Mail/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Mail/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Migration/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/NonMappedDistributors/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/NonMappedDistributors/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Orders/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Orders/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/PharmarackCart/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/PharmarackCart/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/PhoneSales/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/PhoneSales/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/components/AICamera.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/components/POS/BrandBanner.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/PurchaseHistory/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Purchases/index.tsx","target":"file:frontend/src/hooks/useDeferredEffect.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Purchases/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Purchases/index.tsx","target":"file:frontend/src/components/PriceIntelPanel.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Purchases/index.tsx","target":"file:frontend/src/components/HoverPriceIntelTable.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Purchases/index.tsx","target":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Reports/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Returns/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Returns/index.tsx","target":"file:frontend/src/components/AICamera.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Sells/index.tsx","target":"file:frontend/src/components/UniversalMedicineEditModal.tsx","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Sells/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Sells/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Settings/index.tsx","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Settings/index.tsx","target":"file:frontend/src/services/events.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/Settings/index.tsx","target":"file:frontend/src/components/MobileConnectionModal.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","target":"file:pharmacy-mobile/lib/cartEvents.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","target":"file:pharmacy-mobile/components/SearchBar.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/billing/index.tsx","target":"file:pharmacy-mobile/components/CartItem.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inbox/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inbox/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/index.tsx","target":"file:pharmacy-mobile/lib/secureStore.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/index.tsx","target":"file:pharmacy-mobile/lib/cartEvents.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/index.tsx","target":"file:pharmacy-mobile/components/DrawerMenu.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","target":"file:pharmacy-mobile/components/SearchBar.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","target":"file:pharmacy-mobile/components/MedicineRow.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","target":"file:pharmacy-mobile/components/Card.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/more/index.tsx","target":"file:pharmacy-mobile/lib/secureStore.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/more/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/more/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/purchases/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/purchases/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/_layout.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/(tabs)/_layout.tsx","target":"file:pharmacy-mobile/components/DeviceStatusHeader.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/camera/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/notifications/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/notifications/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/product-search/index.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/product-search/index.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/product-search/index.tsx","target":"file:pharmacy-mobile/components/SearchBar.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/product-search/index.tsx","target":"file:pharmacy-mobile/components/Card.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/_layout.tsx","target":"file:pharmacy-mobile/lib/secureStore.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/_layout.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/_layout.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/_layout.tsx","target":"file:pharmacy-mobile/components/ServerSetup.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/app/_layout.tsx","target":"file:pharmacy-mobile/components/AppLock.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/AppLock.tsx","target":"file:pharmacy-mobile/lib/secureStore.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/AppLock.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/Card.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/CartItem.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/DeviceStatusHeader.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/DeviceStatusHeader.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/DrawerMenu.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/DrawerMenu.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/EditScreenInfo.tsx","target":"file:pharmacy-mobile/components/ExternalLink.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/EditScreenInfo.tsx","target":"file:pharmacy-mobile/components/StyledText.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/EditScreenInfo.tsx","target":"file:pharmacy-mobile/components/Themed.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/MedicineRow.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/SearchBar.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/ServerSetup.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/ServerSetup.tsx","target":"file:pharmacy-mobile/lib/api.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/StatCard.tsx","target":"file:pharmacy-mobile/lib/theme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/StyledText.tsx","target":"file:pharmacy-mobile/components/Themed.tsx","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/components/Themed.tsx","target":"file:pharmacy-mobile/components/useColorScheme.ts","type":"imports","weight":0.7},{"source":"file:pharmacy-mobile/lib/api.ts","target":"file:pharmacy-mobile/lib/secureStore.ts","type":"imports","weight":0.7},{"source":"file:scripts/quick-update.mjs","target":"file:scripts/generate-3d-graph.mjs","type":"imports","weight":0.7},{"source":"file:tests/whatsapp/client.test.js","target":"file:src/whatsappClient.ts","type":"imports","weight":0.7},{"source":"file:tests/whatsapp/clientInit.test.js","target":"file:src/whatsappClient.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/hooks/useApiQuery.ts","target":"file:frontend/src/services/api.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/main.tsx","target":"file:frontend/src/lib/queryClient.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/components/QuickOrderModal.tsx","target":"file:frontend/src/hooks/useApiQuery.ts","type":"imports","weight":0.7},{"source":"file:frontend/src/pages/POS/index.tsx","target":"file:frontend/src/hooks/useApiQuery.ts","type":"imports","weight":0.7}],"layers":[{"id":"layer:configuration","name":"Configuration Layer","description":"Package configs","nodeIds":["document:AGENTS.md","file:index.js","file:jest.config.js","file:license.txt","config:package.json","document:README.md","config:tsconfig.json","document:.agents/rules/ponytail.md","config:.opencode/config.json","config:.opencode/package.json","config:.vscode/settings.json","document:AUDIT/01_PROJECT_OVERVIEW.md","document:AUDIT/02_ARCHITECTURE.md","document:AUDIT/03_DATA_FLOW.md","document:AUDIT/04_WORKFLOWS.md","document:AUDIT/05_PROBLEMS_AND_SOLUTIONS.md","document:AUDIT/06_PERFORMANCE_AND_RAM.md","document:AUDIT/07_IMPROVEMENTS.md","file:bootstrapper/main.ts","config:bootstrapper/package.json","file:gas/licenseServer.js","document:gas/README.md","file:scratch/add-inderal.js","file:scratch/add-to-real-cart.js","config:scratch/cart-response.json","file:scratch/checkSalesInvoices.ts","file:scratch/check_db.js","file:scratch/countOrderItems.ts","file:scratch/debugCopyData.ts","file:scratch/get-schema.js","file:scratch/inspect_db.cjs","file:scratch/inspect_db.js","file:scratch/inspect_email_issues.cjs","file:scratch/inspect_pharmarack.cjs","file:scratch/intercept-cart-page.js","file:scratch/intercept-cart.js","file:scratch/print_gmail_creds.cjs","file:scratch/probe-search.js","file:scratch/probe-stores.js","file:scratch/query.js","file:scratch/read-latest-orders.js","file:scratch/recreateCleanDb.ts","file:scratch/runMigrationTest.ts","config:scratch/store-list-response.json","file:scratch/test-cart-endpoints.js","file:scratch/test-dolo-add.js","file:scratch/test-integrity.ts","file:scratch/testDb.js","file:scratch/test_cart.cjs","file:scratch/test_cart.js","file:scratch/test_local_server.js","file:scratch/test_pharmarack_endpoints.cjs","file:scratch/test_puppeteer.ts","file:scratch/test_search.js","file:scratch/test_sync.ts","file:scratch/viewStagedData.ts","document:src/AGENTS.md","file:src/config/index.ts","file:src/database/connection.ts","file:src/database/messageDAO.ts","file:src/database/migrations/002_message_tables.sql","file:src/database/migrations/003_license_settings.sql","file:src/database/sqlitePatch.ts","file:src/database.ts","file:src/extractor.ts","file:src/i18n/getMessage.ts","config:src/i18n/messages.json","file:src/license/gracePolicy.ts","file:src/license/licenseCheck.ts","file:src/license/machineId.ts","file:src/license/startupCheck.ts","file:src/license/tokenStore.ts","file:src/process/processGuardian.ts","file:src/server.ts","file:src/telegramBot.ts","file:src/utils/activityTracker.ts","file:src/utils/dateExtractor.ts","file:src/utils/migrationUtils.ts","file:src/utils/migrationValidation.ts","file:src/utils/nameNormalizer.ts","file:src/utils/networkDetector.ts","file:src/utils/notifications.ts","file:src/utils/pdfGenerator.ts","file:src/utils/preMigrationIntelligence.ts","file:src/utils/reportExporter.ts","file:src/whatsappClient.ts","file:tools/migration-extractor/index.js","config:tools/migration-extractor/package.json","file:__mocks__/sqlite3.js","file:3d-knowledge-graph.html","file:scratch/auto-escape.mjs","file:scratch/debug-repair.mjs","file:scratch/fix-escapes.mjs","file:scratch/repair.mjs","file:scratch/inspect-graph-keys.mjs","file:scratch/inspect-layers.mjs","file:scratch/server.mjs","file:scratch/inspect-loaded-nodes.mjs","file:MIGRATION SAMPEL/zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","file:MIGRATION SAMPEL/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql"]},{"id":"layer:data","name":"Data Layer","description":"Database and data files","nodeIds":["config:data/audit_queue.json","config:data/ocr_corrections.json","config:data/pharmarack_profile/component_crx_cache/metadata.json","config:data/pharmarack_profile/extensions_crx_cache/metadata.json","file:data/archived_migrations/zip_1783067503698_1783067492970-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql","file:data/migration_reports/migration_summary.json","file:data/migration_reports/row_counts.json","file:data/temp_migration/proc_1783059990146_zip_1783059975522_1783059962064-retailerdb_backup_Wed_07_01_2026_23_00_01.83.sql"]},{"id":"layer:documentation","name":"Documentation Layer","description":"Docs and specs","nodeIds":["document:docs/api_endpoints.md","document:docs/DATABASE_ARCHITECTURE.md","document:docs/MOBILE_APP_CONTEXT.md","file:docs/samples/telegram_sample_message.txt","file:docs/samples/whatsapp_sample_message.txt","document:docs/superpowers/plans/2026-05-24-medicine-name-extraction-plan.md","document:docs/superpowers/plans/2026-05-24-whatsapp-automation-plan.md","document:docs/superpowers/plans/2026-05-25-ai-camera-product-name-filtering.md","document:docs/superpowers/plans/2026-05-25-ai-pharmacy-improvements.md","document:docs/superpowers/plans/2026-05-26-delete-backup-files.md","document:docs/superpowers/specs/2026-05-23-cleanup-ai-pharmacy-md-design.md","document:docs/superpowers/specs/2026-05-23-page-wise-design.md","document:docs/superpowers/specs/2026-05-24-medicine-name-extraction-design.md","document:docs/superpowers/specs/2026-05-24-telegram-bot-design.md","document:docs/superpowers/specs/2026-05-24-whatsapp-automation-design.md","document:docs/superpowers/specs/2026-05-25-ai-camera-image-test-design.md","document:docs/superpowers/specs/2026-05-25-ai-camera-product-name-filtering-design.md","document:docs/superpowers/specs/2026-05-25-ai-pharmacy-audit-design.md","document:docs/superpowers/specs/2026-05-25-email-triggered-notifications-design.md","document:docs/superpowers/specs/2026-05-25-hybrid-online-offline-product-data-design.md","document:docs/superpowers/specs/2026-05-25-memory-utility-design.md","document:docs/superpowers/specs/2026-05-25-telegram-order-management-design.md","document:docs/superpowers/specs/2026-05-26-frontend-redesign-light-attractive.md","document:docs/superpowers/specs/2026-05-26-migration-enhancement-design.md","document:docs/superpowers/specs/2026-05-26-redesign-ui-demo.md","document:docs/superpowers/specs/2026-06-02-pos-billing-page-layout-spec.md","document:docs/superpowers/specs/2026-06-03-mail-attachment-picker-design.md","document:docs/superpowers/specs/2026-06-03-mail-implementation-quickstart.md","document:docs/superpowers/specs/2026-06-03-mail-page-ui-design.md","document:docs/superpowers/specs/2026-06-03-mail-page-workflow-design.md","document:docs/superpowers/specs/2026-06-13-whatsapp-automation-agent-spec.md","document:docs/superpowers/specs/implementation_plan.md","document:docs/superpowers/specs/incomplete_tasks_implementation_plan.md","document:docs/superpowers/specs/surgical_fixes.md","document:docs/superpowers/specs/walkthrough.md","document:docs/superpowers/specs/wsl_migration_report.md","document:docs/superpowers/specs/wsl_setup_roadmap.md"]},{"id":"layer:presentation","name":"Presentation Layer","description":"Frontend React SPA","nodeIds":["document:frontend/AGENTS.md","file:frontend/eslint.config.js","file:frontend/index.html","config:frontend/package.json","file:frontend/postcss.config.js","document:frontend/README.md","file:frontend/src/App.css","file:frontend/src/App.tsx","file:frontend/src/components/AICamera.tsx","file:frontend/src/components/BackupCenterModal.tsx","file:frontend/src/components/HoverPriceIntelTable.tsx","file:frontend/src/components/LiveCartAddModal.tsx","file:frontend/src/components/MobileConnectionModal.tsx","file:frontend/src/components/POS/BrandBanner.tsx","file:frontend/src/components/PriceIntelPanel.tsx","file:frontend/src/components/QuickOrderModal.tsx","file:frontend/src/components/StagedReviewModal.tsx","file:frontend/src/components/UniversalMedicineEditModal.tsx","file:frontend/src/hooks/useDeferredEffect.ts","file:frontend/src/index.css","file:frontend/src/main.tsx","file:frontend/src/pages/AutomationCenter/index.tsx","file:frontend/src/pages/CatalogUpload/index.tsx","file:frontend/src/pages/CompositionQueue/index.tsx","file:frontend/src/pages/CRM/index.tsx","file:frontend/src/pages/CustomerReturn/index.tsx","file:frontend/src/pages/CustomerReturnHistory/index.tsx","file:frontend/src/pages/Dashboard/index.tsx","file:frontend/src/pages/Database/index.tsx","file:frontend/src/pages/Dispatch/index.tsx","file:frontend/src/pages/Doctors/index.tsx","file:frontend/src/pages/Expiry/index.tsx","file:frontend/src/pages/Inventory/index.tsx","file:frontend/src/pages/Investigation/index.tsx","file:frontend/src/pages/Learning/index.tsx","file:frontend/src/pages/License/index.tsx","file:frontend/src/pages/Mail/index.tsx","file:frontend/src/pages/Migration/index.tsx","file:frontend/src/pages/NonMappedDistributors/index.tsx","document:frontend/src/pages/NonMappedDistributors/README_changes.md","file:frontend/src/pages/Orders/index.tsx","file:frontend/src/pages/PharmarackCart/index.tsx","file:frontend/src/pages/PhoneSales/index.tsx","file:frontend/src/pages/POS/index.tsx","file:frontend/src/pages/PurchaseHistory/index.tsx","file:frontend/src/pages/Purchases/index.tsx","file:frontend/src/pages/Reports/index.tsx","file:frontend/src/pages/Returns/index.tsx","file:frontend/src/pages/Sells/index.tsx","file:frontend/src/pages/Settings/index.tsx","file:frontend/src/services/api.ts","file:frontend/src/services/events.ts","file:frontend/tailwind.config.js","config:frontend/tsconfig.app.json","config:frontend/tsconfig.json","config:frontend/tsconfig.node.json","file:frontend/vite.config.ts","file:frontend/src/hooks/useApiQuery.ts","file:frontend/src/lib/queryClient.ts"]},{"id":"layer:mobile","name":"Mobile Layer","description":"React Native Expo app","nodeIds":["config:pharmacy-mobile/.claude/settings.json","config:pharmacy-mobile/.vscode/extensions.json","config:pharmacy-mobile/.vscode/settings.json","document:pharmacy-mobile/AGENTS.md","document:pharmacy-mobile/android-configs/README.md","file:pharmacy-mobile/app/(tabs)/billing/index.tsx","file:pharmacy-mobile/app/(tabs)/inbox/index.tsx","file:pharmacy-mobile/app/(tabs)/index.tsx","file:pharmacy-mobile/app/(tabs)/inventory/index.tsx","file:pharmacy-mobile/app/(tabs)/more/index.tsx","file:pharmacy-mobile/app/(tabs)/purchases/index.tsx","file:pharmacy-mobile/app/(tabs)/_layout.tsx","file:pharmacy-mobile/app/+not-found.tsx","file:pharmacy-mobile/app/camera/index.tsx","file:pharmacy-mobile/app/notifications/index.tsx","file:pharmacy-mobile/app/product-search/index.tsx","file:pharmacy-mobile/app/_layout.tsx","config:pharmacy-mobile/app.json","document:pharmacy-mobile/assets/data/README.md","file:pharmacy-mobile/components/AppLock.tsx","file:pharmacy-mobile/components/Card.tsx","file:pharmacy-mobile/components/CartItem.tsx","file:pharmacy-mobile/components/DeviceStatusHeader.tsx","file:pharmacy-mobile/components/DrawerMenu.tsx","file:pharmacy-mobile/components/EditScreenInfo.tsx","file:pharmacy-mobile/components/ExternalLink.tsx","file:pharmacy-mobile/components/MedicineRow.tsx","file:pharmacy-mobile/components/SearchBar.tsx","file:pharmacy-mobile/components/ServerSetup.tsx","file:pharmacy-mobile/components/StatCard.tsx","file:pharmacy-mobile/components/StyledText.tsx","file:pharmacy-mobile/components/Themed.tsx","file:pharmacy-mobile/components/useClientOnlyValue.ts","file:pharmacy-mobile/components/useClientOnlyValue.web.ts","file:pharmacy-mobile/components/useColorScheme.ts","file:pharmacy-mobile/components/useColorScheme.web.ts","file:pharmacy-mobile/constants/Colors.ts","file:pharmacy-mobile/lib/api.ts","file:pharmacy-mobile/lib/cartEvents.ts","file:pharmacy-mobile/lib/secureStore.ts","file:pharmacy-mobile/lib/theme.ts","config:pharmacy-mobile/package.json","config:pharmacy-mobile/tsconfig.json"]},{"id":"layer:scripts","name":"Script Layer","description":"CLI tools and scripts","nodeIds":["file:scripts/backup.mjs","file:scripts/build-medicine-dict.ts","file:scripts/clear-all-data.mjs","file:scripts/extract-styles.mjs","file:scripts/generate-3d-graph.mjs","file:scripts/importCatalog.ts","file:scripts/migrate.js","file:scripts/quick-update.mjs","file:scripts/restore.mjs","file:src/cli/enqueueCatalog.ts","file:src/cli/seedMockData.ts","file:src/cli/watchCatalog.ts","file:src/scripts/fixDb.ts","file:src/scripts/injectStyles.ts","file:src/scripts/migrateItemCodes.ts","file:src/scripts/seedCompanies.ts","file:src/scripts/seedIndianMeds.ts","file:src/scripts/seedMassiveMeds.ts","file:src/scripts/seedPdfs.ts","file:src/scripts/seedRealMeds.ts","file:src/scripts/seedWhoMeds.ts","file:src/scripts/testMigration.ts"]},{"id":"layer:infrastructure","name":"Infrastructure Layer","description":"Middleware and workers","nodeIds":["file:src/middleware/asyncHandler.ts","file:src/middleware/auth.ts","file:src/middleware/errorHandler.ts","file:src/middleware/licenseGate.ts","file:src/middleware/notFoundHandler.ts","file:src/middleware/validation.ts","file:src/worker/catalogWorker.ts","file:src/worker/compositionEnricher.ts","file:src/worker/emailPoller.ts","file:src/worker/importers/pgB2BImporter.ts","file:src/worker/importers/pgExtrasImporter.ts","file:src/worker/importers/pgMasterImporter.ts","file:src/worker/importers/pgPaymentsImporter.ts","file:src/worker/importers/pgPurchaseImporter.ts","file:src/worker/importers/pgReturnsImporter.ts","file:src/worker/importers/pgSalesImporter.ts","file:src/worker/migrationWorker.ts","file:src/worker/parsers/inventoryParser.ts","file:src/worker/parsers/pgCopyParser.ts","file:src/worker/parsers/returnsParser.ts","file:src/worker/parsers/salesParser.ts","file:src/worker/runCatalogWorker.ts","file:src/worker/runEmailPoller.ts","file:src/worker/securityWorker.ts","file:src/worker/workerSupervisor.ts"]},{"id":"layer:api","name":"API Layer","description":"Express.js route handlers","nodeIds":["file:src/routes/aiCamera.ts","file:src/routes/archive.ts","file:src/routes/automation.ts","file:src/routes/catalog.ts","file:src/routes/compliance.ts","file:src/routes/creditNotes.ts","file:src/routes/crm.ts","file:src/routes/customerReturns.ts","file:src/routes/dashboard.ts","file:src/routes/dispatch.ts","file:src/routes/distributors.ts","file:src/routes/email.ts","file:src/routes/enrichment.ts","file:src/routes/expiry.ts","file:src/routes/inventory.ts","file:src/routes/investigation.ts","file:src/routes/learning.ts","file:src/routes/license.ts","file:src/routes/medicines.ts","file:src/routes/messaging.ts","file:src/routes/migration.ts","file:src/routes/notifications.ts","file:src/routes/orders.ts","file:src/routes/pharmarack.ts","file:src/routes/purchases.ts","file:src/routes/refills.ts","file:src/routes/reports.ts","file:src/routes/returns.ts","file:src/routes/sales.ts","file:src/routes/security.ts","file:src/routes/settings.ts","file:src/routes/telegramPrescription.ts","file:src/routes/upload.ts","file:src/routes/utilities.ts","file:src/routes/v1/sales.ts","file:src/routes/whatsappBusiness.ts"]},{"id":"layer:service","name":"Service Layer","description":"Business logic services","nodeIds":["file:src/services/aiCameraService.ts","file:src/services/apiClients/baseApiClient.ts","file:src/services/apiClients/openFdaClient.ts","file:src/services/backupRecoveryService.ts","file:src/services/backupService.ts","file:src/services/bouncedAlertService.ts","file:src/services/cacheService.ts","file:src/services/creditNoteService.ts","file:src/services/customerService.ts","file:src/services/dataMerger.ts","file:src/services/doctorReportingService.ts","file:src/services/emailService.ts","file:src/services/eventService.ts","file:src/services/expiryAlertService.ts","file:src/services/googleSearchService.ts","file:src/services/imageArchiveService.ts","file:src/services/inventoryService.ts","file:src/services/invoiceService.ts","file:src/services/medicineService.ts","file:src/services/messagingQueue.ts","file:src/services/nNotificationService.ts","file:src/services/nonMovingReportService.ts","file:src/services/notificationService.ts","file:src/services/onlineDataEnricher.ts","file:src/services/onnxOcrService.ts","file:src/services/orderFulfillmentService.ts","file:src/services/pdfInvoiceService.ts","file:src/services/productNameFilterService.ts","file:src/services/pushNotificationService.ts","file:src/services/refillService.ts","file:src/services/returnsService.ts","file:src/services/searchCache.ts","file:src/services/telegramPrescriptionService.ts","file:src/services/tokenRefreshScheduler.ts","file:src/services/whatsappBusinessService.ts","file:src/services/whatsappInvoiceService.ts","file:src/services/whatsappQueue.ts"]},{"id":"layer:testing","name":"Testing Layer","description":"Test files","nodeIds":["file:tests/aiCamera.test.ts","file:tests/auth.test.ts","file:tests/automation.test.ts","file:tests/backupRecovery.test.ts","file:tests/catalogPipeline.test.ts","file:tests/crm.test.ts","file:tests/dbIntegrity.test.ts","file:tests/distributorLearning.test.ts","file:tests/distributorNotification.test.ts","file:tests/duplicateCatalog.test.ts","file:tests/email_attachments.test.ts","file:tests/inventoryParser.test.ts","file:tests/investigation.test.ts","file:tests/migrationV2.test.ts","file:tests/ocrParser.test.ts","file:tests/onlineEnrichment.test.ts","file:tests/paddleOcr.test.ts","file:tests/pdf/pdfGenerator.missing.test.ts","file:tests/pdf/pdfGenerator.test.ts","file:tests/pharmarackCartNotif.test.ts","file:tests/preMigration.test.ts","file:tests/processGuardian.test.ts","file:tests/real_integration_test.mjs","file:tests/refills.test.ts","file:tests/returnsParser.test.ts","file:tests/salesParser.test.ts","file:tests/sampleImages.test.ts","file:tests/services/productNameFilterService.test.ts","file:tests/telegramBot.test.ts","file:tests/telegramPrescription.test.ts","file:tests/uiPages.test.ts","file:tests/utilities.test.ts","file:tests/utilities_smoke.test.ts","file:tests/utils/pdfGenerator.test.ts","file:tests/whatsapp/client.test.js","file:tests/whatsapp/client.test.ts","file:tests/whatsapp/clientInit.test.js","file:tests/whatsapp/clientInit.test.ts","file:tests/whatsappRouting.test.ts"]}],"tour":[],"project":{"name":"AI Pharmacy OS","languages":["typescript","javascript","json","markdown","html","css"],"frameworks":["Express.js","React","Vite","Tailwind CSS","React Native","Expo"],"description":"Unified pharmacy management platform.","analyzedAt":"2026-07-03T09:20:27.917Z","gitCommitHash":"277016c64259b8a7553f47d243e501e590fad3da"}};
+
+    // App state
+    let rawGraph = INITIAL_GRAPH_DATA;
+    let filteredGraph = { nodes: [], links: [] };
+    let activeFilters = {
+      layers: new Set(),
+      types: new Set(['file', 'service', 'test', 'config', 'document'])
+    };
+    
+    let Graph = null;
+    let hoveredNode = null;
+    let clickedNode = null;
+    const highlightNodes = new Set();
+    const highlightLinks = new Set();
+
+    // Node colors by architectural layer
+    const LAYER_COLORS = {
+      'layer:presentation': '#ec4899', // Pink
+      'layer:mobile': '#f59e0b',       // Amber
+      'layer:api': '#a855f7',          // Purple
+      'layer:service': '#10b981',      // Emerald
+      'layer:data': '#3b82f6',         // Blue
+      'layer:infrastructure': '#06b6d4', // Cyan
+      'layer:testing': '#ef4444',      // Red
+      'layer:documentation': '#6b7280', // Gray
+      'layer:scripts': '#14b8a6',      // Teal
+      'layer:configuration': '#84cc16'  // Lime
+    };
+    const DEFAULT_COLOR = '#94a3b8';   // Slate
+
+    // Initialize Page
+    window.addEventListener('DOMContentLoaded', () => {
+      initApp(rawGraph);
+    });
+
+    function initApp(graphJson) {
+      rawGraph = graphJson;
+      
+      // Update global badges/stats
+      document.getElementById('global-stats').textContent = 
+        `${rawGraph.nodes.length} Nodes | ${rawGraph.edges.length} Edges`;
+
+      // Build layer filters UI dynamically
+      buildLayerFilters();
+
+      // Initialize active filters with all available layers
+      activeFilters.layers = new Set(rawGraph.layers.map(l => l.id));
+      
+      // Setup UI listeners
+      setupUIEventListeners();
+      
+      // Process and render
+      applyFiltersAndRefresh();
+    }
+
+    // Build the list of filters based on metadata layers
+    function buildLayerFilters() {
+      const container = document.getElementById('layer-filters');
+      container.innerHTML = '';
+      
+      rawGraph.layers.forEach(layer => {
+        const color = LAYER_COLORS[layer.id] || DEFAULT_COLOR;
+        
+        const label = document.createElement('label');
+        label.className = 'filter-item';
+        label.innerHTML = `
+          <input type="checkbox" checked value="${layer.id}">
+          <span class="layer-color-dot" style="background-color: ${color};"></span>
+          <span style="flex-grow: 1;">${layer.name}</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">${layer.nodeIds.length}</span>
+        `;
+        
+        // Listen to checkbox changes
+        label.querySelector('input').addEventListener('change', (e) => {
+          if (e.target.checked) {
+            activeFilters.layers.add(layer.id);
+          } else {
+            activeFilters.layers.delete(layer.id);
+          }
+          applyFiltersAndRefresh();
+        });
+        
+        container.appendChild(label);
+      });
+
+      document.getElementById('layer-count').textContent = `(${rawGraph.layers.length})`;
+    }
+
+    function setupUIEventListeners() {
+      // Type checkboxes
+      document.querySelectorAll('#type-filters input').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+          const type = e.target.getAttribute('data-type');
+          if (e.target.checked) {
+            activeFilters.types.add(type);
+          } else {
+            activeFilters.types.delete(type);
+          }
+          applyFiltersAndRefresh();
+        });
+      });
+
+      // Search bar search listener
+      const searchInput = document.getElementById('node-search');
+      searchInput.addEventListener('input', (e) => {
+        handleSearch(e.target.value);
+      });
+      
+      // Close autocomplete on click outside
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-container')) {
+          document.getElementById('search-results').style.display = 'none';
+        }
+      });
+
+      // Particle slider
+      const particleSlider = document.getElementById('particle-slider');
+      particleSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        document.getElementById('particle-val').textContent = val;
+        if (Graph) {
+          Graph.linkDirectionalParticles(val);
+        }
+      });
+
+      // Opacity slider
+      const opacitySlider = document.getElementById('opacity-slider');
+      opacitySlider.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById('opacity-val').textContent = val;
+        if (Graph) {
+          Graph.linkOpacity(val);
+        }
+      });
+
+      // Size by degree toggle
+      const sizeToggle = document.getElementById('toggle-size-degree');
+      sizeToggle.addEventListener('change', (e) => {
+        if (Graph) {
+          Graph.nodeVal(e.target.checked ? d => d.degree || 1 : 1);
+        }
+      });
+
+      // Auto-rotation toggle
+      const rotateToggle = document.getElementById('toggle-rotate');
+      let angle = 0;
+      let rotationInterval = null;
+      rotateToggle.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          rotationInterval = setInterval(() => {
+            if (Graph) {
+              Graph.cameraPosition({
+                x: 400 * Math.sin(angle),
+                z: 400 * Math.cos(angle)
+              });
+              angle += 0.0015;
+            }
+          }, 20);
+        } else {
+          clearInterval(rotationInterval);
+        }
+      });
+
+      // Uploader Drop events
+      const dropOverlay = document.getElementById('drop-overlay');
+      window.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dropOverlay.classList.add('active');
+      });
+      
+      dropOverlay.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+      
+      dropOverlay.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropOverlay.classList.remove('active');
+        const files = e.dataTransfer.files;
+        if (files.length) {
+          parseAndLoadFile(files[0]);
+        }
+      });
+    }
+
+    // Filters node and edges data and reloads graph visualization
+    function applyFiltersAndRefresh() {
+      // 1. Filter Nodes
+      const allowedNodesMap = new Map();
+      rawGraph.nodes.forEach(node => {
+        // Find layer containing this node ID
+        const layer = rawGraph.layers.find(l => l.nodeIds.includes(node.id));
+        const layerId = layer ? layer.id : 'layer:configuration';
+
+        const matchesLayer = activeFilters.layers.has(layerId);
+        const matchesType = activeFilters.types.has(node.type);
+
+        if (matchesLayer && matchesType) {
+          allowedNodesMap.set(node.id, {
+            ...node,
+            layerId,
+            degree: 0 // Will compute below
+          });
+        }
+      });
+
+      // 2. Filter Links (Edges)
+      const filteredLinks = [];
+      rawGraph.edges.forEach(edge => {
+        const sourceExists = allowedNodesMap.has(edge.source);
+        const targetExists = allowedNodesMap.has(edge.target);
+
+        if (sourceExists && targetExists) {
+          filteredLinks.push({
+            source: edge.source,
+            target: edge.target,
+            type: edge.type,
+            weight: edge.weight || 0.5
+          });
+
+          // Increment degrees
+          allowedNodesMap.get(edge.source).degree += 1;
+          allowedNodesMap.get(edge.target).degree += 1;
+        }
+      });
+
+      const filteredNodes = Array.from(allowedNodesMap.values());
+      filteredGraph = { nodes: filteredNodes, links: filteredLinks };
+
+      renderGraph();
+    }
+
+    function renderGraph() {
+      const graphContainer = document.getElementById('3d-graph');
+      
+      if (!Graph) {
+        // First time initialization
+        Graph = ForceGraph3D()(graphContainer)
+          .graphData(filteredGraph)
+          .backgroundColor('#08080c')
+          .showNavInfo(false)
+          .nodeColor(node => LAYER_COLORS[node.layerId] || DEFAULT_COLOR)
+          .nodeVal(document.getElementById('toggle-size-degree').checked ? d => d.degree || 1 : 1)
+          .nodeLabel(node => `
+            <div class="graph-tooltip">
+              <div class="graph-tooltip-title">${node.name}</div>
+              <div class="graph-tooltip-path">${node.filePath}</div>
+            </div>
+          `)
+          .linkOpacity(parseFloat(document.getElementById('opacity-slider').value))
+          .linkColor(link => {
+            const sourceNode = typeof link.source === 'object' ? link.source : filteredGraph.nodes.find(n => n.id === link.source);
+            const layerId = sourceNode ? sourceNode.layerId : null;
+            const color = LAYER_COLORS[layerId] || DEFAULT_COLOR;
+            return color + '40'; // 25% opacity default
+          })
+          .linkDirectionalParticles(parseInt(document.getElementById('particle-slider').value))
+          .linkDirectionalParticleSpeed(0.004)
+          .linkDirectionalParticleWidth(1.5)
+          .linkDirectionalParticleColor(() => '#a78bfa')
+          
+          // Interactions
+          .onNodeClick(node => {
+            selectNode(node);
+          })
+          .onNodeHover((node, prevNode) => {
+            if (node === hoveredNode) return;
+            
+            highlightNodes.clear();
+            highlightLinks.clear();
+            
+            if (node) {
+              hoveredNode = node;
+              highlightNodes.add(node);
+              // Find adjacent links
+              filteredGraph.links.forEach(link => {
+                const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+                const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+                
+                if (sourceId === node.id) {
+                  highlightLinks.add(link);
+                  const targetNode = typeof link.target === 'object' ? link.target : filteredGraph.nodes.find(n => n.id === targetId);
+                  if (targetNode) highlightNodes.add(targetNode);
+                } else if (targetId === node.id) {
+                  highlightLinks.add(link);
+                  const sourceNode = typeof link.source === 'object' ? link.source : filteredGraph.nodes.find(n => n.id === sourceId);
+                  if (sourceNode) highlightNodes.add(sourceNode);
+                }
+              });
+            } else {
+              hoveredNode = null;
+            }
+            
+            updateHighlight();
+          });
+      } else {
+        // Just update graph data
+        Graph.graphData(filteredGraph);
+      }
+    }
+
+    function updateHighlight() {
+      if (!Graph) return;
+
+      // Trigger redraw by re-assigning properties
+      Graph
+        .nodeColor(node => {
+          if (highlightNodes.size === 0) return LAYER_COLORS[node.layerId] || DEFAULT_COLOR;
+          return highlightNodes.has(node) ? (LAYER_COLORS[node.layerId] || DEFAULT_COLOR) : 'rgba(255, 255, 255, 0.05)';
+        })
+        .linkColor(link => {
+          const sourceNode = typeof link.source === 'object' ? link.source : filteredGraph.nodes.find(n => n.id === link.source);
+          const layerId = sourceNode ? sourceNode.layerId : null;
+          const color = LAYER_COLORS[layerId] || DEFAULT_COLOR;
+          
+          if (highlightLinks.size === 0) return color + '40'; // default 25% opacity
+          return highlightLinks.has(link) ? color + 'cc' : 'rgba(255, 255, 255, 0.02)'; // highlighted: 80% opacity, others: 2% opacity
+        })
+        .linkDirectionalParticles(link => {
+          if (highlightLinks.size === 0) return parseInt(document.getElementById('particle-slider').value);
+          return highlightLinks.has(link) ? parseInt(document.getElementById('particle-slider').value) : 0;
+        });
+    }
+
+    // Node Selection Flow
+    function selectNode(node) {
+      clickedNode = node;
+      
+      // Update UI panels
+      document.getElementById('node-details-name').textContent = node.name;
+      document.getElementById('node-details-path').textContent = node.filePath || node.id;
+      document.getElementById('node-details-summary').textContent = node.summary || 'No summary available.';
+
+      // Badges
+      const badgeContainer = document.getElementById('node-details-badges');
+      badgeContainer.innerHTML = `
+        <span class="type-badge">${node.type}</span>
+        <span class="type-badge" style="background-color: ${LAYER_COLORS[node.layerId]}20; color: ${LAYER_COLORS[node.layerId]}; border-color: ${LAYER_COLORS[node.layerId]}40;">${node.layerId.split(':').pop()}</span>
+      `;
+      if (node.tags) {
+        node.tags.forEach(tag => {
+          badgeContainer.innerHTML += `<span class="tag-badge">${tag}</span>`;
+        });
+      }
+
+      // Find imports (outgoing edges) and dependents (incoming edges)
+      // Note: rawGraph edges use raw IDs
+      const imports = rawGraph.edges.filter(e => e.source === node.id);
+      const dependents = rawGraph.edges.filter(e => e.target === node.id);
+
+      // Render Imports
+      const importsContainer = document.getElementById('node-details-imports');
+      document.getElementById('title-imports').textContent = `Dependencies (${imports.length})`;
+      importsContainer.innerHTML = '';
+      if (imports.length > 0) {
+        imports.forEach(imp => {
+          const targetNode = rawGraph.nodes.find(n => n.id === imp.target);
+          const displayName = targetNode ? targetNode.name : imp.target.split(':').pop();
+          const element = document.createElement('a');
+          element.className = 'dep-item';
+          element.textContent = displayName;
+          element.title = imp.target;
+          element.addEventListener('click', () => jumpToNode(imp.target));
+          importsContainer.appendChild(element);
+        });
+      } else {
+        importsContainer.innerHTML = '<div class="no-deps">No imports/dependencies detected.</div>';
+      }
+
+      // Render Dependents
+      const dependentsContainer = document.getElementById('node-details-dependents');
+      document.getElementById('title-dependents').textContent = `Imported By (${dependents.length})`;
+      dependentsContainer.innerHTML = '';
+      if (dependents.length > 0) {
+        dependents.forEach(dep => {
+          const sourceNode = rawGraph.nodes.find(n => n.id === dep.source);
+          const displayName = sourceNode ? sourceNode.name : dep.source.split(':').pop();
+          const element = document.createElement('a');
+          element.className = 'dep-item';
+          element.textContent = displayName;
+          element.title = dep.source;
+          element.addEventListener('click', () => jumpToNode(dep.source));
+          dependentsContainer.appendChild(element);
+        });
+      } else {
+        dependentsContainer.innerHTML = '<div class="no-deps">No dependents import this file.</div>';
+      }
+
+      // Setup Fly-To Button
+      const focusBtn = document.getElementById('btn-focus-node');
+      // Remove old listeners
+      const newFocusBtn = focusBtn.cloneNode(true);
+      focusBtn.parentNode.replaceChild(newFocusBtn, focusBtn);
+      newFocusBtn.addEventListener('click', () => {
+        flyToNode(node);
+      });
+
+      // Show Right Sidebar
+      document.getElementById('right-sidebar').classList.add('open');
+      
+      // Auto focus camera
+      flyToNode(node);
+    }
+
+    function jumpToNode(nodeId) {
+      // Find if node exists in filteredGraph
+      const node = filteredGraph.nodes.find(n => n.id === nodeId);
+      if (node) {
+        selectNode(node);
+      } else {
+        // Alert that it is filtered out, or suggest disabling filters
+        alert(`Node "${nodeId.split(':').pop()}" is currently filtered out. Enable its layer/type to view.`);
+      }
+    }
+
+    // Navigates camera to focus on node
+    function flyToNode(node) {
+      if (!Graph || !node) return;
+      
+      // Calculate focus camera position
+      const distance = 80;
+      const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+      
+      Graph.cameraPosition(
+        { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }, // new position
+        node, // lookAt node
+        2000  // transition duration (ms)
+      );
+    }
+
+    function closeSidebar() {
+      document.getElementById('right-sidebar').classList.remove('open');
+      clickedNode = null;
+    }
+
+    // Search Logic
+    function handleSearch(query) {
+      const resultsContainer = document.getElementById('search-results');
+      if (!query.trim()) {
+        resultsContainer.style.display = 'none';
+        return;
+      }
+
+      // Filter in rawGraph or filteredGraph? We'll search filteredGraph so that users can jump immediately.
+      const queryLower = query.toLowerCase();
+      const matches = filteredGraph.nodes.filter(node => 
+        node.name.toLowerCase().includes(queryLower) || 
+        node.filePath.toLowerCase().includes(queryLower)
+      ).slice(0, 10); // cap results
+
+      if (matches.length > 0) {
+        resultsContainer.innerHTML = '';
+        matches.forEach(node => {
+          const item = document.createElement('div');
+          item.className = 'autocomplete-item';
+          item.innerHTML = `
+            <strong>${node.name}</strong>
+            <span class="autocomplete-item-path">${node.filePath}</span>
+          `;
+          item.addEventListener('click', () => {
+            selectNode(node);
+            document.getElementById('node-search').value = '';
+            resultsContainer.style.display = 'none';
+          });
+          resultsContainer.appendChild(item);
+        });
+        resultsContainer.style.display = 'block';
+      } else {
+        resultsContainer.innerHTML = '<div class="autocomplete-item" style="color: var(--text-muted); cursor: default;">No matching active files</div>';
+        resultsContainer.style.display = 'block';
+      }
+    }
+
+    // Custom File Loading
+    function showDropOverlay() {
+      document.getElementById('drop-overlay').classList.add('active');
+    }
+
+    function hideDropOverlay() {
+      document.getElementById('drop-overlay').classList.remove('active');
+    }
+
+    function handleFileSelect(input) {
+      const file = input.files[0];
+      if (file) {
+        parseAndLoadFile(file);
+      }
+    }
+
+    function parseAndLoadFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target.result);
+          if (!json.nodes || !json.edges || !json.layers) {
+            throw new Error("Invalid structure. Must have 'nodes', 'edges', and 'layers' keys.");
+          }
+          
+          hideDropOverlay();
+          closeSidebar();
+          
+          // Re-initialize app with new JSON
+          initApp(json);
+        } catch (err) {
+          alert('Error parsing JSON file: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  </script>
+</body>
+</html>

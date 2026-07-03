@@ -1,11 +1,33 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { createPortal } from 'react-dom';
-import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+
+const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
+
+const ModalSkeleton = () => (
+  <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 fade-in">
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+    <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden slide-up">
+      <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary animate-pulse" />
+          <div className="space-y-1">
+            <div className="h-5 w-48 bg-bg2/50 rounded animate-pulse" />
+            <div className="h-3 w-32 bg-bg2/50 rounded animate-pulse" />
+          </div>
+        </div>
+      </div>
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-primary" />
+      </div>
+    </div>
+  </div>
+);
 
 // We will fetch common combinations dynamically instead of using hardcoded constants
 
@@ -313,24 +335,20 @@ const POS = () => {
   const [rowSearchTerm, setRowSearchTerm] = useState('');
   const [rowSearchResults, setRowSearchResults] = useState<any[]>([]);
 
+  // React Query for row search autocomplete
+  const { data: rowSearchData } = useApiQuery(
+    ['row-medicine-search', rowSearchTerm.trim()],
+    () => api.searchMedicine(rowSearchTerm.trim()),
+    { enabled: activeRowSearchIndex !== null && rowSearchTerm.trim().length >= 3, staleTime: 10_000 }
+  );
+
   useEffect(() => {
-    if (activeRowSearchIndex === null || rowSearchTerm.trim().length < 3) {
+    if (rowSearchData && Array.isArray(rowSearchData)) {
+      setRowSearchResults(rowSearchData);
+    } else if (activeRowSearchIndex === null || rowSearchTerm.trim().length < 3) {
       setRowSearchResults([]);
-      return;
     }
-    
-    const delayDebounce = setTimeout(() => {
-      api.searchMedicine(rowSearchTerm)
-        .then(data => {
-          if (Array.isArray(data)) {
-            setRowSearchResults(data);
-          }
-        })
-        .catch(err => console.error('Error searching row medicine:', err));
-    }, 300);
-    
-    return () => clearTimeout(delayDebounce);
-  }, [rowSearchTerm, activeRowSearchIndex]);
+  }, [rowSearchData, rowSearchTerm, activeRowSearchIndex]);
 
   useDeferredEffect(() => {
     // Silent background refresh of doctors
@@ -524,50 +542,45 @@ const POS = () => {
       setSearchingOnline(false);
       return;
     }
-    
-    const delayDebounce = setTimeout(() => {
-      api.searchMedicine(searchTerm)
-        .then(data => {
-          if (Array.isArray(data)) {
-            // Premium Barcode Auto-Add Feature:
-            // If there is exactly one result, and the search term exactly matches its barcode (item_code),
-            // auto-add it to the cart and clear the search box.
-            const term = searchTerm.trim().toUpperCase();
-            if (data.length === 1) {
-              const matched = data[0];
-              const barcode = (matched.item_code || '').toUpperCase().trim();
-              if (barcode === term && matched.inventory_id && !matched.is_out_of_stock) {
-                addToCart({
-                  id: matched.inventory_id,
-                  medicine_id: matched.medicine_id,
-                  name: matched.medicine_name,
-                  batch: matched.batch_no,
-                  expiry: matched.expiry_date,
-                  mrp: matched.mrp,
-                  costPrice: matched.cost_price,
-                  salts: matched.salts || matched.hsn_code || 'Generic',
-                  packSize: matched.pack_size || 10,
-                  quantity: matched.quantity
-                });
-                setSearchTerm('');
-                setSearchResults([]);
-                return;
-              }
-            }
-
-            setSearchResults(data);
-            setOnlineResults([]);
-            setSearchingOnline(false);
-          }
-        })
-        .catch(err => {
-          console.error('Error searching medicines:', err);
-          setSearchingOnline(false);
-        });
-    }, 300);
-    
-    return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
+
+  // React Query autocomplete with dedup + abort
+  const { data: searchResultsData, isLoading: isSearchLoading } = useApiQuery(
+    ['medicine-search', searchTerm.trim()],
+    () => api.searchMedicine(searchTerm.trim()),
+    { enabled: searchTerm.trim().length >= 3, staleTime: 10_000 }
+  );
+
+  useEffect(() => {
+    if (searchResultsData && Array.isArray(searchResultsData)) {
+      // Premium Barcode Auto-Add Feature:
+      const term = searchTerm.trim().toUpperCase();
+      if (searchResultsData.length === 1) {
+        const matched = searchResultsData[0];
+        const barcode = (matched.item_code || '').toUpperCase().trim();
+        if (barcode === term && matched.inventory_id && !matched.is_out_of_stock) {
+          addToCart({
+            id: matched.inventory_id,
+            medicine_id: matched.medicine_id,
+            name: matched.medicine_name,
+            batch: matched.batch_no,
+            expiry: matched.expiry_date,
+            mrp: matched.mrp,
+            costPrice: matched.cost_price,
+            salts: matched.salts || matched.hsn_code || 'Generic',
+            packSize: matched.pack_size || 10,
+            quantity: matched.quantity
+          });
+          setSearchTerm('');
+          setSearchResults([]);
+          return;
+        }
+      }
+      setSearchResults(searchResultsData);
+      setOnlineResults([]);
+      setSearchingOnline(false);
+    }
+  }, [searchResultsData, searchTerm]);
 
   // Universal Edit state
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
@@ -2230,13 +2243,15 @@ const POS = () => {
       )}
       
       {editMedicineId && (
-        <UniversalMedicineEditModal 
-          medicineId={editMedicineId} 
-          onClose={() => setEditMedicineId(null)} 
-          onSave={() => {
-            // Optional: Re-fetch or update local search results state if needed
-          }} 
-        />
+        <Suspense fallback={<ModalSkeleton />}>
+          <UniversalMedicineEditModal 
+            medicineId={editMedicineId} 
+            onClose={() => setEditMedicineId(null)} 
+            onSave={() => {
+              // Optional: Re-fetch or update local search results state if needed
+            }} 
+          />
+        </Suspense>
       )}
 
     </div>

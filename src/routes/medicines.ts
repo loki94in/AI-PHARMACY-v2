@@ -64,9 +64,9 @@ router.get('/medicines', async (req, res) => {
     }
     
     if (search) {
+      const prefixParam = `${search}%`;
       whereClauses.push('(name LIKE ? OR item_code LIKE ? OR manufacturer LIKE ? OR api_reference LIKE ?)');
-      const searchParam = `%${search}%`;
-      params.push(searchParam, searchParam, searchParam, searchParam);
+      params.push(prefixParam, prefixParam, prefixParam, prefixParam);
     }
 
     if (productName) {
@@ -124,7 +124,31 @@ router.get('/medicines', async (req, res) => {
     const totalItems = countRow ? countRow.total : 0;
     const totalPages = Math.ceil(totalItems / limit);
     
-    const medicines = await db.all(query, ...[...params, limit, offset]);
+    let medicines = await db.all(query, ...[...params, limit, offset]);
+    
+    // Fallback: if prefix search returns < 15 results, try middle-word search
+    if (search && medicines.length < 15) {
+      const fallbackParams = [...params];
+      // Replace prefix params with middle-word params (positions 0-3 in params for search)
+      for (let i = 0; i < fallbackParams.length; i++) {
+        if (fallbackParams[i] === `${search}%`) {
+          fallbackParams[i] = `%${search}%`;
+        }
+      }
+      // Execute same query with fallback params
+      const fallbackMedicines = await db.all(query, ...[...fallbackParams, limit, offset]);
+      // Merge results, avoiding duplicates by id
+      const seenIds = new Set(medicines.map((m: any) => m.id));
+      for (const med of fallbackMedicines) {
+        if (!seenIds.has(med.id)) {
+          medicines.push(med);
+          seenIds.add(med.id);
+        }
+      }
+      // Trim to limit
+      medicines = medicines.slice(0, limit);
+    }
+    
     await dbManager.close();
     
     res.json({

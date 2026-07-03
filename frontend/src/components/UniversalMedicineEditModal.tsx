@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, RefreshCw, AlertTriangle, Pill, Package, Factory, LayoutGrid, Barcode, Tag, MapPin, Database, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
@@ -9,7 +9,7 @@ interface Props {
   onSave: () => void;
 }
 
-export const UniversalMedicineEditModal: React.FC<Props> = ({ medicineId, onClose, onSave }) => {
+const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose, onSave }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -331,3 +331,5 @@ export const UniversalMedicineEditModal: React.FC<Props> = ({ medicineId, onClos
     document.body
   );
 };
+
+export const UniversalMedicineEditModal = memo(UniversalMedicineEditModalInner);

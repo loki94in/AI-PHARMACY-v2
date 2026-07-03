@@ -88,6 +88,7 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_inventory_master_medicine_id ON inventory_master (medicine_id);
     CREATE INDEX IF NOT EXISTS idx_inventory_master_batch_no ON inventory_master (batch_no);
     CREATE INDEX IF NOT EXISTS idx_inventory_master_search_filter ON inventory_master (quantity, expiry_date, medicine_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_master_med_qty_exp ON inventory_master (medicine_id, quantity, expiry_date);
     CREATE TABLE IF NOT EXISTS sales_invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       invoice_no TEXT UNIQUE,
