@@ -44,3 +44,38 @@ The following subsystem implements `self-healing-spec.md`. Do not duplicate or r
 ### OS-level watchdog (outside this directory)
 - Not in `src/` — see `self-healing-spec.md` Section 3 for launcher/installer notes.
 - Restarts the Node process on exit code 1 with backoff matching `WorkerSupervisor` pattern.
+
+## Unified Medicine Availability Engine (added 2026-07)
+
+The engine provides a single, unified approach to medicine availability and alternative finding across all touchpoints (POS, Catalog, Telegram).
+
+### Core Files
+| File | Purpose |
+|------|---------|
+| `src/services/medicineAvailabilityEngine.ts` | Core service: availability checks, substitute finding, stock levels, learning |
+| `src/worker/stockCalculatorWorker.ts` | Background worker: recalculates stock_config from sale_items daily |
+| `src/worker/substituteCacheWorker.ts` | Background worker: pre-computes substitute relationships weekly |
+| `src/routes/medicineAvailability.ts` | API endpoints for availability, substitutes, emergency stock, learning |
+
+### Database Tables (added to `src/database.ts`)
+- `stock_config`: per-medicine avg_daily_sales, lead_time, safety_factor, min/max/reorder levels
+- `substitutes`: pre-computed substitute relationships (composition, category, fuzzy, manual)
+- `pharmacist_corrections`: learns from pharmacist corrections for progressive improvement
+
+### API Endpoints
+- `GET /api/medicines/availability?query=&mode=&includeOutOfStock=` — main search with fallbacks
+- `GET /api/medicines/search-full?query=&category=` — full search including out-of-stock
+- `GET /api/medicines/substitutes/:medicineId?mode=&maxDistance=` — get substitutes for a medicine
+- `GET /api/medicines/emergency-stock?categories=` — critical medicine stock check
+- `POST /api/medicines/learn-correction` — learn from pharmacist correction
+- `POST /api/medicines/recalculate-stock` — manually trigger stock recalculation
+- `POST /api/medicines/rebuild-substitutes` — manually rebuild substitute cache
+
+### Background Workers (started on boot in `src/server.ts`)
+- `startStockCalculatorWorker()` — runs daily (86400000ms), recalculates stock limits from sales
+- `startSubstituteCacheWorker()` — runs weekly (604800000ms), pre-computes substitute relationships
+
+### Integration Points
+- `src/telegramBot.ts`: uses engine for out-of-stock alternative suggestions
+- `src/routes/sales.ts`: existing batched alternatives approach preserved (compatible)
+- `src/routes/catalog.ts`: catalog enrichment pipeline preserved (compatible)

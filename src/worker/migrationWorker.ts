@@ -127,7 +127,7 @@ function validateAndCleanCSVRow(row: any, mapping?: Record<string, string>): { i
       const rawVal = row[rawKey];
       if (rawVal === undefined || rawVal === null) continue;
 
-      if (targetCol === 'quantity' || targetCol === 'loose_qty' || targetCol === 'loose_quantity') {
+      if (targetCol === 'quantity') {
         const valStr = String(rawVal).trim();
         const parsed = parseInt(valStr, 10);
         if (valStr !== '' && (isNaN(parsed) || parsed < 0)) {
@@ -135,6 +135,11 @@ function validateAndCleanCSVRow(row: any, mapping?: Record<string, string>): { i
         } else if (valStr !== '') {
           cleaned[rawKey] = parsed;
         }
+      } else if (targetCol === 'loose_qty' || targetCol === 'loose_quantity') {
+        // ponytail: degrade gracefully — bad loose cell must not drop the whole row
+        const valStr = String(rawVal).trim();
+        const parsed = parseInt(valStr, 10);
+        cleaned[rawKey] = (Number.isFinite(parsed) && parsed > 0) ? Math.floor(parsed) : 0;
       }
       else if (targetCol === 'mrp' || targetCol === 'cost_price' || targetCol === 'total_amount' || targetCol === 'cgst' || targetCol === 'sgst' || targetCol === 'discount') {
         const valStr = String(rawVal).trim();
@@ -731,15 +736,22 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   try {
     await db.run(`
       UPDATE inventory_master
-      SET quantity = COALESCE((
-        SELECT SUM(sl.quantity)
-        FROM stock_ledger sl
-        WHERE sl.medicine_id = inventory_master.medicine_id
-          AND sl.batch_no = inventory_master.batch_no
-      ), 0)
+      SET 
+        quantity = COALESCE((
+          SELECT SUM(sl.quantity)
+          FROM stock_ledger sl
+          WHERE sl.medicine_id = inventory_master.medicine_id
+            AND sl.batch_no = inventory_master.batch_no
+        ), 0),
+        loose_quantity = COALESCE((
+          SELECT SUM(sl.loose_quantity)
+          FROM stock_ledger sl
+          WHERE sl.medicine_id = inventory_master.medicine_id
+            AND sl.batch_no = inventory_master.batch_no
+        ), 0)
       WHERE legacy_batch_id IS NOT NULL
     `);
-    console.log('[Migration] Inventory quantities rebuilt from stock_ledger');
+    console.log('[Migration] Inventory quantities and loose quantities rebuilt from stock_ledger');
   } catch (qtyErr: any) {
     console.warn('[Migration] Stock quantity rebuild skipped:', qtyErr.message);
   }

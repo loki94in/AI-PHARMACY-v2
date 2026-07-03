@@ -319,6 +319,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE special_orders ADD COLUMN source_refill_id INTEGER DEFAULT NULL`,
     `ALTER TABLE automation_notifications ADD COLUMN needs_confirmation INTEGER DEFAULT 0`,
     `ALTER TABLE automation_notifications ADD COLUMN lifecycle_status TEXT DEFAULT 'sent'`,
+    `ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
   ];
   for (const stmt of alterStatements) {
     try {
@@ -491,6 +492,7 @@ export async function ensureSchema(dbPath: string) {
       medicine_id INTEGER,
       batch_no TEXT,
       quantity INTEGER,
+      loose_quantity INTEGER DEFAULT 0,
       transaction_type TEXT,
       transaction_id TEXT,
       business_date DATETIME,
@@ -806,6 +808,53 @@ export async function ensureSchema(dbPath: string) {
       delivery_persons_json TEXT,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Unified Engine: Stock configuration per medicine
+    CREATE TABLE IF NOT EXISTS stock_config (
+      medicine_id INTEGER PRIMARY KEY,
+      avg_daily_sales REAL DEFAULT 0,
+      lead_time_days INTEGER DEFAULT 7,
+      safety_factor REAL DEFAULT 1.5,
+      min_stock_level INTEGER DEFAULT 0,
+      max_stock_level INTEGER DEFAULT 0,
+      reorder_level INTEGER DEFAULT 0,
+      category_fallback TEXT,
+      last_calculated DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_config_avg_sales ON stock_config (avg_daily_sales);
+
+    -- Unified Engine: Pre-computed substitute relationships
+    CREATE TABLE IF NOT EXISTS substitutes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_medicine_id INTEGER NOT NULL,
+      substitute_medicine_id INTEGER NOT NULL,
+      match_type TEXT NOT NULL CHECK(match_type IN ('composition', 'category', 'fuzzy', 'manual')),
+      confidence REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_verified DATETIME DEFAULT CURRENT_TIMESTAMP,
+      verification_count INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      FOREIGN KEY(source_medicine_id) REFERENCES medicines(id),
+      FOREIGN KEY(substitute_medicine_id) REFERENCES medicines(id),
+      UNIQUE(source_medicine_id, substitute_medicine_id, match_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_substitutes_source ON substitutes (source_medicine_id);
+    CREATE INDEX IF NOT EXISTS idx_substitutes_type ON substitutes (match_type);
+    CREATE INDEX IF NOT EXISTS idx_substitutes_confidence ON substitutes (confidence DESC);
+
+    -- Unified Engine: Pharmacist correction learning
+    CREATE TABLE IF NOT EXISTS pharmacist_corrections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      original_query TEXT NOT NULL,
+      corrected_medicine_id INTEGER NOT NULL,
+      context TEXT,
+      count INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(corrected_medicine_id) REFERENCES medicines(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_corrections_query ON pharmacist_corrections (original_query);
   `);
 
   // Insert default settings if they don't exist

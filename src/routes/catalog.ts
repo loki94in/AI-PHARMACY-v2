@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import { dbManager } from '../database/connection.js';
+import { runEnrichment, getEnrichmentRunningState } from '../worker/compositionEnricher.js';
 
 const router = express.Router();
 
@@ -232,6 +233,12 @@ router.post('/catalog/import', async (req, res) => {
     }
     
     await dbManager.close();
+
+    // Auto-feed enrichment after catalog import
+    if (!getEnrichmentRunningState()) {
+      runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
+    }
+
     res.json({ success: true, message: 'Catalog imported successfully' });
   } catch (error) {
     await dbManager.close();
@@ -406,6 +413,13 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
             approvedData.manufacturer || null
           ]
         );
+
+        // Precompute substitutes in the background
+        import('../worker/substituteCacheWorker.js')
+          .then(({ precomputeSubstitutes }) => {
+            precomputeSubstitutes().catch(err => console.error('[Catalog] Background substitute precompute failed:', err));
+          })
+          .catch(err => console.error('[Catalog] Failed to load substituteCacheWorker:', err));
       } catch (refErr) {
         console.warn('Continuous learning save failed:', refErr);
       }
@@ -448,6 +462,11 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
     }
     
     await dbManager.close();
+
+    // Auto-feed enrichment after catalog approve
+    if (!getEnrichmentRunningState()) {
+      runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
+    }
     
     const { eventService } = await import('../services/eventService.js');
     eventService.broadcast('catalog_review_updated', {

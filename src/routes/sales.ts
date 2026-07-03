@@ -1,6 +1,7 @@
 import express from 'express';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
+import { productNameFilterService } from '../services/productNameFilterService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -871,12 +872,62 @@ router.get('/search-medicine', async (req, res) => {
       row.is_out_of_stock = row.is_out_of_stock === 1;
     }
     
-    // Fetch alternatives in a single batched query
-    const apiRefs = [...new Set(rows.map(r => r.api_reference).filter(a => a && a.trim() !== ''))];
-    let alternativesMap: Record<string, any[]> = {};
+    // Fetch alternatives via precomputed substitutes table
+    const medicineIds = rows.map(r => r.medicine_id);
     
-    if (apiRefs.length > 0) {
-      const placeholders = apiRefs.map(() => '?').join(',');
+    if (medicineIds.length > 0) {
+      const placeholders = medicineIds.map(() => '?').join(',');
+      const subsSql = `
+        SELECT s.source_medicine_id, s.substitute_medicine_id, s.confidence, s.match_type
+        FROM substitutes s
+        WHERE s.source_medicine_id IN (${placeholders}) AND s.is_active = 1
+        ORDER BY s.confidence DESC
+      `;
+      const subs = await db.all(subsSql, medicineIds);
+      
+      const subsMap: Record<number, number[]> = {};
+      const allSubMedIds = new Set<number>();
+      for (const sub of subs) {
+        if (!subsMap[sub.source_medicine_id]) subsMap[sub.source_medicine_id] = [];
+        if (subsMap[sub.source_medicine_id].length < 5) {
+          subsMap[sub.source_medicine_id].push(sub.substitute_medicine_id);
+          allSubMedIds.add(sub.substitute_medicine_id);
+        }
+      }
+      
+      let altInventory: any[] = [];
+      const uniqueSubMedIds = [...allSubMedIds];
+      if (uniqueSubMedIds.length > 0) {
+        const subPlaceholders = uniqueSubMedIds.map(() => '?').join(',');
+        const altSql = `
+          SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
+                 im.batch_no, im.expiry_date, im.quantity, im.mrp, im.unit_price, im.cost_price,
+                 m.cgst, m.sgst, m.igst, m.hsn_code
+          FROM inventory_master im
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE im.medicine_id IN (${subPlaceholders})
+            AND im.quantity > 0
+        `;
+        altInventory = await db.all(altSql, uniqueSubMedIds);
+      }
+      
+      for (const row of rows) {
+        const targetMedIds = subsMap[row.medicine_id] || [];
+        row.alternatives = altInventory
+          .filter(inv => targetMedIds.includes(inv.medicine_id))
+          .slice(0, 5);
+      }
+    } else {
+      for (const row of rows) {
+        row.alternatives = [];
+      }
+    }
+
+    // Dynamic composition fallback for any row that has empty alternatives
+    const fallbackMeds = rows.filter(r => (!r.alternatives || r.alternatives.length === 0) && r.api_reference && r.api_reference.trim() !== '');
+    if (fallbackMeds.length > 0) {
+      const fallbackApiRefs = [...new Set(fallbackMeds.map(r => r.api_reference))];
+      const placeholders = fallbackApiRefs.map(() => '?').join(',');
       const altSql = `
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                im.batch_no, im.expiry_date, im.quantity, im.mrp, im.unit_price, im.cost_price,
@@ -887,23 +938,87 @@ router.get('/search-medicine', async (req, res) => {
           AND im.quantity > 0
         LIMIT 100
       `;
-      const allAlts = await db.all(altSql, apiRefs);
-      for (const alt of allAlts) {
-        if (!alternativesMap[alt.api_reference]) alternativesMap[alt.api_reference] = [];
-        alternativesMap[alt.api_reference].push(alt);
+      const fallbackAlts = await db.all(altSql, fallbackApiRefs);
+      
+      const fallbackMap: Record<string, any[]> = {};
+      for (const alt of fallbackAlts) {
+        if (!fallbackMap[alt.api_reference]) fallbackMap[alt.api_reference] = [];
+        fallbackMap[alt.api_reference].push(alt);
       }
-    }
-
-    // Attach alternatives
-    for (const row of rows) {
-      const alts = alternativesMap[row.api_reference] || [];
-      // Filter out self alternatives
-      row.alternatives = alts.filter(a => a.medicine_id !== row.medicine_id).slice(0, 5);
+      
+      for (const row of rows) {
+        if (!row.alternatives || row.alternatives.length === 0) {
+          const alts = fallbackMap[row.api_reference] || [];
+          row.alternatives = alts.filter(a => a.medicine_id !== row.medicine_id).slice(0, 5);
+        }
+      }
     }
 
     res.json(rows);
   } catch (error) {
     console.error('Failed to search medicine:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get fuzzy medicine suggestions when search results are thin
+router.get('/sales/suggest-medicine', async (req, res) => {
+  const query = req.query.q as string;
+  if (!query || query.trim().length < 2) {
+    return res.json([]);
+  }
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    await productNameFilterService.initialize();
+    
+    const filterResult = await productNameFilterService.filterProductNames(query.trim(), { minConfidenceThreshold: 0.6 });
+    const matchedNames = filterResult.matches.slice(0, 3);
+    if (matchedNames.length === 0) {
+      await dbManager.close();
+      return res.json([]);
+    }
+    
+    const placeholders = matchedNames.map(() => '?').join(',');
+    const sql = `SELECT id AS medicine_id, name, api_reference FROM medicines WHERE name IN (${placeholders})`;
+    const rows = await db.all(sql, matchedNames);
+    await dbManager.close();
+    
+    // Sort according to matchedNames order
+    const sorted = matchedNames
+      .map(name => rows.find(r => r.name.toLowerCase() === name.toLowerCase()))
+      .filter(Boolean);
+      
+    res.json(sorted);
+  } catch (error) {
+    if (db) await dbManager.close();
+    console.error('Failed to get suggestions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add a medicine to the composition queue from POS
+router.post('/sales/queue-from-pos', async (req, res) => {
+  const { medicine_id } = req.body;
+  if (!medicine_id) {
+    return res.status(400).json({ error: 'medicine_id is required' });
+  }
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const med = await db.get('SELECT enrichment_status FROM medicines WHERE id = ?', medicine_id);
+    if (!med) {
+      await dbManager.close();
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+    if (med.enrichment_status !== 'manual') {
+      await db.run("UPDATE medicines SET enrichment_status = 'needs_review' WHERE id = ?", medicine_id);
+    }
+    await dbManager.close();
+    res.json({ success: true, id: medicine_id });
+  } catch (error) {
+    if (db) await dbManager.close();
+    console.error('Failed to queue medicine from POS:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

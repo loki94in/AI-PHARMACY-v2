@@ -190,6 +190,19 @@ class DatabaseManager {
               backupRecoveryService.triggerSnapshot();
             })
             .catch(err => console.error('Failed to import backupRecoveryService:', err));
+
+          const isInventoryWrite = sqlLower.includes('inventory_master') || 
+                                   sqlLower.includes('sale_items') || 
+                                   sqlLower.includes('sales_invoices') || 
+                                   sqlLower.includes('purchase_items') || 
+                                   sqlLower.includes('purchases') || 
+                                   sqlLower.includes('return_items') || 
+                                   sqlLower.includes('returns');
+          if (isInventoryWrite) {
+            import('../services/expiryAlertService.js')
+              .then(m => m.triggerExpiryCacheRebuildDebounced())
+              .catch(err => console.error('Failed to trigger expiry cache rebuild:', err));
+          }
         }
       };
 

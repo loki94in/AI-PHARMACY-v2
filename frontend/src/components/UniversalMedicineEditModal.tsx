@@ -18,6 +18,8 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
   const [totalStock, setTotalStock] = useState<number>(0);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
+  const [mrkSuggestions, setMrkSuggestions] = useState<string[]>([]);
+  const [showMrkSuggestions, setShowMrkSuggestions] = useState(false);
 
   const handleMfgChange = async (val: string) => {
     setForm((prev: any) => ({ ...prev, manufacturer: val }));
@@ -37,6 +39,27 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
       setShowMfgSuggestions(true);
     } catch (err) {
       console.error('Error fetching manufacturers:', err);
+    }
+  };
+
+  const handleMrkChange = async (val: string) => {
+    setForm((prev: any) => ({ ...prev, marketed_by: val }));
+    try {
+      const res = await api.getMarketedBy(val);
+      setMrkSuggestions(res || []);
+      setShowMrkSuggestions(true);
+    } catch (err) {
+      console.error('Error fetching marketed-by list:', err);
+    }
+  };
+
+  const handleMrkFocus = async (val: string) => {
+    try {
+      const res = await api.getMarketedBy(val);
+      setMrkSuggestions(res || []);
+      setShowMrkSuggestions(true);
+    } catch (err) {
+      console.error('Error fetching marketed-by list:', err);
     }
   };
 
@@ -218,12 +241,34 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
                       </div>
                     )}
                   </div>
-                  <div>
+                  <div className="relative">
                     <label className="block text-xs font-semibold text-muted mb-1.5">Marketed By</label>
                     <input 
-                      type="text" name="marketed_by" value={form.marketed_by} onChange={handleChange}
+                      type="text" 
+                      name="marketed_by" 
+                      value={form.marketed_by} 
+                      onChange={(e) => handleMrkChange(e.target.value)}
+                      onFocus={(e) => handleMrkFocus(e.target.value)}
+                      onBlur={() => setTimeout(() => setShowMrkSuggestions(false), 200)}
                       className="w-full px-4 py-2 bg-bg3 border border-glass-border rounded-xl text-sm text-text focus:border-primary focus:outline-none transition-all"
                     />
+                    {showMrkSuggestions && mrkSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-40 overflow-y-auto z-dropdown text-left">
+                        {mrkSuggestions.map((mrkName, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setForm((prev: any) => ({ ...prev, marketed_by: mrkName }))}
+                            className="w-full text-left px-3 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 flex items-center justify-between text-xs"
+                          >
+                            <span className="truncate pr-2 font-medium">{mrkName}</span>
+                            <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-1 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0">
+                              In Database
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>

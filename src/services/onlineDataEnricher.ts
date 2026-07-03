@@ -1,4 +1,5 @@
 import { checkConnectivity } from '../utils/networkDetector.js';
+import { dbManager } from '../database/connection.js';
 import { OpenFdaClient } from './apiClients/openFdaClient.js';
 import { BaseApiClient } from './apiClients/baseApiClient.js';
 import { cacheService } from './cacheService.js';
@@ -82,11 +83,60 @@ export class OnlineDataEnricher {
             // Store in cache for future queries
             await cacheService.set(cleanName, enrichedData);
             console.log(`[Enricher] [Background] Successfully enriched ${cleanName} using ${client.name}`);
+
+            // Update SQLite medicines table and medicine_reference table
+            if (enrichedData.activeIngredients && enrichedData.activeIngredients.length > 0) {
+              const composition = enrichedData.activeIngredients.join(' + ');
+              const db = await dbManager.getConnection();
+              try {
+                await db.run(
+                  "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.95 WHERE name = ? COLLATE NOCASE",
+                  [composition, cleanName]
+                );
+                await db.run(
+                  "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
+                  [cleanName, composition, enrichedData.manufacturer || null]
+                );
+                console.log(`[Enricher] [Background] Saved ${cleanName} composition (${composition}) directly to SQLite.`);
+              } catch (dbErr) {
+                console.error('[Enricher] [Background] SQLite save failed:', dbErr);
+              } finally {
+                await dbManager.close();
+              }
+            }
             return;
           }
         } catch (clientErr) {
           console.error(`[Enricher] [Background] API Client ${client.name} query failed for ${cleanName}:`, clientErr);
         }
+      }
+
+      // 4. Try Google Search Puppeteer discovery fallback
+      try {
+        console.log(`[Enricher] [Background] APIs returned no results for ${cleanName}. Trying Google search discovery fallback...`);
+        const { googleSearchService } = await import('./googleSearchService.js');
+        const googleResult = await googleSearchService.discoverMedicineInfo(cleanName);
+        if (googleResult && googleResult.api_reference && googleResult.api_reference.trim() !== '') {
+          const composition = googleResult.api_reference.trim();
+          const db = await dbManager.getConnection();
+          try {
+            await db.run(
+              "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.80 WHERE name = ? COLLATE NOCASE",
+              [composition, cleanName]
+            );
+            await db.run(
+              "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
+              [cleanName, composition, googleResult.manufacturer || null]
+            );
+            console.log(`[Enricher] [Background] Successfully discovered and saved ${cleanName} composition (${composition}) via Google search.`);
+          } catch (dbErr) {
+            console.error('[Enricher] [Background] Google save failed:', dbErr);
+          } finally {
+            await dbManager.close();
+          }
+        }
+      } catch (googleErr: any) {
+        console.error('[Enricher] [Background] Google search discovery failed:', googleErr.message || googleErr);
       }
     } catch (err) {
       console.error(`[Enricher] [Background] Failed to enrich medicine ${cleanName}:`, err);

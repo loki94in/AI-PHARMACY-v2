@@ -57,6 +57,7 @@ import enrichmentRouter from './routes/enrichment.js';
 import distributorsRouter from './routes/distributors.js';
 import notificationsRouter from './routes/notifications.js';
 import investigationRouter from './routes/investigation.js';
+import medicineAvailabilityRouter from './routes/medicineAvailability.js';
 import './services/pushNotificationService.js';
 import { whatsappQueue } from './services/whatsappQueue.js';
 import cron from 'node-cron';
@@ -199,6 +200,7 @@ app.use('/api', enrichmentRouter);
 app.use('/api', distributorsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api/investigation', investigationRouter);
+app.use('/api', medicineAvailabilityRouter);
 
 
 
@@ -298,6 +300,17 @@ ensureSchema(DB_PATH).then(async () => {
 
         // 2. WhatsApp Queue Worker (started always; checks automation_enabled inside processQueue)
         whatsappQueue.startWorker();
+
+        // Start Unified Engine background workers
+        try {
+          const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
+          const { startSubstituteCacheWorker } = await import('./worker/substituteCacheWorker.js');
+          startStockCalculatorWorker();
+          startSubstituteCacheWorker();
+          console.log('[Boot] Unified Engine background workers started');
+        } catch (engineErr) {
+          console.error('Failed to start Unified Engine workers:', engineErr);
+        }
 
         // Start new background services for Pharmarack, messaging queue and refills
         try {

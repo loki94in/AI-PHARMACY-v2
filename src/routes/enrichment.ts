@@ -1,10 +1,22 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
 import { dbManager } from '../database/connection.js';
 import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState } from '../worker/compositionEnricher.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
+const REFERENCE_CSV = path.join(DATA_DIR, 'reference_medicines.csv');
+
 const router = express.Router();
 
-// Get enrichment status
+// multer: memory storage for reference CSV uploads
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+// ─── Get enrichment status ────────────────────────────────────────────────────
 router.get('/enrichment/status', async (_req, res) => {
   try {
     const status = await getEnrichmentStatus();
@@ -15,7 +27,7 @@ router.get('/enrichment/status', async (_req, res) => {
   }
 });
 
-// Start enrichment process
+// ─── Start enrichment process ─────────────────────────────────────────────────
 router.post('/enrichment/start', async (_req, res) => {
   try {
     if (getEnrichmentRunningState()) {
@@ -38,7 +50,97 @@ router.post('/enrichment/start', async (_req, res) => {
   }
 });
 
-// Get enrichment queue (medicines needing manual review)
+// ─── Import salt master CSV ───────────────────────────────────────────────────
+// POST /api/enrichment/reference/import
+// Accepts multipart CSV; saves to data/reference_medicines.csv; force-reloads into medicine_reference.
+router.post('/enrichment/reference/import', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    if (!req.file.originalname.toLowerCase().endsWith('.csv')) {
+      return res.status(400).json({ error: 'Only CSV files are accepted' });
+    }
+
+    // Save to disk atomically
+    const tmpPath = REFERENCE_CSV + '.tmp';
+    fs.writeFileSync(tmpPath, req.file.buffer);
+    fs.renameSync(tmpPath, REFERENCE_CSV);
+
+    // Force-reload into medicine_reference table
+    const result = await loadReferenceData({ force: true });
+
+    res.json({ success: true, loaded: result.loaded, skipped: result.skipped });
+  } catch (error) {
+    console.error('Failed to import reference CSV:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Export salt master CSV ───────────────────────────────────────────────────
+// GET /api/enrichment/reference/export
+// Streams medicine_reference table as CSV.
+router.get('/enrichment/reference/export', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all('SELECT name, composition1, composition2, manufacturer FROM medicine_reference ORDER BY name');
+    await dbManager.close();
+
+    const header = 'name,short_composition1,short_composition2,manufacturer_name\n';
+    const body = rows.map(r => {
+      const escape = (v: string | null) => {
+        const s = (v || '').replace(/"/g, '""');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+      };
+      return [escape(r.name), escape(r.composition1), escape(r.composition2), escape(r.manufacturer)].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="reference_medicines.csv"');
+    res.send(header + body);
+  } catch (error) {
+    console.error('Failed to export reference CSV:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Export verified compositions CSV ────────────────────────────────────────
+// GET /api/enrichment/export?status=manual
+// Streams verified medicines as CSV.
+router.get('/enrichment/export', async (req, res) => {
+  try {
+    const status = (req.query.status as string) || 'manual';
+    const allowed = ['manual', 'matched', 'needs_review'];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
+    }
+
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      `SELECT name, api_reference, manufacturer FROM medicines WHERE enrichment_status = ? ORDER BY name`,
+      status
+    );
+    await dbManager.close();
+
+    const header = 'name,api_reference,manufacturer\n';
+    const body = rows.map(r => {
+      const escape = (v: string | null) => {
+        const s = (v || '').replace(/"/g, '""');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+      };
+      return [escape(r.name), escape(r.api_reference), escape(r.manufacturer)].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="verified_medicines_${status}.csv"`);
+    res.send(header + body);
+  } catch (error) {
+    console.error('Failed to export verified CSV:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Get enrichment queue ─────────────────────────────────────────────────────
 router.get('/enrichment/queue', async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -88,7 +190,7 @@ router.get('/enrichment/queue', async (req, res) => {
   }
 });
 
-// Manually set composition for a medicine
+// ─── Manually set composition for a medicine ──────────────────────────────────
 router.put('/enrichment/queue/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);

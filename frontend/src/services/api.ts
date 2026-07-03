@@ -234,6 +234,7 @@ export const api = {
   createMedicineAlias: (aliasName: string, medicineId: number) => apiClient.post('/inventory/medicines/alias', { alias_name: aliasName, medicine_id: medicineId }).then(res => res.data),
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
   getManufacturers: (q: string) => apiClient.get('/manufacturers', { params: { q } }).then(res => res.data),
+  getMarketedBy: (q: string) => apiClient.get('/marketed-by', { params: { q } }).then(res => res.data),
 
 
   
@@ -405,6 +406,17 @@ export const api = {
     apiClient.get('/enrichment/queue', { params: { page, limit, filter } }).then(res => res.data),
   updateComposition: (id: number, composition: string) =>
     apiClient.put(`/enrichment/queue/${id}`, { composition }).then(res => res.data),
+  importReferenceCsv: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiClient.post('/enrichment/reference/import', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => res.data);
+  },
+  exportReferenceCsv: () => apiClient.get('/enrichment/reference/export', { responseType: 'blob' }).then(res => res.data),
+  exportVerifiedCsv: (status = 'manual') => apiClient.get('/enrichment/export', { params: { status }, responseType: 'blob' }).then(res => res.data),
+
+  // POS fuzzy suggestions
+  suggestMedicine: (q: string) => apiClient.get('/sales/suggest-medicine', { params: { q } }).then(res => res.data),
+  queueFromPos: (medicine_id: number) => apiClient.post('/sales/queue-from-pos', { medicine_id }).then(res => res.data),
   
   // Utilities (Barcode generation)
   generateMedicineBarcodes: (items: Array<{ name: string; batch?: string }>) => apiClient.post('/utilities/barcode', { items }).then(res => res.data),

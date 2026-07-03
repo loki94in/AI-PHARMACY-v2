@@ -1,6 +1,7 @@
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,6 +85,13 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
 
 export async function checkAndRunScheduledExpiryScan(days = 90) {
   console.log('[ExpiryScan] Checking if scheduled 15-day expiry scan is overdue...');
+  
+  try {
+    await rebuildAllExpiryCaches();
+  } catch (err) {
+    console.error('[ExpiryScan] Failed to build cache files during check:', err);
+  }
+
   try {
     const db = await dbManager.getConnection();
     await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
@@ -121,7 +129,7 @@ export async function checkAndRunScheduledExpiryScan(days = 90) {
         // Update database timestamp to current time only after a successful run
         const dbUpdate = await dbManager.getConnection();
         await dbUpdate.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", ['last_expiry_scan_timestamp', now.toISOString()]);
-                console.log('[ExpiryScan] Execution timestamp successfully updated in database.');
+        console.log('[ExpiryScan] Execution timestamp successfully updated in database.');
       } else {
         console.warn('[ExpiryScan] Expiry scan skipped or failed to send notification. Database timestamp not updated (will retry next check).');
       }
@@ -129,4 +137,88 @@ export async function checkAndRunScheduledExpiryScan(days = 90) {
   } catch (err) {
     console.error('[ExpiryScan] Failed to execute scheduled expiry scan check:', err);
   }
+}
+
+export function getExpiryYearMonth(expiryDateStr: string | null | undefined): string {
+  if (!expiryDateStr) return 'unknown';
+  let year: number;
+  let month: number;
+  
+  const trimmed = expiryDateStr.trim();
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/');
+    month = parseInt(parts[0], 10);
+    year = parseInt(parts[1], 10);
+    if (year < 100) year += 2000;
+  } else {
+    const d = new Date(trimmed);
+    if (isNaN(d.getTime())) return 'unknown';
+    year = d.getFullYear();
+    month = d.getMonth() + 1;
+  }
+  
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+    return 'unknown';
+  }
+  
+  return `${year}_${String(month).padStart(2, '0')}`;
+}
+
+export async function rebuildAllExpiryCaches(): Promise<void> {
+  console.log('[ExpiryCache] Rebuilding all month-wise expiry cache files...');
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(`
+      SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
+      FROM inventory_master im
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE im.quantity > 0
+      ORDER BY im.expiry_date ASC
+    `);
+
+    const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+    
+    // Clear/ensure the directory exists
+    if (fs.existsSync(cacheDir)) {
+      const files = await fs.promises.readdir(cacheDir);
+      for (const file of files) {
+        if (file.startsWith('expiry_') && file.endsWith('.json')) {
+          await fs.promises.unlink(path.join(cacheDir, file));
+        }
+      }
+    } else {
+      await fs.promises.mkdir(cacheDir, { recursive: true });
+    }
+
+    // Group items by year_month
+    const groups: Record<string, typeof rows> = {};
+    for (const r of rows) {
+      const ym = getExpiryYearMonth(r.expiry_date);
+      if (!groups[ym]) {
+        groups[ym] = [];
+      }
+      groups[ym].push(r);
+    }
+
+    // Write group files
+    for (const [ym, items] of Object.entries(groups)) {
+      const filePath = path.join(cacheDir, `expiry_${ym}.json`);
+      await fs.promises.writeFile(filePath, JSON.stringify(items, null, 2), 'utf-8');
+    }
+    console.log(`[ExpiryCache] Successfully regenerated cache files for ${Object.keys(groups).length} month(s).`);
+  } catch (err) {
+    console.error('[ExpiryCache] Error rebuilding expiry caches:', err);
+  }
+}
+
+let rebuildTimeout: NodeJS.Timeout | null = null;
+
+export function triggerExpiryCacheRebuildDebounced(): void {
+  if (rebuildTimeout) {
+    clearTimeout(rebuildTimeout);
+  }
+  rebuildTimeout = setTimeout(async () => {
+    rebuildTimeout = null;
+    await rebuildAllExpiryCaches();
+  }, 1000); // 1-second debounce
 }

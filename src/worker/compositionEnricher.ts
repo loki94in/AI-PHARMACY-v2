@@ -70,14 +70,19 @@ function calculateMatchScore(name1: string, name2: string): number {
 
 // ─── Reference CSV Loader ──────────────────────────────────────────────
 
-export async function loadReferenceData(): Promise<{ loaded: number; skipped: number }> {
+export async function loadReferenceData({ force }: { force?: boolean } = {}): Promise<{ loaded: number; skipped: number }> {
   const db = await dbManager.getConnection();
 
-  // Check if already loaded
-  const count = await db.get('SELECT COUNT(*) as c FROM medicine_reference');
-  if (count && count.c > 0) {
-    await dbManager.close();
-    return { loaded: 0, skipped: count.c };
+  // Check if already loaded (skip when force=true)
+  if (!force) {
+    const count = await db.get('SELECT COUNT(*) as c FROM medicine_reference');
+    if (count && count.c > 0) {
+      await dbManager.close();
+      return { loaded: 0, skipped: count.c };
+    }
+  } else {
+    // Force reload: clear existing rows so we re-insert fresh data
+    await db.run('DELETE FROM medicine_reference');
   }
 
   if (!fs.existsSync(REFERENCE_CSV)) {
@@ -95,9 +100,10 @@ export async function loadReferenceData(): Promise<{ loaded: number; skipped: nu
       .pipe(csvParser())
       .on('data', (row: any) => {
         const name = (row['name'] || '').trim();
-        const comp1 = (row['short_composition1'] || '').trim();
-        const comp2 = (row['short_composition2'] || '').trim();
-        const mfr = (row['manufacturer_name'] || '').trim();
+        // Accept composition1/2 aliases
+        const comp1 = (row['short_composition1'] || row['composition1'] || '').trim();
+        const comp2 = (row['short_composition2'] || row['composition2'] || '').trim();
+        const mfr = (row['manufacturer_name'] || row['manufacturer'] || '').trim();
 
         if (name && (comp1 || comp2)) {
           rows.push({ name, composition1: comp1, composition2: comp2, manufacturer: mfr });
@@ -333,6 +339,15 @@ export async function runEnrichment(onProgress?: (pct: number, matched: number) 
             bestScore, med.id
           );
           unmatched++;
+
+          // Trigger background online enrichment fallback silently!
+          import('../services/onlineDataEnricher.js')
+            .then(({ onlineDataEnricher }) => {
+              onlineDataEnricher.enrichMedicineByName(med.name).catch(err => 
+                console.warn('[Enricher] Background online query failed:', err)
+              );
+            })
+            .catch(err => console.error('Failed to import onlineDataEnricher:', err));
         }
       }
       await db.run('COMMIT');

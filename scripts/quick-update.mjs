@@ -18,7 +18,8 @@ const META_PATH = join(KNOWLEDGE_DIR, 'meta.json');
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', '.next', '.cache',
-  'backup', '.codegraph', '.wwebjs_auth', 'uploads', '.understand-anything'
+  'backup', '.codegraph', '.wwebjs_auth', 'uploads', '.understand-anything',
+  'cache'
 ]);
 
 const INCLUDE_EXTS = new Set([

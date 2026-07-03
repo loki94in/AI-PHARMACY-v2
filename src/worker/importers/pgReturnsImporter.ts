@@ -181,6 +181,7 @@ export async function importStockEffect(row: Record<string, string | null>, db: 
     medicine_id: medicineId,
     batch_no: batchNo,
     quantity: parseInt(row['quantity'] || '0') || 0,
+    loose_quantity: parseInt(row['loose'] || '0') || 0,
     transaction_type: row['transaction_type'] || null,
     transaction_id: row['transaction_id'] || null,
     business_date: row['business_date'] || null,
@@ -198,9 +199,9 @@ export async function flushStockLedger(db: Database) {
     for (const s of stockBatch) {
       try {
         await db.run(
-          `INSERT INTO stock_ledger (medicine_id, batch_no, quantity, transaction_type, transaction_id, business_date)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [s.medicine_id, s.batch_no, s.quantity, s.transaction_type, s.transaction_id, s.business_date]
+          `INSERT INTO stock_ledger (medicine_id, batch_no, quantity, loose_quantity, transaction_type, transaction_id, business_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [s.medicine_id, s.batch_no, s.quantity, s.loose_quantity, s.transaction_type, s.transaction_id, s.business_date]
         );
       } catch (err: any) {
         console.warn(`[Migration] Skipped stock ledger entry: ${err.message}`);

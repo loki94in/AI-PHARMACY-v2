@@ -1,7 +1,40 @@
-function stringSimilarity(a: string, b: string): number { return 1.0; }
 import { dbManager } from '../database/connection.js';
 import fs from 'fs';
 import path from 'path';
+
+function stringSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1.0;
+
+  const editDistance = (x: string, y: string): number => {
+    if (x.length === 0) return y.length;
+    if (y.length === 0) return x.length;
+
+    let prevRow = Array.from({ length: y.length + 1 }, (_, i) => i);
+    let currRow = new Array(y.length + 1);
+
+    for (let j = 1; j <= x.length; j++) {
+      currRow[0] = j;
+      for (let i = 1; i <= y.length; i++) {
+        if (y.charAt(i - 1) === x.charAt(j - 1)) {
+          currRow[i] = prevRow[i - 1];
+        } else {
+          currRow[i] = Math.min(
+            prevRow[i - 1] + 1,
+            currRow[i - 1] + 1,
+            prevRow[i] + 1
+          );
+        }
+      }
+      [prevRow, currRow] = [currRow, prevRow];
+    }
+
+    return prevRow[y.length];
+  };
+
+  const distance = editDistance(a, b);
+  return 1 - distance / maxLen;
+}
 
 // Helper function to calculate similarity using Levenshtein distance
 function levenshteinSimilarity(s1: string, s2: string): number {

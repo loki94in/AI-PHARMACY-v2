@@ -653,23 +653,26 @@ class TelegramBotService {
       } else {
         let msg = `⚠️ *${medicine.name}* is currently OUT OF STOCK.\n🏷️ Category: ${category}\n💰 MRP: ₹${mrp}\n\n`;
         
-        // Find alternatives based on item_type/category
+        // Find alternatives using the unified engine
         if (medicine.item_type) {
-          const alternatives = await db.all(
-            `SELECT m.name, im.quantity, im.mrp 
-             FROM medicines m
-             JOIN inventory_master im ON im.medicine_id = m.id
-             WHERE m.item_type = ? AND m.id != ? AND im.quantity > 0
-             ORDER BY im.quantity DESC LIMIT 2`,
-            [medicine.item_type, medicine.id]
-          );
+          try {
+            const { medicineAvailabilityEngine } = await import('./services/medicineAvailabilityEngine.js');
+            const substitutes = await medicineAvailabilityEngine.getSubstitutes(medicine.id, {
+              mode: 'TELEGRAM',
+              maxDistance: 2
+            });
+            const inStockSubs = substitutes.filter(s => s.inStock);
 
-          if (alternatives && alternatives.length > 0) {
-            msg += `*Recommended Alternatives (In Stock):*\n`;
-            for (const alt of alternatives) {
-              msg += `• *${alt.name}* (Stock: ${alt.quantity} units) - MRP: ₹${alt.mrp}\n`;
+            if (inStockSubs.length > 0) {
+              msg += `*Recommended Alternatives (In Stock):*\n`;
+              for (const sub of inStockSubs.slice(0, 2)) {
+                msg += `• *${sub.medicine.name}* (Stock: ${sub.stock} units) - MRP: ₹${sub.medicine.mrp}\n`;
+              }
+            } else {
+              msg += `No in-stock alternatives found for category ${category}.`;
             }
-          } else {
+          } catch (engineErr) {
+            console.warn('[Telegram] Engine fallback for alternatives:', engineErr);
             msg += `No in-stock alternatives found for category ${category}.`;
           }
         }

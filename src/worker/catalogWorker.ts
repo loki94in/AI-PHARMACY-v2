@@ -11,6 +11,7 @@ import XLSX_default from 'xlsx';
 const XLSX_import = (XLSX as any).readFile ? XLSX : XLSX_default;
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { runEnrichment, getEnrichmentRunningState } from './compositionEnricher.js';
 
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -967,6 +968,11 @@ export async function runCatalogImport(jobId: number) {
 
     await db.run("UPDATE catalog_jobs SET status = 'done', progress = 100, new_count = ?, existing_count = ?, duplicate_count = ?, processed_count = ? WHERE id = ?", [newCount, existingCount, duplicateCount, processedCount, jobId]);
     eventService.broadcast('catalog_job_update', { id: jobId, status: 'done', progress: 100, new_count: newCount, existing_count: existingCount, duplicate_count: duplicateCount, total_count: totalToProcess });
+
+    // Auto-feed enrichment after catalog import
+    if (!getEnrichmentRunningState()) {
+      runEnrichment().catch(err => console.warn('[CatalogWorker] Background enrichment failed:', err));
+    }
   } catch (err: any) {
     console.error('Batch import failed', err);
     try {

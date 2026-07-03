@@ -15,9 +15,13 @@ data/*.db-wal
 data/*.db.bak*
 data/*.db.bak*-shm
 data/*.db.bak*-wal
+data/*.corrupt
+data/*backup*
+data/app.test.db*
 backup/
 data/temp_migration/
 data/migration_reports/
+data/cache/
 
 
 # Media Uploads & Temp files

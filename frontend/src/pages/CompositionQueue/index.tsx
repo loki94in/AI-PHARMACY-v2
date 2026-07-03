@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Beaker, Play, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Beaker, Play, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles, Upload, Download } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface EnrichmentStatus {
@@ -26,7 +27,19 @@ interface QueueItem {
 let cachedStatus: EnrichmentStatus | null = null;
 let cachedQueue: QueueItem[] = [];
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function CompositionQueue() {
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight') ? parseInt(searchParams.get('highlight')!) : null;
+
   const [status, setStatus] = useState<EnrichmentStatus | null>(cachedStatus);
   const [queue, setQueue] = useState<QueueItem[]>(cachedQueue);
   const [page, setPage] = useState(1);
@@ -37,6 +50,10 @@ export default function CompositionQueue() {
   const [starting, setStarting] = useState(false);
   const [editValues, setEditValues] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState<Record<number, boolean>>({});
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const highlightRowRef = useRef<HTMLTableRowElement>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -73,11 +90,24 @@ export default function CompositionQueue() {
     return () => clearInterval(timer);
   }, [status?.isRunning, loadStatus]);
 
+  // Deep-link: scroll to + highlight the row when ?highlight=<id> is present
+  useEffect(() => {
+    if (!highlightId || loading) return;
+    const inPage = queue.find(q => q.id === highlightId);
+    if (inPage) {
+      setTimeout(() => {
+        highlightRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Focus the composition input in that row
+        const input = highlightRowRef.current?.querySelector('input');
+        input?.focus();
+      }, 150);
+    }
+  }, [highlightId, queue, loading]);
+
   const handleStartEnrichment = async () => {
     setStarting(true);
     try {
       await api.startEnrichment();
-      // Poll status immediately
       setTimeout(loadStatus, 1000);
     } catch (err) {
       console.error('Failed to start enrichment:', err);
@@ -93,7 +123,6 @@ export default function CompositionQueue() {
     setSaving(prev => ({ ...prev, [id]: true }));
     try {
       await api.updateComposition(id, composition.trim());
-      // Remove from queue
       setQueue(prev => prev.filter(item => item.id !== id));
       setTotalItems(prev => prev - 1);
       loadStatus();
@@ -119,6 +148,42 @@ export default function CompositionQueue() {
     }
   };
 
+  const handleImportCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportMsg('');
+    try {
+      const result = await api.importReferenceCsv(file);
+      setImportMsg(`✓ Imported ${result.loaded} medicines into reference`);
+      setTimeout(() => setImportMsg(''), 4000);
+    } catch (err) {
+      setImportMsg('✗ Import failed');
+      setTimeout(() => setImportMsg(''), 4000);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportMaster = async () => {
+    try {
+      const blob = await api.exportReferenceCsv();
+      downloadBlob(blob, 'reference_medicines.csv');
+    } catch (err) {
+      console.error('Export master failed:', err);
+    }
+  };
+
+  const handleExportVerified = async () => {
+    try {
+      const blob = await api.exportVerifiedCsv('manual');
+      downloadBlob(blob, 'verified_medicines.csv');
+    } catch (err) {
+      console.error('Export verified failed:', err);
+    }
+  };
+
   const enrichedPct = status ? Math.round((status.enriched / Math.max(status.total, 1)) * 100) : 0;
 
   return (
@@ -133,24 +198,65 @@ export default function CompositionQueue() {
             </div>
             <div>
               <h2 className="text-lg font-bold text-text">Composition Enrichment</h2>
-              <p className="text-xs text-muted">Auto-fill medicine compositions from reference database</p>
+              <p className="text-xs text-muted">Auto-fills at ≥85% match · 60–85% needs review · below is unmatched. Verified compositions power same-salt substitutes in billing.</p>
             </div>
           </div>
 
-          <button
-            onClick={handleStartEnrichment}
-            disabled={starting || status?.isRunning}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
-          >
-            {status?.isRunning ? (
-              <><Loader2 size={16} className="animate-spin" /> Running...</>
-            ) : starting ? (
-              <><Loader2 size={16} className="animate-spin" /> Starting...</>
-            ) : (
-              <><Play size={16} /> Start Enrichment</>
-            )}
-          </button>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleImportCsv}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
+              title="Import Salt Master CSV"
+            >
+              {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              Import Master
+            </button>
+            <button
+              onClick={handleExportMaster}
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all"
+              title="Export Salt Master CSV"
+            >
+              <Download size={14} /> Export Master
+            </button>
+            <button
+              onClick={handleExportVerified}
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all"
+              title="Export Verified Compositions CSV"
+            >
+              <Download size={14} /> Export Verified
+            </button>
+            <button
+              onClick={handleStartEnrichment}
+              disabled={starting || status?.isRunning}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
+            >
+              {status?.isRunning ? (
+                <><Loader2 size={16} className="animate-spin" /> Running...</>
+              ) : starting ? (
+                <><Loader2 size={16} className="animate-spin" /> Starting...</>
+              ) : (
+                <><Play size={16} /> Start Enrichment</>
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* Import feedback */}
+        {importMsg && (
+          <div className={`mt-2 text-xs px-3 py-1 rounded-lg w-fit ${importMsg.startsWith('✓') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+            {importMsg}
+          </div>
+        )}
 
         {/* Progress Bar */}
         {status && (
@@ -239,74 +345,81 @@ export default function CompositionQueue() {
                   <Sparkles size={20} className="inline mr-2 text-emerald-400" />
                   {status?.enriched ? 'All items have been processed!' : 'Run enrichment to start matching compositions.'}
                 </td></tr>
-              ) : queue.map(item => (
-                <tr key={item.id} className="hover:bg-bg3/50 transition-colors border-b border-glass-border/50">
-                  <td className="p-3 text-xs text-muted/60 font-mono">{item.id}</td>
-                  <td className="p-3">
-                    <div className="font-semibold text-text text-sm">{item.name}</div>
-                    {item.manufacturer && <div className="text-[10px] text-muted mt-0.5">{item.manufacturer}</div>}
-                  </td>
-                  <td className="p-3">
-                    {item.enrichment_status === 'needs_review' ? (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase">Review</span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px] font-bold uppercase">No Match</span>
-                    )}
-                  </td>
-                  <td className="p-3 text-xs text-muted font-mono">
-                    {item.enrichment_confidence ? `${Math.round(item.enrichment_confidence * 100)}%` : '-'}
-                  </td>
-                  <td className="p-3">
-                    {item.enrichment_status === 'needs_review' && item.suggested_composition ? (
-                      <div className="flex flex-col gap-1">
-                        <div className="text-xs text-amber-300/80 bg-amber-500/5 px-2 py-1 rounded border border-amber-500/10">
-                          <span className="text-[10px] text-muted">Suggested:</span> {item.suggested_composition}
+              ) : queue.map(item => {
+                const isHighlighted = item.id === highlightId;
+                return (
+                  <tr
+                    key={item.id}
+                    ref={isHighlighted ? highlightRowRef : undefined}
+                    className={`hover:bg-bg3/50 transition-colors border-b border-glass-border/50 ${isHighlighted ? 'ring-2 ring-violet-500/40 bg-violet-500/5' : ''}`}
+                  >
+                    <td className="p-3 text-xs text-muted/60 font-mono">{item.id}</td>
+                    <td className="p-3">
+                      <div className="font-semibold text-text text-sm">{item.name}</div>
+                      {item.manufacturer && <div className="text-[10px] text-muted mt-0.5">{item.manufacturer}</div>}
+                    </td>
+                    <td className="p-3">
+                      {item.enrichment_status === 'needs_review' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase">Review</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px] font-bold uppercase">No Match</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-xs text-muted font-mono">
+                      {item.enrichment_confidence ? `${Math.round(item.enrichment_confidence * 100)}%` : '-'}
+                    </td>
+                    <td className="p-3">
+                      {item.enrichment_status === 'needs_review' && item.suggested_composition ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-amber-300/80 bg-amber-500/5 px-2 py-1 rounded border border-amber-500/10">
+                            <span className="text-[10px] text-muted">Suggested:</span> {item.suggested_composition}
+                          </div>
+                          <input
+                            type="text"
+                            placeholder="Or type manually..."
+                            className="w-full bg-bg3 border border-glass-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-violet-500/50"
+                            value={editValues[item.id] || ''}
+                            onChange={e => setEditValues(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          />
                         </div>
+                      ) : (
                         <input
                           type="text"
-                          placeholder="Or type manually..."
-                          className="w-full bg-bg3 border border-glass-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-violet-500/50"
+                          placeholder="Enter composition..."
+                          className="w-full bg-bg3 border border-glass-border rounded px-2 py-1.5 text-xs text-text focus:outline-none focus:border-violet-500/50"
                           value={editValues[item.id] || ''}
                           onChange={e => setEditValues(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') handleSave(item.id); }}
                         />
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex gap-1.5">
+                        {item.enrichment_status === 'needs_review' && item.suggested_composition && (
+                          <button
+                            onClick={() => handleAcceptSuggestion(item)}
+                            disabled={saving[item.id]}
+                            className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                            title="Accept suggestion"
+                          >
+                            {saving[item.id] ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                          </button>
+                        )}
+                        {editValues[item.id]?.trim() && (
+                          <button
+                            onClick={() => handleSave(item.id)}
+                            disabled={saving[item.id]}
+                            className="p-1.5 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
+                            title="Save manual entry"
+                          >
+                            {saving[item.id] ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                          </button>
+                        )}
                       </div>
-                    ) : (
-                      <input
-                        type="text"
-                        placeholder="Enter composition..."
-                        className="w-full bg-bg3 border border-glass-border rounded px-2 py-1.5 text-xs text-text focus:outline-none focus:border-violet-500/50"
-                        value={editValues[item.id] || ''}
-                        onChange={e => setEditValues(prev => ({ ...prev, [item.id]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Enter') handleSave(item.id); }}
-                      />
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex gap-1.5">
-                      {item.enrichment_status === 'needs_review' && item.suggested_composition && (
-                        <button
-                          onClick={() => handleAcceptSuggestion(item)}
-                          disabled={saving[item.id]}
-                          className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                          title="Accept suggestion"
-                        >
-                          {saving[item.id] ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                        </button>
-                      )}
-                      {editValues[item.id]?.trim() && (
-                        <button
-                          onClick={() => handleSave(item.id)}
-                          disabled={saving[item.id]}
-                          className="p-1.5 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors"
-                          title="Save manual entry"
-                        >
-                          {saving[item.id] ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

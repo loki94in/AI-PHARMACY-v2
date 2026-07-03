@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
@@ -70,6 +71,7 @@ let cachedCommonCombinations: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
 const POS = () => {
+  const navigate = useNavigate();
   const initialTabs = getInitialPOSTabs();
   const initialActiveTabId = getInitialPOSActiveTabId(initialTabs);
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
@@ -330,6 +332,7 @@ const POS = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
 
   const [activeRowSearchIndex, setActiveRowSearchIndex] = useState<number | null>(null);
   const [rowSearchTerm, setRowSearchTerm] = useState('');
@@ -540,9 +543,31 @@ const POS = () => {
       setSearchResults([]);
       setOnlineResults([]);
       setSearchingOnline(false);
+      setSuggestions([]);
       return;
     }
   }, [searchTerm]);
+
+  // Fetch fuzzy did-you-mean suggestions when results are thin
+  useEffect(() => {
+    if (searchTerm.trim().length < 3 || searchResults.length >= 5) {
+      setSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.suggestMedicine(searchTerm.trim());
+        if (Array.isArray(data)) {
+          const filtered = data.filter(sug => !searchResults.some(r => r.medicine_name.toLowerCase() === sug.name.toLowerCase()));
+          setSuggestions(filtered);
+        }
+      } catch (err) {
+        console.error('Failed to load suggestions in POS:', err);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm, searchResults]);
 
   // React Query autocomplete with dedup + abort
   const { data: searchResultsData, isLoading: isSearchLoading } = useApiQuery(
@@ -1247,6 +1272,25 @@ const POS = () => {
                 {/* Empty inventory fallback dropdown */}
                 {searchTerm.trim().length >= 3 && searchResults.length === 0 && (
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
+                    {suggestions.length > 0 && (
+                      <div className="p-3 border-b border-border/30 bg-violet-500/5">
+                        <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <div className="flex gap-2 flex-wrap">
+                          {suggestions.map((sug) => (
+                            <button
+                              key={sug.medicine_id}
+                              type="button"
+                              onClick={() => {
+                                setSearchTerm(sug.name);
+                              }}
+                              className="px-2.5 py-1 text-xs rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                            >
+                              {sug.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="p-3 border-b border-border/30 text-[10px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
                       ⚠️ No matching inventory found
                     </div>
@@ -1312,6 +1356,30 @@ const POS = () => {
                 {/* Search results dropdown */}
                 {searchResults.length > 0 && (
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
+                    {suggestions.length > 0 && (
+                      <div className="p-3 border-b border-border/30 bg-violet-500/5">
+                        <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <div className="flex gap-2 flex-wrap">
+                          {suggestions.map((sug) => (
+                            <button
+                              key={sug.medicine_id}
+                              type="button"
+                              onClick={() => {
+                                apiClient.post('/medicines/learn-correction', {
+                                  originalQuery: searchTerm,
+                                  correctedMedicineId: sug.medicine_id,
+                                  context: 'POS_FUZZY_SUGGESTION'
+                                }).catch(err => console.error('Failed to learn correction:', err));
+                                setSearchTerm(sug.name);
+                              }}
+                              className="px-2.5 py-1 text-xs rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                            >
+                              {sug.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="p-3 border-b border-border/30 bg-bg3/55 text-[10px] font-bold text-muted uppercase tracking-wider">
                       Matching Inventory Records:
                     </div>
@@ -1345,7 +1413,30 @@ const POS = () => {
                                   {isAlt && <span className="text-[9px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
                                   <span className="font-semibold text-text group-hover:text-primary transition-all">{item.medicine_name}</span>
                                 </div>
-                                <span className="text-[9px] text-muted">Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span></span>
+                                <span className="text-[9px] text-muted">
+                                  Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
+                                  {item.quantity !== undefined && (
+                                    <span className="ml-3 font-mono font-semibold text-primary">
+                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => (c.id === item.inventory_id || (c.medicine_id === item.medicine_id && c.batch === item.batch_no)) ? sum + c.qty : sum, 0))}
+                                    </span>
+                                  )}
+                                </span>
+                                {!isAlt && (!item.api_reference || item.api_reference.trim() === '') && (
+                                  <span 
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        const res = await api.queueFromPos(item.medicine_id);
+                                        navigate(`/composition-queue?highlight=${res.id}`);
+                                      } catch (err) {
+                                        console.error('Failed to queue medicine from POS:', err);
+                                      }
+                                    }}
+                                    className="text-[9px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
+                                  >
+                                    Verify composition ↗
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-4">
                                 <div className="text-right">
@@ -1370,7 +1461,15 @@ const POS = () => {
                           );
                         };
 
-                        if (med.is_out_of_stock) {
+                        const cartQty = cart.reduce((sum, c) => {
+                          if (c.id === med.inventory_id || (c.medicine_id === med.medicine_id && c.batch === med.batch_no)) {
+                            return sum + c.qty;
+                          }
+                          return sum;
+                        }, 0);
+                        const isOutOfStock = med.is_out_of_stock || (med.quantity !== undefined && (med.quantity - cartQty) <= 0);
+
+                        if (isOutOfStock) {
                           return (
                             <div key={`oos_${med.medicine_id}`} className="flex flex-col border-b border-border/10">
                               <div className="p-3 bg-red-500/5 text-xs w-full flex flex-col gap-1 border-l-2 border-red-500">
@@ -1634,7 +1733,7 @@ const POS = () => {
                                           )}
                                         </div>
                                         <span className="text-[9px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[9px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {med.quantity}</span>
+                                        <span className="text-[9px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => (c.id === med.inventory_id || (c.medicine_id === med.medicine_id && c.batch === med.batch_no)) ? sum + c.qty : sum, 0))}</span>
                                       </button>
                                     );
                                   })}
@@ -1649,10 +1748,10 @@ const POS = () => {
                           <div className="relative">
                             <input
                               type="text"
-                              className="w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-1.5 rounded-lg"
+                              className="w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-1.5 rounded-lg cursor-pointer"
                               value={item.batch || ''}
                               placeholder="Batch"
-                              onChange={e => updateCartItem(item.id, 'batch', e.target.value)}
+                              readOnly
                               onFocus={() => {
                                 setActiveBatchRowId(item.id);
                                 api.searchMedicine(item.name)
@@ -1678,32 +1777,42 @@ const POS = () => {
                                 <div className="p-1.5 border-b border-border/30 bg-bg3/60 text-[9px] font-bold text-muted uppercase tracking-wider">
                                   Switch Batch:
                                 </div>
-                                {rowBatchesList.map(b => (
-                                  <button
-                                    key={b.inventory_id}
-                                    type="button"
-                                    onMouseDown={() => {
-                                      updateCart(prev => prev.map(cItem => {
-                                        if (cItem.id !== item.id) return cItem;
-                                        return {
-                                          ...cItem,
-                                          id: b.inventory_id,
-                                          batch: b.batch_no,
-                                          expiry: b.expiry_date,
-                                          mrp: b.mrp,
-                                          costPrice: b.cost_price,
-                                          packSize: b.pack_size || cItem.packSize,
-                                          availableStock: b.quantity !== undefined ? b.quantity : 0
-                                        };
-                                      }));
-                                      setActiveBatchRowId(null);
-                                    }}
-                                    className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-[10px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
-                                  >
-                                    <span className="font-bold block">{b.batch_no}</span>
-                                    <span className="text-muted block text-[8px]">Exp: {b.expiry_date} | Stock: {b.quantity} | MRP: ₹{b.mrp}</span>
-                                  </button>
-                                ))}
+                                {rowBatchesList.map(b => {
+                                  const otherCartQty = cart.reduce((sum, c) => {
+                                    if (c.id === item.id) return sum; // exclude current row
+                                    if (c.id === b.inventory_id || (c.medicine_id === b.medicine_id && c.batch === b.batch_no)) {
+                                      return sum + c.qty;
+                                    }
+                                    return sum;
+                                  }, 0);
+                                  const liveStock = Math.max(0, (b.quantity !== undefined ? b.quantity : 0) - otherCartQty);
+                                  return (
+                                    <button
+                                      key={b.inventory_id}
+                                      type="button"
+                                      onMouseDown={() => {
+                                        updateCart(prev => prev.map(cItem => {
+                                          if (cItem.id !== item.id) return cItem;
+                                          return {
+                                            ...cItem,
+                                            id: b.inventory_id,
+                                            batch: b.batch_no,
+                                            expiry: b.expiry_date,
+                                            mrp: b.mrp,
+                                            costPrice: b.cost_price,
+                                            packSize: b.pack_size || cItem.packSize,
+                                            availableStock: b.quantity !== undefined ? b.quantity : 0
+                                          };
+                                        }));
+                                        setActiveBatchRowId(null);
+                                      }}
+                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-[10px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
+                                    >
+                                      <span className="font-bold block">{b.batch_no}</span>
+                                      <span className="text-muted block text-[8px]">Exp: {b.expiry_date} | Stock: {liveStock} | MRP: ₹{b.mrp}</span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -1716,17 +1825,22 @@ const POS = () => {
 
                         {/* Stock */}
                         <td className="p-2 text-center">
-                          <div className={`font-mono text-xs font-bold bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm ${
-                            item.availableStock === 'N/A' || item.availableStock === undefined || item.availableStock === null
-                              ? 'text-muted'
-                              : Number(item.availableStock) <= 0
-                              ? 'text-red font-extrabold bg-red/5 border-red/20'
-                              : Number(item.availableStock) <= 10
-                              ? 'text-amber-500 font-bold bg-amber-500/5 border-amber-500/20'
-                              : 'text-green font-bold bg-green/5 border-green/20'
-                          }`}>
-                            {item.availableStock !== undefined ? item.availableStock : 'N/A'}
-                          </div>
+                          {(() => {
+                            const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
+                            return (
+                              <div className={`font-mono text-xs font-bold bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm ${
+                                remainingStock === 'N/A'
+                                  ? 'text-muted'
+                                  : remainingStock <= 0
+                                  ? 'text-red font-extrabold bg-red/5 border-red/20'
+                                  : remainingStock <= 10
+                                  ? 'text-amber-500 font-bold bg-amber-500/5 border-amber-500/20'
+                                  : 'text-green font-bold bg-green/5 border-green/20'
+                              }`}>
+                                {remainingStock}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Qty */}
