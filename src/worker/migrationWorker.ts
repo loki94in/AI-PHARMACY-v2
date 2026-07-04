@@ -352,6 +352,26 @@ async function processMigrationFile(
     let actualFilePath = tempProcessingPath;
     let sqlFilePath = tempProcessingPath;
 
+    if (ext === '.db') {
+      migrationStatus.message = 'Database backup detected — loading database directly into staging...';
+      fs.copyFileSync(tempProcessingPath, STAGING_DB_PATH);
+      Object.assign(migrationStatus, {
+        active: false,
+        progress: 100,
+        message: 'Staging Complete! Backup loaded successfully into staging database. Ready for commit.',
+        file: null,
+        isStagingReady: true
+      });
+      if (!originalFilePath.includes('archived_migrations')) {
+        try {
+          fs.copyFileSync(tempProcessingPath, path.join(archiveDir, basename));
+        } catch (archiveErr) {
+          console.warn('Failed to archive migration file:', archiveErr);
+        }
+      }
+      return;
+    }
+
     if (ext === '.xlsx' || ext === '.xls') {
       migrationStatus.message = 'Excel file detected — converting to CSV...';
       const workbook = XLSX.readFile(tempProcessingPath);
@@ -386,11 +406,12 @@ async function processMigrationFile(
       // Direct SQL file — use as-is
       sqlFilePath = tempProcessingPath;
     }
-    else if (ext === '.gz' || tempProcessingPath.toLowerCase().endsWith('.sql.gz')) {
-      migrationStatus.message = 'Decompressing GZIP file...';
+    else if (ext === '.gz' || tempProcessingPath.toLowerCase().endsWith('.sql.gz') || tempProcessingPath.toLowerCase().endsWith('.db.gz')) {
+      const isDb = tempProcessingPath.toLowerCase().endsWith('.db.gz');
+      migrationStatus.message = isDb ? 'Decompressing database backup snapshot...' : 'Decompressing GZIP file...';
       extractPath = path.join(TEMP_DIR, `extract_${Date.now()}`);
       fs.mkdirSync(extractPath, { recursive: true });
-      sqlFilePath = path.join(extractPath, 'decompressed_backup.sql');
+      sqlFilePath = isDb ? STAGING_DB_PATH : path.join(extractPath, 'decompressed_backup.sql');
 
       await new Promise<void>((resolve, reject) => {
         const gzStream = zlib.createGunzip();
@@ -403,6 +424,24 @@ async function processMigrationFile(
           .pipe(gzStream)
           .pipe(writeStream);
       });
+
+      if (isDb) {
+        Object.assign(migrationStatus, {
+          active: false,
+          progress: 100,
+          message: 'Staging Complete! Backup decompressed successfully into staging database. Ready for commit.',
+          file: null,
+          isStagingReady: true
+        });
+        if (!originalFilePath.includes('archived_migrations')) {
+          try {
+            fs.copyFileSync(tempProcessingPath, path.join(archiveDir, basename));
+          } catch (archiveErr) {
+            console.warn('Failed to archive migration file:', archiveErr);
+          }
+        }
+        return;
+      }
     }
     else if (ext === '.zip') {
       extractPath = path.join(TEMP_DIR, `extract_${Date.now()}`);
@@ -442,9 +481,45 @@ async function processMigrationFile(
 
         migrationStatus.message = 'Scanning extracted files...';
         const files = fs.readdirSync(extractPath);
+
+        // Check if there is a SQLite database or database snapshot inside the ZIP
+        const dbFile = files.find(f => f.toLowerCase().endsWith('.db') || f.toLowerCase().endsWith('.db.gz'));
+        if (dbFile) {
+          migrationStatus.message = 'Database file detected in ZIP. Loading database directly...';
+          const dbFilePath = path.join(extractPath, dbFile);
+          if (dbFile.endsWith('.gz')) {
+            await new Promise<void>((resolve, reject) => {
+              const gzStream = zlib.createGunzip();
+              gzStream.on('error', reject);
+              const writeStream = fs.createWriteStream(STAGING_DB_PATH);
+              writeStream.on('close', resolve);
+              writeStream.on('finish', resolve);
+              writeStream.on('error', reject);
+              fs.createReadStream(dbFilePath).pipe(gzStream).pipe(writeStream);
+            });
+          } else {
+            fs.copyFileSync(dbFilePath, STAGING_DB_PATH);
+          }
+          Object.assign(migrationStatus, {
+            active: false,
+            progress: 100,
+            message: 'Staging Complete! Database backup loaded into staging. Ready to commit.',
+            file: null,
+            isStagingReady: true
+          });
+          if (!originalFilePath.includes('archived_migrations')) {
+            try {
+              fs.copyFileSync(tempProcessingPath, path.join(archiveDir, basename));
+            } catch (archiveErr) {
+              console.warn('Failed to archive migration file:', archiveErr);
+            }
+          }
+          return;
+        }
+
         const sqlFile = files.find(f => f.toLowerCase().endsWith('.sql'));
         if (!sqlFile) {
-          throw new Error('No .sql file found in the ZIP archive');
+          throw new Error('No .sql or .db file found in the ZIP archive');
         }
         sqlFilePath = path.join(extractPath, sqlFile);
       }

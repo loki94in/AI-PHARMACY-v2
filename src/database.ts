@@ -855,6 +855,17 @@ export async function ensureSchema(dbPath: string) {
       FOREIGN KEY(corrected_medicine_id) REFERENCES medicines(id)
     );
     CREATE INDEX IF NOT EXISTS idx_corrections_query ON pharmacist_corrections (original_query);
+
+    -- Sales bill edit history for backup and audit logs
+    CREATE TABLE IF NOT EXISTS sales_bill_edit_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      invoice_no TEXT NOT NULL,
+      original_data TEXT NOT NULL,
+      updated_data TEXT NOT NULL,
+      edited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_sales_bill_edit_hist_inv ON sales_bill_edit_history (invoice_id);
   `);
 
   // Insert default settings if they don't exist

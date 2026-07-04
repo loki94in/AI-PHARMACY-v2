@@ -64,6 +64,10 @@ function isDateInRange(dateStr: string, startStr: string, endStr: string): boole
 }
 
 // Get items nearing expiry / already expired
+// Cache contract:
+//   - A cache file EXISTS   → that month has stock items (quantity > 0)
+//   - A cache file MISSING  → that month is empty (all sold/returned) — NOT a cache miss
+//   - The cache dir MISSING → first-ever launch, fall back to live SQL once
 router.get('/', async (req, res) => {
   const date_from = (req.query.date_from as string) || getTodayString();
   let date_to = req.query.date_to as string;
@@ -76,9 +80,31 @@ router.get('/', async (req, res) => {
 
   try {
     const months = getMonthsInRange(date_from, date_to);
-    let items: any[] = [];
-    let cacheLoaded = true;
 
+    // If the cache directory doesn't exist yet, this is a first-ever run.
+    // Fall back to live SQL and trigger a background rebuild for future requests.
+    if (!fs.existsSync(cacheDir)) {
+      console.log('[ExpiryCache] Cache directory missing (first run). Using live SQL and triggering rebuild.');
+      const db = await dbManager.getConnection();
+      const rows = await db.all(`
+        SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        WHERE im.quantity > 0
+          AND date(im.expiry_date) >= date(?)
+          AND date(im.expiry_date) <= date(?)
+        ORDER BY im.expiry_date ASC
+      `, [date_from, date_to]);
+      // Trigger background rebuild so next request is fast
+      import('../services/expiryAlertService.js')
+        .then(m => m.rebuildAllExpiryCaches())
+        .catch(() => {});
+      return res.json(rows);
+    }
+
+    // Cache dir exists: read files that are present.
+    // A missing file = that month has no stock (all sold/returned). Include 0 items for it.
+    let items: any[] = [];
     for (const ym of months) {
       const filePath = path.join(cacheDir, `expiry_${ym}.json`);
       if (fs.existsSync(filePath)) {
@@ -87,37 +113,16 @@ router.get('/', async (req, res) => {
           items = items.concat(JSON.parse(raw));
         } catch (err) {
           console.error(`[ExpiryCache] Failed to parse cache file for ${ym}:`, err);
-          cacheLoaded = false;
-          break;
+          // Corrupt file — trigger rebuild and fall through with what we have
+          import('../services/expiryAlertService.js')
+            .then(m => m.rebuildAllExpiryCaches())
+            .catch(() => {});
         }
-      } else {
-        cacheLoaded = false;
-        break;
       }
+      // Missing file = empty month (all sold/returned). No action needed.
     }
 
-    if (cacheLoaded && months.length > 0) {
-      const filtered = items.filter(item => 
-        item.quantity > 0 && 
-        isDateInRange(item.expiry_date, date_from, date_to)
-      );
-      return res.json(filtered);
-    }
-
-    // Fallback: Query live database
-    console.log('[ExpiryCache] Cache files missing or invalid. Falling back to live SQL query.');
-    const db = await dbManager.getConnection();
-    let query = `
-      SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
-      FROM inventory_master im
-      JOIN medicines m ON im.medicine_id = m.id
-      WHERE im.quantity > 0
-        AND date(im.expiry_date) >= date(?)
-        AND date(im.expiry_date) <= date(?)
-      ORDER BY im.expiry_date ASC
-    `;
-    const rows = await db.all(query, [date_from, date_to]);
-    res.json(rows);
+    return res.json(items.filter(item => item.quantity > 0));
   } catch (err) {
     console.error('Expiry fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });

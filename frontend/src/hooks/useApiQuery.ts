@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import type { UseQueryOptions } from '@tanstack/react-query';
-import { apiClient } from '../services/api';
 
-interface UseApiQueryOptions<TData, TError> extends Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'> {
+export interface UseApiQueryOptions<TData = unknown, TError = Error>
+  extends Omit<UseQueryOptions<TData, TError, TData, any>, 'queryKey' | 'queryFn'> {
   enabled?: boolean;
 }
 
@@ -11,63 +11,80 @@ export function useApiQuery<TData = unknown, TError = Error>(
   fn: () => Promise<TData>,
   options?: UseApiQueryOptions<TData, TError>
 ) {
-  const queryClient = useQueryClient();
-  
-  return useQuery<TData, TError>({
+  return useQuery<TData, TError, TData, any>({
     queryKey: Array.isArray(key) ? key : [key],
     queryFn: fn,
     enabled: options?.enabled ?? true,
-    staleTime: options?.staleTime ?? 30_000,
-    gcTime: options?.gcTime ?? 5 * 60_000,
-    refetchOnWindowFocus: false,
-    retry: options?.retry ?? 1,
-    refetchOnReconnect: false,
     ...options,
   });
 }
 
-export function useApiMutation<TData = unknown, TVariables = unknown, TError = Error>(
+export interface UseApiMutationOptions<TData = unknown, TVariables = unknown, TError = Error, TContext = unknown> {
+  onSuccess?: (data: TData, variables: TVariables, context: TContext) => void | Promise<unknown>;
+  onError?: (error: TError, variables: TVariables, context: TContext | undefined) => void | Promise<unknown>;
+  onSettled?: (data: TData | undefined, error: TError | null, variables: TVariables, context: TContext | undefined) => void | Promise<unknown>;
+  invalidateKeys?: (string | readonly unknown[])[];
+  optimisticUpdate?: {
+    queryKey: string | readonly unknown[];
+    updateFn: (oldData: any, variables: TVariables) => any;
+  };
+}
+
+export function useApiMutation<TData = unknown, TVariables = unknown, TError = Error, TContext = any>(
   fn: (vars: TVariables) => Promise<TData>,
-  options?: {
-    onSuccess?: (data: TData, variables: TVariables) => void;
-    onError?: (error: TError, variables: TVariables) => void;
-    invalidateKeys?: string[][];
-  }
+  options?: UseApiMutationOptions<TData, TVariables, TError, TContext>
 ) {
   const queryClient = useQueryClient();
-  
-  return {
-    mutate: async (variables: TVariables) => {
-      try {
-        const data = await fn(variables);
-        options?.onSuccess?.(data, variables);
-        if (options?.invalidateKeys) {
-          await Promise.all(
-            options.invalidateKeys.map((key) => queryClient.invalidateQueries({ queryKey: key }))
-          );
-        }
-        return data;
-      } catch (error) {
-        options?.onError?.(error as TError, variables);
-        throw error;
+
+  return useMutation<TData, TError, TVariables, any>({
+    mutationFn: fn,
+    onMutate: async (variables: TVariables) => {
+      let context: any = {};
+      if (options?.optimisticUpdate) {
+        const qKey = Array.isArray(options.optimisticUpdate.queryKey)
+          ? options.optimisticUpdate.queryKey
+          : [options.optimisticUpdate.queryKey];
+
+        // Cancel outgoing queries to avoid overwriting our optimistic update
+        await queryClient.cancelQueries({ queryKey: qKey });
+
+        // Snapshot the previous value
+        const previousData = queryClient.getQueryData(qKey);
+        context.previousData = previousData;
+
+        // Optimistically update
+        queryClient.setQueryData(qKey, (old: any) => options.optimisticUpdate!.updateFn(old, variables));
+      }
+      return context;
+    },
+    onError: (err, variables, context) => {
+      if (options?.optimisticUpdate && context?.previousData !== undefined) {
+        const qKey = Array.isArray(options.optimisticUpdate.queryKey)
+          ? options.optimisticUpdate.queryKey
+          : [options.optimisticUpdate.queryKey];
+        queryClient.setQueryData(qKey, context.previousData);
+      }
+      options?.onError?.(err, variables, context);
+    },
+    onSuccess: (data, variables, context) => {
+      options?.onSuccess?.(data, variables, context);
+      if (options?.invalidateKeys) {
+        options.invalidateKeys.forEach((key) => {
+          const qKey = Array.isArray(key) ? key : [key];
+          queryClient.invalidateQueries({ queryKey: qKey });
+        });
       }
     },
-    mutateAsync: async (variables: TVariables) => {
-      try {
-        const data = await fn(variables);
-        options?.onSuccess?.(data, variables);
-        if (options?.invalidateKeys) {
-          await Promise.all(
-            options.invalidateKeys.map((key) => queryClient.invalidateQueries({ queryKey: key }))
-          );
-        }
-        return data;
-      } catch (error) {
-        options?.onError?.(error as TError, variables);
-        throw error;
+    onSettled: (data, error, variables, context) => {
+      if (options?.optimisticUpdate) {
+        const qKey = Array.isArray(options.optimisticUpdate.queryKey)
+          ? options.optimisticUpdate.queryKey
+          : [options.optimisticUpdate.queryKey];
+        queryClient.invalidateQueries({ queryKey: qKey });
       }
+      options?.onSettled?.(data, error, variables, context);
     },
-  };
+  });
 }
 
 export function cancelQueries(queryKey: string | readonly unknown[], client?: QueryClient) {

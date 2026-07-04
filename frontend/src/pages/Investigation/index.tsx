@@ -764,7 +764,7 @@ const InvestigationCenter = () => {
                 </div>
 
                 {/* Invoice lines */}
-                <div className="border border-glass-border/30 rounded-xl overflow-hidden divide-y divide-glass-border/30 max-h-80 overflow-y-auto">
+                <div className="border border-glass-border/30 rounded-xl divide-y divide-glass-border/30 max-h-80 overflow-y-auto">
                   {billItems.length === 0 ? (
                     <div className="p-8 text-center text-xs text-muted">No items in the list. Please search and add a medicine.</div>
                   ) : (

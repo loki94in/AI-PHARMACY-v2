@@ -179,8 +179,8 @@ class DatabaseManager {
       const originalRun = db.run.bind(db);
       const originalExec = db.exec.bind(db);
 
-      const checkWriteQuery = (sql: string) => {
-        if (!sql) return;
+      const checkWriteQuery = (sql: string): { isInventoryWrite: boolean } => {
+        if (!sql) return { isInventoryWrite: false };
         const sqlLower = sql.toLowerCase();
         const isWrite = sqlLower.includes('insert') || sqlLower.includes('update') || sqlLower.includes('delete');
         const isInternal = sqlLower.includes('action_logs') || sqlLower.includes('app_settings') || sqlLower.includes('processed_emails') || sqlLower.includes('processed_files') || sqlLower.includes('push_tokens');
@@ -198,17 +198,33 @@ class DatabaseManager {
                                    sqlLower.includes('purchases') || 
                                    sqlLower.includes('return_items') || 
                                    sqlLower.includes('returns');
-          if (isInventoryWrite) {
-            import('../services/expiryAlertService.js')
-              .then(m => m.triggerExpiryCacheRebuildDebounced())
-              .catch(err => console.error('Failed to trigger expiry cache rebuild:', err));
-          }
+          return { isInventoryWrite };
         }
+        return { isInventoryWrite: false };
       };
 
       db.run = async function (sql: any, ...params: any[]) {
         if (typeof sql === 'string') {
-          checkWriteQuery(sql);
+          const sqlLower = sql.toLowerCase();
+          const { isInventoryWrite } = checkWriteQuery(sql);
+          if (isInventoryWrite) {
+            // Try to extract inventory_master row ID for surgical cache patch.
+            // Pattern: UPDATE inventory_master SET ... WHERE id = ?
+            // params is accessible here — last integer param is the row ID.
+            let inventoryIds: number[] | undefined;
+            if (sqlLower.includes('update') && sqlLower.includes('inventory_master') && sqlLower.includes('where')) {
+              const flatParams: any[] = [];
+              for (const p of params) {
+                if (Array.isArray(p)) flatParams.push(...p);
+                else if (p !== undefined && p !== null) flatParams.push(p);
+              }
+              const lastNum = [...flatParams].reverse().find(v => typeof v === 'number' && Number.isInteger(v) && v > 0);
+              if (lastNum !== undefined) inventoryIds = [lastNum as number];
+            }
+            import('../services/expiryAlertService.js')
+              .then(m => m.triggerExpiryCacheRebuildDebounced(inventoryIds))
+              .catch(err => console.error('Failed to trigger expiry cache rebuild:', err));
+          }
         }
         return originalRun(sql, ...params);
       } as any;

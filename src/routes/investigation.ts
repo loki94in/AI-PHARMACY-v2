@@ -856,6 +856,20 @@ router.put('/sales/:invoiceId', async (req, res) => {
       [total, tax, discount, subtotal, invoiceId]
     );
 
+    // Save snapshot of the edit in history for backup
+    const originalData = JSON.stringify({
+      bill: existingBill,
+      items: oldItems
+    });
+    const updatedData = JSON.stringify({
+      bill: { total_amount: total, tax_amount: tax, discount, subtotal },
+      items: items
+    });
+    await db.run(
+      'INSERT INTO sales_bill_edit_history (invoice_id, invoice_no, original_data, updated_data) VALUES (?, ?, ?, ?)',
+      [invoiceId, existingBill.invoice_no, originalData, updatedData]
+    );
+
     // Audit logging
     const desc = `Corrected Sales Invoice #${existingBill.invoice_no}. Subtotal: ₹${existingBill.subtotal} -> ₹${subtotal}, Discount: ₹${existingBill.discount} -> ₹${discount}, Total: ₹${existingBill.total_amount} -> ₹${total}.`;
     await logAction(db, 'SALES_BILL_CORRECTION', desc);

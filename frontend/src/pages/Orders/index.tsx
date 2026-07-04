@@ -806,7 +806,7 @@ const Orders = () => {
                             <span title="Walk-in / Manual"><User size={14} className="text-muted" /></span>
                           )}
                           <div className="flex flex-col">
-                            <span className="font-semibold text-text max-w-[160px] truncate">
+                            <span className="font-semibold text-text max-w-[220px] truncate" title={order.product}>
                               {order.product}
                             </span>
                             {order.pharmarack_distributor && (

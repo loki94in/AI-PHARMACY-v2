@@ -55,7 +55,7 @@ async function openStagingDb() {
   return db;
 }
 
-const ALLOWED_MIGRATION_EXTENSIONS = /\.(zip|sql|gz|tgz|csv|xlsx|xls)$/i;
+const ALLOWED_MIGRATION_EXTENSIONS = /\.(zip|sql|gz|tgz|csv|xlsx|xls|db)$/i;
 const MAX_MIGRATION_SIZE = 500 * 1024 * 1024; // 500MB
 
 const storage = multer.diskStorage({
@@ -74,7 +74,7 @@ const upload = multer({
     if (ALLOWED_MIGRATION_EXTENSIONS.test(file.originalname)) {
       cb(null, true);
     } else {
-      cb(new Error('Only .zip, .sql, .gz, .tgz, .csv, .xlsx, .xls files are allowed'));
+      cb(new Error('Only .zip, .sql, .gz, .tgz, .csv, .xlsx, .xls, .db files are allowed'));
     }
   }
 });
