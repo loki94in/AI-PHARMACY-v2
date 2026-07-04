@@ -22,7 +22,7 @@ export function InfiniteTable({
       ref={containerRef as any}
       className={`flex-1 overflow-auto bg-black/20 relative w-full scrollbar-thin ${className}`}
     >
-      <table className="w-full text-left border-collapse flex flex-col">
+      <table className="w-full min-w-max text-left border-collapse flex flex-col">
         <thead className="sticky top-0 bg-[#18181b]/95 backdrop-blur z-20 flex flex-col border-b border-glass-border">
           {header}
         </thead>

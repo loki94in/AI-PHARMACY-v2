@@ -104,5 +104,8 @@ export function usePersistedDateRange({
     setPreset,
     minDate,
     maxDate: today,
+    futurePresets,
+    defaultFrom,
+    defaultTo,
   };
 }

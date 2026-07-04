@@ -152,6 +152,7 @@ const InvestigationCenter = () => {
   });
   const [showColMenu, setShowColMenu] = useState(false);
   const colMenuRef = useRef<HTMLDivElement>(null);
+  const medicineSearchRef = useRef<HTMLDivElement>(null);
 
   const toggleCol = (key: ColKey) => {
     setVisibleCols(prev => {
@@ -162,11 +163,14 @@ const InvestigationCenter = () => {
     });
   };
 
-  // Close col menu on outside click
+  // Close menus on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) {
         setShowColMenu(false);
+      }
+      if (medicineSearchRef.current && !medicineSearchRef.current.contains(e.target as Node)) {
+        setSearchMedicineResults([]);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -733,7 +737,7 @@ const InvestigationCenter = () => {
             {(editingType === 'sale' || editingType === 'purchase') && (
               <div className="bg-bg2 border border-glass-border p-6 rounded-2xl flex flex-col gap-4 max-w-5xl mx-auto">
                 {/* Search to add medicine item */}
-                <div className="relative">
+                <div className="relative" ref={medicineSearchRef}>
                   <Search className="absolute left-2.5 top-2.5 text-muted" size={13} />
                   <input 
                     type="text"

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { RedBookUploader } from './components/RedBookUploader';
 import { ReviewModal } from './components/ReviewModal';
 import { api } from '../../services/api';
@@ -83,7 +84,15 @@ const Migration: React.FC = () => {
   };
 
   return (
-    <div className="container mx-auto px-6 py-12 max-w-5xl">
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+      className="container mx-auto px-6 py-12 max-w-5xl relative"
+    >
+      {/* Background glow decoration */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-sky/5 rounded-full blur-[80px] pointer-events-none -z-10" />
+
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
         <RedBookUploader
           onUpload={handleUpload}
@@ -92,15 +101,17 @@ const Migration: React.FC = () => {
         />
       </div>
 
-      {fileEntry && (
-        <ReviewModal
-          isOpen={modalOpen}
-          onClose={handleCloseModal}
-          fileEntry={fileEntry}
-          onUpdateFile={handleUpdateFile}
-        />
-      )}
-    </div>
+      <AnimatePresence>
+        {modalOpen && fileEntry && (
+          <ReviewModal
+            isOpen={modalOpen}
+            onClose={handleCloseModal}
+            fileEntry={fileEntry}
+            onUpdateFile={handleUpdateFile}
+          />
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
 

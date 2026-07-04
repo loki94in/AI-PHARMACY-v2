@@ -396,6 +396,7 @@ const Expiry = () => {
             <DateRangeFilter
               helper={dateRangeHelper}
               label="Expiry Date Range"
+              showInputs={false}
               presets={[
                 { label: '30d', days: 30 },
                 { label: '60d', days: 60 },
