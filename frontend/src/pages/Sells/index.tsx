@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment, useRef } from 'react';
-import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw } from 'lucide-react';
+import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { api } from '../../services/api';
@@ -11,6 +11,7 @@ import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
+import { exportToCSV, exportToPDF } from '../../utils/export';
 
 interface SaleItem {
   id: number;
@@ -67,6 +68,17 @@ const getNDaysAgoString = (n: number) => {
 
 // Module-level cache for instant re-mount
 let cachedInvoices: SaleInvoice[] | null = null;
+
+const exportColumns = [
+  { key: 'invoice_no', label: 'Invoice No' },
+  { key: 'customer_name', label: 'Patient Name' },
+  { key: 'date', label: 'Date' },
+  { key: 'doctor_name', label: 'Doctor Name' },
+  { key: 'subtotal', label: 'Bill Amount' },
+  { key: 'total_amount', label: 'Final Amount' },
+  { key: 'discount', label: 'Discount (₹)' },
+  { key: 'payment_medium', label: 'Pay Via' }
+];
 
 const Sells = () => {
   const dateRangeHelper = usePersistedDateRange({
@@ -316,6 +328,28 @@ const Sells = () => {
   return (
     <div className="h-full flex flex-col px-6 py-6 animate-in fade-in duration-500 gap-4">
       
+      {/* Header with Export Buttons */}
+      <div className="flex justify-between items-center shrink-0">
+        <h1 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
+          <FileText className="w-5 h-5 text-primary" />
+          Sales History Ledger
+        </h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportToCSV(items, exportColumns, 'sales_history.csv')}
+            className="px-3 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold hover:text-text transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <Download size={13} /> Export CSV
+          </button>
+          <button
+            onClick={() => exportToPDF(items, exportColumns, 'sales_history.pdf', 'Sales History Report')}
+            className="px-3 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold hover:text-text transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <Download size={13} /> Export PDF
+          </button>
+        </div>
+      </div>
+
       {/* Invoices Table */}
       <div className="bg-white/10 backdrop-blur-lg rounded-xl p-0 border border-white/20 flex-1 flex flex-col overflow-hidden min-h-0">
         

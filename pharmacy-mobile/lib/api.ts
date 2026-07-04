@@ -1185,3 +1185,14 @@ export async function logAssistantChat(payload: {
     return { success: false, offline: true };
   }
 }
+
+export async function disconnectGoogleAuthServer(): Promise<{ success: boolean; message: string }> {
+  try {
+    return await request('/settings/google/disconnect', {
+      method: 'POST',
+    });
+  } catch (err) {
+    console.warn('Failed to disconnect Google account from server:', err);
+    throw err;
+  }
+}

@@ -591,19 +591,53 @@ router.get('/', async (req, res) => {
       filterQuery = 'WHERE ' + conditions.join(' AND ');
     }
     
-    const hasFilters = !!(start || end || months > 0 || search);
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : (hasFilters ? 5000 : 50);
+    const pageVal = req.query.page ? parseInt(req.query.page as string, 10) : null;
     
-    const purchases = await db.all(`
-      SELECT p.id, p.invoice_no, p.date, p.total_amount, p.cn_amount, p.cn_number, p.original_amount, d.name as distributor_name,
-             COALESCE((SELECT SUM(quantity) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty
-      FROM purchases p 
-      LEFT JOIN distributors d ON p.distributor_id = d.id 
-      ${filterQuery}
-      ORDER BY p.date DESC 
-      LIMIT ?
-    `, [...params, limit]);
-    res.json(purchases);
+    if (pageVal !== null && !isNaN(pageVal)) {
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      const offset = (pageVal - 1) * limit;
+      
+      const countRow = await db.get(`
+        SELECT COUNT(*) as count
+        FROM purchases p 
+        LEFT JOIN distributors d ON p.distributor_id = d.id 
+        ${filterQuery}
+      `, params);
+      
+      const totalItems = countRow?.count || 0;
+      const totalPages = Math.ceil(totalItems / limit);
+      
+      const purchases = await db.all(`
+        SELECT p.id, p.invoice_no, p.date, p.total_amount, p.cn_amount, p.cn_number, p.original_amount, d.name as distributor_name,
+               COALESCE((SELECT SUM(quantity) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty
+        FROM purchases p 
+        LEFT JOIN distributors d ON p.distributor_id = d.id 
+        ${filterQuery}
+        ORDER BY p.date DESC 
+        LIMIT ? OFFSET ?
+      `, [...params, limit, offset]);
+      
+      res.json({
+        data: purchases,
+        totalItems,
+        totalPages,
+        currentPage: pageVal
+      });
+    } else {
+      const hasFilters = !!(start || end || months > 0 || search);
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : (hasFilters ? 5000 : 50);
+      
+      const purchases = await db.all(`
+        SELECT p.id, p.invoice_no, p.date, p.total_amount, p.cn_amount, p.cn_number, p.original_amount, d.name as distributor_name,
+               COALESCE((SELECT SUM(quantity) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty
+        FROM purchases p 
+        LEFT JOIN distributors d ON p.distributor_id = d.id 
+        ${filterQuery}
+        ORDER BY p.date DESC 
+        LIMIT ?
+      `, [...params, limit]);
+      res.json(purchases);
+    }
   } catch (err) {
     console.error('Purchases fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });

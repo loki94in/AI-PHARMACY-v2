@@ -23,6 +23,15 @@ router.get('/', async (_req, res) => {
     rows.forEach(r => {
       settingsObj[r.key] = r.value;
     });
+
+    // Inject App-Owned credentials if not present in database settings
+    if (!settingsObj['google_client_id'] && process.env.GOOGLE_CLIENT_ID) {
+      settingsObj['google_client_id'] = process.env.GOOGLE_CLIENT_ID;
+    }
+    if (!settingsObj['google_client_secret'] && process.env.GOOGLE_CLIENT_SECRET) {
+      settingsObj['google_client_secret'] = process.env.GOOGLE_CLIENT_SECRET;
+    }
+
     res.json(settingsObj);
   } catch (error) {
     console.error('All settings fetch error:', error);
@@ -203,4 +212,18 @@ router.put('/distributors/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update distributor' });
   }
 });
+// Disconnect Google account settings
+router.post('/google/disconnect', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(
+      "DELETE FROM app_settings WHERE key IN ('gmail_oauth_refresh_token', 'gmail_oauth_access_token', 'gmail_oauth_token_expiry', 'gmail_user')"
+    );
+    res.json({ success: true, message: 'Google account disconnected successfully' });
+  } catch (error: any) {
+    console.error('Failed to disconnect Google account:', error);
+    res.status(500).json({ error: 'Failed to disconnect Google account' });
+  }
+});
+
 export default router;

@@ -1156,6 +1156,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
         rowCount++;
         if (rowCount % 1000 === 0) {
           migrationStatus.progress = Math.min(50, Math.floor((rowCount / 50000) * 50));
+          migrationStatus.message = `Reading and parsing CSV rows: ${rowCount.toLocaleString()} processed...`;
         }
       })
       .on('end', async () => {
@@ -1165,9 +1166,11 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
         try {
           let insertCount = 0;
           for (const row of results) {
-            // Yield every 200 rows to keep event loop free
+            // Yield every 200 rows to keep event loop free and update progress/message
             if (insertCount % 200 === 0) {
               await new Promise(resolve => setImmediate(resolve));
+              migrationStatus.message = `Writing staging records: ${insertCount.toLocaleString()} / ${rowCount.toLocaleString()} rows processed...`;
+              migrationStatus.progress = 50 + Math.min(50, Math.floor((insertCount / rowCount) * 50));
             }
 
             // Apply range boundaries and evaluate filters if provided
@@ -1880,9 +1883,6 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             }
 
             insertCount++;
-            if (insertCount % 1000 === 0) {
-              migrationStatus.progress = 50 + Math.min(50, Math.floor((insertCount / rowCount) * 50));
-            }
           }
           await db.run('COMMIT');
           resolve();

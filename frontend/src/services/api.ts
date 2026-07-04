@@ -206,7 +206,7 @@ export const api = {
   deleteSale: (id: number) => apiClient.delete(`/sales/${id}`).then(res => res.data),
   
   // Purchases
-  getPurchases: (params?: { limit?: number; start?: string; end?: string; months?: number; search?: string }) => apiClient.get('/purchases', { params }).then(res => res.data),
+  getPurchases: (params?: { limit?: number; page?: number; start?: string; end?: string; months?: number; search?: string }) => apiClient.get('/purchases', { params }).then(res => res.data),
   getEarliestPurchaseDate: () => apiClient.get<{ earliest: string | null }>('/purchases/earliest-date').then(res => res.data),
   getPurchaseItems: () => apiClient.get('/purchases/items/all').then(res => res.data),
   getPurchase: (id: number) => apiClient.get(`/purchases/${id}`).then(res => res.data),
@@ -217,7 +217,7 @@ export const api = {
   // Customer Returns
   searchInvoiceForReturn: (invoice_no: string) => apiClient.get('/customer-returns/search-invoice', { params: { invoice_no } }).then(res => res.data),
   createCustomerReturn: (data: any) => apiClient.post('/customer-returns', data).then(res => res.data),
-  getCustomerReturnsHistory: () => apiClient.get('/customer-returns/history').then(res => res.data),
+  getCustomerReturnsHistory: (params?: { page?: number; limit?: number; start?: string; end?: string; search?: string }) => apiClient.get('/customer-returns/history', { params }).then(res => res.data),
   
   // Returns (Supplier)
   createManualPurchase: (data: any) => apiClient.post('/purchases/manual', data).then(res => res.data),

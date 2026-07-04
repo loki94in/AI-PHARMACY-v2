@@ -289,10 +289,13 @@ router.get('/auth/google', async (req, res) => {
     const db = await dbManager.getConnection();
     const clientIdRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_id'");
     
-    const clientId = clientIdRow?.value;
+    const clientId = process.env.GOOGLE_CLIENT_ID || clientIdRow?.value;
     if (!clientId) {
-      return res.status(400).send('Please configure Google Client ID in settings first.');
+      return res.status(400).send('Please configure Google Client ID first.');
     }
+
+    const { platform } = req.query;
+    const state = platform === 'mobile' ? 'mobile' : 'web';
 
     const redirectUri = `${req.protocol}://${req.get('host')}/api/email/auth/google/callback`;
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -301,7 +304,8 @@ router.get('/auth/google', async (req, res) => {
       `&response_type=code` +
       `&scope=${encodeURIComponent('https://mail.google.com/ https://www.googleapis.com/auth/drive.file')}` +
       `&access_type=offline` +
-      `&prompt=consent`;
+      `&prompt=consent` +
+      `&state=${state}`;
 
     res.redirect(googleAuthUrl);
   } catch (error: any) {
@@ -312,7 +316,7 @@ router.get('/auth/google', async (req, res) => {
 
 // Google OAuth Callback Handler
 router.get('/auth/google/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   if (!code) {
     return res.status(400).send('Authorization code not provided');
   }
@@ -323,12 +327,12 @@ router.get('/auth/google/callback', async (req, res) => {
     const clientSecretRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_secret'");
     const userRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
     
-    const clientId = clientIdRow?.value;
-    const clientSecret = clientSecretRow?.value;
+    const clientId = process.env.GOOGLE_CLIENT_ID || clientIdRow?.value;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET || clientSecretRow?.value;
     const emailUser = userRow?.value;
 
     if (!clientId || !clientSecret) {
-            return res.status(400).send('Google OAuth configuration incomplete on backend');
+      return res.status(400).send('Google OAuth configuration incomplete on backend');
     }
 
     const redirectUri = `${req.protocol}://${req.get('host')}/api/email/auth/google/callback`;
@@ -349,7 +353,7 @@ router.get('/auth/google/callback', async (req, res) => {
 
     const tokenData = await response.json() as any;
     if (tokenData.error) {
-            throw new Error(tokenData.error_description || tokenData.error);
+      throw new Error(tokenData.error_description || tokenData.error);
     }
 
     const { access_token, refresh_token, expires_in } = tokenData;
@@ -378,7 +382,40 @@ router.get('/auth/google/callback', async (req, res) => {
       }
     }
 
-    
+    if (state === 'mobile') {
+      const mobileRedirectUrl = `pharmacymobile://auth/google/callback?gmail_user=${encodeURIComponent(detectedEmail || '')}&refresh_token=${encodeURIComponent(refresh_token || '')}&access_token=${encodeURIComponent(access_token || '')}&expiry=${expiryTimestamp}`;
+      return res.send(`
+        <html>
+          <head>
+            <title>Authentication Successful</title>
+            <style>
+              body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; background-color: #0F0F1A; color: #fff; }
+              .card { background: #151526; padding: 40px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 400px; }
+              h1 { color: #10B981; font-size: 22px; margin-bottom: 12px; }
+              p { font-size: 14px; color: #A0AEC0; line-height: 1.5; margin-bottom: 20px; }
+              .btn { display: inline-block; background: #3B82F6; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; transition: background 0.2s; }
+              .btn:hover { background: #2563EB; }
+            </style>
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.location.href = "${mobileRedirectUrl}";
+                }, 800);
+              };
+            </script>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Gmail Connected!</h1>
+              <p>Email: <strong>${detectedEmail || 'Associated Account'}</strong></p>
+              <p>Successfully authenticated. Redirecting you back to Pharmacy Genius app...</p>
+              <a class="btn" href="${mobileRedirectUrl}">Open App Manually</a>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
     res.send(`
       <html>
         <head>

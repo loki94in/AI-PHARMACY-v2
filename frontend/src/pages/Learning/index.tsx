@@ -308,6 +308,17 @@ const Learning: React.FC = () => {
     }
   };
 
+  const handleDisconnectGoogle = async () => {
+    try {
+      await apiClient.post('/settings/google/disconnect');
+      toastEvent.trigger('Google account disconnected successfully', 'success');
+      fetchSettings();
+    } catch (error) {
+      console.error('Failed to disconnect Google account', error);
+      toastEvent.trigger('Failed to disconnect Google account', 'error');
+    }
+  };
+
   const handlePharmarackLogout = async () => {
     const updated = {
       ...settingsData,
@@ -1684,39 +1695,43 @@ const Learning: React.FC = () => {
                             </div>
                           </div>
                         ) : (
-                          <div className="space-y-3 bg-bg3/40 p-3 rounded-lg border border-glass-border/40">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-muted uppercase">Google Client ID</label>
-                                <input
-                                  type="text"
-                                  className="premium-input w-full text-xs"
-                                  value={settingsData.google_client_id || ''}
-                                  onChange={(e) => setSettingsData({ ...settingsData, google_client_id: e.target.value })}
-                                />
+                          <div className="space-y-3 bg-bg3/40 p-3.5 rounded-xl border border-glass-border/40 text-left">
+                            {settingsData.gmail_oauth_refresh_token ? (
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-emerald-500/5 p-3 rounded-lg border border-emerald-500/10">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+                                    <span className="text-[10px] font-black uppercase text-green tracking-wider">Connected</span>
+                                  </div>
+                                  <span className="text-xs font-semibold text-text">{settingsData.gmail_user || 'Google Account'}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleDisconnectGoogle}
+                                  className="text-[9px] font-bold bg-red-500/10 hover:bg-red-500/20 text-red px-3 py-1.5 rounded-lg border border-red-500/20 transition-all uppercase tracking-wider"
+                                >
+                                  Disconnect
+                                </button>
                               </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-muted uppercase">Google Client Secret</label>
-                                <input
-                                  type="password"
-                                  className="premium-input w-full text-xs"
-                                  value={settingsData.google_client_secret || ''}
-                                  onChange={(e) => setSettingsData({ ...settingsData, google_client_secret: e.target.value })}
-                                />
+                            ) : (
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-800/10 p-3 rounded-lg border border-glass-border/40">
+                                <div className="space-y-0.5">
+                                  <span className="text-[10px] font-black uppercase text-muted tracking-wider">Status</span>
+                                  <span className="text-xs font-semibold text-muted block">Google account not connected</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await apiClient.post('/settings/save', settingsData);
+                                    const backendUrl = apiClient.defaults.baseURL || window.location.origin;
+                                    window.open(`${backendUrl}/api/email/auth/google`, '_blank');
+                                  }}
+                                  className="text-[9px] font-bold bg-sky-500/20 hover:bg-sky-500/35 text-sky px-4 py-2 rounded-lg border border-sky-500/30 transition-all uppercase tracking-wider"
+                                >
+                                  Connect Google Account
+                                </button>
                               </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await apiClient.post('/settings/save', settingsData);
-                                const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                                window.open(`${backendUrl}/api/email/auth/google`, '_blank');
-                              }}
-                              className="text-[9px] font-bold bg-sky-500/20 hover:bg-sky-500/35 text-sky px-3.5 py-1.5 rounded-lg border border-sky-500/30"
-                              disabled={!settingsData.google_client_id || !settingsData.google_client_secret}
-                            >
-                              Open Google OAuth Consent Authorization
-                            </button>
+                            )}
                           </div>
                         )}
 

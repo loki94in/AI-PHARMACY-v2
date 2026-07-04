@@ -321,8 +321,8 @@ export class BackupRecoveryService {
    */
   private async uploadToGoogleDrive(filePath: string, filename: string): Promise<boolean> {
     try {
-      const clientId = await this.getSetting('google_client_id', '');
-      const clientSecret = await this.getSetting('google_client_secret', '');
+      const clientId = process.env.GOOGLE_CLIENT_ID || await this.getSetting('google_client_id', '');
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET || await this.getSetting('google_client_secret', '');
       const refreshToken = await this.getSetting('gmail_oauth_refresh_token', '');
 
       if (!clientId || !clientSecret || !refreshToken) {

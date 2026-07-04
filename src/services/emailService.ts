@@ -1046,13 +1046,16 @@ export class EmailService {
       const clientIdRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_id'");
       const clientSecretRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_secret'");
       
+      const clientId = process.env.GOOGLE_CLIENT_ID || clientIdRow?.value;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET || clientSecretRow?.value;
+
       if (!accessTokenRow || !accessTokenRow.value) {
-                return null;
+        return null;
       }
 
       const expiry = expiryRow ? parseInt(expiryRow.value, 10) : 0;
       // If token is expired or expires in the next 60 seconds, refresh it using refresh_token
-      if (Date.now() + 60000 >= expiry && refreshTokenRow && refreshTokenRow.value && clientIdRow && clientIdRow.value && clientSecretRow && clientSecretRow.value) {
+      if (Date.now() + 60000 >= expiry && refreshTokenRow && refreshTokenRow.value && clientId && clientSecret) {
         console.log('Gmail OAuth access token expired/expiring, refreshing...');
         const response = await fetch('https://oauth2.googleapis.com/token', {
           method: 'POST',
@@ -1060,8 +1063,8 @@ export class EmailService {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            client_id: clientIdRow.value,
-            client_secret: clientSecretRow.value,
+            client_id: clientId,
+            client_secret: clientSecret,
             refresh_token: refreshTokenRow.value,
             grant_type: 'refresh_token',
           }).toString(),

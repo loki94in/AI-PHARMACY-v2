@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Alert, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as SecureStore from '../../../lib/secureStore';
 import { colors, spacing, typography, radius, shadows } from '../../../lib/theme';
-import { clearServerUrl } from '../../../lib/api';
+import { clearServerUrl, getServerUrl, disconnectGoogleAuthServer } from '../../../lib/api';
+import * as WebBrowser from 'expo-web-browser';
 
 const menuItems = [
   { icon: 'camera-outline', label: 'AI Camera', desc: 'Scan medicine packaging', route: '/camera', color: '#F59E0B' },
@@ -20,9 +21,8 @@ export default function MoreScreen() {
   // Gmail Direct Config state
   const [gmailModalVisible, setGmailModalVisible] = useState(false);
   const [gmailUser, setGmailUser] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -31,28 +31,91 @@ export default function MoreScreen() {
 
       // Load cached Gmail configs
       setGmailUser((await SecureStore.getItemAsync('gmail_user')) || '');
-      setClientId((await SecureStore.getItemAsync('google_client_id')) || '');
-      setClientSecret((await SecureStore.getItemAsync('google_client_secret')) || '');
       setRefreshToken((await SecureStore.getItemAsync('gmail_oauth_refresh_token')) || '');
     })();
   }, []);
 
-  const handleSaveGmailConfig = async () => {
+  const handleConnectGoogle = async () => {
+    setIsConnecting(true);
     try {
-      await SecureStore.setItemAsync('gmail_user', gmailUser.trim());
-      await SecureStore.setItemAsync('google_client_id', clientId.trim());
-      await SecureStore.setItemAsync('google_client_secret', clientSecret.trim());
-      await SecureStore.setItemAsync('gmail_oauth_refresh_token', refreshToken.trim());
+      const serverUrl = await getServerUrl();
+      if (!serverUrl) {
+        Alert.alert('Server Offline', 'Please connect the mobile app to the pharmacy PC server first.');
+        setIsConnecting(false);
+        return;
+      }
       
-      // Reset access token so it forces refresh with the new credentials
-      await SecureStore.deleteItemAsync('gmail_oauth_access_token');
-      await SecureStore.deleteItemAsync('gmail_oauth_token_expiry');
-
-      setGmailModalVisible(false);
-      Alert.alert('Settings Saved', 'Direct Gmail API credentials updated. The phone will now sync emails independently.');
-    } catch (e) {
-      Alert.alert('Error', 'Failed to save Gmail API settings.');
+      const authUrl = `${serverUrl}/api/email/auth/google?platform=mobile`;
+      const redirectUrl = 'pharmacymobile://auth/google/callback';
+      
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+      
+      if (result.type === 'success' && result.url) {
+        const urlStr = result.url;
+        const getParam = (name: string) => {
+          const match = urlStr.match(new RegExp('[?&]' + name + '=([^&#]*)'));
+          return match ? decodeURIComponent(match[1]) : '';
+        };
+        const detectedEmail = getParam('gmail_user');
+        const rToken = getParam('refresh_token');
+        const aToken = getParam('access_token');
+        const expiry = getParam('expiry');
+        
+        if (rToken) {
+          await SecureStore.setItemAsync('gmail_user', detectedEmail);
+          await SecureStore.setItemAsync('gmail_oauth_refresh_token', rToken);
+          await SecureStore.setItemAsync('gmail_oauth_access_token', aToken);
+          await SecureStore.setItemAsync('gmail_oauth_token_expiry', expiry);
+          
+          setGmailUser(detectedEmail);
+          setRefreshToken(rToken);
+          
+          Alert.alert('Success', `Connected successfully as ${detectedEmail}`);
+        } else {
+          Alert.alert('Error', 'Authentication completed but refresh token was not received.');
+        }
+      }
+    } catch (e: any) {
+      console.error('Google auth error:', e);
+      Alert.alert('Authentication Failed', 'Failed to authenticate Google account.');
+    } finally {
+      setIsConnecting(false);
     }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    Alert.alert(
+      'Disconnect Account',
+      'Are you sure you want to disconnect Google sync?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete locally
+              await SecureStore.deleteItemAsync('gmail_user');
+              await SecureStore.deleteItemAsync('gmail_oauth_refresh_token');
+              await SecureStore.deleteItemAsync('gmail_oauth_access_token');
+              await SecureStore.deleteItemAsync('gmail_oauth_token_expiry');
+              
+              setGmailUser('');
+              setRefreshToken('');
+
+              // Try to notify server
+              try {
+                await disconnectGoogleAuthServer();
+              } catch (_) {}
+
+              Alert.alert('Disconnected', 'Google account disconnected successfully.');
+            } catch (e) {
+              Alert.alert('Error', 'Failed to clear settings.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const toggleAppLock = async (value: boolean) => {
@@ -183,8 +246,8 @@ export default function MoreScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={typography.h2}>Direct Gmail API</Text>
-                <Text style={styles.modalSubtitle}>Configure direct phone-to-Google sync settings</Text>
+                <Text style={typography.h2}>Google Account Sync</Text>
+                <Text style={styles.modalSubtitle}>Sync backups and invoice emails with Google Cloud</Text>
               </View>
               <TouchableOpacity onPress={() => setGmailModalVisible(false)}>
                 <Ionicons name="close-circle-outline" size={28} color={colors.textSecondary} />
@@ -193,70 +256,49 @@ export default function MoreScreen() {
 
             <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
               <View style={styles.formCard}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Gmail User Email</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={gmailUser}
-                    onChangeText={setGmailUser}
-                    placeholder="e.g. pharmacy@gmail.com"
-                    placeholderTextColor={colors.textMuted}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Google Client ID</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={clientId}
-                    onChangeText={setClientId}
-                    placeholder="Enter Google Client ID"
-                    placeholderTextColor={colors.textMuted}
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Google Client Secret</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={clientSecret}
-                    onChangeText={setClientSecret}
-                    placeholder="Enter Google Client Secret"
-                    placeholderTextColor={colors.textMuted}
-                    autoCapitalize="none"
-                    secureTextEntry
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>OAuth Refresh Token</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={refreshToken}
-                    onChangeText={setRefreshToken}
-                    placeholder="Enter Gmail OAuth Refresh Token"
-                    placeholderTextColor={colors.textMuted}
-                    autoCapitalize="none"
-                    secureTextEntry
-                  />
-                </View>
+                {refreshToken ? (
+                  <View style={{ gap: spacing.md, paddingVertical: spacing.sm }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                      <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+                      <View>
+                        <Text style={[typography.body, { fontWeight: '700' }]}>Account Connected</Text>
+                        <Text style={[typography.bodySmall, { color: colors.textMuted }]}>{gmailUser}</Text>
+                      </View>
+                    </View>
+                    
+                    <TouchableOpacity
+                      style={[styles.modalBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }]}
+                      onPress={handleDisconnectGoogle}
+                    >
+                      <Text style={[styles.modalBtnTextCancel, { color: colors.danger, fontWeight: '700' }]}>Disconnect Google Account</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={{ gap: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' }}>
+                    <Ionicons name="logo-google" size={48} color={colors.textMuted} style={{ marginBottom: spacing.xs }} />
+                    <Text style={[typography.body, { textAlign: 'center', color: colors.textMuted }]}>
+                      Connect your Google Account to automatically sync backups and check purchase emails directly from this device.
+                    </Text>
+                    
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnSave, { width: '100%', marginTop: spacing.md }]}
+                      onPress={handleConnectGoogle}
+                      disabled={isConnecting}
+                    >
+                      <Text style={styles.modalBtnTextSave}>
+                        {isConnecting ? 'Connecting...' : 'Connect Google Account'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
 
-              <View style={styles.modalActions}>
+              <View style={[styles.modalActions, { marginTop: spacing.xl }]}>
                 <TouchableOpacity
                   style={[styles.modalBtn, styles.modalBtnCancel]}
                   onPress={() => setGmailModalVisible(false)}
                 >
-                  <Text style={styles.modalBtnTextCancel}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalBtnSave]}
-                  onPress={handleSaveGmailConfig}
-                >
-                  <Text style={styles.modalBtnTextSave}>Save Settings</Text>
+                  <Text style={styles.modalBtnTextCancel}>Close</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>

@@ -1,8 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
-import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Paperclip, Trash2, Edit, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Paperclip, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
+import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
+import { useVirtualizer } from '../../hooks/useVirtualizer';
+import { InfiniteTable } from '../../components/InfiniteTable';
+import { VirtualRow } from '../../components/VirtualRow';
+import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
+import { exportToCSV, exportToPDF } from '../../utils/export';
 
 interface PurchaseTransaction {
   id: number;
@@ -41,95 +48,99 @@ let cachedTransactions: PurchaseTransaction[] | null = null;
 
 const PurchaseHistory = () => {
   const navigate = useNavigate();
-  const [transactions, setTransactions] = useState<PurchaseTransaction[]>(cachedTransactions || []);
-  const [loading, setLoading] = useState(!cachedTransactions);
   
   const [searchQuery, setSearchQuery] = useState('');
-  const [earliestDate, setEarliestDate] = useState<string>(getTodayString());
-  const [dateRange, setDateRange] = useState({ start: getNDaysAgoString(15), end: getTodayString() });
-  const [manualToDate, setManualToDate] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [supplierFilter, setSupplierFilter] = useState('All');
-  const [productFilter, setProductFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
   const [colFilterId, setColFilterId] = useState('');
   const [colFilterDistributor, setColFilterDistributor] = useState('');
   const [colFilterInvoiceNo, setColFilterInvoiceNo] = useState('');
   const [colFilterDate, setColFilterDate] = useState('');
   const [colFilterMinAmount, setColFilterMinAmount] = useState('');
   const [colFilterMaxAmount, setColFilterMaxAmount] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
 
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 15;
+  const dateRangeHelper = usePersistedDateRange({
+    storageKey: 'purchase-history-date-range',
+    defaultFrom: getNDaysAgoString(15),
+    defaultTo: getTodayString(),
+  });
 
-  // Reset pagination when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, supplierFilter, dateRange.start, dateRange.end, productFilter, colFilterId, colFilterDistributor, colFilterInvoiceNo, colFilterDate, colFilterMinAmount, colFilterMaxAmount]);
+  // Client-side filtering logic
+  const clientFilterFn = useCallback((t: PurchaseTransaction) => {
+    if (colFilterId && !t.id.toString().includes(colFilterId)) {
+      return false;
+    }
+    if (colFilterDistributor && !(t.distributor_name || '').toLowerCase().includes(colFilterDistributor.toLowerCase())) {
+      return false;
+    }
+    if (colFilterInvoiceNo && !(t.invoice_no || '').toLowerCase().includes(colFilterInvoiceNo.toLowerCase())) {
+      return false;
+    }
+    if (colFilterDate) {
+      const pDate = t.date ? t.date.substring(0, 10) : '';
+      if (pDate !== colFilterDate) return false;
+    }
+    const amountVal = t.total_amount || 0;
+    const minVal = colFilterMinAmount ? Number(colFilterMinAmount) : 0;
+    const maxVal = colFilterMaxAmount ? Number(colFilterMaxAmount) : 100000000;
+    if (amountVal < minVal || amountVal > maxVal) {
+      return false;
+    }
+    return true;
+  }, [colFilterId, colFilterDistributor, colFilterInvoiceNo, colFilterDate, colFilterMinAmount, colFilterMaxAmount]);
 
-  // Fetch the date of the earliest transaction on mount
-  useEffect(() => {
-    api.getEarliestPurchaseDate()
-      .then((res) => {
-        const defaultBoundary = getTodayString();
-        if (res && res.earliest) {
-          const formatted = res.earliest.substring(0, 10);
-          setEarliestDate(formatted);
-          setDateRange(prev => {
-            if (prev.start < formatted) {
-              return { ...prev, start: formatted };
-            }
-            return prev;
-          });
-        } else {
-          setEarliestDate(defaultBoundary);
-          setDateRange(prev => {
-            if (prev.start < defaultBoundary) {
-              return { ...prev, start: defaultBoundary };
-            }
-            return prev;
-          });
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch earliest transaction date:', err);
-        const defaultBoundary = getTodayString();
-        setEarliestDate(defaultBoundary);
-        setDateRange(prev => {
-          if (prev.start < defaultBoundary) {
-            return { ...prev, start: defaultBoundary };
-          }
-          return prev;
-        });
+  // Infinite Scroll setup
+  const {
+    items,
+    allItems,
+    totalItems,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+    sentinelRef,
+  } = useInfiniteScroll<PurchaseTransaction>({
+    queryKey: 'purchase-history-list',
+    cacheKey: 'purchase-history-cache',
+    serverFilters: {
+      search: searchQuery,
+      start: dateRangeHelper.dateRange.from,
+      end: dateRangeHelper.dateRange.to,
+    },
+    clientFilterFn,
+    fetchPage: async (pageParam, filters) => {
+      const response = await api.getPurchases({
+        page: pageParam,
+        limit: 50,
+        search: filters.search || undefined,
+        start: filters.start || undefined,
+        end: filters.end || undefined,
       });
-  }, []);
+      if (response && response.data) {
+        return {
+          data: response.data || [],
+          totalItems: response.totalItems || 0,
+          totalPages: response.totalPages || 1,
+        };
+      } else {
+        const list = Array.isArray(response) ? response : [];
+        return {
+          data: list,
+          totalItems: list.length,
+          totalPages: 1,
+        };
+      }
+    },
+  });
 
-  useEffect(() => {
-    if (!manualToDate) {
-      setDateRange(prev => ({ ...prev, end: getTodayString() }));
-    }
-  }, [manualToDate]);
+  const parentRef = useRef<HTMLDivElement | null>(null);
 
-  const handleDateFromChange = (val: string) => {
-    if (!val) {
-      setDateRange(prev => ({ ...prev, start: earliestDate }));
-    } else if (val < earliestDate) {
-      setDateRange(prev => ({ ...prev, start: earliestDate }));
-    } else {
-      setDateRange(prev => ({ ...prev, start: val }));
-    }
-  };
-
-  const handleDateToChange = (val: string) => {
-    if (!val) {
-      setDateRange(prev => ({ ...prev, end: getTodayString() }));
-    } else if (val < earliestDate) {
-      setDateRange(prev => ({ ...prev, end: earliestDate }));
-    } else {
-      setDateRange(prev => ({ ...prev, end: val }));
-    }
-  };
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 56,
+    overscan: 10,
+  });
 
   // Reconciliation States
   const [activeTab, setActiveTab] = useState<'history' | 'reconciliation'>('history');
@@ -140,30 +151,9 @@ const PurchaseHistory = () => {
   const [resolvingUid, setResolvingUid] = useState<number | null>(null);
   const [viewPurchase, setViewPurchase] = useState<any | null>(null);
 
-  const fetchHistory = async (search = searchQuery, start = dateRange.start, end = dateRange.end) => {
-    try {
-      setLoading(true);
-      const data = await api.getPurchases({
-        search: search || undefined,
-        start: start || undefined,
-        end: end || undefined
-      });
-      setTransactions(Array.isArray(data) ? data : []);
-      cachedTransactions = Array.isArray(data) ? data : [];
-    } catch (err) {
-      console.error('Error fetching purchase history', err);
-    } finally {
-      setLoading(false);
-    }
+  const fetchHistory = async () => {
+    refetch();
   };
-
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      fetchHistory(searchQuery, dateRange.start, dateRange.end);
-    }, 300);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, dateRange.start, dateRange.end]);
 
   useEffect(() => {
     fetchReconciliation();
@@ -296,106 +286,33 @@ const PurchaseHistory = () => {
     }
   };
 
-  // Filter Logic
-  const filteredData = transactions.filter(t => {
-    // Search
-    const searchLower = searchQuery.toLowerCase();
-    const matchesSearch = 
-      t.invoice_no?.toLowerCase().includes(searchLower) ||
-      t.id.toString().includes(searchLower) ||
-      t.distributor_name?.toLowerCase().includes(searchLower) ||
-      t.plan?.toLowerCase().includes(searchLower);
-
-    // Status removed for cash workflow
-    const matchesStatus = true;
-    
-    // Supplier
-    const matchesSupplier = supplierFilter === 'All' || t.distributor_name === supplierFilter;
-
-    // Date
-    let matchesDate = true;
-    if (dateRange.start && t.date) {
-      matchesDate = matchesDate && t.date.substring(0, 10) >= dateRange.start;
-    }
-    if (dateRange.end && t.date) {
-      matchesDate = matchesDate && t.date.substring(0, 10) <= dateRange.end;
-    }
-
-    // Product/Plan Filter
-    const matchesProduct = !productFilter || t.plan?.toLowerCase().includes(productFilter.toLowerCase());
-
-    if (!(matchesSearch && matchesStatus && matchesSupplier && matchesDate && matchesProduct)) {
-      return false;
-    }
-
-    // Column header filters
-    if (colFilterId && !t.id.toString().includes(colFilterId)) {
-      return false;
-    }
-    if (colFilterDistributor && !(t.distributor_name || '').toLowerCase().includes(colFilterDistributor.toLowerCase())) {
-      return false;
-    }
-    if (colFilterInvoiceNo && !(t.invoice_no || '').toLowerCase().includes(colFilterInvoiceNo.toLowerCase())) {
-      return false;
-    }
-    if (colFilterDate) {
-      const pDate = t.date ? t.date.substring(0, 10) : '';
-      if (pDate !== colFilterDate) return false;
-    }
-    const amountVal = t.total_amount || 0;
-    const minVal = colFilterMinAmount ? Number(colFilterMinAmount) : 0;
-    const maxVal = colFilterMaxAmount ? Number(colFilterMaxAmount) : 100000000;
-    if (amountVal < minVal || amountVal > maxVal) {
-      return false;
-    }
-
-    return true;
-  });
-
-  const totalPages = Math.ceil(filteredData.length / pageSize);
-  const paginatedData = filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  // Extract unique suppliers for the filter dropdown
-  const uniqueSuppliers = Array.from(new Set(transactions.map(t => t.distributor_name).filter(Boolean)));
-
   // Purchase Analytics
-  const totalPurchases = filteredData.length;
-  const totalAmount = filteredData.reduce((sum, t) => sum + (t.total_amount || 0), 0);
+  const totalPurchases = totalItems;
+  const totalAmount = items.reduce((sum, t) => sum + (t.total_amount || 0), 0);
   const paidAmount = totalAmount; // Cash workflow, all are paid
 
-  // Export Logic
-  const exportToCSV = () => {
-    if (filteredData.length === 0) {
-      alert('No data to export!');
-      return;
+  const handleExport = (type: 'csv' | 'pdf') => {
+    const columns = [
+      { key: 'id_formatted', label: 'Purchase ID' },
+      { key: 'distributor_name', label: 'Distributor Name' },
+      { key: 'invoice_no', label: 'Invoice No.' },
+      { key: 'date_formatted', label: 'Date' },
+      { key: 'total_qty', label: 'Qty' },
+      { key: 'total_amount_formatted', label: 'Amount' },
+    ];
+
+    const formattedData = items.map(t => ({
+      ...t,
+      id_formatted: `#${t.id.toString().padStart(6, '0')}`,
+      date_formatted: `${new Date(t.date).toLocaleDateString()} ${new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      total_amount_formatted: `₹${(t.total_amount || 0).toFixed(2)}`,
+    }));
+
+    if (type === 'csv') {
+      exportToCSV(formattedData, columns, 'purchase_history.csv');
+    } else {
+      exportToPDF(formattedData, columns, 'purchase_history.pdf', 'Purchase History Report');
     }
-
-    const headers = ['Purchase ID', 'Invoice No', 'Distributor', 'Date', 'Qty', 'Amount'];
-    const csvRows = [headers.join(',')];
-
-    filteredData.forEach(tx => {
-      const row = [
-        tx.id,
-        `"${tx.invoice_no || ''}"`,
-        `"${tx.distributor_name || ''}"`,
-        `"${new Date(tx.date).toLocaleDateString()}"`,
-        tx.total_qty || 0,
-        tx.total_amount || 0
-      ];
-      csvRows.push(row.join(','));
-    });
-
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Purchase_History_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   const getUnreconciledCount = () => {
@@ -467,233 +384,209 @@ const PurchaseHistory = () => {
 
           {/* Table */}
           <div className="bg-white/10 backdrop-blur-lg rounded-b-xl border border-white/20 flex-1 flex flex-col min-h-0 relative z-10 overflow-hidden shadow-2xl">
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
-                  <tr className="bg-black/40 border-b border-glass-border/50 text-sm font-semibold text-gray-300">
-                    <th className="px-6 py-4 whitespace-nowrap">Purchase ID</th>
-                    <th className="px-6 py-4 whitespace-nowrap">Distributor Name</th>
-                    <th className="px-6 py-4 whitespace-nowrap">Invoice No.</th>
-                    <th className="px-6 py-4 whitespace-nowrap">Date</th>
-                    <th className="px-6 py-4 whitespace-nowrap text-right">Qty</th>
-                    <th className="px-6 py-4 whitespace-nowrap text-right">Amount</th>
-                    <th className="px-6 py-4 whitespace-nowrap text-center">Action</th>
-                  </tr>
-                  <tr className="bg-bg2 border-b border-glass-border/30">
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="Search ID..."
-                        value={colFilterId}
-                        onChange={e => setColFilterId(e.target.value)}
-                        className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="Search distributor..."
-                        value={colFilterDistributor}
-                        onChange={e => setColFilterDistributor(e.target.value)}
-                        className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="Search Invoice..."
-                        value={colFilterInvoiceNo}
-                        onChange={e => setColFilterInvoiceNo(e.target.value)}
-                        className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="date"
-                        value={colFilterDate}
-                        onChange={e => setColFilterDate(e.target.value)}
-                        className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </td>
-                    <td className="p-2"></td>
-                    <td className="p-2 flex gap-1">
-                      <input
-                        type="number"
-                        placeholder="Min"
-                        value={colFilterMinAmount}
-                        onChange={e => setColFilterMinAmount(e.target.value)}
-                        className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Max"
-                        value={colFilterMaxAmount}
-                        onChange={e => setColFilterMaxAmount(e.target.value)}
-                        className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                      />
-                    </td>
-                    <td className="p-2 text-center">
-                      {(colFilterId || colFilterDistributor || colFilterInvoiceNo || colFilterDate || colFilterMinAmount || colFilterMaxAmount) && (
-                        <button
-                          onClick={() => {
-                            setColFilterId('');
-                            setColFilterDistributor('');
-                            setColFilterInvoiceNo('');
-                            setColFilterDate('');
-                            setColFilterMinAmount('');
-                            setColFilterMaxAmount('');
-                          }}
-                          className="text-xs text-red hover:underline font-bold"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-glass-border/30 text-sm">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center text-gray-400">
-                        <div className="flex justify-center items-center gap-2">
-                          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                          Loading history...
+            {isFetching && items.length === 0 ? (
+              <div className="p-8 text-center text-gray-400">
+                <div className="flex justify-center items-center gap-2">
+                  <Loader2 size={20} className="animate-spin text-primary" />
+                  Loading history...
+                </div>
+              </div>
+            ) : items.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-12">
+                <AlertCircle size={48} className="mb-4 opacity-20" />
+                <p className="text-lg font-bold text-white">No transactions found</p>
+                <p className="text-sm opacity-70">Try adjusting your search or filters</p>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <InfiniteTable
+                  totalSize={rowVirtualizer.getTotalSize()}
+                  containerRef={parentRef}
+                  className="border-0 bg-transparent text-sm"
+                  header={
+                    <tr className="flex items-center min-w-[1000px] bg-black/40 border-b border-glass-border/50 text-sm font-semibold text-gray-300 select-none align-top">
+                      <th className="w-32 shrink-0 px-6 py-4">
+                        <div className="flex flex-col gap-1.5">
+                          <span>Purchase ID</span>
+                          <input
+                            type="text"
+                            placeholder="Search ID..."
+                            value={colFilterId}
+                            onChange={e => setColFilterId(e.target.value)}
+                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                          />
                         </div>
-                      </td>
-                    </tr>
-                  ) : filteredData.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center">
-                        <div className="flex flex-col items-center justify-center text-gray-400">
-                          <AlertCircle size={48} className="mb-4 opacity-20" />
-                          <p className="text-lg">No transactions found</p>
-                          <p className="text-sm opacity-70">Try adjusting your search or filters</p>
+                      </th>
+                      <th className="flex-1 min-w-[200px] px-6 py-4">
+                        <div className="flex flex-col gap-1.5">
+                          <span>Distributor Name</span>
+                          <input
+                            type="text"
+                            placeholder="Search distributor..."
+                            value={colFilterDistributor}
+                            onChange={e => setColFilterDistributor(e.target.value)}
+                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                          />
                         </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedData.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-white/5 transition-colors group">
-                        <td className="px-6 py-4 text-gray-300 font-mono">
-                          #{tx.id.toString().padStart(6, '0')}
-                        </td>
-                        <td className="px-6 py-4 text-white font-medium">
-                          {tx.distributor_name || '-'}
-                        </td>
-                        <td className="px-6 py-4 text-gray-300 font-mono text-xs">
-                          {tx.invoice_no || '-'}
-                        </td>
-                        <td className="px-6 py-4 text-gray-400 whitespace-nowrap">
-                          {new Date(tx.date).toLocaleDateString()}
-                          <div className="text-xs text-gray-500 mt-0.5">
-                            {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </th>
+                      <th className="w-40 shrink-0 px-6 py-4">
+                        <div className="flex flex-col gap-1.5">
+                          <span>Invoice No.</span>
+                          <input
+                            type="text"
+                            placeholder="Search Invoice..."
+                            value={colFilterInvoiceNo}
+                            onChange={e => setColFilterInvoiceNo(e.target.value)}
+                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                          />
+                        </div>
+                      </th>
+                      <th className="w-48 shrink-0 px-6 py-4">
+                        <div className="flex flex-col gap-1.5">
+                          <span>Date</span>
+                          <input
+                            type="date"
+                            value={colFilterDate}
+                            onChange={e => setColFilterDate(e.target.value)}
+                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                          />
+                        </div>
+                      </th>
+                      <th className="w-28 shrink-0 text-right px-6 py-4">Qty</th>
+                      <th className="w-40 shrink-0 px-6 py-4">
+                        <div className="flex flex-col gap-1.5 text-right">
+                          <span>Amount</span>
+                          <div className="flex gap-1">
+                            <input
+                              type="number"
+                              placeholder="Min"
+                              value={colFilterMinAmount}
+                              onChange={e => setColFilterMinAmount(e.target.value)}
+                              className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
+                            />
+                            <input
+                              type="number"
+                              placeholder="Max"
+                              value={colFilterMaxAmount}
+                              onChange={e => setColFilterMaxAmount(e.target.value)}
+                              className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
+                            />
                           </div>
-                        </td>
-                        <td className="px-6 py-4 text-right text-gray-300 font-medium">
-                          {tx.total_qty || 0}
-                        </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap">
-                          {tx.cn_amount && tx.cn_amount > 0 ? (
-                            <div className="flex flex-col items-end">
-                              <div className="flex items-center gap-1.5 justify-end">
-                                <span className="text-xs text-gray-500 line-through">
-                                  ₹{(tx.original_amount || (tx.total_amount + tx.cn_amount)).toFixed(2)}
-                                </span>
-                                <span className="text-white font-medium">
-                                  ₹{tx.total_amount?.toFixed(2) || '0.00'}
+                        </div>
+                      </th>
+                      <th className="w-32 shrink-0 text-center px-6 py-4">
+                        <div className="flex flex-col gap-1.5 items-center justify-center">
+                          <span>Action</span>
+                          {(colFilterId || colFilterDistributor || colFilterInvoiceNo || colFilterDate || colFilterMinAmount || colFilterMaxAmount) && (
+                            <button
+                              onClick={() => {
+                                setColFilterId('');
+                                setColFilterDistributor('');
+                                setColFilterInvoiceNo('');
+                                setColFilterDate('');
+                                setColFilterMinAmount('');
+                                setColFilterMaxAmount('');
+                              }}
+                              className="text-xs text-red hover:underline font-bold"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      </th>
+                    </tr>
+                  }
+                  body={
+                    rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const tx = items[virtualRow.index];
+                      if (!tx) return null;
+                      return (
+                        <VirtualRow
+                          key={virtualRow.key}
+                          ref={rowVirtualizer.measureElement}
+                          start={virtualRow.start}
+                          size={virtualRow.size}
+                          className="min-w-[1000px] border-b border-glass-border/30 hover:bg-white/5 transition-colors items-center flex"
+                        >
+                          <td className="w-32 shrink-0 px-6 py-4 text-gray-300 font-mono">
+                            #{tx.id.toString().padStart(6, '0')}
+                          </td>
+                          <td className="flex-1 min-w-[200px] px-6 py-4 text-white font-medium truncate" title={tx.distributor_name}>
+                            {tx.distributor_name || '-'}
+                          </td>
+                          <td className="w-40 shrink-0 px-6 py-4 text-gray-300 font-mono text-xs truncate" title={tx.invoice_no}>
+                            {tx.invoice_no || '-'}
+                          </td>
+                          <td className="w-48 shrink-0 px-6 py-4 text-gray-400 whitespace-nowrap">
+                            {new Date(tx.date).toLocaleDateString()}
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </td>
+                          <td className="w-28 shrink-0 text-right px-6 py-4 text-gray-300 font-medium">
+                            {tx.total_qty || 0}
+                          </td>
+                          <td className="w-40 shrink-0 text-right px-6 py-4 whitespace-nowrap">
+                            {tx.cn_amount && tx.cn_amount > 0 ? (
+                              <div className="flex flex-col items-end">
+                                <div className="flex items-center gap-1.5 justify-end">
+                                  <span className="text-xs text-gray-500 line-through">
+                                    ₹{(tx.original_amount || (tx.total_amount + tx.cn_amount)).toFixed(2)}
+                                  </span>
+                                  <span className="text-white font-medium">
+                                    ₹{tx.total_amount?.toFixed(2) || '0.00'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-sky-400 font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 mt-1 transition-all hover:bg-sky-500/25">
+                                  CN Applied: -₹{tx.cn_amount.toFixed(2)}
                                 </span>
                               </div>
-                              <span className="text-[10px] text-sky-400 font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 mt-1 transition-all hover:bg-sky-500/25">
-                                CN Applied: -₹{tx.cn_amount.toFixed(2)}
+                            ) : (
+                              <span className="text-white font-medium">
+                                ₹{tx.total_amount?.toFixed(2) || '0.00'}
                               </span>
+                            )}
+                          </td>
+                          <td className="w-32 shrink-0 text-center px-6 py-4">
+                            <div className="flex items-center justify-center gap-2">
+                              <button onClick={() => openView(tx.id)} className="text-gray-400 hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
+                                <Eye size={16} />
+                              </button>
+                              <button onClick={() => openEdit(tx.id)} className="text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-blue-400/10" title="Edit Purchase">
+                                <Edit size={16} />
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  if(window.confirm('Are you sure you want to delete this purchase? This will reduce the stock in inventory.')) {
+                                    api.deletePurchase(tx.id).then(() => {
+                                      alert('Purchase deleted and stock reverted');
+                                      fetchHistory();
+                                    }).catch((err) => {
+                                      alert('Failed to delete purchase: ' + (err.response?.data?.error || err.message));
+                                    });
+                                  }
+                                }}
+                                className="text-gray-400 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10" title="Delete Purchase"
+                              >
+                                <Trash2 size={16} />
+                              </button>
                             </div>
-                          ) : (
-                            <span className="text-white font-medium">
-                              ₹{tx.total_amount?.toFixed(2) || '0.00'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button onClick={() => openView(tx.id)} className="text-gray-400 hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
-                              <Eye size={16} />
-                            </button>
-                            <button onClick={() => openEdit(tx.id)} className="text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-blue-400/10" title="Edit Purchase">
-                              <Edit size={16} />
-                            </button>
-                            <button 
-                              onClick={() => {
-                                if(window.confirm('Are you sure you want to delete this purchase? This will reduce the stock in inventory.')) {
-                                  api.deletePurchase(tx.id).then(() => {
-                                    alert('Purchase deleted and stock reverted');
-                                    fetchHistory();
-                                  }).catch((err) => {
-                                    alert('Failed to delete purchase: ' + (err.response?.data?.error || err.message));
-                                  });
-                                }
-                              }}
-                              className="text-gray-400 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10" title="Delete Purchase"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="px-6 py-3 bg-[#18181b]/60 backdrop-blur-sm border-t border-glass-border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-text select-none">
-                <div className="text-muted text-gray-400">
-                  Showing <span className="font-semibold text-white">{Math.min(filteredData.length, (currentPage - 1) * pageSize + 1)}</span> to{' '}
-                  <span className="font-semibold text-white">{Math.min(filteredData.length, currentPage * pageSize)}</span> of{' '}
-                  <span className="font-semibold text-white">{filteredData.length}</span> transactions
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 bg-bg3 hover:bg-white/10 text-text border border-glass-border rounded-lg font-semibold disabled:opacity-40 disabled:hover:bg-bg3 transition-all cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    Previous
-                  </button>
-                  
-                  {/* Page numbers */}
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                      .map((p, idx, arr) => {
-                        const showEllipsisBefore = idx > 0 && p - arr[idx - 1] > 1;
-                        return (
-                          <React.Fragment key={p}>
-                            {showEllipsisBefore && <span className="px-1 text-muted text-gray-500">...</span>}
-                            <button
-                              onClick={() => setCurrentPage(p)}
-                              className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold border transition-all ${
-                                currentPage === p
-                                  ? 'bg-primary/20 text-primary border-primary/40'
-                                  : 'bg-bg3 hover:bg-white/10 text-text border-glass-border'
-                              }`}
-                            >
-                              {p}
-                            </button>
-                          </React.Fragment>
-                        );
-                      })}
-                  </div>
-
-                  <button
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1.5 bg-bg3 hover:bg-white/10 text-text border border-glass-border rounded-lg font-semibold disabled:opacity-40 disabled:hover:bg-bg3 transition-all cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
-                </div>
+                          </td>
+                        </VirtualRow>
+                      );
+                    })
+                  }
+                />
+                <InfiniteScrollStatus
+                  totalItems={totalItems}
+                  loadedCount={items.length}
+                  isFetching={isFetching}
+                  isFetchingNextPage={isFetchingNextPage}
+                  hasNextPage={hasNextPage}
+                  onLoadMore={fetchNextPage}
+                  sentinelRef={sentinelRef}
+                  itemName="transactions"
+                />
               </div>
             )}
           </div>
@@ -1084,8 +977,7 @@ const PurchaseHistory = () => {
         </div>,
         document.body
       )}
-    {/* Edit Purchase Modal */}
-      {/* Floating Action Buttons */}
+          {/* Floating Action Buttons */}
       {activeTab === 'history' && (
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
           {/* Drop-up Filter Menu */}
@@ -1102,65 +994,27 @@ const PurchaseHistory = () => {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-gray-400 text-sm">Distributor Name</label>
-                <div className="bg-black/40 border border-glass-border rounded-xl p-2.5">
-                  <select 
-                    value={supplierFilter}
-                    onChange={(e) => setSupplierFilter(e.target.value)}
-                    className="w-full bg-transparent text-white text-sm focus:outline-none"
-                  >
-                    <option value="All" className="bg-gray-900">All Distributors</option>
-                    {uniqueSuppliers.map(sup => (
-                      <option key={sup} value={sup} className="bg-gray-900">{sup}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="flex justify-between items-center">
-                  <label className="text-gray-400 text-sm">Date Range</label>
-                  <label className="text-xs text-muted flex items-center gap-1 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={manualToDate}
-                      onChange={e => setManualToDate(e.target.checked)}
-                      className="rounded border-glass-border text-primary focus:ring-primary/20 bg-black/20"
-                    />
-                    Edit
-                  </label>
-                </div>
+                <label className="text-gray-400 text-sm">Date Range</label>
                 <div className="flex items-center gap-2 bg-black/40 border border-glass-border rounded-xl p-2.5">
                   <input
                     type="date"
-                    value={dateRange.start}
-                    min={earliestDate}
-                    max={getTodayString()}
-                    onChange={(e) => handleDateFromChange(e.target.value)}
+                    value={dateRangeHelper.dateRange.from}
+                    onChange={(e) => dateRangeHelper.handleFromChange(e.target.value)}
                     className="w-full bg-transparent text-white text-sm focus:outline-none"
                   />
                   <span className="text-gray-500">to</span>
                   <input
                     type="date"
-                    value={dateRange.end}
-                    min={earliestDate}
-                    max={getTodayString()}
-                    disabled={!manualToDate}
-                    onChange={(e) => handleDateToChange(e.target.value)}
-                    className="w-full bg-transparent text-white text-sm focus:outline-none disabled:opacity-50"
+                    value={dateRangeHelper.dateRange.to}
+                    onChange={(e) => dateRangeHelper.handleToChange(e.target.value)}
+                    className="w-full bg-transparent text-white text-sm focus:outline-none"
                   />
                 </div>
               </div>
 
               <button 
                 onClick={() => { 
-                  setSupplierFilter('All'); 
-                  const defaultStart = getNDaysAgoString(15);
-                  setDateRange({
-                    start: defaultStart < earliestDate ? earliestDate : defaultStart, 
-                    end: getTodayString()
-                  }); 
-                  setManualToDate(false); 
+                  dateRangeHelper.clearFilters();
                 }}
                 className="w-full mt-2 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl text-sm font-semibold transition-colors border border-white/10"
               >
@@ -1176,19 +1030,24 @@ const PurchaseHistory = () => {
             >
               <Filter size={18} />
               Filter
-              {(supplierFilter !== 'All' || 
-                dateRange.start !== (getNDaysAgoString(15) < earliestDate ? earliestDate : getNDaysAgoString(15)) || 
-                dateRange.end !== getTodayString()) && (
+              {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
                 <span className="w-2 h-2 rounded-full bg-primary absolute top-0 right-0 animate-pulse"></span>
               )}
             </button>
 
             <button 
-              onClick={exportToCSV}
+              onClick={() => handleExport('csv')}
               className="flex items-center gap-2 bg-gradient-to-r from-primary to-blue-600 hover:shadow-[0_0_20px_rgba(37,99,235,0.4)] px-5 py-3 rounded-full text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10"
             >
               <Download size={18} />
               Export CSV
+            </button>
+            <button 
+              onClick={() => handleExport('pdf')}
+              className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] px-5 py-3 rounded-full text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10"
+            >
+              <Download size={18} />
+              Export PDF
             </button>
           </div>
         </div>

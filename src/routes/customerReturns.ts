@@ -142,26 +142,95 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
 // Get customer return history
 router.get('/history', asyncHandler(async (req: express.Request, res: express.Response) => {
   const db = await dbManager.getConnection();
-  const rows = await db.all(`
-    SELECT r.*, si.invoice_no as original_invoice_no
-    FROM returns r
-    LEFT JOIN sales_invoices si ON r.original_invoice_id = si.id
-    WHERE r.type = 'sale'
-    ORDER BY r.date DESC
-    LIMIT 100
-  `);
-  
-  for (const row of rows) {
-    row.items = await db.all(`
-      SELECT ri.quantity, ri.total_price, m.name as medicine_name, ri.batch_no
-      FROM return_items ri
-      JOIN medicines m ON ri.medicine_id = m.id
-      WHERE ri.return_id = ?
-    `, [row.id]);
+  const start = req.query.start as string;
+  const end = req.query.end as string;
+  const search = req.query.search as string || '';
+
+  const params: any[] = [];
+  const conditions: string[] = ["r.type = 'sale'"];
+
+  if (start && end) {
+    conditions.push('date(r.date) BETWEEN date(?) AND date(?)');
+    params.push(start, end);
+  } else if (start) {
+    conditions.push('date(r.date) >= date(?)');
+    params.push(start);
+  } else if (end) {
+    conditions.push('date(r.date) <= date(?)');
+    params.push(end);
   }
 
-  await dbManager.close();
-  res.json(rows);
+  if (search) {
+    conditions.push('(r.return_no LIKE ? OR si.invoice_no LIKE ? OR r.reason LIKE ? OR EXISTS (SELECT 1 FROM return_items ri JOIN medicines m ON ri.medicine_id = m.id WHERE ri.return_id = r.id AND m.name LIKE ?))');
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+
+  const filterQuery = 'WHERE ' + conditions.join(' AND ');
+  const pageVal = req.query.page ? parseInt(req.query.page as string, 10) : null;
+
+  if (pageVal !== null && !isNaN(pageVal)) {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+    const offset = (pageVal - 1) * limit;
+
+    const countRow = await db.get(`
+      SELECT COUNT(*) as count
+      FROM returns r
+      LEFT JOIN sales_invoices si ON r.original_invoice_id = si.id
+      ${filterQuery}
+    `, params);
+
+    const totalItems = countRow?.count || 0;
+    const totalPages = Math.ceil(totalItems / limit);
+
+    const rows = await db.all(`
+      SELECT r.*, si.invoice_no as original_invoice_no
+      FROM returns r
+      LEFT JOIN sales_invoices si ON r.original_invoice_id = si.id
+      ${filterQuery}
+      ORDER BY r.date DESC
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
+
+    for (const row of rows) {
+      row.items = await db.all(`
+        SELECT ri.quantity, ri.total_price, m.name as medicine_name, ri.batch_no
+        FROM return_items ri
+        JOIN medicines m ON ri.medicine_id = m.id
+        WHERE ri.return_id = ?
+      `, [row.id]);
+    }
+
+    await dbManager.close();
+    res.json({
+      data: rows,
+      totalItems,
+      totalPages,
+      currentPage: pageVal
+    });
+  } else {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+    const rows = await db.all(`
+      SELECT r.*, si.invoice_no as original_invoice_no
+      FROM returns r
+      LEFT JOIN sales_invoices si ON r.original_invoice_id = si.id
+      ${filterQuery}
+      ORDER BY r.date DESC
+      LIMIT ?
+    `, [...params, limit]);
+
+    for (const row of rows) {
+      row.items = await db.all(`
+        SELECT ri.quantity, ri.total_price, m.name as medicine_name, ri.batch_no
+        FROM return_items ri
+        JOIN medicines m ON ri.medicine_id = m.id
+        WHERE ri.return_id = ?
+      `, [row.id]);
+    }
+
+    await dbManager.close();
+    res.json(rows);
+  }
 }));
 
 export default router;

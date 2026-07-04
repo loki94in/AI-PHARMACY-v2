@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check } from 'lucide-react';
+import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
@@ -12,6 +12,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { useRef } from 'react';
+import { exportToCSV, exportToPDF } from '../../utils/export';
 
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
@@ -109,6 +110,30 @@ const Inventory = () => {
     });
   };
   const col = (key: ColKey) => visibleCols.has(key);
+
+  const handleExport = (type: 'csv' | 'pdf') => {
+    const columns = [
+      { key: 'name', label: 'Medicine' },
+      ...(col('id') ? [{ key: 'id', label: 'ID' }] : []),
+      ...(col('batch') ? [{ key: 'batch_number', label: 'Batch' }] : []),
+      ...(col('expiry') ? [{ key: 'expiry_date', label: 'Expiry' }] : []),
+      ...(col('packs') ? [{ key: 'quantity', label: 'Packs' }] : []),
+      ...(col('loose') ? [{ key: 'loose_quantity', label: 'Loose' }] : []),
+      ...(col('mrp') ? [{ key: 'mrp', label: 'MRP' }] : []),
+      ...(col('rack') ? [{ key: 'rack_location', label: 'Rack' }] : []),
+    ];
+
+    const formattedData = items.map(item => ({
+      ...item,
+      expiry_date: formatExpiryToMMYY(item.expiry_date) || '12/28'
+    }));
+
+    if (type === 'csv') {
+      exportToCSV(formattedData, columns, 'inventory_stock.csv');
+    } else {
+      exportToPDF(formattedData, columns, 'inventory_stock.pdf', 'Inventory Stock Report');
+    }
+  };
 
   // Close col menu on outside click
   useEffect(() => {
@@ -298,6 +323,23 @@ const Inventory = () => {
             {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} medicines
           </span>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExport('csv')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
+              title="Export to CSV"
+            >
+              <Download size={12} />
+              CSV
+            </button>
+            <button
+              onClick={() => handleExport('pdf')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
+              title="Export to PDF"
+            >
+              <Download size={12} />
+              PDF
+            </button>
+
             {/* Column visibility toggle */}
             <div className="relative" ref={colMenuRef}>
               <button
