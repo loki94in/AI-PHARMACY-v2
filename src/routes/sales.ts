@@ -265,7 +265,8 @@ router.post('/', async (req, res) => {
                ordering_triggered = 0, 
                is_ready = 0, 
                hold_for_stock = 0, 
-               quick_bill_id = NULL 
+               quick_bill_id = NULL,
+               stock_verified_override = 0
            WHERE id = ?`,
           [nextDateStr, refillId]
         );

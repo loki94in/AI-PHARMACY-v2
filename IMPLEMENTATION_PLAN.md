@@ -1,64 +1,99 @@
-# Expiry-Driven Returns: One-Click Return Creation + Bulk PDF/CSV Export + Invoice-Linked Return Notes
+# Patient Refill Panel: Grouped Multi-Medicine View, Auto Stock Pre-Check & Live-Cart Fallback
 
 ## Context
 
-The app already has three separate pieces that don't talk to each other yet:
-- An **Expiry Monitor** (`src/routes/expiry.ts` + `expiryAlertService.ts`) that lists near-expiry stock from `inventory_master`, cached per-month on disk.
-- A **Returns** module (`src/routes/returns.ts`, `frontend/src/pages/Returns/index.tsx`) that can create/list returns, and already has a `GET /lookup-purchases` endpoint that fuzzy-matches a medicine name/batch back to its original `purchases`/`purchase_items` record (invoice_no, distributor, cost price).
-- Generic PDF/Excel export helpers (`src/utils/reportExporter.ts`: `exportToPdf`, `exportToExcel`) already used elsewhere, plus a returns-specific `POST /export-pdf-report` in `returns.ts`.
+Investigation confirmed the backend automation for refills is already substantial:
+- `patient_refills` table (`src/database.ts` ~line 147, extended ~lines 282-318) stores patient refill metadata: `patient_name, patient_phone, medicine_id, refill_interval_days, last_refill_date, next_refill_date, status, hold_for_stock, is_active, is_ready, acknowledged, ordering_triggered, quick_bill_id`.
+- Two separate checking flows currently exist:
+  1. `checkAllRefills(db)` in `src/services/refillService.ts` (runs daily via cron at 9:00 AM and catch-up on boot).
+  2. `checkRefillsAndGenerateOrders()` in `src/services/orderFulfillmentService.ts` (runs every hour).
+- Today these workflows are duplicated, run at different times, use slightly different parameters (e.g. 10 units vs 1 unit order quantities), and lack synchronization.
+- **No dedicated frontend Refill Panel**: Only a list inside `AutomationCenter/index.tsx`. The user wants a dedicated Left-side panel and a Refill management page highlighting due patients, grouped by patient (one row per patient listing all their due medicines).
+- **No configurable global lead time**: Currently hardcoded to 6 days (5 if Sunday).
+- **No per-medicine stock-verified override**: Today the automation always trusts `inventory_master.quantity`. Pharmacists want a per-medicine, per-cycle override to physically confirm stock presence.
+- **Tomorrow's Due Reminder Template**: If a patient's refill is due **tomorrow**, and the medicines have been checked (are in stock or override is verified), we show a manual send button in the Refill Panel to dispatch a tailored WhatsApp collection reminder.
 
-Today, turning an expiring item into a return is manual: the user has to note down the medicine/batch from the Expiry Monitor, then separately search for it in Returns, then separately look up which purchase invoice it came from. The user wants this collapsed into: see the expiry list → click "Create Return" → the return form auto-fills with the matched purchase invoice → submit → and separately be able to export the whole expiry list (or a date-range subset) as PDF/CSV in one action, plus generate a proper return/credit note document that shows the original purchase invoice number.
+## Proposed Changes
 
-Per user's answers: (1) one-click create with pre-fill, not fully automatic; (2) export defaults to "full current list" but must also support a date-range filter; (3) purchase-invoice match is **required** before a return can be finalized — no free-text fallback.
+### Database
 
-## Approach
+#### [MODIFY] [database.ts](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/src/database.ts)
+- Add migration ALTER statement to add `stock_verified_override` to the `patient_refills` table:
+  ```sql
+  ALTER TABLE patient_refills ADD COLUMN stock_verified_override INTEGER DEFAULT 0
+  ```
 
-### 1. Backend: link expiry rows to their purchase invoice at read time
+---
 
-In `src/routes/expiry.ts`, the `GET /` handler currently returns cached rows straight from `inventory_master` (id, medicine_name, batch_no, expiry_date, quantity, mrp, rack_location) with no purchase/distributor info. Add a batch-lookup step after loading `items`:
-- Collect distinct `(medicine_id, batch_no)` pairs from the resolved items (cache files already come from `expiryAlertService.ts` — check what columns it writes; extend that cache-building query, not just the read path, to also select `pi.invoice_no as purchase_invoice_no, p.id as purchase_id, d.id as distributor_id, d.name as distributor_name` via the same join pattern used in `returns.ts` `GET /near-expiry` (lines ~106-121) and `GET /lookup-purchases` (lines 248-278).
-- If no purchase match exists for a row, mark it `purchase_invoice_no: null` so the frontend can flag it as "needs manual match" (still following the "required match" rule at return-creation time, not at list-display time — the list should show everything, just flag unmatched ones).
-- Since expiry data is cached to `data/cache/expiry/expiry_{yyyy_mm}.json`, bump the cache to include these new fields and trigger `rebuildAllExpiryCaches()` once (same pattern already used for corrupt-cache recovery in `expiry.ts` lines 116-119).
+### Backend Services
 
-### 2. Backend: "create return from expiry item" endpoint
+#### [MODIFY] [refillService.ts](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/src/services/refillService.ts)
+- Refactor `checkAllRefills(db)` to become the **single source of truth** for refill processing.
+- Retrieve the configurable `refill_notice_days` (default `3` days) from `app_settings`.
+- In `checkAllRefills`:
+  - Calculate due lead time: `diffDays <= refill_notice_days`.
+  - Check stock availability (`SUM(quantity)`) from `inventory_master` for the medicine.
+  - If `qty > 0` OR `stock_verified_override = 1`:
+    - Auto-create Quick Bill (held bill) if it does not exist yet.
+    - Set `is_ready = 1`, `hold_for_stock = 0`, and link the `quick_bill_id`.
+  - If `qty <= 0` AND `stock_verified_override = 0`:
+    - Ensure a special order does not already exist for this patient/medicine before adding one.
+    - Create a high-priority special order (source `refill`, quantity 10, priority `High`, status `Pending`, `pharmarack_mapped = 1`).
+    - Set `hold_for_stock = 1`, `is_ready = 0`, `ordering_triggered = 1`.
+    - Silent API post to add item to the Pharmarack cart (using `messagingQueue` or endpoint fetch).
+- Clean up duplicate direct WhatsApp notification methods and utilize the unified `messagingQueue` where applicable.
 
-Add `POST /api/expiry/create-return` (or extend `returns.ts` with `POST /from-expiry`) that accepts `{ inventory_id, quantity, purchase_item_id }`:
-- Re-validates the purchase match server-side (reuse the `lookup-purchases` query logic factored into a small helper function shared between `expiry.ts`/`returns.ts` — avoid duplicating the JOIN).
-- Rejects with 400 if no matching `purchase_items` row is found (enforces the "required match" decision) — return a clear error the frontend surfaces as "Cannot create return: no purchase invoice found, please match manually first."
-- On success, inserts into `returns` with `return_sub_type='expiry'`, `original_invoice_id` = matched `purchases.id`, and calls the existing `trackExpiryReturn` (`creditNoteService.ts`) exactly like the current `POST /` handler does for `is_expiry` (returns.ts lines 88-91) — reuse that function rather than re-implementing credit-note tracking.
+#### [MODIFY] [orderFulfillmentService.ts](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/src/services/orderFulfillmentService.ts)
+- Combine background check workflows: Refactor `checkRefillsAndGenerateOrders()` to dynamically import and call `checkAllRefills(db)`.
+- Eliminate the duplicate stock-checking, update query, and special order insertion logic from `orderFulfillmentService.ts` to prevent status drifts or conflicting orders.
 
-### 3. Backend: bulk export endpoints (PDF + CSV)
+---
 
-Reuse `src/utils/reportExporter.ts`'s `exportToPdf`/`exportToExcel` (already handle title, headers, alternating rows, column widths) — do not write new PDF-layout code.
-- Add `GET /api/expiry/export?format=pdf|csv&date_from=&date_to=` in `expiry.ts`: pulls the same rows the list view uses (reuse the existing cache-read logic, just parameterized by the query's `date_from`/`date_to`, which the route already accepts), then calls `exportToPdf(res, 'Expiry Report', headers, keys, rows)` for PDF, or for CSV either add a small `exportToCsv` helper next to `exportToExcel` in `reportExporter.ts` (plain CSV is simpler than XLSX — a few lines with manual join, no new dependency needed) or reuse `exportToExcel` and rename the button "Excel" instead of "CSV" if the user is fine with .xlsx — flag this choice to the user during implementation if ambiguous.
-- No date range supplied = full current near-expiry list (per user's answer), matching the default `days=90` behavior already in `expiry.ts` `GET /`.
+### Backend Routes
 
-### 4. Backend: return invoice document with purchase invoice number
+#### [MODIFY] [refills.ts](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/src/routes/refills.ts)
+- Add new endpoints:
+  - `GET /api/refills/panel`: Fetches the `refill_notice_days` setting. Selects all active `patient_refills` due within the notice days. Joins `medicines` and `inventory_master` (for `SUM(quantity)` as `in_stock_qty`). Groups server-side by `patient_phone` and returns grouped records: `{ patient_name, patient_phone, next_refill_date, medicines: [{ id, medicine_name, quantity_needed, in_stock_qty, stock_verified_override, acknowledged, hold_for_stock }] }`.
+  - `POST /api/refills/:id/toggle-override`: Flips `stock_verified_override` (0 or 1). Re-runs `checkAllRefills` to refresh billing/ordering immediately.
+  - `POST /api/refills/:id/fulfill`: Fulfills the current cycle: sets `last_refill_date = datetime('now')`, advances `next_refill_date` by `refill_interval_days`, resets `stock_verified_override = 0`, `ordering_triggered = 0`, `is_ready = 0`, and sets status back to `pending`.
+  - `POST /api/refills/send-tomorrow-reminder`: Accept a patient's `patient_phone`. Retrieve all their pending, ready/verified refills due tomorrow. Formulate a consolidated message: *"Hello {patient_name}, this is a friendly reminder that your refill for {medicine_names} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from {medical_name} at your convenience."*. Queue this via `messagingQueue` (or fallback WhatsApp client).
 
-The existing `POST /export-pdf-report` in `returns.ts` (line 379) already groups return items by distributor and renders a PDF, but doesn't print the originating purchase invoice number. Extend the row data passed to it (and the frontend's `exportPDF()` in `Returns/index.tsx` line 693, which already calls `api.exportReturnsPDF`) to include `purchase_invoice_no` per item, and add a column/line for it in the PDF body loop (~line 393 onward) next to batch/expiry — this is a template change, not new plumbing.
+---
 
-### 5. Frontend: Expiry Monitor page — "Create Return" + export buttons
+### Frontend Components
 
-Find/confirm the Expiry Monitor page component (likely under `frontend/src/pages/` — verify exact path during implementation; commit `9febc6d6` added this feature). Add:
-- A "Create Return" action per row that calls the new create-return endpoint, pre-filled with the row's matched purchase invoice; disabled with a tooltip ("no purchase match found — resolve manually") when `purchase_invoice_no` is null, per the required-match rule.
-- Toolbar buttons "Export PDF" / "Export CSV" and an optional date-range picker (reuse whatever date-range component `Purchases`/`Returns` pages already use, e.g. `frontend/src/pages/Returns/index.tsx` likely has a date filter UI — reuse its pattern rather than building a new one) that hit the new `/api/expiry/export` endpoint and trigger a file download (same blob-download pattern as `exportPDF()` in `Returns/index.tsx` line 693).
+#### [NEW] [Refills index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/Refills/index.tsx)
+- Create a dedicated Refill management page.
+- Lists grouped patient cards/rows with nested due medicines.
+- Shows current stock levels versus needed quantities.
+- Provides a checkbox to toggle the physical stock verification override (`stock_verified_override`).
+- Provides a "Send to POS" button to trigger automated billing.
+- Provides a "Add to Live Cart" button for out-of-stock items, opening the `LiveCartAddModal`.
+- **WhatsApp Reminder Trigger**: If a patient has refills due tomorrow (and they are ready/verified), render a "Send WhatsApp Reminder" button. On click, call `POST /api/refills/send-tomorrow-reminder` and display a success toast.
 
-### 6. Frontend: Returns page — show purchase invoice number
+#### [MODIFY] [Layout.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/components/Layout.tsx)
+- Add a left-side compact Refills panel/widget showing upcoming due patients. Clicking a patient focuses them or navigates to the POS/Refills page.
 
-In `frontend/src/pages/Returns/index.tsx`, ensure the return list/detail view and the PDF export both display `purchase_invoice_no` so the credit-note style document is traceable back to the original purchase, satisfying "return invoice that generate through the system with purchase invoice number easily."
+#### [MODIFY] [AutomationCenter.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/AutomationCenter/index.tsx)
+- Add a slider/input for the `refill_notice_days` global lead-time setting (saves to `POST /api/settings/save`).
 
-## Files to touch
-- `src/routes/expiry.ts` — join to purchases/distributors, add create-return + export routes
-- `src/services/expiryAlertService.ts` — extend cache-building query with purchase/distributor columns
-- `src/routes/returns.ts` — factor out shared purchase-lookup helper; extend export-pdf-report with purchase invoice column
-- `src/utils/reportExporter.ts` — add CSV export helper (or confirm reuse of `exportToExcel`)
-- Expiry Monitor frontend page (path to confirm) — Create Return action, export buttons, date-range filter
-- `frontend/src/pages/Returns/index.tsx` — surface purchase invoice number in list/detail/PDF
-- `frontend/src/services/api` (wherever `exportReturnsPDF` and other API calls live) — add new client functions for create-return and expiry export
+#### [MODIFY] [POS index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/POS/index.tsx)
+- **POS Handoff**: Read query/state parameters on mount (`medicine_id`, `patient_name`, `patient_phone`). Automatically pre-fill the customer details and add the medicine to the cart using the existing `addToCart` handler.
+- **Name-Match Alert**: When typing a customer name, check against upcoming due refills. If there is a match, display an inline alert: *"XYZ has a pending refill for Amlodipine. Add to sale? [Accept] [Ignore]"*.
+  - Clicking **Accept** adds the medicine and automatically triggers `/api/refills/:id/fulfill` on complete checkout.
 
-## Verification
-- Start the dev server, open Expiry Monitor: confirm near-expiry items show a matched purchase invoice number (or a clear "unmatched" flag).
-- Click "Create Return" on a matched item → confirm it lands in the Returns list with the correct `original_invoice_id`/purchase invoice number, and that `expiry_returns_tracking`/credit-note logic still fires (check via `creditNoteService.ts` behavior, e.g. a credit note record is created).
-- Attempt "Create Return" on an unmatched item → confirm it's blocked (button disabled or server 400) rather than silently proceeding.
-- Click "Export PDF" and "Export CSV" with no date range → confirm a file downloads containing the full current expiry list; repeat with a date range selected → confirm the file only contains rows in range.
-- Open a generated Returns PDF/credit-note export → confirm the original purchase invoice number appears per line item.
+---
+
+## Verification Plan
+
+### Automated Tests
+- Run `npm test` (`tests/automation.test.ts`) to ensure refill cycles run and update correctly.
+- Implement tests verifying `stock_verified_override` skips order generation.
+
+### Manual Verification
+1. Open the **Automation Center**, update refill lead time to 3 days, and verify it updates the DB.
+2. Verify the **Refill Panel** groups items by patient phone.
+3. Check the "Physical Stock Verified" override checkbox on an out-of-stock item: run a manual check and verify no special order or Pharmarack cart insertion occurs.
+4. Select "Send to POS" and verify the cart and patient details pre-fill correctly.
+5. Search a matching patient name in the POS search bar and verify the auto-suggest banner shows Accept/Ignore.
+6. Verify clicking the "Send WhatsApp Reminder" button on a patient due tomorrow sends the consolidated reminder message format successfully.

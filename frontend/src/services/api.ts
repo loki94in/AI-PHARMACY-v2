@@ -473,6 +473,10 @@ export const api = {
   sendRefillNow: (id: number) => apiClient.post(`/refills/${id}/send`).then(res => res.data),
   acknowledgeRefill: (id: number) => apiClient.post(`/refills/${id}/acknowledge`).then(res => res.data),
   skipRefill: (id: number) => apiClient.post(`/refills/${id}/skip`).then(res => res.data),
+  getRefillsPanel: () => apiClient.get('/refills/panel').then(res => res.data),
+  toggleRefillOverride: (id: number) => apiClient.post(`/refills/${id}/toggle-override`).then(res => res.data),
+  fulfillRefill: (id: number) => apiClient.post(`/refills/${id}/fulfill`).then(res => res.data),
+  sendTomorrowReminder: (patientPhone: string) => apiClient.post('/refills/send-tomorrow-reminder', { patient_phone: patientPhone }).then(res => res.data),
 
   // Automation / Communication logs
   getAutomationNotifications: (params?: { type?: string; status?: string; search?: string; limit?: number }) =>

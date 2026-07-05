@@ -99,6 +99,7 @@ const Sidebar = ({
   const location = useLocation();
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
+    { path: '/refills', label: 'Patient Refills', icon: <Clock size={18} /> },
     { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
     { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
@@ -1075,7 +1076,7 @@ const RefillControlSidebar = ({
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-muted/70">
             <span>Automations ({activeRefills.length})</span>
             <button
-              onClick={() => navigate('/automation-center')}
+              onClick={() => navigate('/refills')}
               className="text-[9px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest"
             >
               Manage
@@ -1192,7 +1193,7 @@ export const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
-  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales'].includes(location.pathname);
+  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales', '/refills'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {

@@ -215,7 +215,7 @@ router.post('/:id/skip', async (req, res) => {
 
     await db.run(
       `UPDATE patient_refills 
-       SET next_refill_date = ?, acknowledged = 0, ordering_triggered = 0, is_ready = 0, hold_for_stock = 0 
+       SET next_refill_date = ?, acknowledged = 0, ordering_triggered = 0, is_ready = 0, hold_for_stock = 0, stock_verified_override = 0
        WHERE id = ?`,
       [nextDateStr, id]
     );
@@ -231,6 +231,208 @@ router.post('/:id/skip', async (req, res) => {
     res.json({ success: true, message: 'Refill skipped successfully for today' });
   } catch (err: any) {
     console.error('Failed to skip refill:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Grouped refill panel list with stock pre-check
+router.get('/panel', async (req, res) => {
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    
+    // Fetch refill notice days setting
+    let noticeDays = 3;
+    const setting = await db.get("SELECT value FROM app_settings WHERE key = 'refill_notice_days'");
+    if (setting && setting.value) {
+      noticeDays = parseInt(setting.value, 10) || 3;
+    }
+
+    const rows = await db.all(
+      `SELECT pr.*, m.name as medicine_name, 
+              (SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = pr.medicine_id) as in_stock_qty 
+       FROM patient_refills pr
+       JOIN medicines m ON pr.medicine_id = m.id
+       WHERE pr.is_active = 1 AND (date(pr.next_refill_date) <= date('now', '+' || ? || ' days') OR pr.is_ready = 1 OR pr.hold_for_stock = 1)
+       ORDER BY pr.next_refill_date ASC`,
+      [noticeDays]
+    );
+
+    const patientGroups: Record<string, any> = {};
+    for (const row of rows) {
+      const phone = row.patient_phone;
+      if (!patientGroups[phone]) {
+        patientGroups[phone] = {
+          patient_name: row.patient_name,
+          patient_phone: row.patient_phone,
+          next_refill_date: row.next_refill_date,
+          medicines: []
+        };
+      }
+      // If a row has an earlier due date, use that as the group's next refill date
+      if (new Date(row.next_refill_date) < new Date(patientGroups[phone].next_refill_date)) {
+        patientGroups[phone].next_refill_date = row.next_refill_date;
+      }
+      patientGroups[phone].medicines.push({
+        id: row.id,
+        medicine_id: row.medicine_id,
+        medicine_name: row.medicine_name,
+        quantity_needed: 10, // default refill quantity
+        in_stock_qty: row.in_stock_qty || 0,
+        stock_verified_override: row.stock_verified_override || 0,
+        acknowledged: row.acknowledged || 0,
+        hold_for_stock: row.hold_for_stock || 0,
+        is_ready: row.is_ready || 0,
+        status: row.status,
+        quick_bill_id: row.quick_bill_id
+      });
+    }
+
+    res.json(Object.values(patientGroups));
+  } catch (err: any) {
+    console.error('Failed to fetch refill panel:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Toggle the physical stock verified override
+router.post('/:id/toggle-override', async (req, res) => {
+  const { id } = req.params;
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT stock_verified_override FROM patient_refills WHERE id = ?', [id]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill not found' });
+    }
+
+    const nextVal = refill.stock_verified_override === 1 ? 0 : 1;
+    await db.run('UPDATE patient_refills SET stock_verified_override = ? WHERE id = ?', [nextVal, id]);
+    
+    // Re-run checking engine to update quick-bills or special orders
+    await checkAllRefills(db);
+
+    res.json({ success: true, stock_verified_override: nextVal });
+  } catch (err: any) {
+    console.error('Failed to toggle stock override:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Fulfill a refill manually (advances next cycle)
+router.post('/:id/fulfill', async (req, res) => {
+  const { id } = req.params;
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [id]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill not found' });
+    }
+
+    const interval = refill.refill_interval_days || 30;
+    const nextDate = new Date(refill.next_refill_date || new Date());
+    nextDate.setDate(nextDate.getDate() + interval);
+    const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+
+    await db.run(
+      `UPDATE patient_refills 
+       SET last_refill_date = datetime('now'),
+           next_refill_date = ?,
+           stock_verified_override = 0,
+           ordering_triggered = 0,
+           is_ready = 0,
+           hold_for_stock = 0,
+           quick_bill_id = NULL,
+           status = 'pending'
+       WHERE id = ?`,
+      [nextDateStr, id]
+    );
+
+    // Update staged notification to completed
+    await db.run(
+      `UPDATE automation_notifications 
+       SET lifecycle_status = 'sent' 
+       WHERE type = 'refill_collection' AND reference_id = ? AND lifecycle_status = 'staged'`,
+      [String(id)]
+    );
+
+    // Re-run checking engine to process the next cycle or sibling refills
+    await checkAllRefills(db);
+
+    res.json({ success: true, message: 'Refill marked as fulfilled and advanced to next cycle.' });
+  } catch (err: any) {
+    console.error('Failed to fulfill refill:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Send WhatsApp reminder for refills due tomorrow
+router.post('/send-tomorrow-reminder', async (req, res) => {
+  const { patient_phone } = req.body;
+  if (!patient_phone) {
+    return res.status(400).json({ error: 'patient_phone is required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+
+    // Query ready/override-verified refills due tomorrow
+    const rows = await db.all(
+      `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+       JOIN medicines m ON pr.medicine_id = m.id
+       WHERE pr.patient_phone = ? AND pr.status = 'pending' AND pr.is_active = 1 
+         AND (pr.is_ready = 1 OR pr.stock_verified_override = 1)`,
+      [patient_phone]
+    );
+
+    // Filter to only include those due tomorrow (in case SQL date checks are timezone-sensitive)
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
+
+    const tomorrowRefills = rows.filter(r => {
+      const d = new Date(r.next_refill_date);
+      return d.toISOString().split('T')[0] === tomorrowDateStr;
+    });
+
+    if (tomorrowRefills.length === 0) {
+      return res.status(400).json({ error: 'No ready refills due tomorrow found for this patient' });
+    }
+
+    const patientName = tomorrowRefills[0].patient_name;
+    const medicineNames = tomorrowRefills.map(r => r.medicine_name).join(', ');
+
+    let medicalName = 'XYZ MEDICAL';
+    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
+    if (nameRow && nameRow.value) {
+      medicalName = nameRow.value;
+    }
+
+    const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
+
+    // Queue WhatsApp message
+    const { messagingQueue } = await import('../services/messagingQueue.js');
+    await messagingQueue.queueMessage(
+      'refill_reminder',
+      patientName,
+      patient_phone,
+      msg,
+      String(tomorrowRefills[0].id)
+    );
+
+    // Update status to notified, reset is_ready
+    const ids = tomorrowRefills.map(r => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await db.run(
+      `UPDATE patient_refills SET status = 'notified', is_ready = 0 WHERE id IN (${placeholders})`,
+      ids
+    );
+
+    res.json({ success: true, message: 'Tomorrow reminder queued successfully' });
+  } catch (err: any) {
+    console.error('Failed to send tomorrow reminder:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });

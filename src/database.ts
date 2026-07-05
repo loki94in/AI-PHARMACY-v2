@@ -320,6 +320,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE automation_notifications ADD COLUMN needs_confirmation INTEGER DEFAULT 0`,
     `ALTER TABLE automation_notifications ADD COLUMN lifecycle_status TEXT DEFAULT 'sent'`,
     `ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
+    `ALTER TABLE patient_refills ADD COLUMN stock_verified_override INTEGER DEFAULT 0`,
   ];
   for (const stmt of alterStatements) {
     try {

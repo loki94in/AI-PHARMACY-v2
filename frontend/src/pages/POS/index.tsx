@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
@@ -9,6 +9,7 @@ import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { toastEvent } from '../../services/events';
 
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
@@ -113,6 +114,7 @@ const groupBatches = (items: any[]): any[] => {
 
 const POS = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const initialTabs = getInitialPOSTabs();
   const initialActiveTabId = getInitialPOSActiveTabId(initialTabs);
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
@@ -126,6 +128,8 @@ const POS = () => {
   const [refillEnabled, setRefillEnabled] = useState(initialActiveTab.refillEnabled || false);
   const [refillDays, setRefillDays] = useState(initialActiveTab.refillDays || 30);
   const [activeRefillId, setActiveRefillId] = useState<number | null>(null);
+  const [matchedRefill, setMatchedRefill] = useState<any | null>(null);
+  const [dismissedRefillId, setDismissedRefillId] = useState<number | null>(null);
 
   // Hydrate POS cart from URL parameters for automatic refill checkouts
   useEffect(() => {
@@ -187,6 +191,41 @@ const POS = () => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
+
+  // Hydrate POS cart from router state parameter for refills panel handoff
+  useEffect(() => {
+    if (location.state && (location.state as any).prefill) {
+      const { patientName: name, patientPhone: phone, medicineId, quantity } = (location.state as any).prefill;
+      if (name) setPatientName(name);
+      if (phone) setPatientPhone(phone);
+      
+      const fetchAndAdd = async () => {
+        try {
+          const matched = await api.getQuickEditMedicine(Number(medicineId));
+          if (matched) {
+            const cartItem = {
+              id: matched.id,
+              name: matched.name,
+              batch: matched.batch_no || matched.batch_number || 'AUTO',
+              expiry: matched.expiry_date || '12/28',
+              mrp: matched.mrp || 100,
+              qty: Number(quantity) || 10,
+              quantity: Number(quantity) || 10,
+              unitPrice: matched.unit_price || matched.mrp || 100,
+              looseQty: 0,
+              discount: 0,
+              packSize: matched.pack_size || 10
+            };
+            setCart([cartItem]);
+          }
+        } catch (err) {
+          console.error('Failed to prefill POS from state:', err);
+        }
+      };
+      fetchAndAdd();
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate]);
 
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
@@ -549,6 +588,79 @@ const POS = () => {
 
     return () => clearTimeout(delayDebounce);
   }, [patientName]);
+
+  // Search for pending refills matching the patient's name to display the name-match alert banner
+  useEffect(() => {
+    if (patientName.trim().length < 2) {
+      setMatchedRefill(null);
+      return;
+    }
+    const delayCheck = setTimeout(async () => {
+      try {
+        const response = await apiClient.get('/refills/panel');
+        if (response.data && Array.isArray(response.data)) {
+          const match = response.data.find((group: any) => 
+            group.patient_name.toLowerCase().trim() === patientName.toLowerCase().trim()
+          );
+          if (match && match.medicines.length > 0) {
+            // Find a medicine in the group that is ready (or override set) and not checked out
+            const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
+            if (med && med.id !== dismissedRefillId) {
+              setMatchedRefill({
+                id: med.id,
+                patient_name: match.patient_name,
+                patient_phone: match.patient_phone,
+                medicine_id: med.medicine_id,
+                medicine_name: med.medicine_name,
+                quantity: med.quantity_needed || 10
+              });
+              return;
+            }
+          }
+        }
+        setMatchedRefill(null);
+      } catch (err) {
+        console.error('Failed to search for refill match:', err);
+      }
+    }, 450);
+    return () => clearTimeout(delayCheck);
+  }, [patientName, dismissedRefillId]);
+
+  const handleAcceptRefill = async () => {
+    if (!matchedRefill) return;
+    try {
+      const results = await api.searchMedicine(matchedRefill.medicine_name);
+      const matched = (results && results.length > 0) ? results[0] : null;
+      const cartItem = {
+        id: matched ? matched.id : matchedRefill.medicine_id,
+        name: matchedRefill.medicine_name,
+        batch: matched ? (matched.batch_no || matched.batch_number || 'AUTO') : 'AUTO',
+        expiry: matched ? (matched.expiry_date || '12/28') : '12/28',
+        mrp: matched ? (matched.mrp || 100) : 100,
+        qty: Number(matchedRefill.quantity),
+        quantity: Number(matchedRefill.quantity),
+        unitPrice: matched ? (matched.unit_price || matched.mrp || 100) : 100,
+        looseQty: 0,
+        discount: 0,
+        packSize: matched ? (matched.pack_size || 10) : 10
+      };
+
+      setCart(prev => {
+        const clean = prev.filter(item => !item.isEmptyRow);
+        return [...clean, cartItem];
+      });
+
+      if (matchedRefill.patient_phone) {
+        setPatientPhone(matchedRefill.patient_phone);
+      }
+
+      setActiveRefillId(matchedRefill.id);
+      toastEvent.trigger(`Added refill medication: ${matchedRefill.medicine_name}`, 'success', '/pos');
+    } catch (err) {
+      console.error('Failed to accept refill:', err);
+    }
+    setMatchedRefill(null);
+  };
 
   const handleSavePatientProfile = async () => {
     if (patientName.trim()) {
@@ -1207,6 +1319,30 @@ const POS = () => {
           
           {/* Patient & Doctor Context Bar */}
           <div className="glass-panel p-4 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl">
+            {matchedRefill && (
+              <div className="mb-3 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
+                  <span>
+                    <strong>{matchedRefill.patient_name}</strong> has a pending refill for <strong>{matchedRefill.medicine_name}</strong>. Add to this bill?
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAcceptRefill}
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-[11px] transition-all shadow-sm"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => { setDismissedRefillId(matchedRefill.id); setMatchedRefill(null); }}
+                    className="px-3 py-1 bg-white/5 hover:bg-white/10 text-muted hover:text-text rounded-lg font-bold text-[11px] transition-all border border-glass-border"
+                  >
+                    Ignore
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
               {/* Patient Name */}
               <div className="relative z-20">

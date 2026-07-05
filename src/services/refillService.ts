@@ -3,12 +3,22 @@ import { sendMessage } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
 
 export async function checkAllRefills(db: Database): Promise<void> {
-  // Query active refills that are due to catch Sunday and standard lead times
+  // Query active refills that are due
   const activeRefills = await db.all(
     `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
      JOIN medicines m ON pr.medicine_id = m.id
      WHERE pr.status = 'pending' AND pr.is_active = 1`
   );
+
+  let noticeDays = 3;
+  try {
+    const setting = await db.get("SELECT value FROM app_settings WHERE key = 'refill_notice_days'");
+    if (setting && setting.value) {
+      noticeDays = parseInt(setting.value, 10) || 3;
+    }
+  } catch (err) {
+    console.error('Failed to load refill_notice_days setting:', err);
+  }
 
   const outOfStockRefills: any[] = [];
   const today = new Date();
@@ -20,16 +30,9 @@ export async function checkAllRefills(db: Database): Promise<void> {
     const diffTime = nextDate.getTime() - today.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     
-    const isRefillSunday = nextDate.getDay() === 0;
-
-    // Trigger configurations
-    // If due date is Sunday: order at 5 days before (Tuesday), highlight at 4 days before (Wednesday).
-    // If due date is not Sunday: order at 6 days before, highlight at 6 days before.
-    const orderThreshold = isRefillSunday ? 5 : 6;
-    const highlightThreshold = isRefillSunday ? 4 : 6;
-
-    const orderTrigger = diffDays <= orderThreshold;
-    const highlightTrigger = diffDays <= highlightThreshold;
+    // Check if within the notice lead time
+    const highlightTrigger = diffDays <= noticeDays;
+    const orderTrigger = diffDays <= noticeDays;
 
     if (!orderTrigger && !highlightTrigger) {
       continue;
@@ -42,8 +45,10 @@ export async function checkAllRefills(db: Database): Promise<void> {
     );
     const qty = stockRow ? (stockRow.total_qty || 0) : 0;
 
-    if (qty > 0) {
-      // Stock is present!
+    const hasStock = qty > 0 || refill.stock_verified_override === 1;
+
+    if (hasStock) {
+      // Stock is present or override is active!
       if (highlightTrigger) {
         let quickBillId = refill.quick_bill_id;
         if (!quickBillId) {
@@ -64,15 +69,24 @@ export async function checkAllRefills(db: Database): Promise<void> {
         }
       }
     } else {
-      // Stock is missing!
+      // Stock is missing and override is not active!
       if (orderTrigger) {
         if (refill.ordering_triggered === 0) {
-          // Log order in special_orders
-          await db.run(
-            `INSERT INTO special_orders (product, requester, phone, qty, priority, status, pharmarack_mapped, source_refill_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [refill.medicine_name, refill.patient_name, refill.patient_phone, 10, 'High', 'Pending', 1, refill.id]
+          // Check if a pending/ordered special order already exists for this patient & medicine to avoid duplicates
+          const existingOrder = await db.get(
+            `SELECT id FROM special_orders 
+             WHERE phone = ? AND LOWER(product) = LOWER(?) AND status IN ('Pending', 'Ordered')`,
+            [refill.patient_phone, refill.medicine_name]
           );
+
+          if (!existingOrder) {
+            // Log order in special_orders
+            await db.run(
+              `INSERT INTO special_orders (product, requester, phone, qty, priority, status, pharmarack_mapped, source_refill_id, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [refill.medicine_name, refill.patient_name, refill.patient_phone, 10, 'High', 'Pending', 1, refill.id, 'refill']
+            );
+          }
           
           await db.run(
             `UPDATE patient_refills 

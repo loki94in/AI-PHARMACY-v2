@@ -1,0 +1,22 @@
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\CATALOG\INDIA-BUSINESS-product-List-1.pdf
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\CATALOG\INDIA-BUSINESS-product-List.pdf
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\CATALOG\Sun Pharmaceutical Industries Ltd..pdf
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\CATALOG\nlem2022.pdf
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\README.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\code-of-conduct.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\contributing.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\.github\PULL_REQUEST_TEMPLATE.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\.github\workflows\generate-readme.yml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\.github\workflows\validate-pr.yml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\agentic.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\claude-subagents.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\deliberation.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\gem-team.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\nerv.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\opencode-agents.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\opencode-redstone.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\python-agent.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\agents\server-manager.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\examples\README.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\examples\agent.yaml
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\awesome-opencode\data\examples\fork.yaml

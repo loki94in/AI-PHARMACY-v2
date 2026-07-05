@@ -1,0 +1,11 @@
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\AGENTS.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\android-configs\README.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\icon.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\data\README.md
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\android-icon-background.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\android-icon-foreground.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\android-icon-monochrome.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\favicon.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\icon.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\pharmacy-mobile\assets\images\splash-icon.png
+E:\CURRENT PROJECT ON WORKING\AI PHARMACY v2\src\AGENTS.md

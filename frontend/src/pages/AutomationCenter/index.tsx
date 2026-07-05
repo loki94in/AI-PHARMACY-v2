@@ -21,7 +21,7 @@ import {
   Settings,
   Copy,
 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, apiClient } from '../../services/api';
 import type { Refill, AutomationNotification } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
@@ -35,6 +35,36 @@ let cachedLogs: AutomationNotification[] = [];
 const AutomationCenter = () => {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'reminders' | 'logs'>('reminders');
+
+  // Refill global notice days setting
+  const [noticeDays, setNoticeDays] = useState<number>(3);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await apiClient.get('/settings');
+        if (response.data && response.data.refill_notice_days) {
+          setNoticeDays(parseInt(response.data.refill_notice_days, 10) || 3);
+        }
+      } catch (err) {
+        console.error('Failed to load notice days:', err);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const handleUpdateNoticeDays = async (val: number) => {
+    const clamped = Math.max(1, Math.min(30, val));
+    setNoticeDays(clamped);
+    try {
+      await apiClient.post('/settings/save', { refill_notice_days: String(clamped) });
+      showToast(`Refill notice lead time updated to ${clamped} days.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+    } catch (err) {
+      console.error('Failed to save notice days:', err);
+      showToast('Failed to update lead time.', 'error');
+    }
+  };
 
   // Reminders States
   const { data: refills = [], isLoading: loadingRefills, refetch: refetchRefills } = useApiQuery<Refill[]>(
@@ -422,6 +452,17 @@ const AutomationCenter = () => {
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-xl border border-glass-border mr-2">
+                <span className="text-[10px] font-black text-muted uppercase tracking-wider">Notice Days:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={noticeDays}
+                  onChange={e => handleUpdateNoticeDays(parseInt(e.target.value) || 3)}
+                  className="w-12 text-center font-mono font-bold bg-black/40 border border-glass-border/60 rounded px-1 py-0.5 text-text focus:outline-none focus:border-primary/50 text-xs"
+                />
+              </div>
               <button
                 onClick={() => queryClient.invalidateQueries({ queryKey: ['automation-refills'] })}
                 className="p-2 rounded-xl bg-white/5 border border-glass-border hover:bg-white/10 hover:text-text text-muted transition-all"

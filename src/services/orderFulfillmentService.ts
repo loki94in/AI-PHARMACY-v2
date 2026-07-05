@@ -208,71 +208,9 @@ export class OrderFulfillmentService {
 
     try {
       const db = await dbManager.getConnection();
-      
-      // Get pending active refills that are due within 3 days
-      const dueRefills = await db.all(
-        `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
-         JOIN medicines m ON pr.medicine_id = m.id
-         WHERE pr.next_refill_date <= datetime('now', '+3 days') 
-           AND pr.status = 'pending' 
-           AND pr.is_active = 1`
-      );
-
-      for (const refill of dueRefills) {
-        // Check current stock in inventory_master
-        const stockRow = await db.get(
-          `SELECT SUM(quantity) as total_qty FROM inventory_master WHERE medicine_id = ?`,
-          [refill.medicine_id]
-        );
-        const qty = stockRow ? (stockRow.total_qty || 0) : 0;
-
-        if (qty > 0) {
-          // Stock is available. Mark refill as ready for manual/automatic notification dispatch
-          await db.run(
-            `UPDATE patient_refills 
-             SET is_ready = 1, hold_for_stock = 0 
-             WHERE id = ?`,
-            [refill.id]
-          );
-        } else {
-          // Stock is unavailable (out of stock). 
-          // 1. Mark refill as holding for stock
-          await db.run(
-            `UPDATE patient_refills 
-             SET hold_for_stock = 1, is_ready = 0 
-             WHERE id = ?`,
-            [refill.id]
-          );
-
-          // 2. Check if a pending/ordered special order already exists for this patient & medicine to avoid duplicates
-          const existingOrder = await db.get(
-            `SELECT id FROM special_orders 
-             WHERE phone = ? AND LOWER(product) = LOWER(?) AND status IN ('Pending', 'Ordered')`,
-            [refill.patient_phone, refill.medicine_name]
-          );
-
-          if (!existingOrder) {
-            console.log(`[OrderFulfillmentService] Refill ID ${refill.id} is out of stock. Auto-generating high priority special order.`);
-            
-            // Ensure source column exists
-            try {
-              await db.run("ALTER TABLE special_orders ADD COLUMN source TEXT DEFAULT 'manual'");
-            } catch (_) {}
-
-            // Create a high priority special order
-            await db.run(
-              `INSERT INTO special_orders (
-                product, requester, phone, qty, priority, status, source
-              ) VALUES (?, ?, ?, 1, 'High', 'Pending', 'refill')`,
-              [
-                refill.medicine_name,
-                refill.patient_name,
-                refill.patient_phone
-              ]
-            );
-          }
-        }
-      }
+      // Import dynamically to avoid circular dependencies
+      const { checkAllRefills } = await import('./refillService.js');
+      await checkAllRefills(db);
     } catch (err: any) {
       console.error('[OrderFulfillmentService] Error in background refill check:', err.message);
     } finally {

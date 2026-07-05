@@ -45,6 +45,7 @@ const NonMappedDistributors = lazy(pageImports['/non-mapped-distributors']);
 const AutomationCenter = lazy(pageImports['/automation-center']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
+const Refills = lazy(pageImports['/refills']);
 
 // ──────────────────────────────────────────────
 // App Component
@@ -89,6 +90,7 @@ function App() {
               <Route path="/crm" element={<CRM />} />
               <Route path="/orders" element={<Orders />} />
               <Route path="/automation-center" element={<AutomationCenter />} />
+              <Route path="/refills" element={<Refills />} />
               <Route path="/pharmarack-cart" element={<PharmarackCart />} />
               <Route path="/non-mapped-distributors" element={<NonMappedDistributors />} />
               <Route path="/migration" element={<Migration />} />
