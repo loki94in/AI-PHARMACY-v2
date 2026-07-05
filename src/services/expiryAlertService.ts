@@ -170,9 +170,20 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
     const db = await dbManager.getConnection();
     // Only fetch items that still have stock — zero-qty = sold/returned
     const rows = await db.all(`
-      SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
+      SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
+             pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+             d.id as distributor_id, d.name as distributor_name
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
+      LEFT JOIN purchase_items pi ON pi.id = (
+        SELECT pi3.id 
+        FROM purchase_items pi3 
+        WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+        ORDER BY pi3.id DESC 
+        LIMIT 1
+      )
+      LEFT JOIN purchases p ON pi.purchase_id = p.id
+      LEFT JOIN distributors d ON p.distributor_id = d.id
       WHERE im.quantity > 0
       ORDER BY im.expiry_date ASC
     `);
@@ -232,13 +243,27 @@ export async function patchExpiryCacheForInventoryItem(inventoryId: number): Pro
 
     const db = await dbManager.getConnection();
     const item = await db.get<{
-      id: number; medicine_name: string; batch_no: string;
+      id: number; medicine_id: number; medicine_name: string; batch_no: string;
       expiry_date: string; quantity: number; mrp: number; rack_location: string | null;
+      purchase_item_id: number | null; purchase_cost_price: number | null;
+      purchase_invoice_no: string | null; purchase_id: number | null;
+      distributor_id: number | null; distributor_name: string | null;
     }>(`
-      SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date,
-             im.quantity, im.mrp, im.rack_location
+      SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date,
+             im.quantity, im.mrp, im.rack_location,
+             pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+             d.id as distributor_id, d.name as distributor_name
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
+      LEFT JOIN purchase_items pi ON pi.id = (
+        SELECT pi3.id 
+        FROM purchase_items pi3 
+        WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+        ORDER BY pi3.id DESC 
+        LIMIT 1
+      )
+      LEFT JOIN purchases p ON pi.purchase_id = p.id
+      LEFT JOIN distributors d ON p.distributor_id = d.id
       WHERE im.id = ?
     `, [inventoryId]);
 

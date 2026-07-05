@@ -1,5 +1,6 @@
 // @ts-nocheck
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
@@ -141,6 +142,12 @@ const Returns: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  
+  const activeSearchRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(activeSearchRef, () => {
+    setActiveSearchIndex(null);
+    setSearchResults([]);
+  });
   const [groupedReturns, setGroupedReturns] = useState<GroupedReturn[]>([]);
 
   const [selectedHistoryReturn, setSelectedHistoryReturn] = useState<any | null>(null);
@@ -487,8 +494,12 @@ const Returns: React.FC = () => {
         batch_no: item.batch_no || '',
         expiry_date: formatExpiryToMMYY(item.expiry_date || ''),
         quantity: item.quantity || '',
-        cost_price: item.mrp || '',
+        cost_price: item.purchase_cost_price ?? item.cost_price ?? item.mrp ?? '',
         mrp: item.mrp || '',
+        purchase_item_id: item.purchase_item_id || undefined,
+        invoice_no: item.purchase_invoice_no || '',
+        distributor_name: item.distributor_name || '',
+        distributor_id: item.distributor_id || undefined,
       }));
       setItems(mapped);
     }
@@ -1065,6 +1076,27 @@ const Returns: React.FC = () => {
                       </button>
                     )}
                     <button
+                      onClick={async () => {
+                        try {
+                          const blob = await api.exportReturnsPDF(historyReturnItems);
+                          const url = window.URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `return-${selectedHistoryReturn.return_no}-${Date.now()}.pdf`;
+                          document.body.appendChild(a);
+                          a.click();
+                          window.URL.revokeObjectURL(url);
+                          document.body.removeChild(a);
+                        } catch (error) {
+                          console.error('Error exporting PDF:', error);
+                          alert('Failed to export PDF');
+                        }
+                      }}
+                      className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all"
+                    >
+                      <FileText size={13} /> Export PDF
+                    </button>
+                    <button
                       onClick={() => { setEditingItems(historyReturnItems.map(i => ({ ...i }))); setIsEditingHistory(true); }}
                       className="bg-primary/10 hover:bg-primary/20 text-primary font-semibold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all"
                     >
@@ -1269,7 +1301,7 @@ const Returns: React.FC = () => {
                       
                       {/* Medicine Select / Search */}
                       <td className="p-3">
-                        <div className="relative">
+                        <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative">
                           <div className="flex gap-1 items-center">
                             <input
                               type="text"

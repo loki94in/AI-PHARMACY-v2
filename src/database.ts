@@ -329,6 +329,13 @@ export async function ensureSchema(dbPath: string) {
     }
   }
 
+  // Create index on medicines (item_code) after columns are added
+  try {
+    await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_item_code ON medicines (item_code);');
+  } catch (err) {
+    console.warn('Failed to create index idx_medicines_item_code:', err);
+  }
+
   // New tables needed by various routes
   await db.exec(`
     CREATE TABLE IF NOT EXISTS staged_medicine_reviews (

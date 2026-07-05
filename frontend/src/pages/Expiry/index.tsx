@@ -9,7 +9,8 @@ import {
   AlertTriangle, 
   RefreshCw, 
   CheckCircle2,
-  RotateCcw
+  RotateCcw,
+  FileText
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -26,6 +27,13 @@ interface ExpiryItem {
   quantity: number;
   mrp: number;
   rack_location?: string;
+  medicine_id?: number;
+  purchase_invoice_no?: string;
+  purchase_id?: number;
+  purchase_item_id?: number;
+  purchase_cost_price?: number;
+  distributor_id?: number;
+  distributor_name?: string;
 }
 
 const getTodayString = () => {
@@ -115,6 +123,28 @@ const Expiry = () => {
     const selected = filteredItems.filter(item => selectedIds.has(item.id));
     if (selected.length === 0) return;
     navigate('/returns', { state: { prefilledReturnItems: selected } });
+  };
+
+  const handleExport = async (format: 'pdf' | 'csv') => {
+    try {
+      const blob = await api.exportExpiryReport({
+        date_from: dateRangeHelper.dateRange.from,
+        date_to: dateRangeHelper.dateRange.to,
+        format
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `expiry_report_${Date.now()}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      showNotification(`Expiry report (${format.toUpperCase()}) exported successfully!`, 'success');
+    } catch (err) {
+      console.error(`Failed to export expiry report:`, err);
+      showNotification('Failed to export expiry report.', 'error');
+    }
   };
 
   const handleSendWhatsAppAlerts = async (e: React.FormEvent) => {
@@ -248,6 +278,20 @@ const Expiry = () => {
               Return {selectedIds.size} Selected
             </button>
           )}
+          <button
+            onClick={() => handleExport('pdf')}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white text-muted transition-all text-xs font-semibold"
+          >
+            <FileText size={13} />
+            Export PDF
+          </button>
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white text-muted transition-all text-xs font-semibold"
+          >
+            <FileText size={13} />
+            Export CSV
+          </button>
           <button 
             onClick={() => queryClient.invalidateQueries({ queryKey: expiryKey })} 
             disabled={refreshing}
@@ -373,7 +417,7 @@ const Expiry = () => {
             <DateRangeFilter
               helper={dateRangeHelper}
               label="Expiry Date Range"
-              showInputs={false}
+              showInputs={true}
               presets={[
                 { label: '30d', days: 30 },
                 { label: '60d', days: 60 },
@@ -438,9 +482,9 @@ const Expiry = () => {
                 <tr>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 w-8">
                     <input type="checkbox" className="rounded" onChange={e => {
-                      if (e.target.checked) setSelectedIds(new Set(filteredItems.map(i => i.id)));
+                      if (e.target.checked) setSelectedIds(new Set(filteredItems.filter(i => i.purchase_invoice_no).map(i => i.id)));
                       else setSelectedIds(new Set());
-                    }} checked={selectedIds.size === filteredItems.length && filteredItems.length > 0} readOnly />
+                    }} checked={selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no).length && filteredItems.length > 0} readOnly />
                   </th>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">ID</th>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Medicine Name</th>
@@ -449,7 +493,9 @@ const Expiry = () => {
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Remaining Time</th>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Stock Qty</th>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-right">MRP Price</th>
+                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Invoice Ref / Supplier</th>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Rack Location</th>
+                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Actions</th>
                 </tr>
                 <tr className="bg-bg2 border-b border-glass-border/30">
                   <td className="p-2"></td>
@@ -524,6 +570,9 @@ const Expiry = () => {
                     </div>
                   </td>
                   <td className="p-2">
+                    {/* Invoice Ref / Supplier empty filter cell */}
+                  </td>
+                  <td className="p-2">
                     <div className="flex items-center justify-between gap-1">
                       <input
                         type="text"
@@ -552,19 +601,22 @@ const Expiry = () => {
                       )}
                     </div>
                   </td>
+                  <td className="p-2">
+                    {/* Actions empty filter cell */}
+                  </td>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="p-12 text-center text-muted font-semibold">
+                    <td colSpan={11} className="p-12 text-center text-muted font-semibold">
                       <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-primary opacity-60" />
                       Loading expiry register...
                     </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-16 text-center text-muted font-semibold">
+                    <td colSpan={11} className="p-16 text-center text-muted font-semibold">
                       <CheckCircle2 size={36} className="mx-auto mb-3 text-muted/30" />
                       No items matching expiry thresholds in inventory.
                     </td>
@@ -582,9 +634,10 @@ const Expiry = () => {
                         <td className="p-4">
                           <input
                             type="checkbox"
-                            className="rounded cursor-pointer"
+                            className="rounded cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                             checked={isSelected}
                             onChange={() => toggleSelect(item.id)}
+                            disabled={!item.purchase_invoice_no}
                           />
                         </td>
                         <td className="p-4 text-muted font-mono select-none">
@@ -615,8 +668,41 @@ const Expiry = () => {
                         <td className="p-4 text-right font-mono font-bold text-sky">
                           ₹{item.mrp?.toFixed(2) || '0.00'}
                         </td>
+                        <td className="p-4 select-none">
+                          {item.purchase_invoice_no ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[9px] font-semibold font-mono w-max">
+                                {item.purchase_invoice_no}
+                              </span>
+                              <span className="text-[10px] text-muted truncate max-w-[130px] font-semibold" title={item.distributor_name}>
+                                {item.distributor_name}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted/65 italic font-medium">Unmatched (match manually)</span>
+                          )}
+                        </td>
                         <td className="p-4 text-muted select-none">
                           {item.rack_location || '-'}
+                        </td>
+                        <td className="p-4 text-center select-none">
+                          <button
+                            onClick={() => {
+                              if (item.purchase_invoice_no) {
+                                navigate('/returns', { state: { prefilledReturnItems: [item] } });
+                              }
+                            }}
+                            disabled={!item.purchase_invoice_no}
+                            className={`flex items-center gap-1 mx-auto px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                              item.purchase_invoice_no
+                                ? 'bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-500/30'
+                                : 'opacity-40 bg-white/5 border-glass-border text-muted cursor-not-allowed'
+                            }`}
+                            title={item.purchase_invoice_no ? 'Create Return' : 'Cannot return: no purchase invoice found, match manually'}
+                          >
+                            <RotateCcw size={10} />
+                            Return
+                          </button>
                         </td>
                       </tr>
                     );

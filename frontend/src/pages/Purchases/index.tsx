@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw } from 'lucide-react';
+import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -484,6 +485,13 @@ const Purchases: React.FC = () => {
 
   const savePurchaseRef = useRef<any>(null);
   const addNewItemRef = useRef<any>(null);
+  const activeSearchRef = useRef<HTMLDivElement>(null);
+
+  useOnClickOutside(activeSearchRef, () => {
+    setActiveSearchIndex(null);
+    setSearchResults([]);
+  });
+
   useEffect(() => {
     savePurchaseRef.current = savePurchase;
     addNewItemRef.current = addNewItem;
@@ -1937,7 +1945,7 @@ const Purchases: React.FC = () => {
                     </span>
                   </td>
                   <td className="py-3">
-                    <div className="relative group/search">
+                    <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative group/search">
                       <div className="flex gap-1">
                         <input
                           type="text"

@@ -1026,25 +1026,25 @@ const RefillControlSidebar = ({
 
   if (!expanded) {
     return (
-      <button
+      <div
         onClick={() => setExpanded(true)}
-        className="w-10 bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-6 hover:bg-white/[0.02] transition-colors cursor-pointer shrink-0 z-20"
+        className="w-10 h-full bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-6 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
         title="Expand Refill Assistant"
       >
-        <ChevronLeftIcon size={16} className="text-muted" />
+        <ChevronLeftIcon size={16} className="text-muted mt-2" />
         <div 
           style={{ writingMode: 'vertical-rl' }}
-          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest select-none"
+          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest"
         >
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
           <span>Refill Control</span>
         </div>
         {(refills.length > 0 || notifications.length > 0) && (
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-black/40 animate-pulse">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-purple-600/30 animate-pulse">
             {refills.length + notifications.length}
           </span>
         )}
-      </button>
+      </div>
     );
   }
 

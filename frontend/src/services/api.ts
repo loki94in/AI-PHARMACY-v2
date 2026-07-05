@@ -403,6 +403,10 @@ export const api = {
     return apiClient.get('/expiry', { params }).then(res => res.data);
   },
   sendExpiryAlerts: (data: { phone?: string, days?: number }) => apiClient.post('/expiry/send-alerts', data).then(res => res.data),
+  exportExpiryReport: (params: { date_from?: string; date_to?: string; format: 'pdf' | 'csv' }) =>
+    apiClient.get('/expiry/export', { params, responseType: 'blob' }).then(res => res.data),
+  createReturnFromExpiry: (inventoryId: number, quantity: number) =>
+    apiClient.post('/expiry/create-return', { inventory_id: inventoryId, quantity }).then(res => res.data),
 
   // Dispatch Orders
   getDispatchOrders: () => apiClient.get('/dispatch/orders').then(res => res.data),

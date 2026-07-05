@@ -180,3 +180,24 @@ export function exportToPdf(
 
   doc.end();
 }
+
+/**
+ * Generate a standard CSV string from headers, keys, and row objects.
+ * Handles double quote escaping.
+ */
+export function exportToCsv(
+  headers: string[],
+  keys: string[],
+  rows: any[]
+): string {
+  const headerLine = headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(',');
+  const rowLines = rows.map(row => 
+    keys.map(k => {
+      const val = row[k];
+      const strVal = val !== undefined && val !== null ? String(val) : '';
+      return `"${strVal.replace(/"/g, '""')}"`;
+    }).join(',')
+  );
+  return [headerLine, ...rowLines].join('\n');
+}
+

@@ -196,6 +196,7 @@ const POS = () => {
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
   const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
   const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   
   // Doctor Modal state
   const [showDoctorModal, setShowDoctorModal] = useState(false);
@@ -499,6 +500,7 @@ const POS = () => {
   useOnClickOutside(productSearchRef, () => {
     setSearchResults([]);
     setSuggestions([]);
+    setShowSearchDropdown(false);
   });
 
   useOnClickOutside(activeRowRef, () => {
@@ -536,7 +538,10 @@ const POS = () => {
         .then((data: any[]) => {
           if (Array.isArray(data)) {
             setPatientSuggestions(data);
-            setShowPatientSuggestions(data.length > 0);
+            const isFocused = document.activeElement && document.activeElement.getAttribute('aria-label') === 'Patient Name';
+            if (isFocused) {
+              setShowPatientSuggestions(data.length > 0);
+            }
           }
         })
         .catch(() => {});
@@ -768,7 +773,8 @@ const POS = () => {
         mrp: med.mrp, 
         costPrice: med.costPrice || (med.mrp * 0.7),
         salts: med.salts || '',
-        availableStock: med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0)
+        availableStock: med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0),
+        availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0)
       }];
     });
   };
@@ -855,6 +861,7 @@ const POS = () => {
           salts: med.salts || med.hsn_code || 'Generic',
           packSize: med.pack_size || 10,
           availableStock: med.quantity !== undefined ? med.quantity : 0,
+          availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
           isEmptyRow: false
         };
       }));
@@ -864,6 +871,14 @@ const POS = () => {
     setRowSearchTerm('');
     setRowSearchResults([]);
     setRowSearchHighlightIndex(-1);
+
+    setTimeout(() => {
+      const qtyInput = document.getElementById(`row-qty-input-${index}`);
+      if (qtyInput) {
+        qtyInput.focus();
+        (qtyInput as HTMLInputElement).select();
+      }
+    }, 100);
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
@@ -1199,6 +1214,7 @@ const POS = () => {
                 <div className="flex gap-1 items-center">
                   <input 
                     type="text" 
+                    autoComplete="off"
                     className="premium-input text-xs h-9 px-3 flex-1 w-full bg-bg2/40 border-border/60 rounded-xl" 
                     placeholder="Walk-in Customer" 
                     value={patientName}
@@ -1300,6 +1316,7 @@ const POS = () => {
                 <div className="flex gap-1 relative">
                   <input 
                     type="text"
+                    autoComplete="off"
                     className="premium-input text-xs h-9 pl-3 pr-7 bg-bg2/40 border-border/60 w-full text-text focus:border-sky rounded-xl"
                     placeholder="Type or Select Doctor..."
                     value={doctor}
@@ -1393,10 +1410,15 @@ const POS = () => {
                 </span>
                 <input 
                   type="text" 
+                  autoComplete="off"
                   placeholder="Search medicine by name, composition, batch, or price..." 
                   className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20"
                   value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
+                  onFocus={() => setShowSearchDropdown(true)}
+                  onChange={e => {
+                    setSearchTerm(e.target.value);
+                    setShowSearchDropdown(true);
+                  }}
                   onKeyDown={e => {
                     if (searchResults.length === 0) return;
                     if (e.key === 'ArrowDown') {
@@ -1424,16 +1446,18 @@ const POS = () => {
                         setSearchTerm('');
                         setSearchResults([]);
                         setSearchHighlightIndex(-1);
+                        setShowSearchDropdown(false);
                       }
                     } else if (e.key === 'Escape') {
                       setSearchResults([]);
                       setSearchHighlightIndex(-1);
+                      setShowSearchDropdown(false);
                     }
                   }}
                 />
                 
                 {/* Empty inventory fallback dropdown */}
-                {searchTerm.trim().length >= 3 && searchResults.length === 0 && (
+                {showSearchDropdown && searchTerm.trim().length >= 3 && searchResults.length === 0 && (
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
@@ -1473,6 +1497,7 @@ const POS = () => {
                             quantity: 0
                           });
                           setSearchTerm('');
+                          setShowSearchDropdown(false);
                         }}
                         className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/20 text-left transition-all text-xs w-full group"
                       >
@@ -1517,7 +1542,7 @@ const POS = () => {
                 )}
                 
                 {/* Search results dropdown */}
-                {searchResults.length > 0 && (
+                {showSearchDropdown && searchResults.length > 0 && (
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
@@ -1569,6 +1594,7 @@ const POS = () => {
                                 });
                                 setSearchTerm('');
                                 setSearchResults([]);
+                                setShowSearchDropdown(false);
                               }}
                               className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                             >
@@ -1581,7 +1607,8 @@ const POS = () => {
                                   Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
                                   {item.quantity !== undefined && (
                                     <span className="ml-3 font-mono font-semibold text-primary">
-                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => c.medicine_id === item.medicine_id ? sum + c.qty : sum, 0))}
+                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => c.medicine_id === item.medicine_id ? sum + c.qty : sum, 0))} Str
+                                      {item.loose_quantity !== undefined && item.loose_quantity > 0 && ` / ${item.loose_quantity} Tab`}
                                     </span>
                                   )}
                                 </span>
@@ -1801,9 +1828,7 @@ const POS = () => {
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80">Medicine</th>
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80">Batch</th>
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Expiry</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center text-primary font-extrabold">Stock</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Qty (Str)</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Loose Qty</th>
+                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center text-primary font-extrabold">Qty (Strips/Tablets)</th>
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Disc %</th>
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-right">MRP</th>
                     <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-right">Total</th>
@@ -1857,6 +1882,7 @@ const POS = () => {
                               <input 
                                 id={`row-med-input-${cart.indexOf(item)}`}
                                 type="text" 
+                                autoComplete="off"
                                 className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-xs font-semibold text-text py-1 px-1 rounded"
                                 value={activeRowSearchIndex === cart.indexOf(item) ? rowSearchTerm : item.name}
                                 onChange={e => {
@@ -1869,6 +1895,14 @@ const POS = () => {
                                   const idx = cart.indexOf(item);
                                   setActiveRowSearchIndex(idx);
                                   setRowSearchTerm(item.name);
+                                }}
+                                onBlur={() => {
+                                  setTimeout(() => {
+                                    setActiveRowSearchIndex(null);
+                                    setRowSearchTerm('');
+                                    setRowSearchResults([]);
+                                    setRowSearchHighlightIndex(-1);
+                                  }, 200);
                                 }}
                                 onKeyDown={e => {
                                   const idx = cart.indexOf(item);
@@ -1992,7 +2026,8 @@ const POS = () => {
                                             mrp: b.mrp,
                                             costPrice: b.cost_price,
                                             packSize: b.pack_size || cItem.packSize,
-                                            availableStock: b.quantity !== undefined ? b.quantity : 0
+                                            availableStock: b.quantity !== undefined ? b.quantity : 0,
+                                            availableLooseStock: b.loose_quantity !== undefined ? b.loose_quantity : 0
                                           };
                                         }));
                                         setActiveBatchRowId(null);
@@ -2000,7 +2035,7 @@ const POS = () => {
                                       className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-[10px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
                                     >
                                       <span className="font-bold block">{b.batch_no}</span>
-                                      <span className="text-muted block text-[8px]">Exp: {b.expiry_date} | Stock: {liveStock} | MRP: ₹{b.mrp}</span>
+                                      <span className="text-muted block text-[8px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}
@@ -2016,51 +2051,85 @@ const POS = () => {
                           </div>
                         </td>
 
-                        {/* Stock */}
-                        <td className="p-2 text-center">
+                        {/* Qty & Stock */}
+                        <td className="p-2 text-center min-w-[180px]">
                           {(() => {
                             if (item.isEmptyRow) {
                               return <div className="font-mono text-xs font-bold text-muted bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm">-</div>;
                             }
                             const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
+                            const remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
                             return (
-                              <div className={`font-mono text-xs font-bold bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm ${
-                                remainingStock === 'N/A'
-                                  ? 'text-muted'
-                                  : remainingStock <= 0
-                                  ? 'text-red font-extrabold bg-red/5 border-red/20'
-                                  : remainingStock <= 10
-                                  ? 'text-amber-500 font-bold bg-amber-500/5 border-amber-500/20'
-                                  : 'text-green font-bold bg-green/5 border-green/20'
-                              }`}>
-                                {remainingStock}
+                              <div className="flex flex-col gap-1.5 items-center justify-center">
+                                <div className="flex items-center gap-1">
+                                  {/* Qty (Str) */}
+                                  <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5">
+                                    <input 
+                                      id={`row-qty-input-${cart.indexOf(item)}`}
+                                      type="number" 
+                                      className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold text-text focus:outline-none"
+                                      value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
+                                      onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                                      min="0"
+                                      placeholder="0"
+                                      disabled={item.isEmptyRow}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          const looseInput = document.getElementById(`row-loose-input-${cart.indexOf(item)}`);
+                                          if (looseInput) {
+                                            looseInput.focus();
+                                            (looseInput as HTMLInputElement).select();
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-[9px] text-muted font-bold select-none uppercase">Str</span>
+                                  </div>
+
+                                  <span className="text-muted/60 font-mono text-xs font-bold select-none">/</span>
+
+                                  {/* Loose Qty */}
+                                  <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5">
+                                    <input 
+                                      id={`row-loose-input-${cart.indexOf(item)}`}
+                                      type="number" 
+                                      className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold text-amber-500 focus:outline-none"
+                                      value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
+                                      onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                                      min="0"
+                                      placeholder="0"
+                                      disabled={item.isEmptyRow}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          const currentIdx = cart.indexOf(item);
+                                          const nextIdx = currentIdx + 1;
+                                          const nextMedInput = document.getElementById(`row-med-input-${nextIdx}`);
+                                          if (nextMedInput) {
+                                            nextMedInput.focus();
+                                            (nextMedInput as HTMLInputElement).select();
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-[9px] text-muted font-bold select-none uppercase">Tab</span>
+                                  </div>
+                                </div>
+
+                                {/* Available Stock Info */}
+                                <div className={`text-[10px] select-none font-bold font-mono px-2 py-0.5 rounded-lg border ${
+                                  (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
+                                    ? 'bg-red/5 border-red/20 text-red animate-pulse'
+                                    : (typeof remainingStock === 'number' && remainingStock <= 10)
+                                    ? 'bg-amber-500/5 border-amber-500/20 text-amber-500'
+                                    : 'bg-green/5 border-green/20 text-green'
+                                }`}>
+                                  Left: {remainingStock} Str / {remainingLoose} Tab
+                                </div>
                               </div>
                             );
                           })()}
-                        </td>
-
-                        {/* Qty */}
-                        <td className="p-2 text-center">
-                          <input 
-                            type="number" 
-                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
-                            value={item.isEmptyRow ? '' : (item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty)}
-                            onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                            min="0"
-                            disabled={item.isEmptyRow}
-                          />
-                        </td>
-
-                        {/* Loose Qty */}
-                        <td className="p-2 text-center">
-                          <input 
-                            type="number" 
-                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-amber-500 py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
-                            value={item.isEmptyRow ? '' : (item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty)}
-                            onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                            min="0"
-                            disabled={item.isEmptyRow}
-                          />
                         </td>
 
                         {/* Discount */}

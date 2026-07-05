@@ -165,7 +165,7 @@ const Doctors = () => {
             </div>
 
             {/* Fields */}
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 space-y-4 overflow-y-auto pr-1 scrollbar-thin">
               {(
                 [
                   { id: 'doc-name',       field: 'name',               label: 'Full Name *',           placeholder: 'Dr. Full Name',           type: 'text'   },

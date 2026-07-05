@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ClipboardList, 
@@ -21,6 +21,7 @@ import type { SpecialOrder } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 
 const parseSqliteDate = (dateStr: string) => {
   if (!dateStr) return new Date();
@@ -114,6 +115,11 @@ const Orders = () => {
   const [prSearchResults, setPrSearchResults] = useState<any[]>([]);
   const [showPrDropdown, setShowPrDropdown] = useState(false);
   const [loadingPr, setLoadingPr] = useState(false);
+  
+  const productContainerRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(productContainerRef, () => {
+    setShowPrDropdown(false);
+  });
   
   // Selected Pharmarack Metadata Form State
   const [selectedDistributor, setSelectedDistributor] = useState('');
@@ -466,7 +472,7 @@ const Orders = () => {
               Register Out-of-Stock Request
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2 relative">
+              <div ref={productContainerRef} className="space-y-2 relative">
                 <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Requested Medicine Name *</label>
                 <div className="relative">
                   <input 

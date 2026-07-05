@@ -55,6 +55,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                m.item_code as item_code, m.manufacturer as manufacturer,
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+               im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
                m.cgst, m.sgst, m.igst, m.hsn_code,
                0 as is_out_of_stock
@@ -77,6 +78,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                m.item_code as item_code, m.manufacturer as manufacturer,
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+               im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
                m.cgst, m.sgst, m.igst, m.hsn_code,
                0 as is_out_of_stock
@@ -99,6 +101,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
       SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
              m.item_code as item_code, m.manufacturer as manufacturer,
              im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+             im.loose_quantity as loose_quantity,
              COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
              m.cgst, m.sgst, m.igst, m.hsn_code,
              0 as is_out_of_stock
@@ -119,6 +122,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                m.item_code as item_code, m.manufacturer as manufacturer,
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+               im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
                m.cgst, m.sgst, m.igst, m.hsn_code,
                0 as is_out_of_stock
@@ -160,7 +164,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
       JOIN medicines m ON im.medicine_id = m.id
       WHERE m.api_reference IN (${placeholders})
         AND im.quantity > 0
-        AND date(im.expiry_date) >= date('now')
+        AND im.expiry_date >= date('now')
       LIMIT 100
     `;
     const allAlts = await db.all(altSql, apiRefs);
@@ -185,6 +189,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
       WHERE name LIKE ? 
       LIMIT 15
     `;
+    const searchLikeQuery = `${cleanQuery}%`;
     const extraMeds = await db.all(outOfStockSql, [searchLikeQuery]);
     const outOfStockMeds = extraMeds.filter(m => !foundMedIds.has(m.id)).slice(0, 5);
     
@@ -200,7 +205,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
           JOIN medicines m ON im.medicine_id = m.id
           WHERE m.api_reference IN (${placeholders})
             AND im.quantity > 0
-            AND date(im.expiry_date) >= date('now')
+            AND im.expiry_date >= date('now')
           LIMIT 50
         `;
         const oosAllAlts = await db.all(oosAltSql, oosApiRefs);

@@ -3,6 +3,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { exportToPdf, exportToCsv } from '../utils/reportExporter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,9 +88,20 @@ router.get('/', async (req, res) => {
       console.log('[ExpiryCache] Cache directory missing (first run). Using live SQL and triggering rebuild.');
       const db = await dbManager.getConnection();
       const rows = await db.all(`
-        SELECT im.id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location
+        SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
+               pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+               d.id as distributor_id, d.name as distributor_name
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
+        LEFT JOIN purchase_items pi ON pi.id = (
+          SELECT pi3.id 
+          FROM purchase_items pi3 
+          WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+          ORDER BY pi3.id DESC 
+          LIMIT 1
+        )
+        LEFT JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE im.quantity > 0
           AND date(im.expiry_date) >= date(?)
           AND date(im.expiry_date) <= date(?)
@@ -122,9 +134,212 @@ router.get('/', async (req, res) => {
       // Missing file = empty month (all sold/returned). No action needed.
     }
 
-    return res.json(items.filter(item => item.quantity > 0));
+    return res.json(items.filter(item => item.quantity > 0 && isDateInRange(item.expiry_date, date_from, date_to)));
   } catch (err) {
     console.error('Expiry fetch error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Export items nearing expiry / already expired as PDF or CSV
+router.get('/export', async (req, res) => {
+  const date_from = (req.query.date_from as string) || getTodayString();
+  let date_to = req.query.date_to as string;
+  if (!date_to) {
+    const days = req.query.days ? parseInt(req.query.days as string, 10) : 90;
+    date_to = getNDaysAheadString(days);
+  }
+  const format = (req.query.format as string) || 'pdf';
+
+  const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+  let items: any[] = [];
+
+  try {
+    const months = getMonthsInRange(date_from, date_to);
+
+    if (!fs.existsSync(cacheDir)) {
+      const db = await dbManager.getConnection();
+      items = await db.all(`
+        SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
+               pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+               d.id as distributor_id, d.name as distributor_name
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        LEFT JOIN purchase_items pi ON pi.id = (
+          SELECT pi3.id 
+          FROM purchase_items pi3 
+          WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+          ORDER BY pi3.id DESC 
+          LIMIT 1
+        )
+        LEFT JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN distributors d ON p.distributor_id = d.id
+        WHERE im.quantity > 0
+          AND date(im.expiry_date) >= date(?)
+          AND date(im.expiry_date) <= date(?)
+        ORDER BY im.expiry_date ASC
+      `, [date_from, date_to]);
+    } else {
+      for (const ym of months) {
+        const filePath = path.join(cacheDir, `expiry_${ym}.json`);
+        if (fs.existsSync(filePath)) {
+          try {
+            const raw = await fs.promises.readFile(filePath, 'utf-8');
+            items = items.concat(JSON.parse(raw));
+          } catch (err) {
+            console.error(`[ExpiryCache] Failed to parse cache file for ${ym}:`, err);
+          }
+        }
+      }
+      items = items.filter(item => item.quantity > 0 && isDateInRange(item.expiry_date, date_from, date_to));
+    }
+
+    const headers = ['ID', 'Medicine Name', 'Batch No', 'Expiry Date', 'Qty', 'MRP', 'Location', 'Purchase Inv', 'Distributor'];
+    const keys = ['id', 'medicine_name', 'batch_no', 'expiry_date', 'quantity', 'mrp', 'rack_location', 'purchase_invoice_no', 'distributor_name'];
+    const alignMap = {
+      id: 'left',
+      medicine_name: 'left',
+      batch_no: 'left',
+      expiry_date: 'center',
+      quantity: 'center',
+      mrp: 'right',
+      rack_location: 'left',
+      purchase_invoice_no: 'left',
+      distributor_name: 'left'
+    } as any;
+    const columnWidths = [30, 110, 60, 50, 30, 42, 50, 60, 80];
+
+    const formattedRows = items.map(item => ({
+      ...item,
+      expiry_date: item.expiry_date ? new Date(item.expiry_date).toLocaleDateString([], { month: '2-digit', year: '2-digit' }) : '—',
+      purchase_invoice_no: item.purchase_invoice_no || '—',
+      distributor_name: item.distributor_name || '—'
+    }));
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=expiry_report_${Date.now()}.csv`);
+      const csvContent = exportToCsv(headers, keys, formattedRows);
+      return res.send(csvContent);
+    } else {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=expiry_report_${Date.now()}.pdf`);
+      return exportToPdf(res, 'Near Expiry Inventory Report', headers, keys, formattedRows, alignMap, columnWidths);
+    }
+  } catch (err) {
+    console.error('Expiry export error:', err);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// Create return directly from an expiry item
+router.post('/create-return', async (req, res) => {
+  const { inventory_id, quantity } = req.body;
+  if (!inventory_id || !quantity) {
+    return res.status(400).json({ error: 'inventory_id and quantity are required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    
+    // 1. Fetch inventory item details
+    const invItem = await db.get<{
+      id: number; medicine_id: number; medicine_name: string; batch_no: string;
+      expiry_date: string; quantity: number; mrp: number; rack_location: string | null;
+    }>(`
+      SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date,
+             im.quantity, im.mrp, im.rack_location
+      FROM inventory_master im
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE im.id = ?
+    `, [inventory_id]);
+
+    if (!invItem) {
+      return res.status(404).json({ error: 'Inventory item not found' });
+    }
+
+    if (invItem.quantity < quantity) {
+      return res.status(400).json({ error: 'Insufficient quantity in inventory' });
+    }
+
+    // 2. Find purchase match
+    const purchaseItem = await db.get<{
+      purchase_item_id: number; cost_price: number; mrp: number;
+      purchase_id: number; invoice_no: string; distributor_id: number; distributor_name: string;
+    }>(`
+      SELECT pi.id as purchase_item_id, pi.cost_price, pi.mrp, p.id as purchase_id, p.invoice_no, d.id as distributor_id, d.name as distributor_name
+      FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      JOIN distributors d ON p.distributor_id = d.id
+      WHERE pi.medicine_id = ? AND pi.batch_no = ?
+      ORDER BY p.date DESC
+      LIMIT 1
+    `, [invItem.medicine_id, invItem.batch_no]);
+
+    if (!purchaseItem) {
+      return res.status(400).json({ error: 'Cannot create return: no purchase invoice found for this batch/medicine. Please match manually.' });
+    }
+
+    // 3. Process return
+    await db.run('BEGIN TRANSACTION');
+    try {
+      // Generate return number
+      const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
+      let nextNum = 1;
+      if (lastRet && lastRet.return_no) {
+        const match = lastRet.return_no.match(/PR-(\d+)/);
+        if (match) {
+          nextNum = parseInt(match[1], 10) + 1;
+        }
+      }
+      const returnNo = `PR-${String(nextNum).padStart(3, '0')}`;
+      const totalAmount = (purchaseItem.cost_price || 0) * quantity;
+
+      const result = await db.run(
+        'INSERT INTO returns (return_no, type, total_amount, distributor_id, original_invoice_id, date, return_sub_type) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)',
+        [returnNo, 'purchase', totalAmount, purchaseItem.distributor_id, purchaseItem.purchase_id, 'expiry']
+      );
+      const returnId = result.lastID;
+
+      // Record return item
+      await db.run(
+        `INSERT INTO return_items (return_id, medicine_id, batch_no, quantity, cost_price, mrp, total_price) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          returnId,
+          invItem.medicine_id,
+          invItem.batch_no,
+          quantity,
+          purchaseItem.cost_price,
+          purchaseItem.mrp,
+          totalAmount
+        ]
+      );
+
+      // Decrement inventory quantity
+      const newQty = Math.max(0, invItem.quantity - quantity);
+      await db.run('UPDATE inventory_master SET quantity = ? WHERE id = ?', [newQty, inventory_id]);
+
+      if (purchaseItem.distributor_id) {
+        const { trackExpiryReturn } = await import('../services/creditNoteService.js');
+        await trackExpiryReturn(db, returnId as number, purchaseItem.distributor_id, totalAmount, 3.0);
+      }
+
+      await db.run('COMMIT');
+
+      // Trigger cache update in background
+      import('../services/expiryAlertService.js')
+        .then(m => m.triggerExpiryCacheRebuildDebounced([inventory_id]))
+        .catch(() => {});
+
+      res.json({ success: true, message: 'Return successfully created', returnNo });
+    } catch (err: any) {
+      await db.run('ROLLBACK');
+      console.error('Error creating return from expiry:', err);
+      res.status(500).json({ error: 'Failed to create return' });
+    }
+  } catch (err) {
+    console.error('Error in create-return endpoint:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
