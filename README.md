@@ -8,14 +8,14 @@ Welcome to the **AI Pharmacy OS** repository. This platform consists of a local 
 
 ```mermaid
 graph TD
-    subgraph PC Server (Local Machine)
+    subgraph "PC Server (Local Machine)"
         DB[(SQLite app.db)] <--> Express[Express.js Server]
         Express <--> DesktopUI[HTML5 Web Interface]
         Express --> WhatsApp[WhatsApp Web JS Client]
         Express --> Tesseract[Tesseract OCR Engine]
     end
 
-    subgraph Mobile App (Expo / React Native)
+    subgraph "Mobile App (Expo / React Native)"
         AppLock[Biometric App Lock] --> AndroidUI[Chat & Navigation Shell]
         AndroidUI <--> APIClient[lib/api.ts Client]
         APIClient <--> Express
