@@ -767,7 +767,7 @@ const Topbar = ({
     <>
       <FlashToast toast={flashToast} onDismiss={() => setFlashToast(null)} onOpenReview={onOpenStagedReview} />
       
-      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-6 z-35 shrink-0">
+      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-6 relative z-30 shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-sm font-bold uppercase tracking-wider text-text/90">
             {location.pathname === '/' ? 'POS' : location.pathname.substring(1).replace('-', ' ')}
@@ -1032,7 +1032,10 @@ const RefillControlSidebar = ({
         title="Expand Refill Assistant"
       >
         <ChevronLeftIcon size={16} className="text-muted" />
-        <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest vertical-text select-none">
+        <div 
+          style={{ writingMode: 'vertical-rl' }}
+          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest select-none"
+        >
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
           <span>Refill Control</span>
         </div>

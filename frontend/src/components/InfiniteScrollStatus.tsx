@@ -23,7 +23,7 @@ export function InfiniteScrollStatus({
   itemName = 'items',
 }: InfiniteScrollStatusProps) {
   return (
-    <div className="flex flex-col items-center justify-center p-4 border-t border-glass-border/40 bg-white/5 select-none text-[11px] gap-3 shrink-0">
+    <div className="flex flex-col items-center justify-center p-4 border-t border-glass-border/40 bg-white/5 select-none text-xs gap-3 shrink-0">
       <div className="flex items-center justify-between w-full max-w-4xl text-muted px-2 font-medium">
         <div>
           Showing <span className="font-bold text-text font-mono">{loadedCount.toLocaleString()}</span> of{' '}
@@ -42,7 +42,7 @@ export function InfiniteScrollStatus({
       {hasNextPage && (
         <div ref={sentinelRef} className="h-6 w-full flex items-center justify-center">
           {isFetchingNextPage ? (
-            <div className="flex items-center gap-2 text-muted text-[11px] font-semibold">
+            <div className="flex items-center gap-2 text-muted text-xs font-semibold">
               <Loader2 size={14} className="animate-spin text-primary" />
               <span>Loading more {itemName}...</span>
             </div>
@@ -51,7 +51,7 @@ export function InfiniteScrollStatus({
               <button
                 type="button"
                 onClick={onLoadMore}
-                className="px-4 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold tracking-wider hover:text-text transition-all text-[11px] uppercase"
+                className="px-4 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold tracking-wider hover:text-text transition-all text-xs uppercase"
               >
                 Load More
               </button>
@@ -61,7 +61,7 @@ export function InfiniteScrollStatus({
       )}
 
       {!hasNextPage && totalItems > 0 && (
-        <div className="text-[11px] text-muted font-bold uppercase tracking-wider mt-1">
+        <div className="text-xs text-muted font-bold uppercase tracking-wider mt-1">
           ✓ All {itemName} loaded
         </div>
       )}

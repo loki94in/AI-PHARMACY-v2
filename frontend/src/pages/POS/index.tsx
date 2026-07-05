@@ -72,6 +72,45 @@ let cachedDoctors: any[] | null = null;
 let cachedCommonCombinations: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
+const groupBatches = (items: any[]): any[] => {
+  const grouped: any[] = [];
+  const map = new Map<number, any>();
+  
+  for (const item of items) {
+    const medId = item.medicine_id || item.inventory_id || Math.random();
+    if (!map.has(medId)) {
+      const copy = { ...item, quantity: item.quantity || 0 };
+      if (item.alternatives && Array.isArray(item.alternatives)) {
+        copy.alternatives = groupBatches(item.alternatives);
+      } else {
+        copy.alternatives = [];
+      }
+      map.set(medId, copy);
+      grouped.push(copy);
+    } else {
+      const existing = map.get(medId);
+      existing.quantity = (existing.quantity || 0) + (item.quantity || 0);
+      
+      // FEFO (First Expiry, First Out): prefer the batch details of the batch with the earliest valid expiry date
+      const existingExp = existing.expiry_date;
+      const currentExp = item.expiry_date;
+      if (currentExp && (!existingExp || currentExp < existingExp)) {
+        existing.inventory_id = item.inventory_id;
+        existing.batch_no = item.batch_no;
+        existing.expiry_date = item.expiry_date;
+        existing.mrp = item.mrp;
+        existing.cost_price = item.cost_price;
+        existing.unit_price = item.unit_price;
+      }
+      
+      if (item.alternatives && Array.isArray(item.alternatives) && item.alternatives.length > 0) {
+        existing.alternatives = groupBatches([...existing.alternatives, ...item.alternatives]);
+      }
+    }
+  }
+  return grouped;
+};
+
 const POS = () => {
   const navigate = useNavigate();
   const initialTabs = getInitialPOSTabs();
@@ -476,7 +515,7 @@ const POS = () => {
 
   useEffect(() => {
     if (rowSearchData && Array.isArray(rowSearchData)) {
-      setRowSearchResults(rowSearchData);
+      setRowSearchResults(groupBatches(rowSearchData));
       setRowSearchHighlightIndex(-1);
     } else if (activeRowSearchIndex === null || rowSearchTerm.trim().length < 3) {
       setRowSearchResults([]);
@@ -633,10 +672,11 @@ const POS = () => {
 
   useEffect(() => {
     if (searchResultsData && Array.isArray(searchResultsData)) {
+      const groupedData = groupBatches(searchResultsData);
       // Premium Barcode Auto-Add Feature:
       const term = searchTerm.trim().toUpperCase();
-      if (searchResultsData.length === 1) {
-        const matched = searchResultsData[0];
+      if (groupedData.length === 1) {
+        const matched = groupedData[0];
         const barcode = (matched.item_code || '').toUpperCase().trim();
         if (barcode === term && matched.inventory_id && !matched.is_out_of_stock) {
           addToCart({
@@ -657,7 +697,7 @@ const POS = () => {
           return;
         }
       }
-      setSearchResults(searchResultsData);
+      setSearchResults(groupedData);
       setSearchHighlightIndex(-1);
       setOnlineResults([]);
       setSearchingOnline(false);
@@ -1541,7 +1581,7 @@ const POS = () => {
                                   Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
                                   {item.quantity !== undefined && (
                                     <span className="ml-3 font-mono font-semibold text-primary">
-                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => (c.id === item.inventory_id || (c.medicine_id === item.medicine_id && c.batch === item.batch_no)) ? sum + c.qty : sum, 0))}
+                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => c.medicine_id === item.medicine_id ? sum + c.qty : sum, 0))}
                                     </span>
                                   )}
                                 </span>
@@ -1586,7 +1626,7 @@ const POS = () => {
                         };
 
                         const cartQty = cart.reduce((sum, c) => {
-                          if (c.id === med.inventory_id || (c.medicine_id === med.medicine_id && c.batch === med.batch_no)) {
+                          if (c.medicine_id === med.medicine_id) {
                             return sum + c.qty;
                           }
                           return sum;
@@ -1882,7 +1922,7 @@ const POS = () => {
                                           )}
                                         </div>
                                         <span className="text-[9px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[9px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => (c.id === med.inventory_id || (c.medicine_id === med.medicine_id && c.batch === med.batch_no)) ? sum + c.qty : sum, 0))}</span>
+                                        <span className="text-[9px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => c.medicine_id === med.medicine_id ? sum + c.qty : sum, 0))}</span>
                                       </button>
                                     );
                                   })}

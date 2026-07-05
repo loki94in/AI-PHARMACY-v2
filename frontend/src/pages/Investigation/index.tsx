@@ -1009,7 +1009,7 @@ const InvestigationCenter = () => {
                   containerRef={parentRef}
                   className="border border-glass-border/30 rounded-xl bg-glass-bg"
                   header={
-                    <tr className="flex items-center min-w-[1700px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] align-top select-none">
+                    <tr className="flex items-center min-w-[1750px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] align-top select-none">
                       {/* Medicine Header — always visible */}
                       <th className="p-2 border-r border-glass-border/20 min-w-[150px] flex-1">
                         <div className="flex flex-col gap-1">
@@ -1019,13 +1019,13 @@ const InvestigationCenter = () => {
                             placeholder="Filter medicine..."
                             value={colFilterMedicine}
                             onChange={e => setColFilterMedicine(e.target.value)}
-                            className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
                       {/* Batch Header */}
                       {col('batch') && (
-                        <th className="p-2 border-r border-glass-border/20 w-24 shrink-0">
+                        <th className="p-2 border-r border-glass-border/20 w-24 shrink-0 min-w-0">
                           <div className="flex flex-col gap-1">
                             <span className="uppercase text-[10px] tracking-wider text-muted font-black">Batch</span>
                             <input
@@ -1033,14 +1033,14 @@ const InvestigationCenter = () => {
                               placeholder="Filter batch..."
                               value={colFilterBatch}
                               onChange={e => setColFilterBatch(e.target.value)}
-                              className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
                       )}
                       {/* Date Header */}
                       {col('date') && (
-                        <th className="p-2 border-r border-glass-border/20 w-32 shrink-0">
+                        <th className="p-2 border-r border-glass-border/20 w-44 shrink-0">
                           <div className="flex flex-col gap-1">
                             <span className="uppercase text-[10px] tracking-wider text-muted font-black">Date</span>
                           </div>
@@ -1048,7 +1048,7 @@ const InvestigationCenter = () => {
                       )}
                       {/* Invoice Header */}
                       {col('invoice') && (
-                        <th className="p-2 border-r border-glass-border/20 w-28 shrink-0">
+                        <th className="p-2 border-r border-glass-border/20 w-28 shrink-0 min-w-0">
                           <div className="flex flex-col gap-1">
                             <span className="uppercase text-[10px] tracking-wider text-muted font-black">Invoice</span>
                             <input
@@ -1056,14 +1056,14 @@ const InvestigationCenter = () => {
                               placeholder="Filter invoice..."
                               value={colFilterInvoice}
                               onChange={e => setColFilterInvoice(e.target.value)}
-                              className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
                       )}
                       {/* Party Header */}
                       {col('party') && (
-                        <th className="p-2 border-r border-glass-border/20 w-36 shrink-0">
+                        <th className="p-2 border-r border-glass-border/20 w-36 shrink-0 min-w-0">
                           <div className="flex flex-col gap-1">
                             <span className="uppercase text-[10px] tracking-wider text-muted font-black">Party</span>
                             <input
@@ -1071,20 +1071,20 @@ const InvestigationCenter = () => {
                               placeholder="Filter party..."
                               value={colFilterParty}
                               onChange={e => setColFilterParty(e.target.value)}
-                              className="w-full px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
                       )}
                       {/* Opening Stock Header (with Type Selector) */}
                       {col('openingStock') && (
-                        <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0">
+                        <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 min-w-0">
                           <div className="flex flex-col gap-1 items-center">
                             <span className="uppercase text-[10px] tracking-wider text-muted font-black">Opening Stock</span>
                             <select
                               value={colFilterType}
                               onChange={e => setColFilterType(e.target.value)}
-                              className="w-full px-1.5 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal focus:outline-none focus:border-primary/50"
+                              className="w-full min-w-0 px-1.5 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal focus:outline-none focus:border-primary/50"
                             >
                               <option value="All">All Types</option>
                               <option value="Purchase">Purchases</option>
@@ -1137,7 +1137,7 @@ const InvestigationCenter = () => {
                           ref={rowVirtualizer.measureElement}
                           start={virtualRow.start}
                           size={virtualRow.size}
-                          className="min-w-[1700px] border-b border-glass-border/20"
+                          className="min-w-[1750px] border-b border-glass-border/20"
                         >
                           <td className="p-2 border-r border-glass-border/20 flex-1 min-w-[150px] text-text truncate" title={item.medicine_name}>
                             <div className="truncate">
@@ -1145,7 +1145,7 @@ const InvestigationCenter = () => {
                             </div>
                           </td>
                           {col('batch') && <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 font-mono font-bold text-muted truncate">{item.batch_no || 'N/A'}</td>}
-                          {col('date') && <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 font-mono whitespace-nowrap text-muted">{formatDate(item.date)}</td>}
+                          {col('date') && <td className="p-2 border-r border-glass-border/20 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
                           {col('invoice') && (
                             <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 truncate">
                               {item.invoice_id || item.purchase_id ? (
