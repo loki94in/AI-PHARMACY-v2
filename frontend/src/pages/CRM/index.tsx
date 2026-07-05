@@ -3,6 +3,8 @@ import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Patient {
   id: number;
@@ -65,7 +67,7 @@ const WhatsAppMedia = ({
     const src = `data:${media.mimetype};base64,${media.data}`;
     return (
       <div className="mt-1 mb-1 max-w-full rounded-lg overflow-hidden border border-glass-border/10 cursor-zoom-in" onClick={() => onImageClick(src, media.filename || 'Image')}>
-        <img src={src} alt={media.filename || 'WhatsApp Image'} className="max-w-full h-auto max-h-48 object-cover hover:scale-[1.02] transition-transform duration-200" />
+        <img src={src} alt={media.filename || 'WhatsApp Image'} loading="lazy" decoding="async" className="max-w-full h-auto max-h-48 object-cover hover:scale-[1.02] transition-transform duration-200" />
         {msg.body && <p className="mt-1 text-xs text-text">{msg.body}</p>}
       </div>
     );
@@ -118,8 +120,11 @@ const getNDaysAgoString = (n: number) => {
 };
 
 const CRM = () => {
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: patients = [], isLoading: loading } = useApiQuery<Patient[]>(
+    'patients',
+    () => api.getPatients({ limit: 20 })
+  );
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState(emptyForm);
@@ -184,17 +189,6 @@ const CRM = () => {
     toastEvent.trigger(msg, type, '/crm');
   };
 
-  const fetchPatients = useCallback(async () => {
-    try {
-      const data = await api.getPatients({ limit: 20 });
-      setPatients(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const fetchWaChats = useCallback(async () => {
     try {
       const data = await api.getWhatsappChats();
@@ -243,7 +237,6 @@ const CRM = () => {
   };
 
   useDeferredEffect(() => { 
-    fetchPatients(); 
     fetchWaStatus();
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
@@ -259,7 +252,7 @@ const CRM = () => {
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [fetchPatients, fetchWaStatus, waStatus.isReady]);
+  }, [fetchWaStatus, waStatus.isReady]);
 
   // Listen for real-time WhatsApp events pushed via SSE
   useEffect(() => {
@@ -620,7 +613,7 @@ const CRM = () => {
       }
       setForm(emptyForm);
       setEditingId(null);
-      fetchPatients();
+      queryClient.invalidateQueries({ queryKey: ['patients'] });
     } catch (err) {
       showNotif('Failed to save patient', 'error');
     } finally {
@@ -640,7 +633,7 @@ const CRM = () => {
       await api.deletePatient(id);
       showNotif('Patient deleted');
       if (selectedPatient?.id === id) setSelectedPatient(null);
-      fetchPatients();
+      queryClient.invalidateQueries({ queryKey: ['patients'] });
     } catch { showNotif('Failed to delete', 'error'); }
   };
 

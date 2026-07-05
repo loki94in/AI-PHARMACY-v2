@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiClient, api } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -141,8 +143,6 @@ const Settings = () => {
   const [waBusinessTestResult, setWaBusinessTestResult] = useState<{ success?: boolean; phone?: string; name?: string; error?: string } | null>(null);
   const [waBusinessTesting, setWaBusinessTesting] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
-  const [backupList, setBackupList] = useState<{ filename: string; sizeBytes: number; createdAt: string }[]>([]);
-  const [backupListLoading, setBackupListLoading] = useState(false);
   const [restoringFile, setRestoringFile] = useState<string | null>(null);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
@@ -271,71 +271,60 @@ const Settings = () => {
     }
   };
 
+  const queryClient = useQueryClient();
+
+  const { data: serverSettings } = useApiQuery(
+    'settings',
+    () => apiClient.get('/settings').then(res => res.data)
+  );
+
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const { data } = await apiClient.get('/settings');
-        if (data) {
-          setPharmacyName(data.shop_name || '');
-          setAddress(data.shop_address || '');
-          setPhone(data.shop_phone || '');
-          setGstin(data.gstin || '');
-          setDrugLicense(data.shop_licence || '');
-          setEmail(data.email || '');
-          
-          setGmailUser(data.gmail_user || '');
-          setGmailPass(data.gmail_pass || '');
-          setGoogleClientId(data.google_client_id || '');
-          setGoogleClientSecret(data.google_client_secret || '');
-          setGmailAuthMethod(data.gmail_auth_method || 'password');
-          setEmailAutodeleteEnabled(data.email_autodelete_enabled !== 'false');
-          setEmailAutodeleteLimit(Number(data.email_autodelete_limit) || 10);
-          setAutomationEnabled(data.automation_enabled === 'true');
-
-          setAdminRemoteMode(data.admin_remote_mode !== 'false');
-          setAdminUsername(data.admin_username || 'admin');
-          setAdminPassword(data.admin_password || 'admin123');
-          setAdminUniqueKey(data.admin_unique_key || 'KEY-ADM-837261');
-          setAdminAuthorizedDeviceId(data.admin_authorized_device_id || '');
-          setAdminAuthorizedDeviceName(data.admin_authorized_device_name || '');
-
-          setDefaultTaxRate(Number(data.default_tax_rate) || 18);
-          setInvoicePrefix(data.invoice_prefix || 'INV-');
-          setAutoPrint(data.auto_print === 'true');
-          setDefaultPaymentMode(data.default_payment_mode || 'Cash');
-
-          setWhatsappNotif(data.whatsapp_notif === 'true');
-          setEmailAlerts(data.email_alerts === 'true');
-          setLowStockThreshold(Number(data.low_stock_threshold) || 10);
-          setExpiryAlertDays(Number(data.expiry_alert_days) || 90);
-          setDineshWhatsappNumber(data.dinesh_whatsapp_number || '');
-
-          setTelegramEnabled(data.telegram_enabled === 'true');
-          setTelegramToken(data.telegram_token || '');
-          setTelegramChatId(data.telegram_chat_id || '');
-          
-          setWhatsappEnabled(data.whatsapp_enabled === 'true');
-
-           // WhatsApp Business API
-          setWaBusinessEnabled(data.wa_business_enabled === 'true');
-          setWaBusinessPhoneNumberId(data.wa_business_phone_number_id || '');
-          setWaBusinessAccessToken(data.wa_business_access_token || '');
-          setWaBusinessWabaId(data.wa_business_waba_id || '');
-          setWaBusinessWebhookVerifyToken(data.wa_business_webhook_verify_token || '');
-          setWhatsappPreferredSystem(data.whatsapp_preferred_system || 'automated');
-
-          // Pharmarack Settings
-          setPrUsername(data.pharmarack_username || '');
-          setPrPassword(data.pharmarack_password || '');
-          setPrToken(data.pharmarack_session_token || '');
-          setPrMode(data.pharmarack_mode || 'Live');
-        }
-      } catch (error) {
-        console.error('Failed to load settings', error);
-      }
-    };
-    fetchSettings();
-  }, []);
+    if (serverSettings) {
+      setSettings(prev => ({
+        ...prev,
+        pharmacyName: serverSettings.shop_name || '',
+        address: serverSettings.shop_address || '',
+        phone: serverSettings.shop_phone || '',
+        gstin: serverSettings.gstin || '',
+        drugLicense: serverSettings.shop_licence || '',
+        email: serverSettings.email || '',
+        gmailUser: serverSettings.gmail_user || '',
+        gmailPass: serverSettings.gmail_pass || '',
+        googleClientId: serverSettings.google_client_id || '',
+        googleClientSecret: serverSettings.google_client_secret || '',
+        gmailAuthMethod: serverSettings.gmail_auth_method || 'password',
+        emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
+        emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
+        automationEnabled: serverSettings.automation_enabled === 'true',
+        adminRemoteMode: serverSettings.admin_remote_mode !== 'false',
+        adminUsername: serverSettings.admin_username || 'admin',
+        adminPassword: serverSettings.admin_password || 'admin123',
+        adminUniqueKey: serverSettings.admin_unique_key || 'KEY-ADM-837261',
+        adminAuthorizedDeviceId: serverSettings.admin_authorized_device_id || '',
+        adminAuthorizedDeviceName: serverSettings.admin_authorized_device_name || '',
+        defaultTaxRate: Number(serverSettings.default_tax_rate) || 18,
+        invoicePrefix: serverSettings.invoice_prefix || 'INV-',
+        autoPrint: serverSettings.auto_print === 'true',
+        defaultPaymentMode: serverSettings.default_payment_mode || 'Cash',
+        whatsappNotif: serverSettings.whatsapp_notif === 'true',
+        emailAlerts: serverSettings.email_alerts === 'true',
+        lowStockThreshold: Number(serverSettings.low_stock_threshold) || 10,
+        expiryAlertDays: Number(serverSettings.expiry_alert_days) || 90,
+        dineshWhatsappNumber: serverSettings.dinesh_whatsapp_number || '',
+        telegramEnabled: serverSettings.telegram_enabled === 'true',
+        telegramToken: serverSettings.telegram_token || '',
+        telegramChatId: serverSettings.telegram_chat_id || '',
+        whatsappEnabled: serverSettings.whatsapp_enabled === 'true',
+        waBusinessEnabled: serverSettings.wa_business_enabled === 'true',
+        waBusinessPhoneNumberId: serverSettings.wa_business_phone_number_id || '',
+        waBusinessAccessToken: serverSettings.wa_business_access_token || '',
+        waBusinessWabaId: serverSettings.wa_business_waba_id || '',
+        waBusinessWebhookVerifyToken: serverSettings.wa_business_webhook_verify_token || '',
+        whatsappPreferredSystem: serverSettings.whatsapp_preferred_system || 'automated',
+        backupFrequency: serverSettings.backup_frequency || 'off',
+      }));
+    }
+  }, [serverSettings]);
 
   useEffect(() => {
     let timer: any;
@@ -427,6 +416,7 @@ const Settings = () => {
     try {
       await apiClient.post('/settings/save', payload);
       toastEvent.trigger('Settings saved successfully', 'success');
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to save settings', error);
       toastEvent.trigger('Failed to save settings', 'error');
@@ -455,6 +445,7 @@ const Settings = () => {
             setPrToken(data.pharmarack_session_token);
             setPrMode(data.pharmarack_mode || 'Live');
             toastEvent.trigger('Successfully linked Pharmarack session!', 'success');
+            queryClient.invalidateQueries({ queryKey: ['settings'] });
             clearInterval(interval);
             setIsOpeningWindow(false);
           }
@@ -531,6 +522,7 @@ const Settings = () => {
       await apiClient.post('/settings/save', payload);
       await apiClient.post('/pharmarack/logout');
       toastEvent.trigger('Logged out and cleared Pharmarack credentials successfully.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to logout from Pharmarack', error);
       toastEvent.trigger('Failed to logout from Pharmarack', 'error');
@@ -561,39 +553,31 @@ const Settings = () => {
     }
   };
 
-  // Backup handlers
-  const fetchBackupList = async () => {
-    setBackupListLoading(true);
-    try {
-      const { data } = await apiClient.get('/utilities/backup/list');
-      setBackupList(data.backups || []);
-    } catch {
-      console.error('Failed to fetch backup list');
-    } finally {
-      setBackupListLoading(false);
-    }
-  };
+  // Backup list React Query
+  const { data: backupListData, isLoading: backupListLoading } = useApiQuery<{ backups: { filename: string; sizeBytes: number; createdAt: string }[] }>(
+    'backup-list',
+    () => apiClient.get('/utilities/backup/list').then(res => res.data)
+  );
+  const backupList = backupListData?.backups || [];
 
-  const fetchBackupSchedule = async () => {
-    try {
-      const { data } = await apiClient.get('/utilities/backup/schedule');
-      setBackupFrequency(data.frequency || 'off');
-    } catch {
-      console.error('Failed to fetch backup schedule');
-    }
-  };
+  // Backup schedule React Query
+  const { data: serverBackupSchedule } = useApiQuery<{ frequency: string }>(
+    'backup-schedule',
+    () => apiClient.get('/utilities/backup/schedule').then(res => res.data)
+  );
 
   useEffect(() => {
-    fetchBackupList();
-    fetchBackupSchedule();
-  }, []);
+    if (serverBackupSchedule) {
+      setBackupFrequency(serverBackupSchedule.frequency || 'off');
+    }
+  }, [serverBackupSchedule]);
 
   const handleBackupNow = async () => {
     setBackupLoading(true);
     try {
       await apiClient.post('/utilities/backup');
       toastEvent.trigger('Backup created successfully!', 'success');
-      fetchBackupList();
+      queryClient.invalidateQueries({ queryKey: ['backup-list'] });
     } catch {
       toastEvent.trigger('Failed to create backup', 'error');
     } finally {
@@ -606,6 +590,7 @@ const Settings = () => {
     try {
       await apiClient.post('/utilities/backup/schedule', { frequency: freq });
       toastEvent.trigger(`Backup schedule set to: ${freq === 'off' ? 'Off' : `Every ${freq}`}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['backup-schedule'] });
     } catch {
       toastEvent.trigger('Failed to update backup schedule', 'error');
     }
@@ -617,7 +602,7 @@ const Settings = () => {
       await apiClient.delete(`/utilities/backup/${encodeURIComponent(filename)}`);
       toastEvent.trigger('Backup deleted', 'success');
       setConfirmDelete(null);
-      fetchBackupList();
+      queryClient.invalidateQueries({ queryKey: ['backup-list'] });
     } catch {
       toastEvent.trigger('Failed to delete backup', 'error');
     } finally {
@@ -1224,7 +1209,7 @@ const Settings = () => {
               <span className="text-xs text-muted font-normal">({backupList.length} backups)</span>
             </h4>
             <button
-              onClick={fetchBackupList}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['backup-list'] })}
               disabled={backupListLoading}
               className="text-xs font-bold text-sky hover:text-sky/80 flex items-center gap-1 transition-colors"
             >

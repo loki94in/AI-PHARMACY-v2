@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
@@ -68,6 +70,7 @@ let cachedItems: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
 const Inventory = () => {
+  const queryClient = useQueryClient();
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'inventory-date-range',
     defaultFrom: '',
@@ -158,7 +161,10 @@ const Inventory = () => {
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
-  const [specialOrders, setSpecialOrders] = useState<any[]>(cachedSpecialOrders || []);
+  const { data: specialOrders = [] } = useApiQuery<any[]>(
+    'pos-special-orders',
+    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : [])
+  );
 
   // Debounced column filter states for server search
   const [debouncedFilters, setDebouncedFilters] = useState({
@@ -249,17 +255,7 @@ const Inventory = () => {
     refetch();
   }, [refetch]);
 
-  useDeferredEffect(() => {
-    api.getOrders()
-      .then(data => {
-        if (Array.isArray(data)) {
-          const activeOrders = data.filter(o => o.status === 'Pending' || o.status === 'Ordered');
-          setSpecialOrders(activeOrders);
-          cachedSpecialOrders = activeOrders;
-        }
-      })
-      .catch(err => console.error('Error loading special orders for inventory:', err));
-  }, []);
+
 
   const handleRowClick = (item: InventoryItem) => {
     setSelectedItem(item);
@@ -300,6 +296,7 @@ const Inventory = () => {
         setIsEditing(false);
         setSelectedItem({ ...selectedItem, ...editForm } as InventoryItem);
         loadInventory();
+        queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
       })
       .catch(err => {
         console.error('Failed to update item:', err);

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus } from 'lucide-react';
 import { api } from '../../services/api';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface MedicineRow {
   id: number;
@@ -26,6 +28,7 @@ interface MedicineRow {
 let cachedMedicines: MedicineRow[] | null = null;
 
 const DatabasePage = () => {
+  const queryClient = useQueryClient();
   const [medicines, setMedicines] = useState<MedicineRow[]>(cachedMedicines || []);
   const [loading, setLoading] = useState(!cachedMedicines);
   const [appending, setAppending] = useState(false);
@@ -41,7 +44,7 @@ const DatabasePage = () => {
   const [packagingTerm, setPackagingTerm] = useState('');
   const [distributorInput, setDistributorInput] = useState('');
   const [distributorTerm, setDistributorTerm] = useState('');
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [allSelectedAcrossPages, setAllSelectedAcrossPages] = useState(false);
   const [sort, setSort] = useState('name_asc');
   const [letter, setLetter] = useState('');
@@ -150,7 +153,7 @@ const DatabasePage = () => {
     try {
       await api.deleteMedicine(id);
       alert('Medicine deleted successfully');
-      setSelectedIds(prev => prev.filter(item => item !== id));
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
       setPage(1);
       loadDatabase();
     } catch (err: any) {
@@ -162,17 +165,18 @@ const DatabasePage = () => {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedIds(medicines.map(m => m.id));
+      setSelectedIds(new Set(medicines.map(m => m.id)));
     } else {
-      setSelectedIds([]);
+      setSelectedIds(new Set());
       setAllSelectedAcrossPages(false);
     }
   };
 
   const handleSelectRow = (id: number) => {
     setSelectedIds(prev => {
-      const updated = prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
-      if (updated.length !== medicines.length) {
+      const updated = new Set(prev);
+      if (updated.has(id)) updated.delete(id); else updated.add(id);
+      if (updated.size !== medicines.length) {
         setAllSelectedAcrossPages(false);
       }
       return updated;
@@ -180,7 +184,7 @@ const DatabasePage = () => {
   };
 
   const handleBulkDelete = async () => {
-    const countToDelete = allSelectedAcrossPages ? totalItems : selectedIds.length;
+    const countToDelete = allSelectedAcrossPages ? totalItems : selectedIds.size;
     if (!window.confirm(`Are you sure you want to delete all ${countToDelete} selected medicines? This cannot be undone.`)) {
       return;
     }
@@ -188,7 +192,7 @@ const DatabasePage = () => {
     setLoading(true);
     try {
       const res = await api.bulkDeleteMedicines({
-        ids: allSelectedAcrossPages ? undefined : selectedIds,
+        ids: allSelectedAcrossPages ? undefined : Array.from(selectedIds),
         all: allSelectedAcrossPages,
         productName: productNameTerm,
         mrpFilter: mrpTerm,
@@ -198,7 +202,7 @@ const DatabasePage = () => {
       });
 
       setLoading(false);
-      setSelectedIds([]);
+      setSelectedIds(new Set());
       setAllSelectedAcrossPages(false);
       setPage(1);
       loadDatabase();
@@ -299,39 +303,48 @@ const DatabasePage = () => {
   
   const observerTarget = useRef<HTMLTableRowElement>(null);
 
-  const loadDatabase = useCallback(() => {
-    if (page === 1) setLoading(true);
-    else setAppending(true);
-
-    api.getMedicines(page, limit, '', sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm, '')
-      .then((res: any) => {
-        if (page === 1) {
-          setMedicines(res.data || []);
-          cachedMedicines = res.data || [];
-          setSelectedIds([]);
-          setAllSelectedAcrossPages(false);
-        } else {
-          setMedicines(prev => {
-            const newIds = new Set((res.data || []).map((m: any) => m.id));
-            const filteredPrev = prev.filter(p => !newIds.has(p.id));
-            return [...filteredPrev, ...(res.data || [])];
-          });
-        }
-        setTotalPages(res.totalPages || 1);
-        setTotalItems(res.totalItems || 0);
-        setLoading(false);
-        setAppending(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load medicines database:', err);
-        setLoading(false);
-        setAppending(false);
-      });
-  }, [page, limit, sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm]);
+  const { data: pageData, isFetching: queryIsFetching } = useApiQuery<any>(
+    ['database-medicines', page, sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm],
+    () => api.getMedicines(page, limit, '', sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm, ''),
+    { staleTime: 30000 }
+  );
 
   useEffect(() => {
-    loadDatabase();
-  }, [loadDatabase]);
+    if (queryIsFetching) {
+      if (page === 1) setLoading(true);
+      else setAppending(true);
+    }
+  }, [queryIsFetching, page]);
+
+  useEffect(() => {
+    if (pageData) {
+      const data = pageData.data || [];
+      const totalPagesVal = pageData.totalPages || 1;
+      const totalItemsVal = pageData.totalItems || 0;
+
+      setTotalPages(totalPagesVal);
+      setTotalItems(totalItemsVal);
+
+      if (page === 1) {
+        setMedicines(data);
+        cachedMedicines = data;
+        setSelectedIds(new Set());
+        setAllSelectedAcrossPages(false);
+      } else {
+        setMedicines(prev => {
+          const newIds = new Set(data.map((m: any) => m.id));
+          const filteredPrev = prev.filter(p => !newIds.has(p.id));
+          return [...filteredPrev, ...data];
+        });
+      }
+      setLoading(false);
+      setAppending(false);
+    }
+  }, [pageData, page]);
+
+  const loadDatabase = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
+  }, [queryClient]);
 
   // Infinite Scroll Observer
   useEffect(() => {
@@ -410,14 +423,14 @@ const DatabasePage = () => {
 
 
         {/* Bulk Delete Action Bar */}
-        {selectedIds.length > 0 && (
+        {selectedIds.size > 0 && (
           <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 animate-fade-in z-20">
             <div className="text-xs font-semibold text-red-400">
               {allSelectedAcrossPages ? (
                 <span>Selected all {totalItems} medicines in the database matching current filters.</span>
               ) : (
                 <span>
-                  Selected {selectedIds.length} {selectedIds.length === 1 ? 'medicine' : 'medicines'} on this page.
+                  Selected {selectedIds.size} {selectedIds.size === 1 ? 'medicine' : 'medicines'} on this page.
                   {totalItems > medicines.length && (
                     <button
                       onClick={() => setAllSelectedAcrossPages(true)}
@@ -433,7 +446,7 @@ const DatabasePage = () => {
               {allSelectedAcrossPages && (
                 <button
                   onClick={() => {
-                    setSelectedIds([]);
+                    setSelectedIds(new Set());
                     setAllSelectedAcrossPages(false);
                   }}
                   className="px-3 py-1.5 border border-glass-border hover:bg-bg2 text-muted hover:text-text rounded-lg text-xs font-bold uppercase transition-all"
@@ -469,7 +482,7 @@ const DatabasePage = () => {
                   <input 
                     type="checkbox"
                     className="rounded bg-bg3 border-glass-border text-sky-500 focus:ring-0 focus:ring-offset-0 cursor-pointer w-4 h-4"
-                    checked={medicines.length > 0 && selectedIds.length === medicines.length}
+                    checked={medicines.length > 0 && selectedIds.size === medicines.length}
                     onChange={handleSelectAll}
                   />
                 </th>
@@ -554,15 +567,16 @@ const DatabasePage = () => {
                 </tr>
               ) : (
                 medicines.map(item => (
-                  <tr 
-                    key={item.id} 
+                  <tr
+                    key={item.id}
                     className="hover:bg-bg3/50 transition-colors border-b border-glass-border/50 group"
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: '0 73px' }}
                   >
                     <td className="p-4 text-center align-middle w-12">
-                      <input 
+                      <input
                         type="checkbox"
                         className="rounded bg-bg3 border-glass-border text-sky-500 focus:ring-0 focus:ring-offset-0 cursor-pointer w-4 h-4"
-                        checked={selectedIds.includes(item.id)}
+                        checked={selectedIds.has(item.id)}
                         onChange={() => handleSelectRow(item.id)}
                       />
                     </td>

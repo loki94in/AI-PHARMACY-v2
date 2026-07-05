@@ -24,6 +24,9 @@ const OriginalDatabase = sqlite3.Database;
       return;
     }
     
+    const isTest = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
+    const busyTimeout = isTest ? 10000 : 30000;
+
     // Set journal_mode, busy_timeout, and performance tunings immediately on opening
     db.serialize(() => {
       db.run('PRAGMA journal_mode = WAL;', (err1) => {
@@ -31,7 +34,7 @@ const OriginalDatabase = sqlite3.Database;
           if (callback) callback(err1);
           return;
         }
-        db.run('PRAGMA busy_timeout = 10000;');
+        db.run(`PRAGMA busy_timeout = ${busyTimeout};`);
         db.run('PRAGMA cache_size = -16000;');
         db.run('PRAGMA temp_store = MEMORY;');
         db.run('PRAGMA synchronous = NORMAL;', (err2) => {

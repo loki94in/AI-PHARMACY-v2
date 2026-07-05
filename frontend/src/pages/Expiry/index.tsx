@@ -15,6 +15,8 @@ import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface ExpiryItem {
   id: number;
@@ -57,9 +59,15 @@ const Expiry = () => {
     futurePresets: true,
   });
   
-  const [items, setItems] = useState<ExpiryItem[]>(cachedExpiryItems || []);
-  const [loading, setLoading] = useState(!cachedExpiryItems);
-  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+  const expiryKey = ['expiry', dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to] as const;
+  const { data: items = [], isLoading: loading, isFetching: refreshing } = useApiQuery<ExpiryItem[]>(
+    expiryKey,
+    () => api.getExpiryList({
+      date_from: dateRangeHelper.dateRange.from,
+      date_to: dateRangeHelper.dateRange.to,
+    })
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [customPhone, setCustomPhone] = useState('');
   const [sendingAlerts, setSendingAlerts] = useState(false);
@@ -90,37 +98,6 @@ const Expiry = () => {
   );
   
 
-
-  const fetchExpiryItems = async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true);
-    if (!cachedExpiryItems && !showRefresh) setLoading(true);
-    try {
-      const data = await api.getExpiryList({
-        date_from: dateRangeHelper.dateRange.from,
-        date_to: dateRangeHelper.dateRange.to,
-      });
-      if (Array.isArray(data)) {
-        setItems(data);
-        cachedExpiryItems = data;
-      }
-    } catch (err) {
-      console.error('Error fetching near-expiry items:', err);
-      showNotification('Failed to load near-expiry inventory data.', 'error');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchExpiryItems();
-  }, [dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to]);
-
-  useEffect(() => {
-    // Attempt to load settings to prefill owner/pharmacist phone number
-    api.getLicenseStatus() // we can fetch details from licensing/settings if available
-      .catch(err => console.error(err));
-  }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
     toastEvent.trigger(message, type, '/expiry');
@@ -272,7 +249,7 @@ const Expiry = () => {
             </button>
           )}
           <button 
-            onClick={() => fetchExpiryItems(true)} 
+            onClick={() => queryClient.invalidateQueries({ queryKey: expiryKey })} 
             disabled={refreshing}
             className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white transition-all text-muted"
           >
@@ -387,7 +364,7 @@ const Expiry = () => {
         </div>
 
         {/* RIGHT COLUMN: Table Directory of Nearing Expiry */}
-        <div className="xl:col-span-3 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border">
+        <div className="xl:col-span-3 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border min-h-0">
           
           {/* Table Toolbar (Search, Days Filters) */}
           <div className="p-4 border-b border-glass-border bg-black/10 flex flex-col gap-4">

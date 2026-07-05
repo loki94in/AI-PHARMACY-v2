@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Database, Upload, FileText, CheckCircle, AlertCircle, Loader2, History, Check, AlertTriangle, Play, RefreshCw, Trash2, X } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface CatalogJob {
   id: number;
@@ -364,9 +366,19 @@ const CatalogUpload = () => {
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
 
-  // History & List States
-  const [previousJobs, setPreviousJobs] = useState<CatalogJob[]>([]);
-  const [loadingJobs, setLoadingJobs] = useState(false);
+  // History & List States — now driven by React Query
+  const queryClient = useQueryClient();
+  const { data: previousJobs = [], isLoading: loadingJobs, refetch: refetchJobs } = useApiQuery<CatalogJob[]>(
+    'catalog-jobs',
+    async () => {
+      const jobs = await api.getCatalogJobs();
+      // Also refresh search quota counters in background (no await needed in query fn)
+      api.getGoogleSearchStatus().then(res => {
+        if (res?.success) setGoogleSearchStatus({ count: res.count, limit: res.limit });
+      }).catch(() => {});
+      return jobs || [];
+    }
+  );
   
   // Messaging States
   const [error, setError] = useState<string | null>(null);
@@ -485,23 +497,7 @@ const CatalogUpload = () => {
     }
   }, []);
 
-  // Fetch previous jobs
-  const fetchJobs = useCallback(async () => {
-    setLoadingJobs(true);
-    try {
-      const jobs = await api.getCatalogJobs();
-      setPreviousJobs(jobs || []);
-      fetchSearchStatus();
-    } catch (err: any) {
-      console.error('Failed to fetch catalog jobs:', err);
-    } finally {
-      setLoadingJobs(false);
-    }
-  }, [fetchSearchStatus]);
-
-  useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs]);
+  // ponytail: fetchJobs replaced by useApiQuery above — no explicit useEffect trigger needed.
 
   const jobIdRef = useRef<number | null>(null);
   useEffect(() => {
@@ -545,9 +541,10 @@ const CatalogUpload = () => {
                 }));
               }
             }
-            // Update previousJobs list item progress
-            setPreviousJobs(prev => 
-              prev.map(job => 
+            // Update previousJobs list item progress in React Query cache
+            queryClient.setQueryData<CatalogJob[]>(['catalog-jobs'], (old) => {
+              if (!old) return [];
+              return old.map(job => 
                 job.id === payload.id 
                   ? { 
                       ...job, 
@@ -559,8 +556,8 @@ const CatalogUpload = () => {
                       duplicate_count: payload.duplicate_count !== undefined ? payload.duplicate_count : job.duplicate_count
                     } 
                   : job
-              )
-            );
+              );
+            });
           } else if (type === 'catalog_job_update' && payload) {
             // Update active job status/progress if it matches
             if (payload.id === jobIdRef.current) {
@@ -600,9 +597,10 @@ const CatalogUpload = () => {
               }
             }
             
-            // Update previousJobs list item status/progress
-            setPreviousJobs(prev => 
-              prev.map(job => 
+            // Update previousJobs list item status/progress in React Query cache
+            queryClient.setQueryData<CatalogJob[]>(['catalog-jobs'], (old) => {
+              if (!old) return [];
+              return old.map(job => 
                 job.id === payload.id 
                   ? { 
                       ...job, 
@@ -615,11 +613,11 @@ const CatalogUpload = () => {
                       duplicate_count: payload.duplicate_count !== undefined ? payload.duplicate_count : job.duplicate_count
                     } 
                   : job
-              )
-            );
+              );
+            });
 
             // Fetch latest jobs to refresh stats and details
-            fetchJobs();
+            queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
           } else if (type === 'catalog_review_updated' && payload) {
             if (payload.jobId === jobIdRef.current) {
               fetchReviews(payload.jobId);
@@ -657,7 +655,7 @@ const CatalogUpload = () => {
         clearTimeout(reconnectTimeout);
       }
     };
-  }, [fetchJobs]);
+  }, [queryClient]);
 
   useEffect(() => {
     if (hoveredHeader && scrollContainerRef.current) {
@@ -757,7 +755,7 @@ const CatalogUpload = () => {
       if (jobId === id) {
         setJobStatus('paused');
       }
-      fetchJobs();
+      queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
     } catch (err: any) {
       console.error('Pause failed:', err);
       setError(err.response?.data?.error || err.message || 'Failed to pause ingestion');
@@ -772,7 +770,7 @@ const CatalogUpload = () => {
         setImporting(true);
         setJobStatus('processing');
       }
-      fetchJobs();
+      queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
     } catch (err: any) {
       console.error('Resume failed:', err);
       setError(err.response?.data?.error || err.message || 'Failed to resume ingestion');
@@ -791,7 +789,7 @@ const CatalogUpload = () => {
         setJobStatus(null);
         setPreviewRows([]);
       }
-      fetchJobs();
+      queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.error || err.message || 'Failed to delete job');

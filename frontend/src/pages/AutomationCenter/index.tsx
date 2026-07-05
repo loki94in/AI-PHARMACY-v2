@@ -25,21 +25,42 @@ import { api } from '../../services/api';
 import type { Refill, AutomationNotification } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Module-level cache to persist data across page navigation (unmount/remount)
 let cachedRefills: Refill[] = [];
 let cachedLogs: AutomationNotification[] = [];
 
 const AutomationCenter = () => {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'reminders' | 'logs'>('reminders');
 
   // Reminders States
-  const [refills, setRefills] = useState<Refill[]>(() => cachedRefills);
-  const [loadingRefills, setLoadingRefills] = useState(() => cachedRefills.length === 0);
+  const { data: refills = [], isLoading: loadingRefills, refetch: refetchRefills } = useApiQuery<Refill[]>(
+    'automation-refills',
+    () => api.getRefills().then(d => (Array.isArray(d) ? d.slice(0, 100) : [])),
+    { enabled: activeTab === 'reminders' }
+  );
   const [refillSearch, setRefillSearch] = useState('');
+  const [logsSearch, setLogsSearch] = useState('');
+  const [logsStatusFilter, setLogsStatusFilter] = useState('All');
+  const [logsTypeFilter, setLogsTypeFilter] = useState('All');
 
-  // Create / Edit Reminder Modal States
-  const [showReminderModal, setShowReminderModal] = useState(false);
+  // Communication Logs Query
+  const [logsSearchTerm, setLogsSearchTerm] = useState('');
+  const logsKey = ['automation-logs', logsTypeFilter, logsStatusFilter, logsSearchTerm] as const;
+  const { data: logs = [], isLoading: loadingLogs, refetch: refetchLogs } = useApiQuery<AutomationNotification[]>(
+    logsKey,
+    () => {
+      const type = logsTypeFilter === 'All' ? undefined : logsTypeFilter;
+      const status = logsStatusFilter === 'All' ? undefined : logsStatusFilter;
+      return api.getAutomationNotifications({ type, status, search: logsSearchTerm || undefined, limit: 100 }).then(d => Array.isArray(d) ? d : []);
+    },
+    { enabled: activeTab === 'logs' }
+  );
+
+
   const [editingRefillId, setEditingRefillId] = useState<number | null>(null);
   const [patientName, setPatientName] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
@@ -51,12 +72,7 @@ const AutomationCenter = () => {
   const [loadingMedicineSearch, setLoadingMedicineSearch] = useState(false);
   const [modalSubmitting, setModalSubmitting] = useState(false);
 
-  // Communication Logs States
-  const [logs, setLogs] = useState<AutomationNotification[]>(() => cachedLogs);
-  const [loadingLogs, setLoadingLogs] = useState(() => cachedLogs.length === 0);
-  const [logsSearch, setLogsSearch] = useState('');
-  const [logsStatusFilter, setLogsStatusFilter] = useState('All');
-  const [logsTypeFilter, setLogsTypeFilter] = useState('All');
+  const [showReminderModal, setShowReminderModal] = useState(false);
 
   // Manual Send Details Dialog State
   const [manualSendNotification, setManualSendNotification] = useState<AutomationNotification | null>(null);
@@ -75,52 +91,7 @@ const AutomationCenter = () => {
     toastEvent.trigger(message, type === 'success' ? 'automation' : type, '/automation-center');
   }, []);
 
-  const fetchRefills = useCallback(async () => {
-    if (cachedRefills.length === 0) setLoadingRefills(true);
-    try {
-      const data = await api.getRefills();
-      const list = Array.isArray(data) ? data.slice(0, 100) : [];
-      setRefills(list);
-      cachedRefills = list;
-    } catch (err) {
-      console.error('Failed to fetch refills:', err);
-      showToast('Failed to load refills. Please try again.', 'error');
-    } finally {
-      setLoadingRefills(false);
-    }
-  }, [showToast]);
-
-  const fetchLogs = useCallback(async (searchOverride?: string) => {
-    if (cachedLogs.length === 0) setLoadingLogs(true);
-    try {
-      const type = logsTypeFilter === 'All' ? undefined : logsTypeFilter;
-      const status = logsStatusFilter === 'All' ? undefined : logsStatusFilter;
-      const search = searchOverride !== undefined ? searchOverride.trim() : logsSearch.trim();
-      const data = await api.getAutomationNotifications({ type, status, search: search || undefined, limit: 100 });
-      const list = Array.isArray(data) ? data : [];
-      setLogs(list);
-      cachedLogs = list;
-    } catch (err) {
-      console.error('Failed to fetch logs:', err);
-      showToast('Failed to load communication logs.', 'error');
-    } finally {
-      setLoadingLogs(false);
-    }
-  }, [logsTypeFilter, logsStatusFilter, logsSearch, showToast]);
-
-  useDeferredEffect(() => {
-    if (activeTab === 'reminders') {
-      fetchRefills();
-    }
-  }, [activeTab, fetchRefills]);
-
-  // ponytail: merged two duplicate useDeferredEffect hooks into one.
-  // Both called fetchLogs() when activeTab === 'logs', causing double requests.
-  useDeferredEffect(() => {
-    if (activeTab === 'logs') {
-      fetchLogs();
-    }
-  }, [logsTypeFilter, logsStatusFilter, activeTab, fetchLogs]);
+  // ponytail: RQ handles fetch triggering via enabled flag and key changes — no useDeferredEffect needed.
 
   const medicineSearchTimeout = useRef<number | null>(null);
   useEffect(() => {
@@ -223,14 +194,14 @@ const AutomationCenter = () => {
       setRefillInterval(30);
       setMedicineQuery('');
       setSelectedMedicines([]);
-      fetchRefills();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     } catch (err) {
       console.error('Error saving reminder:', err);
       showToast('Failed to save refill reminder.', 'error');
     } finally {
       setModalSubmitting(false);
     }
-  }, [editingRefillId, patientName, patientPhone, refillInterval, selectedMedicines, fetchRefills, showToast]);
+  }, [editingRefillId, patientName, patientPhone, refillInterval, selectedMedicines, queryClient, showToast]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -269,88 +240,88 @@ const AutomationCenter = () => {
   const handleToggleActive = useCallback(async (refill: Refill) => {
     const nextActive = refill.is_active === 1 ? 0 : 1;
     try {
-      setRefills(prev => prev.map(r => (r.id === refill.id ? { ...r, is_active: nextActive } : r)));
       await api.updateRefill(refill.id, { is_active: nextActive });
       showToast(`Refill schedule is now ${nextActive === 1 ? 'Active' : 'Paused'}.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     } catch (err) {
       console.error('Failed to toggle active status:', err);
       showToast('Failed to change status. Reverting.', 'error');
-      fetchRefills();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     }
-  }, [fetchRefills, showToast]);
+  }, [queryClient, showToast]);
 
   const handleSendNow = useCallback(async (id: number) => {
     try {
       showToast('Triggering manual message dispatch...', 'info');
       await api.sendRefillNow(id);
       showToast('Refill reminder dispatched via WhatsApp!', 'success');
-      fetchRefills();
-      if (activeTab === 'logs') fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     } catch (err: any) {
       console.error('Failed to trigger send:', err);
       showToast('WhatsApp dispatch failed: ' + (err.response?.data?.error || err.message), 'error');
-      fetchRefills();
-      if (activeTab === 'logs') fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     }
-  }, [activeTab, fetchRefills, fetchLogs, showToast]);
+  }, [queryClient, showToast]);
 
   const handleSaveIntervalInline = useCallback(async (id: number, interval: number) => {
     if (interval < 0 || interval > 120) return showToast('Interval must be 0 to 120 days.', 'error');
     try {
       await api.updateRefill(id, { refill_interval_days: interval });
       showToast('Refill interval updated.', 'success');
-      fetchRefills();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     } catch (err) {
       console.error('Failed to update interval inline:', err);
       showToast('Failed to update interval.', 'error');
     }
-  }, [fetchRefills, showToast]);
+  }, [queryClient, showToast]);
 
   const handleDeleteReminder = useCallback(async (id: number) => {
     if (!confirm('Are you sure you want to cancel this refill schedule?')) return;
     try {
-      setRefills(prev => prev.filter(r => r.id !== id));
       await api.deleteRefill(id);
       showToast('Refill schedule deleted successfully.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     } catch (err) {
       console.error('Failed to delete refill:', err);
       showToast('Failed to delete refill schedule.', 'error');
-      fetchRefills();
+      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     }
-  }, [fetchRefills, showToast]);
+  }, [queryClient, showToast]);
 
   const handleRetryDispatch = useCallback(async (id: number) => {
     try {
       showToast('Retrying message dispatch...', 'info');
       await api.retryNotification(id);
       showToast('Message resent successfully!', 'success');
-      fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     } catch (err: any) {
       console.error('Failed to retry:', err);
       showToast('Resend failed: ' + (err.response?.data?.error || err.message), 'error');
-      fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     }
-  }, [fetchLogs, showToast]);
+  }, [queryClient, showToast]);
 
   const handleCancelDispatch = useCallback(async (id: number) => {
     try {
       showToast('Cancelling notification...', 'info');
       await api.cancelNotification(id);
       showToast('Notification successfully cancelled.', 'success');
-      fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     } catch (err: any) {
       console.error('Failed to cancel:', err);
       showToast('Cancel failed: ' + (err.response?.data?.error || err.message), 'error');
-      fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
     }
-  }, [fetchLogs, showToast]);
+  }, [queryClient, showToast]);
 
   const handleMarkSentManually = useCallback(async (notification: AutomationNotification) => {
     try {
       await api.manualNotification(notification.id);
       showToast('Message marked as sent manually.', 'success');
       setManualSendNotification(null);
-      fetchLogs();
+      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
 
       const phone = notification.recipient_phone;
       const text = encodeURIComponent(notification.message);
@@ -360,7 +331,7 @@ const AutomationCenter = () => {
       console.error('Failed to mark sent manually:', err);
       showToast('Failed to update message status.', 'error');
     }
-  }, [fetchLogs, showToast]);
+  }, [queryClient, showToast]);
 
   const handleCopyMessage = useCallback((text: string) => {
     navigator.clipboard.writeText(text);
@@ -452,7 +423,7 @@ const AutomationCenter = () => {
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <button
-                onClick={fetchRefills}
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['automation-refills'] })}
                 className="p-2 rounded-xl bg-white/5 border border-glass-border hover:bg-white/10 hover:text-text text-muted transition-all"
                 title="Refresh List"
               >
@@ -606,7 +577,7 @@ const AutomationCenter = () => {
                 type="text"
                 value={logsSearch}
                 onChange={e => setLogsSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && fetchLogs(logsSearch)}
+                onKeyDown={e => e.key === 'Enter' && setLogsSearchTerm(logsSearch)}
                 placeholder="Search patient, distributor, msg..."
                 className="premium-input pl-9 pr-4 py-1.5 text-xs w-full"
               />
@@ -645,7 +616,7 @@ const AutomationCenter = () => {
               </div>
 
               <button
-                onClick={() => fetchLogs(logsSearch)}
+                onClick={() => setLogsSearchTerm(logsSearch)}
                 className="p-2 rounded-xl bg-white/5 border border-glass-border hover:bg-white/10 hover:text-text text-muted transition-all"
                 title="Refresh Logs"
               >

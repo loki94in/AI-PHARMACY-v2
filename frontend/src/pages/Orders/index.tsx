@@ -19,6 +19,8 @@ import {
 import { api } from '../../services/api';
 import type { SpecialOrder } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 const parseSqliteDate = (dateStr: string) => {
   if (!dateStr) return new Date();
@@ -51,9 +53,14 @@ let cachedOrdersList: SpecialOrder[] | null = null;
 
 const Orders = () => {
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<SpecialOrder[]>(cachedOrdersList || []);
-  const [loading, setLoading] = useState(!cachedOrdersList);
-  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: orders = [], isLoading: loading, isFetching: refreshing } = useApiQuery<SpecialOrder[]>(
+    'orders',
+    async () => {
+      const data = await api.getOrders();
+      return Array.isArray(data) ? data.slice(0, 100) : [];
+    }
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState(getNDaysAgoString(15));
@@ -159,36 +166,17 @@ const Orders = () => {
     setShowPrDropdown(false);
   };
 
-  // Fetch all orders
-  const fetchOrders = async (showRefresh = false, silent = false) => {
-    if (showRefresh) setRefreshing(true);
-    if (!silent && !cachedOrdersList) setLoading(true);
-    try {
-      const data = await api.getOrders();
-      // STRICT RULE: Only show last 100
-      const sliced = Array.isArray(data) ? data.slice(0, 100) : [];
-      setOrders(sliced);
-      cachedOrdersList = sliced;
-    } catch (err) {
-      console.error('Failed to fetch special orders:', err);
-      showNotification('Failed to load orders. Please check your connection.', 'error');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+
 
   useEffect(() => {
-    fetchOrders(false, !!cachedOrdersList);
-
     const handleRefresh = () => {
-      fetchOrders(true, true);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     };
     window.addEventListener('refresh-special-orders', handleRefresh);
     return () => {
       window.removeEventListener('refresh-special-orders', handleRefresh);
     };
-  }, []);
+  }, [queryClient]);
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
     toastEvent.trigger(message, type, '/orders');
@@ -287,7 +275,7 @@ const Orders = () => {
       setSelectedPackaging('');
       
       // Refresh list
-      fetchOrders();
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err) {
       console.error('Error creating order:', err);
       showNotification('Failed to register special order.', 'error');
@@ -303,9 +291,6 @@ const Orders = () => {
       if (!originalOrder) return;
 
       const updatedFields = { [field]: value };
-      
-      // Optimistic Update
-      setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updatedFields } : o));
 
       await api.updateOrder(id, updatedFields);
       
@@ -313,21 +298,21 @@ const Orders = () => {
         showNotification(`Order status updated to "${value}".`, 'success');
         // Backend automatically sends WhatsApp when status → 'Ready' (see orders.ts route)
         // Re-fetch to get updated notified flag from server
+        queryClient.invalidateQueries({ queryKey: ['orders'] });
         const refreshed = await api.getOrders();
-        setOrders(refreshed);
         const updated = refreshed.find((o: any) => o.id === id);
-        if (value === 'Ready' && updated?.notified === 1 && originalOrder.phone) {
+        if (value === 'Ready' && updated?.notified === 1) {
           showNotification('✅ WhatsApp notification sent to customer.', 'info');
         }
       } else {
         showNotification('Order details updated.', 'success');
-        fetchOrders();
+        queryClient.invalidateQueries({ queryKey: ['orders'] });
       }
     } catch (err) {
       console.error('Error updating order:', err);
       showNotification('Failed to update order.', 'error');
       // Revert from server
-      fetchOrders();
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     }
   };
 
@@ -336,14 +321,13 @@ const Orders = () => {
     if (!confirm('Are you sure you want to delete this special order request?')) return;
 
     try {
-      // Optimistic Delete
-      setOrders(prev => prev.filter(o => o.id !== id));
       await api.deleteOrder(id);
       showNotification('Special order deleted.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err) {
       console.error('Error deleting order:', err);
       showNotification('Failed to delete order.', 'error');
-      fetchOrders();
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     }
   };
 
@@ -362,7 +346,7 @@ const Orders = () => {
       const response = await api.convertToRefill(order.id, intervalDays);
       if (response.success) {
         showNotification(response.message || 'Successfully converted to recurring refill!', 'success');
-        fetchOrders();
+        queryClient.invalidateQueries({ queryKey: ['orders'] });
       } else {
         showNotification(response.error || 'Failed to convert to recurring refill.', 'error');
       }
@@ -374,7 +358,6 @@ const Orders = () => {
 
   // Trigger Uncollected Reminders Scan
   const handleScanUncollected = async () => {
-    setRefreshing(true);
     try {
       const alertedList = await api.getUncollectedAlerts();
       const notifiedCount = alertedList.filter(o => o.notified).length;
@@ -385,12 +368,10 @@ const Orders = () => {
         showNotification('No uncollected orders required notifications at this time.', 'info');
       }
       
-      fetchOrders();
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err) {
       console.error('Error scanning uncollected alerts:', err);
       showNotification('Failed to execute uncollected alerts reminders.', 'error');
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -467,7 +448,7 @@ const Orders = () => {
           Auto Remind Uncollected
         </button>
         <button 
-          onClick={() => fetchOrders(true)} 
+          onClick={() => queryClient.invalidateQueries({ queryKey: ['orders'] })} 
           disabled={refreshing}
           className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white transition-all text-muted"
         >

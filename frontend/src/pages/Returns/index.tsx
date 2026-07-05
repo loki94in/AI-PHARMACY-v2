@@ -5,6 +5,8 @@ import { useLocation } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
 import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Layers, Camera, X, Loader2, Edit, Wand2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -136,8 +138,6 @@ const Returns: React.FC = () => {
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
 
   const [items, setItems] = useState<ReturnItem[]>(initialActiveTab.items || []);
-  const [returnHistory, setReturnHistory] = useState<any[]>(cachedReturnHistory || []);
-  const [loading, setLoading] = useState(!cachedReturnHistory);
   const [saving, setSaving] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
@@ -189,7 +189,7 @@ const Returns: React.FC = () => {
     try {
       await api.deleteReturn(ret.id);
       if (selectedHistoryReturn?.id === ret.id) handleClearHistorySelection();
-      fetchReturnHistory(dateFrom, dateTo, minAmount, maxAmount);
+      queryClient.invalidateQueries({ queryKey: ['return-history'] });
     } catch (err) {
       console.error('Failed to delete return:', err);
       alert('Failed to delete return');
@@ -211,7 +211,7 @@ const Returns: React.FC = () => {
       await api.updateReturn(selectedHistoryReturn.id, { items: validItems, total_amount: total });
       setIsEditingHistory(false);
       await handleSelectHistoryReturn(selectedHistoryReturn);
-      fetchReturnHistory(dateFrom, dateTo, minAmount, maxAmount);
+      queryClient.invalidateQueries({ queryKey: ['return-history'] });
     } catch (err) {
       console.error('Failed to save return:', err);
       alert('Failed to save changes');
@@ -363,6 +363,21 @@ const Returns: React.FC = () => {
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
   const [distributorFilter, setDistributorFilter] = useState('');
+  const queryClient = useQueryClient();
+  const returnHistoryKey = ['return-history', dateFrom, dateTo, minAmount, maxAmount] as const;
+  const { data: returnHistory = [], isLoading: loading } = useApiQuery(
+    returnHistoryKey,
+    async () => {
+      const params = {
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        min_amount: minAmount ? parseFloat(minAmount) : undefined,
+        max_amount: maxAmount ? parseFloat(maxAmount) : undefined,
+      };
+      const response = await api.getReturns(params);
+      return Array.isArray(response) ? response : (response.data || []);
+    }
+  );
   const [showGroupedPreview, setShowGroupedPreview] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraTargetIndex, setCameraTargetIndex] = useState<number | null>(null);
@@ -479,29 +494,7 @@ const Returns: React.FC = () => {
     }
   }, []);
 
-  const fetchReturnHistory = async (start = dateFrom, end = dateTo, min = minAmount, max = maxAmount, silent = false) => {
-    if (!silent && !cachedReturnHistory) setLoading(true);
-    try {
-      const params = {
-        date_from: start || undefined,
-        date_to: end || undefined,
-        min_amount: min ? parseFloat(min) : undefined,
-        max_amount: max ? parseFloat(max) : undefined,
-      };
-      const response = await api.getReturns(params);
-      const returns = Array.isArray(response) ? response : (response.data || []);
-      setReturnHistory(returns);
-      cachedReturnHistory = returns;
-    } catch (error) {
-      console.error('Error fetching returns:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchReturnHistory(dateFrom, dateTo, minAmount, maxAmount, !!cachedReturnHistory);
-  }, [dateFrom, dateTo, minAmount, maxAmount]);
+  // RQ re-fetches automatically when returnHistoryKey changes (dateFrom/dateTo/minAmount/maxAmount)
 
   const searchTimeoutRef = React.useRef<any>(null);
 
@@ -681,7 +674,7 @@ const Returns: React.FC = () => {
       alert(`Successfully processed ${grouped.length} return(s)!`);
       setItems([createEmptyItem()]);
       setShowGroupedPreview(false);
-      fetchReturnHistory();
+      queryClient.invalidateQueries({ queryKey: ['return-history'] });
     } catch (error) {
       console.error('Error processing return:', error);
       alert('Failed to process return');

@@ -1,9 +1,11 @@
 // @ts-nocheck
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 import { PriceIntelPanel } from '../../components/PriceIntelPanel';
 import { HoverPriceIntelTable } from '../../components/HoverPriceIntelTable';
 import { createPortal } from 'react-dom';
@@ -222,8 +224,25 @@ const Purchases: React.FC = () => {
   const [tabs, setTabs] = useState<any[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
 
-  const [distributors, setDistributors] = useState<Distributor[]>(cachedDistributors || []);
+  const queryClient = useQueryClient();
+
+  const { data: distributors = [] } = useApiQuery<Distributor[]>(
+    'distributors',
+    () => api.getDistributors().then(res => Array.isArray(res) ? res : (res?.data || []))
+  );
+
+  const { data: purchaseHistory = [] } = useApiQuery<PurchaseHistory[]>(
+    'purchase-history',
+    () => api.getPurchases().then(res => Array.isArray(res) ? res.slice(0, 100) : [])
+  );
+
   const [selectedDistributor, setSelectedDistributor] = useState<number | null>(initialActiveTab?.selectedDistributor || null);
+
+  const { data: pendingReturns = [] } = useApiQuery<any[]>(
+    ['pending-returns', selectedDistributor],
+    () => api.getPendingReturns(selectedDistributor!),
+    { enabled: !!selectedDistributor }
+  );
   const [distributorSearch, setDistributorSearch] = useState(initialActiveTab?.distributorSearch || '');
   const [showDistributorDropdown, setShowDistributorDropdown] = useState(false);
   const [invoiceNo, setInvoiceNo] = useState(initialActiveTab?.invoiceNo || '');
@@ -234,10 +253,8 @@ const Purchases: React.FC = () => {
   const [cnAmount, setCnAmount] = useState(initialActiveTab?.cnAmount !== undefined && initialActiveTab?.cnAmount !== 0 ? initialActiveTab.cnAmount : '');
   const [cnNumber, setCnNumber] = useState(initialActiveTab?.cnNumber || '');
   const [reconcileExpiryReturnId, setReconcileExpiryReturnId] = useState<number | null>(initialActiveTab?.reconcileExpiryReturnId || null);
-  const [pendingReturns, setPendingReturns] = useState<any[]>([]);
   const [showCreditNotesPanel, setShowCreditNotesPanel] = useState(false);
   const [items, setItems] = useState<BillItem[]>(initialActiveTab?.items || []);
-  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseHistory[]>(cachedPurchaseHistory || []);
   const [sourceFilename, setSourceFilename] = useState(initialActiveTab?.sourceFilename || '');
   const [sourceFileHeaders, setSourceFileHeaders] = useState<string[]>(initialActiveTab?.sourceFileHeaders || []);
   const [mappingConfig, setMappingConfig] = useState<Record<string, string>>(initialActiveTab?.mappingConfig || {});
@@ -668,51 +685,7 @@ const Purchases: React.FC = () => {
 
 
 
-  useDeferredEffect(() => {
-    fetchDistributors();
-    fetchPurchaseHistory();
-  }, []);
-
-  const fetchPendingReturns = async (distId: number) => {
-    try {
-      const response = await api.getPendingReturns(distId);
-      setPendingReturns(Array.isArray(response) ? response : []);
-    } catch (error) {
-      console.error('Error fetching pending returns:', error);
-      setPendingReturns([]);
-    }
-  };
-
-  useEffect(() => {
-    if (selectedDistributor) {
-      fetchPendingReturns(selectedDistributor);
-    } else {
-      setPendingReturns([]);
-    }
-  }, [selectedDistributor]);
-
-  const fetchDistributors = async () => {
-    try {
-      const response = await api.getDistributors();
-      const list = Array.isArray(response) ? response : (response.data || []);
-      setDistributors(list);
-      cachedDistributors = list;
-    } catch (error) {
-      console.error('Error fetching distributors:', error);
-    }
-  };
-
-  const fetchPurchaseHistory = async () => {
-    try {
-      const list = await api.getPurchases();
-      // STRICT RULE: Only show last 100
-      const historyList = Array.isArray(list) ? list.slice(0, 100) : [];
-      setPurchaseHistory(historyList);
-      cachedPurchaseHistory = historyList;
-    } catch (err) {
-      console.error('Error fetching purchase history:', err);
-    }
-  };
+  // ponytail: React Query manages distributors, purchaseHistory, and pendingReturns automatically.
 
   const saveDistributor = async () => {
     if (!newDistributor.name?.trim()) {
@@ -737,13 +710,13 @@ const Purchases: React.FC = () => {
       if (editDistributorId) {
         const response = await apiClient.put(`/settings/distributors/${editDistributorId}`, newDistributor);
         const saved = response.data.data || response.data;
-        setDistributors(distributors.map(d => d.id === editDistributorId ? saved : d));
+        queryClient.invalidateQueries({ queryKey: ['distributors'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
       } else {
         const response = await apiClient.post('/settings/distributors', newDistributor);
         const saved = response.data.data || response.data;
-        setDistributors([...distributors, saved]);
+        queryClient.invalidateQueries({ queryKey: ['distributors'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
       }
@@ -1340,7 +1313,7 @@ const Purchases: React.FC = () => {
       setSourceFileHeaders([]);
       setMappingConfig({});
       setEditPurchaseId(null);
-      fetchPurchaseHistory();
+      queryClient.invalidateQueries({ queryKey: ['purchase-history'] });
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.message || 'Failed to save purchase';
@@ -1587,6 +1560,15 @@ const Purchases: React.FC = () => {
 
   const totals = calculateTotals();
 
+  const filteredDistributors = useMemo(() => {
+    const term = distributorSearch.toLowerCase();
+    if (!term) return distributors;
+    return distributors.filter((d) => {
+      const distName = d.name || d.distributor_name || '';
+      return distName.toLowerCase().includes(term);
+    });
+  }, [distributors, distributorSearch]);
+
   return (
     <div className="h-full flex flex-col px-6 pt-0 pb-0 animate-in fade-in duration-500">
 
@@ -1696,35 +1678,14 @@ const Purchases: React.FC = () => {
                 />
                 {showDistributorDropdown && (
                   <div className="absolute z-dropdown w-full mt-1 bg-[#18181b]/95 backdrop-blur border border-glass-border rounded-xl overflow-hidden max-h-60 overflow-y-auto shadow-2xl">
-                    {distributorSearch === '' ? (
-                      distributors.slice(0, 50).map((dist) => {
+                    {filteredDistributors.length === 0 ? (
+                      <div className="px-4 py-2 text-muted text-sm">
+                        {distributorSearch === '' ? 'No distributors available' : 'No match found. Click + to add.'}
+                      </div>
+                    ) : (
+                      filteredDistributors.slice(0, 50).map((dist) => {
                         const distName = dist.name || dist.distributor_name || 'Unnamed Distributor';
                         return (
-                        <button
-                          key={dist.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setSelectedDistributor(dist.id);
-                            setDistributorSearch(distName);
-                            setShowDistributorDropdown(false);
-                          }}
-                          className="w-full text-left px-4 py-2 hover:bg-white/10 text-text text-sm"
-                        >
-                          {distName}
-                          {dist.phone && <span className="text-gray-400 ml-2">({dist.phone})</span>}
-                        </button>
-                        );
-                      })
-                    ) : (
-                      // Filter distributors when search has value
-                      distributors
-                        .filter((d) => {
-                          const distName = d.name || d.distributor_name || '';
-                          return distName.toLowerCase().includes(distributorSearch.toLowerCase());
-                        })
-                        .map((dist) => {
-                          const distName = dist.name || dist.distributor_name || 'Unnamed Distributor';
-                          return (
                           <button
                             key={dist.id}
                             onMouseDown={(e) => {
@@ -1738,19 +1699,9 @@ const Purchases: React.FC = () => {
                             {distName}
                             {dist.phone && <span className="text-gray-400 ml-2">({dist.phone})</span>}
                           </button>
-                          );
-                        })
+                        );
+                      })
                     )}
-                    {distributorSearch === ''
-                      ? (distributors.length === 0 && (
-                        <div className="px-4 py-2 text-muted text-sm">No distributors available</div>
-                      ))
-                      : (distributors.filter((d) => {
-                        const distName = d.name || d.distributor_name || '';
-                        return distName.toLowerCase().includes(distributorSearch.toLowerCase());
-                      }).length === 0 && (
-                        <div className="px-4 py-2 text-muted text-sm">No match found. Click + to add.</div>
-                      ))}
                   </div>
                 )}
               </div>
@@ -2765,6 +2716,7 @@ const Purchases: React.FC = () => {
                     });
                     setEditingPurchase(null);
                     alert('Purchase updated successfully');
+                    queryClient.invalidateQueries({ queryKey: ['purchase-history'] });
                   } catch (error) {
                     alert('Failed to update purchase');
                   }

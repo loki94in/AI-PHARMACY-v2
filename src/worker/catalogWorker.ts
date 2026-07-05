@@ -993,16 +993,37 @@ const DISCOVERY_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 // Loop to poll jobs
 export async function startWorker() {
   // Reset stuck jobs on startup to allow resuming
-  try {
-    const db = await dbManager.getConnection();
-    const result1 = await db.run("UPDATE catalog_jobs SET status = 'pending' WHERE status = 'processing'");
-    const result2 = await db.run("UPDATE catalog_jobs SET status = 'pending_analysis' WHERE status = 'processing_analysis'");
-    if ((result1.changes && result1.changes > 0) || (result2.changes && result2.changes > 0)) {
-      console.log(`[Worker] Reset ${result1.changes || 0} stuck processing jobs and ${result2.changes || 0} stuck analysis jobs to pending/pending_analysis.`);
+  // ponytail: database write lock retry loop to handle startup contention
+  let db;
+  let attempts = 0;
+  const maxAttempts = 5;
+  const baseDelay = 500;
+
+  while (attempts < maxAttempts) {
+    try {
+      db = await dbManager.getConnection();
+      await db.run('PRAGMA busy_timeout = 30000;');
+      
+      const result1 = await db.run("UPDATE catalog_jobs SET status = 'pending' WHERE status = 'processing'");
+      const result2 = await db.run("UPDATE catalog_jobs SET status = 'pending_analysis' WHERE status = 'processing_analysis'");
+      if ((result1.changes && result1.changes > 0) || (result2.changes && result2.changes > 0)) {
+        console.log(`[Worker] Reset ${result1.changes || 0} stuck processing jobs and ${result2.changes || 0} stuck analysis jobs to pending/pending_analysis.`);
+      }
+      break;
+    } catch (err: any) {
+      attempts++;
+      const isLocked = err && (err.code === 'SQLITE_BUSY' || err.message?.includes('locked') || err.message?.includes('BUSY'));
+      if (isLocked && attempts < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempts - 1);
+        console.warn(`[Worker] Failed to reset stuck catalog jobs on startup (DB locked), retrying in ${delay}ms... (Attempt ${attempts}/${maxAttempts})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        console.error('[Worker] Failed to reset stuck catalog jobs on startup after retries:', err);
+        break;
+      }
     }
-  } catch (err) {
-    console.error('[Worker] Failed to reset stuck catalog jobs on startup:', err);
   }
+
 
   // ponytail: concurrency lock to avoid CPU/memory leak
   setInterval(async () => {

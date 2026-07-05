@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface LearningProfileSummary {
   distributor_id: number;
@@ -64,9 +66,44 @@ const Learning: React.FC = () => {
   // Navigation State
   const [activeTab, setActiveTab] = useState<'clinical' | 'doctors' | 'distributors' | 'messaging' | 'ingestion' | 'operations'>('clinical');
 
-  // Doctor Affiliations States
-  const [doctorsList, setDoctorsList] = useState<any[]>([]);
-  const [loadingDoctors, setLoadingDoctors] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Doctors Query
+  const { data: doctorsList = [], isLoading: loadingDoctors } = useApiQuery<any[]>(
+    'crm-doctors',
+    () => apiClient.get('/crm/doctors').then(res => res.data)
+  );
+
+  // Profiles Query
+  const { data: profiles = [], isLoading: loadingProfiles } = useApiQuery<LearningProfileSummary[]>(
+    'learning-profiles',
+    () => apiClient.get('/learning/profiles').then(res => res.data.profiles || [])
+  );
+
+  // Settings Query
+  const { data: serverSettings, isLoading: loadingSettings } = useApiQuery<any>(
+    'settings',
+    () => apiClient.get('/settings').then(res => res.data)
+  );
+
+  // Profile Detail Query
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const { data: serverProfileDetail, isLoading: loadingDetail } = useApiQuery<any>(
+    ['learning-profile-detail', selectedProfileId],
+    () => apiClient.get(`/learning/profiles/${selectedProfileId}`).then(res => res.data),
+    { enabled: !!selectedProfileId }
+  );
+
+  // Local draft states
+  const [selectedProfile, setSelectedProfile] = useState<{
+    distributor: any;
+    profile: ProfileDetail | null;
+    files: HistoricalFile[];
+  } | null>(null);
+
+  const [settingsData, setSettingsData] = useState<any>(null);
+
+  // Doctor Affiliations Modal States
   const [showAddDocModal, setShowAddDocModal] = useState(false);
   const [newDocName, setNewDocName] = useState('');
   const [newDocPhone, setNewDocPhone] = useState('');
@@ -75,22 +112,6 @@ const Learning: React.FC = () => {
   const [newDocRegNo, setNewDocRegNo] = useState('');
   const [newDocSendSummary, setNewDocSendSummary] = useState(false);
   const [triggeringDoctorReport, setTriggeringDoctorReport] = useState<number | null>(null);
-
-  // Core Data States
-  const [profiles, setProfiles] = useState<LearningProfileSummary[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
-  const [selectedProfile, setSelectedProfile] = useState<{
-    distributor: any;
-    profile: ProfileDetail | null;
-    files: HistoricalFile[];
-  } | null>(null);
-  
-  const [loadingProfiles, setLoadingProfiles] = useState(false);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  
-  // Settings/Automation state
-  const [settingsData, setSettingsData] = useState<any>(null);
-  const [loadingSettings, setLoadingSettings] = useState(false);
   const [savingSetting, setSavingSetting] = useState<string | null>(null);
 
   // Configuration UI toggle states
@@ -157,6 +178,44 @@ const Learning: React.FC = () => {
   const [sandboxTested, setSandboxTested] = useState(false);
   const [refreshingModel, setRefreshingModel] = useState(false);
   const [clinicalSensitivity, setClinicalSensitivity] = useState(70);
+  useEffect(() => {
+    if (serverSettings) {
+      setSettingsData(serverSettings);
+      if (serverSettings.clinical_learning_sensitivity) {
+        setClinicalSensitivity(Number(serverSettings.clinical_learning_sensitivity));
+      }
+    }
+  }, [serverSettings]);
+
+  useEffect(() => {
+    if (serverProfileDetail) {
+      setSelectedProfile(serverProfileDetail);
+      
+      // Populate manual rules form
+      const rules = serverProfileDetail.profile?.file_mapping_rules 
+        ? JSON.parse(serverProfileDetail.profile.file_mapping_rules) 
+        : {};
+      
+      setMappingRules({
+        name: rules.name || '',
+        quantity: rules.quantity || '',
+        rate: rules.rate || '',
+        mrp: rules.mrp || '',
+        batch_no: rules.batch_no || '',
+        expiry_date: rules.expiry_date || '',
+        free_qty: rules.free_qty || '',
+        cgst: rules.cgst || '',
+        sgst: rules.sgst || '',
+        global_cd_per: rules.global_cd_per || '',
+        invoice_no: rules.invoice_no || '',
+        invoice_date: rules.invoice_date || '',
+        grn_no: rules.grn_no || '',
+        custom_columns: rules.custom_columns || {}
+      });
+    } else {
+      setSelectedProfile(null);
+    }
+  }, [serverProfileDetail]);
 
   const checkPrHealth = async () => {
     setCheckingPrHealth(true);
@@ -188,7 +247,7 @@ const Learning: React.FC = () => {
         setNewDistName('');
         setNewDistPhone('');
         setNewDistEmail('');
-        fetchProfiles();
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
       }
     } catch (err) {
       console.error('Failed to add distributor', err);
@@ -201,11 +260,8 @@ const Learning: React.FC = () => {
       await apiClient.post('/settings/save', updatedSettings);
       toastEvent.trigger('Settings saved successfully', 'success');
       // Refresh settings
-      const { data } = await apiClient.get('/settings');
-      if (data) {
-        setSettingsData(data);
-        checkPrHealth();
-      }
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      checkPrHealth();
     } catch (error) {
       console.error('Failed to save settings', error);
       toastEvent.trigger('Failed to save settings', 'error');
@@ -312,7 +368,7 @@ const Learning: React.FC = () => {
     try {
       await apiClient.post('/settings/google/disconnect');
       toastEvent.trigger('Google account disconnected successfully', 'success');
-      fetchSettings();
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to disconnect Google account', error);
       toastEvent.trigger('Failed to disconnect Google account', 'error');
@@ -340,8 +396,6 @@ const Learning: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchProfiles();
-    fetchDoctors();
     const initPr = async () => {
       try {
         const { data } = await apiClient.get('/pharmarack/auto-verify');
@@ -349,27 +403,12 @@ const Learning: React.FC = () => {
       } catch (err) {
         console.error('Failed initial Pharmarack verification:', err);
       }
-      fetchSettings();
     };
     initPr();
     
     const interval = setInterval(checkPrHealth, 180000); // Poll every 3 minutes
     return () => clearInterval(interval);
   }, []);
-
-  const fetchDoctors = async () => {
-    setLoadingDoctors(true);
-    try {
-      const res = await apiClient.get('/crm/doctors');
-      if (Array.isArray(res.data)) {
-        setDoctorsList(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch doctors:', err);
-    } finally {
-      setLoadingDoctors(false);
-    }
-  };
 
   const handleAddDoctor = async () => {
     if (!newDocName.trim()) {
@@ -394,7 +433,7 @@ const Learning: React.FC = () => {
         setNewDocHospital('');
         setNewDocRegNo('');
         setNewDocSendSummary(false);
-        fetchDoctors();
+        queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
       }
     } catch (err) {
       console.error('Failed to add doctor:', err);
@@ -404,7 +443,6 @@ const Learning: React.FC = () => {
 
   const handleToggleDoctorSummary = async (doc: any) => {
     const updatedStatus = doc.send_daily_summary === 1 ? 0 : 1;
-    setDoctorsList(prev => prev.map(d => d.id === doc.id ? { ...d, send_daily_summary: updatedStatus } : d));
     try {
       await apiClient.put(`/crm/doctors/${doc.id}`, {
         name: doc.name,
@@ -415,10 +453,10 @@ const Learning: React.FC = () => {
         send_daily_summary: updatedStatus
       });
       toastEvent.trigger(`Reporting ${updatedStatus ? 'enabled' : 'disabled'} for Dr. ${doc.name}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
     } catch (err) {
       console.error('Failed to update doctor reporting toggle:', err);
       toastEvent.trigger('Failed to update reporting preference', 'error');
-      fetchDoctors();
     }
   };
 
@@ -442,37 +480,6 @@ const Learning: React.FC = () => {
     }
   };
 
-  const fetchProfiles = async () => {
-    setLoadingProfiles(true);
-    try {
-      const res = await apiClient.get('/learning/profiles');
-      if (res.data && res.data.success) {
-        setProfiles(res.data.profiles || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch learning profiles:', err);
-    } finally {
-      setLoadingProfiles(false);
-    }
-  };
-
-  const fetchSettings = async () => {
-    setLoadingSettings(true);
-    try {
-      const { data } = await apiClient.get('/settings');
-      if (data) {
-        setSettingsData(data);
-        if (data.clinical_learning_sensitivity) {
-          setClinicalSensitivity(Number(data.clinical_learning_sensitivity));
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch settings:', err);
-    } finally {
-      setLoadingSettings(false);
-    }
-  };
-
   const handleToggleSetting = async (key: string) => {
     if (!settingsData) return;
     const currentValue = settingsData[key] === 'true';
@@ -489,6 +496,7 @@ const Learning: React.FC = () => {
     try {
       await apiClient.post('/settings/save', updatedSettings);
       toastEvent.trigger(`Automation feature updated successfully`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (err) {
       console.error('Failed to save settings:', err);
       toastEvent.trigger('Failed to update automation feature settings', 'error');
@@ -496,42 +504,6 @@ const Learning: React.FC = () => {
       setSettingsData(settingsData);
     } finally {
       setSavingSetting(null);
-    }
-  };
-
-  const fetchProfileDetail = async (distId: number) => {
-    setLoadingDetail(true);
-    setSelectedProfileId(distId);
-    try {
-      const res = await apiClient.get(`/learning/profiles/${distId}`);
-      if (res.data && res.data.success) {
-        setSelectedProfile(res.data);
-        
-        // Populate manual rules form
-        const rules = res.data.profile?.file_mapping_rules 
-          ? JSON.parse(res.data.profile.file_mapping_rules) 
-          : {};
-        
-        setMappingRules({
-          name: rules.name || '',
-          quantity: rules.quantity || '',
-          rate: rules.rate || '',
-          mrp: rules.mrp || '',
-          batch_no: rules.batch_no || '',
-          expiry_date: rules.expiry_date || '',
-          free_qty: rules.free_qty || '',
-          cgst: rules.cgst || '',
-          sgst: rules.sgst || '',
-          global_cd_per: rules.global_cd_per || '',
-          invoice_no: rules.invoice_no || '',
-          invoice_date: rules.invoice_date || '',
-          total_amount: rules.total_amount || ''
-        });
-      }
-    } catch (err) {
-      console.error('Failed to fetch profile details:', err);
-    } finally {
-      setLoadingDetail(false);
     }
   };
 
@@ -552,8 +524,8 @@ const Learning: React.FC = () => {
       });
       if (res.data && res.data.success) {
         toastEvent.trigger('Column mapping rules saved successfully.', 'success');
-        fetchProfiles();
-        fetchProfileDetail(selectedProfileId);
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+        queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
       }
     } catch (err) {
       console.error('Failed to save manual mappings:', err);
@@ -573,7 +545,7 @@ const Learning: React.FC = () => {
         toastEvent.trigger('Learning profile reset successfully.', 'success');
         setSelectedProfile(null);
         setSelectedProfileId(null);
-        fetchProfiles();
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
       }
     } catch (err) {
       console.error('Failed to reset profile:', err);
@@ -588,8 +560,8 @@ const Learning: React.FC = () => {
       if (res.data && res.data.success) {
         toastEvent.trigger('Historical file reference deleted.', 'success');
         if (selectedProfileId) {
-          fetchProfileDetail(selectedProfileId);
-          fetchProfiles();
+          queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
+          queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
         }
       }
     } catch (err) {
@@ -696,7 +668,7 @@ const Learning: React.FC = () => {
           </button>
           
           <button
-            onClick={() => { fetchSettings(); fetchProfiles(); checkPrHealth(); }}
+            onClick={() => { queryClient.invalidateQueries({ queryKey: ['settings'] }); queryClient.invalidateQueries({ queryKey: ['learning-profiles'] }); checkPrHealth(); }}
             className="p-2 rounded-2xl bg-bg3 border border-glass-border hover:bg-bg2 text-muted hover:text-text transition-all active:scale-95"
             title="Refresh All States"
           >
@@ -927,7 +899,11 @@ const Learning: React.FC = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {doctorsList.map((doc) => (
-                    <div key={doc.id} className="bg-bg2/40 border border-glass-border rounded-2xl p-5 flex flex-col justify-between hover:bg-bg2/60 transition-colors shadow-sm">
+                    <div
+                      key={doc.id}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
+                      className="bg-bg2/40 border border-glass-border rounded-2xl p-5 flex flex-col justify-between hover:bg-bg2/60 transition-colors shadow-sm"
+                    >
                       <div className="space-y-3">
                         <div className="flex justify-between items-start">
                           <div>
@@ -1021,7 +997,8 @@ const Learning: React.FC = () => {
                     return (
                       <button
                         key={p.distributor_id}
-                        onClick={() => fetchProfileDetail(p.distributor_id)}
+                        onClick={() => setSelectedProfileId(p.distributor_id)}
+                        style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
                         className={`w-full text-left p-3 rounded-xl border transition-all duration-200 flex flex-col gap-1 ${
                           isSelected 
                             ? 'bg-sky-500/10 border-sky-500/30 text-text' 
@@ -1132,7 +1109,7 @@ const Learning: React.FC = () => {
                               try {
                                 await apiClient.put(`/settings/distributors/${selectedProfile.distributor.id}`, selectedProfile.distributor);
                                 toastEvent.trigger('Distributor profile updated', 'success');
-                                fetchProfiles();
+                                queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
                               } catch (err) {
                                 console.error(err);
                                 toastEvent.trigger('Failed to update details', 'error');

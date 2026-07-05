@@ -111,6 +111,10 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
     }
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+
+    // Give the async queue process time to run
+    await new Promise(resolve => setTimeout(resolve, 200));
+
     expect(mockSendMessage).toHaveBeenCalledWith('919999999999', undefined, 'Time for refill!');
 
     // Query DB to verify status is updated

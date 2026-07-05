@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { BarChart3, TrendingUp, Download, IndianRupee, ShoppingBag, Package, FileText, Info } from 'lucide-react';
 import { api } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
 
 const getTodayString = () => {
   const today = new Date();
@@ -46,28 +47,30 @@ const Reports = () => {
     }
   };
   const [activeTab, setActiveTab] = useState<'sales' | 'inventory' | 'purchases' | 'expiry'>('sales');
-  const [stats, setStats] = useState({ totalSales: 0, totalPurchases: 0, profitMargin: 0, itemsSold: 0 });
-  const [records, setRecords] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
   const [hasGenerated, setHasGenerated] = useState(false);
   const isMounted = useRef(false);
 
-  const fetchReportData = async () => {
-    setLoading(true);
-    try {
+  const { data: reportData, isLoading: loading, refetch } = useApiQuery<{
+    summary: { totalSales: number; totalPurchases: number; profitMargin: number; itemsSold: number };
+    records: any[];
+  }>(
+    ['reports', activeTab, fromDate, toDate],
+    async () => {
       const [summaryData, tableData] = await Promise.all([
         api.getReportsSummary({ fromDate, toDate }),
         api.getReportsData({ type: activeTab, fromDate, toDate })
       ]);
-      setStats(summaryData);
-      setRecords(tableData);
-      setHasGenerated(true);
-    } catch (err) {
-      console.error('Error fetching report data:', err);
-    } finally {
-      setLoading(false);
-    }
+      return { summary: summaryData, records: tableData };
+    },
+    { enabled: false }
+  );
+
+  const stats = reportData?.summary ?? { totalSales: 0, totalPurchases: 0, profitMargin: 0, itemsSold: 0 };
+  const records = reportData?.records ?? [];
+
+  const handleGenerate = () => {
+    setHasGenerated(true);
+    refetch();
   };
 
   useEffect(() => {
@@ -76,7 +79,7 @@ const Reports = () => {
       return;
     }
     if (hasGenerated) {
-      fetchReportData();
+      refetch();
     }
   }, [activeTab]);
 
@@ -191,7 +194,7 @@ const Reports = () => {
             </label>
           </div>
           <button
-            onClick={fetchReportData}
+            onClick={handleGenerate}
             className="bg-green hover:bg-green/95 text-white font-semibold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-sm"
             title="Generate Report"
           >

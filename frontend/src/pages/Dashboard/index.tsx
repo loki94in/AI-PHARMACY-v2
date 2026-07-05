@@ -1,34 +1,23 @@
-import { useState } from 'react';
-import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { IndianRupee, PackageOpen, ListTodo, Server, ArrowUpRight, AlertTriangle, Clock, CheckCircle, Activity, MessageCircle, Mail, Send } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { DashboardStats } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
 
 const Dashboard = () => {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [dateStr, setDateStr] = useState('');
+  const queryClient = useQueryClient();
+  const { data: stats, isLoading: loading, error } = useApiQuery<DashboardStats>(
+    'dashboard',
+    () => api.getDashboard()
+  );
 
-  useDeferredEffect(() => {
-    setDateStr(new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }));
-    
-    api.getDashboard()
-      .then(data => {
-        setStats(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message || 'Failed to load dashboard data');
-        setLoading(false);
-      });
-  }, []);
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   const handleDismissAlert = async (id: number) => {
     try {
       await api.dismissDashboardAlert(id);
-      setStats(prev => {
-        if (!prev) return null;
+      queryClient.setQueryData<DashboardStats>(['dashboard'], prev => {
+        if (!prev) return prev;
         const updatedAlerts = prev.alerts ? prev.alerts.filter(a => a.id !== id) : [];
         return {
           ...prev,
@@ -46,7 +35,7 @@ const Dashboard = () => {
   }
 
   if (error) {
-    return <div className="text-red p-4 glass-panel border-red/20">{error}</div>;
+    return <div className="text-red p-4 glass-panel border-red/20">{(error as Error).message || 'Failed to load dashboard data'}</div>;
   }
 
   return (

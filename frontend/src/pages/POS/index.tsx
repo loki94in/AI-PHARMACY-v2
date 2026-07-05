@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
@@ -172,10 +174,59 @@ const POS = () => {
   const [cart, setCart] = useState<any[]>(initialActiveTab.items || []);
   const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
   const [paymentMedium, setPaymentMedium] = useState<string>(initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
-  const [specialOrders, setSpecialOrders] = useState<any[]>(cachedSpecialOrders ? cachedSpecialOrders.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []);
+  const queryClient = useQueryClient();
+
+  const { data: specialOrders = [] } = useApiQuery<any[]>(
+    'pos-special-orders',
+    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : [])
+  );
+
+  const { data: commonCombinations = [] } = useApiQuery<any[]>(
+    'pos-common-combinations',
+    async () => {
+      const data = await api.getInventory({ limit: 12 });
+      if (!Array.isArray(data)) return [];
+      const topItems = data.slice(0, 12).map(med => ({
+        id: med.id,
+        name: med.name,
+        batch: med.batch_number || 'B-GEN',
+        expiry: med.expiry_date || '12/28',
+        mrp: med.mrp || 0,
+        costPrice: med.purchase_price || ((med.mrp || 0) * 0.7),
+        salts: med.hsn || 'Generic',
+        packSize: parseInt(med.pack_size || '10', 10) || 10,
+        recommendedQty: 1,
+        recommendedLooseQty: 0,
+        recommendationMsg: '',
+        quantity: med.stock_quantity
+      }));
+
+      try {
+        const medNames = topItems.map(m => m.name).join(',');
+        const response = await apiClient.get('/sales/recommend-quantity/batch', { params: { medicineNames: medNames } });
+        const recommendations = response.data || {};
+
+        return topItems.map(med => {
+          const rec = recommendations[med.name];
+          if (rec) {
+            return {
+              ...med,
+              recommendedQty: rec.type === 'strip' ? (rec.recommendedQty || 1) : 0,
+              recommendedLooseQty: rec.type === 'loose' ? (rec.recommendedQty || 1) : 0,
+              recommendationMsg: rec.message || ''
+            };
+          }
+          return med;
+        });
+      } catch (err) {
+        console.error('Batch quantity enrichment failed:', err);
+        return topItems;
+      }
+    }
+  );
+
   const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
   const [activeBatchRowId, setActiveBatchRowId] = useState<number | null>(null);
-  const [commonCombinations, setCommonCombinations] = useState<any[]>(cachedCommonCombinations || []);
 
   // Multi-cart tab states
   const [tabs, setTabs] = useState<any[]>(initialTabs);
@@ -223,6 +274,65 @@ const POS = () => {
   useEffect(() => {
     localStorage.setItem('pos_draft_tabs', JSON.stringify(tabs));
   }, [tabs]);
+
+  // Auto-initialize with an empty row if the cart is completely empty
+  useEffect(() => {
+    const validItems = cart.filter(item => !item.isEmptyRow);
+    if (validItems.length === 0 && (cart.length !== 1 || !cart[0].isEmptyRow)) {
+      setCart([{
+        id: 'empty_row_' + Date.now(),
+        name: '',
+        batch: '',
+        expiry: '',
+        mrp: 0,
+        qty: 1,
+        looseQty: 0,
+        discount: 0,
+        packSize: 10,
+        isEmptyRow: true
+      }]);
+    }
+  }, [cart]);
+
+  // Automatically append a new empty row at the bottom if the last row is filled
+  useEffect(() => {
+    if (cart.length > 0) {
+      const lastItem = cart[cart.length - 1];
+      if (!lastItem.isEmptyRow && lastItem.name) {
+        setCart(prev => [
+          ...prev,
+          {
+            id: 'empty_row_' + Date.now(),
+            name: '',
+            batch: '',
+            expiry: '',
+            mrp: 0,
+            qty: 1,
+            looseQty: 0,
+            discount: 0,
+            packSize: 10,
+            isEmptyRow: true
+          }
+        ]);
+      }
+    }
+  }, [cart]);
+
+  // Autofocus the next empty row's medicine input when cart length increases or changes
+  useEffect(() => {
+    if (cart.length > 0) {
+      const lastIndex = cart.length - 1;
+      const lastItem = cart[lastIndex];
+      if (lastItem && lastItem.isEmptyRow) {
+        setTimeout(() => {
+          const input = document.getElementById(`row-med-input-${lastIndex}`);
+          if (input) {
+            input.focus();
+          }
+        }, 80);
+      }
+    }
+  }, [cart.length]);
 
   // Clean up any potential legacy conflicting local storage keys to ensure robust cache
   useEffect(() => {
@@ -312,9 +422,10 @@ const POS = () => {
 
   const getTabItemsCount = (tab: any) => {
     if (tab.id === activeTabId) {
-      return cart.length;
+      return cart.filter(item => !item.isEmptyRow).length;
     }
-    return tab.items ? tab.items.length : 0;
+    const items = tab.items || [];
+    return items.filter((item: any) => !item.isEmptyRow).length;
   };
 
   const updateCart = (newCartOrFn: any[] | ((prev: any[]) => any[])) => {
@@ -328,7 +439,10 @@ const POS = () => {
     setPatientName(name);
   };
   
-  const [doctorsList, setDoctorsList] = useState<any[]>(cachedDoctors || []);
+  const { data: doctorsList = [] } = useApiQuery<any[]>(
+    'crm-doctors',
+    () => api.getDoctors()
+  );
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
@@ -337,6 +451,21 @@ const POS = () => {
   const [activeRowSearchIndex, setActiveRowSearchIndex] = useState<number | null>(null);
   const [rowSearchTerm, setRowSearchTerm] = useState('');
   const [rowSearchResults, setRowSearchResults] = useState<any[]>([]);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
+  const [rowSearchHighlightIndex, setRowSearchHighlightIndex] = useState(-1);
+
+  const productSearchRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLDivElement>(null);
+
+  useOnClickOutside(productSearchRef, () => {
+    setSearchResults([]);
+    setSuggestions([]);
+  });
+
+  useOnClickOutside(activeRowRef, () => {
+    setRowSearchResults([]);
+    setActiveRowSearchIndex(null);
+  });
 
   // React Query for row search autocomplete
   const { data: rowSearchData } = useApiQuery(
@@ -348,74 +477,12 @@ const POS = () => {
   useEffect(() => {
     if (rowSearchData && Array.isArray(rowSearchData)) {
       setRowSearchResults(rowSearchData);
+      setRowSearchHighlightIndex(-1);
     } else if (activeRowSearchIndex === null || rowSearchTerm.trim().length < 3) {
       setRowSearchResults([]);
+      setRowSearchHighlightIndex(-1);
     }
   }, [rowSearchData, rowSearchTerm, activeRowSearchIndex]);
-
-  useDeferredEffect(() => {
-    // Silent background refresh of doctors
-    api.getDoctors()
-      .then(data => {
-        if (Array.isArray(data)) {
-          setDoctorsList(data);
-          cachedDoctors = data;
-        }
-      })
-      .catch(err => console.error('Error fetching doctors:', err));
-      
-    // Fetch quick-add common combinations from inventory using limit: 12 (P1)
-    if (!cachedCommonCombinations) {
-      api.getInventory({ limit: 12 })
-        .then(async data => {
-          if (Array.isArray(data)) {
-            // Take top 12 active inventory items as quick adds
-            const topItems = data.slice(0, 12).map(med => ({
-              id: med.id,
-              name: med.name,
-              batch: med.batch_number || 'B-GEN',
-              expiry: med.expiry_date || '12/28',
-              mrp: med.mrp || 0,
-              costPrice: med.purchase_price || ((med.mrp || 0) * 0.7),
-              salts: med.hsn || 'Generic',
-              packSize: parseInt(med.pack_size || '10', 10) || 10,
-              recommendedQty: 1,
-              recommendedLooseQty: 0,
-              recommendationMsg: '',
-              quantity: med.stock_quantity
-            }));
-
-            // Batch enrich with recommended quantities in a single backend call!
-            try {
-              const medNames = topItems.map(m => m.name).join(',');
-              const response = await apiClient.get('/sales/recommend-quantity/batch', { params: { medicineNames: medNames } });
-              const recommendations = response.data || {};
-
-              const enriched = topItems.map(med => {
-                const rec = recommendations[med.name];
-                if (rec) {
-                  return {
-                    ...med,
-                    recommendedQty: rec.type === 'strip' ? (rec.recommendedQty || 1) : 0,
-                    recommendedLooseQty: rec.type === 'loose' ? (rec.recommendedQty || 1) : 0,
-                    recommendationMsg: rec.message || ''
-                  };
-                }
-                return med;
-              });
-
-              setCommonCombinations(enriched);
-              cachedCommonCombinations = enriched;
-            } catch (err) {
-              console.error('Batch quantity enrichment failed:', err);
-              setCommonCombinations(topItems);
-              cachedCommonCombinations = topItems;
-            }
-          }
-        })
-        .catch(err => console.error('Error fetching common combinations:', err));
-    }
-  }, []);
 
   // Fetch customer suggestions for patient autocomplete (P2)
   useEffect(() => {
@@ -438,19 +505,6 @@ const POS = () => {
 
     return () => clearTimeout(delayDebounce);
   }, [patientName]);
-
-  useDeferredEffect(() => {
-    // Skip remote fetch if already cached to prevent redundant DB query
-    api.getOrders()
-      .then(data => {
-        if (Array.isArray(data)) {
-          cachedSpecialOrders = data;
-          const active = data.filter(o => o.status === 'Pending' || o.status === 'Ordered');
-          setSpecialOrders(active);
-        }
-      })
-      .catch(err => console.error('Error fetching special orders:', err));
-  }, []);
 
   const handleSavePatientProfile = async () => {
     if (patientName.trim()) {
@@ -541,6 +595,7 @@ const POS = () => {
   useEffect(() => {
     if (searchTerm.trim().length < 3) {
       setSearchResults([]);
+      setSearchHighlightIndex(-1);
       setOnlineResults([]);
       setSearchingOnline(false);
       setSuggestions([]);
@@ -598,10 +653,12 @@ const POS = () => {
           });
           setSearchTerm('');
           setSearchResults([]);
+          setSearchHighlightIndex(-1);
           return;
         }
       }
       setSearchResults(searchResultsData);
+      setSearchHighlightIndex(-1);
       setOnlineResults([]);
       setSearchingOnline(false);
     }
@@ -639,18 +696,18 @@ const POS = () => {
       alert(`🔔 Pending Out-of-Stock Request:\nCustomer "${pendingMatches[0].requester}" requested ${pendingMatches[0].qty} unit(s) of "${med.name}". Please ensure it is reserved or reconciled if needed!`);
     }
     updateCart(prevCart => {
-      const existing = prevCart.find(item => {
+      const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
+      const existing = cleanPrev.find(item => {
         const isDbId = (id: any) => typeof id === 'number' && id < 1000000;
         const idMatches = isDbId(item.id) && isDbId(med.id) && item.id === med.id;
-        const nameAndBatchMatch = 
-          (item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id && item.batch.toLowerCase().trim() === (med.batch || 'B-GEN').toLowerCase().trim()) ||
-          (item.name.toLowerCase().trim() === med.name.toLowerCase().trim() && item.batch.toLowerCase().trim() === (med.batch || 'B-GEN').toLowerCase().trim());
-        return idMatches || nameAndBatchMatch;
+        const medicineIdMatch = item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id;
+        const nameMatch = item.name.toLowerCase().trim() === med.name.toLowerCase().trim();
+        return idMatches || medicineIdMatch || nameMatch;
       });
       const incQty = med.recommendedQty !== undefined ? med.recommendedQty : 1;
       const incLooseQty = med.recommendedLooseQty || 0;
       if (existing) {
-        return prevCart.map(item => 
+        return cleanPrev.map(item => 
           item.id === existing.id ? { 
             ...item, 
             qty: item.qty + incQty,
@@ -658,7 +715,7 @@ const POS = () => {
           } : item
         );
       }
-      return [...prevCart, { 
+      return [...cleanPrev, { 
         id: med.id, 
         medicine_id: med.medicine_id || med.id,
         name: med.name, 
@@ -718,25 +775,55 @@ const POS = () => {
         correctName: med.medicine_name
       }).catch(err => console.error('Failed to post correction learning:', err));
     }
-    updateCart(prev => prev.map((item, idx) => {
-      if (idx !== index) return item;
-      return {
-        ...item,
-        id: med.inventory_id,
-        medicine_id: med.medicine_id,
-        name: med.medicine_name,
-        batch: med.batch_no,
-        expiry: med.expiry_date,
-        mrp: med.mrp,
-        costPrice: med.cost_price,
-        salts: med.salts || med.hsn_code || 'Generic',
-        packSize: med.pack_size || 10,
-        availableStock: med.quantity !== undefined ? med.quantity : 0
-      };
-    }));
+
+    const existingIndex = cart.findIndex((item, idx) => 
+      idx !== index && 
+      !item.isEmptyRow && 
+      ((item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id) ||
+       (item.name.toLowerCase().trim() === med.medicine_name.toLowerCase().trim()))
+    );
+
+    if (existingIndex !== -1) {
+      updateCart(prev => {
+        const next = prev.map((item, idx) => {
+          if (idx === existingIndex) {
+            return {
+              ...item,
+              qty: item.qty + 1
+            };
+          }
+          return item;
+        });
+        if (originalItem && originalItem.isEmptyRow) {
+          return next;
+        } else {
+          return next.filter((_, idx) => idx !== index);
+        }
+      });
+    } else {
+      updateCart(prev => prev.map((item, idx) => {
+        if (idx !== index) return item;
+        return {
+          ...item,
+          id: med.inventory_id,
+          medicine_id: med.medicine_id,
+          name: med.medicine_name,
+          batch: med.batch_no,
+          expiry: med.expiry_date,
+          mrp: med.mrp,
+          costPrice: med.cost_price,
+          salts: med.salts || med.hsn_code || 'Generic',
+          packSize: med.pack_size || 10,
+          availableStock: med.quantity !== undefined ? med.quantity : 0,
+          isEmptyRow: false
+        };
+      }));
+    }
+
     setActiveRowSearchIndex(null);
     setRowSearchTerm('');
     setRowSearchResults([]);
+    setRowSearchHighlightIndex(-1);
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
@@ -878,6 +965,7 @@ const POS = () => {
   
   // Calculations
   const subtotal = cart.reduce((sum, item) => {
+    if (item.isEmptyRow) return sum;
     const unitRate = item.packSize > 0 ? item.mrp / item.packSize : item.mrp;
     const itemTotalBeforeDiscount = (item.mrp * item.qty) + (unitRate * (item.looseQty || 0));
     return sum + itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
@@ -887,16 +975,18 @@ const POS = () => {
   const grandTotal = Math.round(subtotal - discountAmount);
 
   const totalCost = cart.reduce((sum, item) => {
+    if (item.isEmptyRow) return sum;
     const itemCost = item.costPrice != null ? item.costPrice : (item.mrp * 0.7);
     const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
     return sum + (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
   }, 0);
 
+  const hasValidItems = cart.some(item => !item.isEmptyRow && item.name && item.name.trim() !== '');
   const profitOrLoss = grandTotal - totalCost;
-  const isLoss = cart.length > 0 && profitOrLoss < -0.001; // Loss greater than 0.1 paise
+  const isLoss = hasValidItems && profitOrLoss < -0.001; // Loss greater than 0.1 paise
 
   const handleCompleteSale = async () => {
-    if (cart.length === 0) return;
+    if (!hasValidItems) return;
 
     if (isLoss) {
       alert(`❌ CANNOT SAVE BILL:\n\nTransaction results in a Net Loss (Grand Total ₹${grandTotal} is less than Cost Price ₹${Math.round(totalCost)}).\nPlease adjust overall discount or items MRP to proceed.`);
@@ -917,6 +1007,7 @@ const POS = () => {
 
     // Expiry check
     for (const item of cart) {
+      if (item.isEmptyRow) continue;
       const expiryStr = item.expiry || '';
       if (expiryStr) {
         let expDate: Date;
@@ -937,7 +1028,7 @@ const POS = () => {
     }
     
     try {
-      const salesItems = cart.map(item => {
+      const salesItems = cart.filter(item => !item.isEmptyRow).map(item => {
         const itemDiscount = item.discount || item.discountPer || 0;
         return {
           inventory_id: typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined,
@@ -972,7 +1063,7 @@ const POS = () => {
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
       
       setLastSavedInvoiceNo(invoiceNo);
-      setLastSavedItems(cart.map(item => ({
+      setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
         name: item.name || item.medicine_name,
         batch: item.batch_number || item.batch_no || 'N/A'
       })));
@@ -1021,8 +1112,7 @@ const POS = () => {
         reg_no: newDoctorRegNo
       });
       // Refresh doctors list
-      const docs = await api.getDoctors();
-      if (Array.isArray(docs)) setDoctorsList(docs);
+      queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
       setDoctor(docName);
       setShowDoctorModal(false);
       setNewDoctorName('');
@@ -1257,7 +1347,7 @@ const POS = () => {
           {/* A. Search & Scan Medicine Area (Header) */}
           <div className="glass-panel p-4 flex flex-col gap-3 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-md">
             <div className="flex items-center gap-3">
-              <div className="relative flex-1">
+              <div ref={productSearchRef} className="relative flex-1">
                 <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-muted">
                   <Search size={18} />
                 </span>
@@ -1267,6 +1357,39 @@ const POS = () => {
                   className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20"
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
+                  onKeyDown={e => {
+                    if (searchResults.length === 0) return;
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter') {
+                      if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                        e.preventDefault();
+                        const item = searchResults[searchHighlightIndex];
+                        addToCart({
+                          id: item.inventory_id,
+                          medicine_id: item.medicine_id,
+                          name: item.medicine_name,
+                          batch: item.batch_no,
+                          expiry: item.expiry_date,
+                          mrp: item.mrp,
+                          costPrice: item.cost_price,
+                          salts: item.salts || item.hsn_code || 'Generic',
+                          packSize: item.pack_size || 10,
+                          quantity: item.quantity
+                        });
+                        setSearchTerm('');
+                        setSearchResults([]);
+                        setSearchHighlightIndex(-1);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setSearchResults([]);
+                      setSearchHighlightIndex(-1);
+                    }
+                  }}
                 />
                 
                 {/* Empty inventory fallback dropdown */}
@@ -1386,6 +1509,7 @@ const POS = () => {
                     <div className="flex flex-col">
                       {searchResults.map((med) => {
                         const renderMedicineItem = (item: any, isAlt = false) => {
+                          const isHighlighted = !isAlt && searchHighlightIndex === searchResults.indexOf(item);
                           return (
                             <button
                               key={item.inventory_id || `item_${item.medicine_id}_${Math.random()}`}
@@ -1406,7 +1530,7 @@ const POS = () => {
                                 setSearchTerm('');
                                 setSearchResults([]);
                               }}
-                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''}`}
+                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                             >
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -1580,7 +1704,7 @@ const POS = () => {
           </div>
 
           {/* B. Cart Panel - Takes up all remaining height */}
-          <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border h-full relative z-10 min-h-0 shadow-md">
+          <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border relative z-10 min-h-0 shadow-md">
             {/* Cart Header / Tab System */}
             <div className="p-2.5 border-b border-border flex items-center justify-between gap-3 bg-bg3/30 flex-nowrap shrink-0 rounded-t-[2rem]">
               <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 scrollbar-thin py-0.5">
@@ -1675,20 +1799,23 @@ const POS = () => {
                           <div className="flex items-center">
                             {item.scanImage && (
                               <div className="relative group/thumb shrink-0 mr-2.5 select-none animate-in fade-in duration-200">
-                                <img 
-                                  src={item.scanImage} 
-                                  alt="Scan thumbnail" 
+                                <img
+                                  src={item.scanImage}
+                                  alt="Scan thumbnail"
+                                  loading="lazy"
+                                  decoding="async"
                                   className="w-9 h-9 object-cover rounded-xl border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
                                   onClick={() => setZoomedImage(item.scanImage)}
                                 />
                                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/thumb:block z-[100] bg-bg2 border border-border rounded-xl p-2 shadow-2xl w-48 animate-in fade-in duration-150">
-                                  <img src={item.scanImage} alt="Scan preview" className="w-full h-auto rounded-lg object-contain" />
+                                  <img src={item.scanImage} alt="Scan preview" loading="lazy" decoding="async" className="w-full h-auto rounded-lg object-contain" />
                                   <div className="text-[8px] text-muted text-center mt-1 font-semibold">Click to enlarge</div>
                                 </div>
                               </div>
                             )}
-                            <div className="flex-1 relative">
+                            <div ref={activeRowSearchIndex === cart.indexOf(item) ? activeRowRef : null} className="flex-1 relative">
                               <input 
+                                id={`row-med-input-${cart.indexOf(item)}`}
                                 type="text" 
                                 className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-xs font-semibold text-text py-1 px-1 rounded"
                                 value={activeRowSearchIndex === cart.indexOf(item) ? rowSearchTerm : item.name}
@@ -1703,7 +1830,28 @@ const POS = () => {
                                   setActiveRowSearchIndex(idx);
                                   setRowSearchTerm(item.name);
                                 }}
-                                placeholder="Change medicine..."
+                                onKeyDown={e => {
+                                  const idx = cart.indexOf(item);
+                                  if (activeRowSearchIndex !== idx || rowSearchResults.length === 0) return;
+                                  if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setRowSearchHighlightIndex(i => Math.min(i + 1, rowSearchResults.length - 1));
+                                  } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setRowSearchHighlightIndex(i => Math.max(i - 1, 0));
+                                  } else if (e.key === 'Enter') {
+                                    if (rowSearchHighlightIndex >= 0 && rowSearchHighlightIndex < rowSearchResults.length) {
+                                      e.preventDefault();
+                                      changeRowMedicine(idx, rowSearchResults[rowSearchHighlightIndex]);
+                                    }
+                                  } else if (e.key === 'Escape') {
+                                    setActiveRowSearchIndex(null);
+                                    setRowSearchTerm('');
+                                    setRowSearchResults([]);
+                                    setRowSearchHighlightIndex(-1);
+                                  }
+                                }}
+                                placeholder={item.isEmptyRow ? "Search medicine..." : "Change medicine..."}
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchResults.length > 0 && (
@@ -1714,6 +1862,7 @@ const POS = () => {
                                            med.medicine_name.toLowerCase().includes(o.product.toLowerCase().trim())
                                     );
                                     const rowHasPending = rowPendingMatches.length > 0;
+                                    const isRowHighlighted = rowSearchHighlightIndex === rowSearchResults.indexOf(med);
                                     return (
                                       <button
                                         key={med.inventory_id}
@@ -1722,7 +1871,7 @@ const POS = () => {
                                           const idx = cart.indexOf(item);
                                           changeRowMedicine(idx, med);
                                         }}
-                                        className="flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full"
+                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                       >
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                           <span className="font-semibold text-text">{med.medicine_name}</span>
@@ -1748,11 +1897,13 @@ const POS = () => {
                           <div className="relative">
                             <input
                               type="text"
-                              className="w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-1.5 rounded-lg cursor-pointer"
+                              className={`w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-1.5 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
                               value={item.batch || ''}
                               placeholder="Batch"
                               readOnly
+                              disabled={item.isEmptyRow}
                               onFocus={() => {
+                                if (item.isEmptyRow) return;
                                 setActiveBatchRowId(item.id);
                                 api.searchMedicine(item.name)
                                   .then(data => {
@@ -1820,12 +1971,17 @@ const POS = () => {
                         
                         {/* Expiry */}
                         <td className="p-2 text-center">
-                          <div className={`font-mono text-[10px] font-bold px-2 py-0.8 rounded-lg inline-block shadow-sm ${expBadgeClass}`}>{item.expiry}</div>
+                          <div className={`font-mono text-[10px] font-bold px-2 py-0.8 rounded-lg inline-block shadow-sm ${expBadgeClass}`}>
+                            {item.isEmptyRow ? '-' : item.expiry}
+                          </div>
                         </td>
 
                         {/* Stock */}
                         <td className="p-2 text-center">
                           {(() => {
+                            if (item.isEmptyRow) {
+                              return <div className="font-mono text-xs font-bold text-muted bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm">-</div>;
+                            }
                             const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
                             return (
                               <div className={`font-mono text-xs font-bold bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm ${
@@ -1847,10 +2003,11 @@ const POS = () => {
                         <td className="p-2 text-center">
                           <input 
                             type="number" 
-                            className="w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold py-1 px-1 rounded-lg"
-                            value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
+                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            value={item.isEmptyRow ? '' : (item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty)}
                             onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                             min="0"
+                            disabled={item.isEmptyRow}
                           />
                         </td>
 
@@ -1858,10 +2015,11 @@ const POS = () => {
                         <td className="p-2 text-center">
                           <input 
                             type="number" 
-                            className="w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-amber-500 py-1 px-1 rounded-lg"
-                            value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
+                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-amber-500 py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            value={item.isEmptyRow ? '' : (item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty)}
                             onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                             min="0"
+                            disabled={item.isEmptyRow}
                           />
                         </td>
 
@@ -1869,11 +2027,12 @@ const POS = () => {
                         <td className="p-2 text-center">
                           <input 
                             type="number" 
-                            className="w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-1 px-1 rounded-lg"
-                            value={item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount}
+                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
                             onChange={e => updateCartItem(item.id, 'discount', e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
                             min="0"
                             max="100"
+                            disabled={item.isEmptyRow}
                           />
                         </td>
 
@@ -1881,17 +2040,18 @@ const POS = () => {
                         <td className="p-2 text-right">
                           <input 
                             type="number" 
-                            className="w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-1 px-1.5 rounded-lg" 
-                            value={item.mrp || ''}
+                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-1 px-1.5 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
                             onChange={e => updateCartItem(item.id, 'mrp', Math.max(0, Number(e.target.value)))}
+                            disabled={item.isEmptyRow}
                           />
                         </td>
 
                         {/* Total */}
                         <td className="p-2 text-right">
                           <div className="font-mono text-xs font-bold text-green pr-1">
-                            ₹{Math.round(itemTotal)}
+                            {item.isEmptyRow ? '-' : `₹${Math.round(itemTotal)}`}
                           </div>
                         </td>
 

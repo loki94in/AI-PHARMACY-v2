@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { UserPlus, Stethoscope, Trash2, Edit2, Search, X, Phone, Building2, BadgePercent, Hash } from 'lucide-react';
 import { api } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface DoctorForm {
   name: string;
@@ -38,25 +40,12 @@ const initials = (name: string) =>
 let cachedDoctorsList: any[] | null = null;
 
 const Doctors = () => {
-  const [doctors, setDoctors] = useState<any[]>(cachedDoctorsList || []);
-  const [loading, setLoading] = useState(!cachedDoctorsList);
+  const queryClient = useQueryClient();
+  const { data: doctors = [], isLoading: loading } = useApiQuery<any[]>('doctors', () => api.getDoctors());
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState<DoctorForm>(emptyForm);
   const [editingDoctorId, setEditingDoctorId] = useState<number | null>(null);
-
-  const fetchDoctors = (silent = false) => {
-    if (!silent && !cachedDoctorsList) setLoading(true);
-    api.getDoctors()
-      .then(data => {
-        setDoctors(data);
-        cachedDoctorsList = data;
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
-
-  useEffect(() => { fetchDoctors(); }, []);
 
   const handleChange = (field: keyof DoctorForm, value: string) =>
     setForm(prev => ({ ...prev, [field]: value }));
@@ -77,16 +66,11 @@ const Doctors = () => {
 
   const handleDelete = (id: number, name: string) => {
     if (!window.confirm(`Delete Dr. ${name}?`)) return;
-    // Optimistic UI update
-    setDoctors(prev => {
-      const next = prev.filter(d => d.id !== id);
-      cachedDoctorsList = next;
-      return next;
-    });
     api.deleteDoctor(id)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['doctors'] }))
       .catch(err => {
         console.error('Failed to delete doctor:', err);
-        fetchDoctors(true);
+        queryClient.invalidateQueries({ queryKey: ['doctors'] });
       });
   };
 
@@ -103,7 +87,7 @@ const Doctors = () => {
     };
     const apiCall = editingDoctorId ? api.updateDoctor(editingDoctorId, payload) : api.addDoctor(payload);
     apiCall
-      .then(() => { setForm(emptyForm); setEditingDoctorId(null); fetchDoctors(); })
+      .then(() => { setForm(emptyForm); setEditingDoctorId(null); queryClient.invalidateQueries({ queryKey: ['doctors'] }); })
       .catch(() => {})
       .finally(() => setSaving(false));
   };
@@ -234,7 +218,7 @@ const Doctors = () => {
         </div>
 
         {/* ── Right – Doctor Directory ──────────────────────────────── */}
-        <div className="md:col-span-2 glass-panel flex flex-col overflow-hidden">
+        <div className="md:col-span-2 glass-panel flex flex-col overflow-hidden min-h-0">
 
           {/* Directory Header */}
           <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between gap-4 flex-wrap">

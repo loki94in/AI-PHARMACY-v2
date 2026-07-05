@@ -43,40 +43,62 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
   const db = await dbManager.getConnection();
   const cleanQuery = query.trim();
   const isNumeric = /^\d+(\.\d+)?$/.test(cleanQuery);
-  const searchLikeQuery = `%${cleanQuery}%`;
   
   let rows = [];
   if (isNumeric) {
     const exactQuery = cleanQuery;
     const normalizedQuery = normalizeNumericSearch(cleanQuery);
-    const likeQuery = `%${normalizedQuery}%`;
-    const sql = `
-      SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
-             m.item_code as item_code, m.manufacturer as manufacturer,
-             im.batch_no, MIN(im.expiry_date) as expiry_date, SUM(im.quantity) as quantity, 
-             COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
-             m.cgst, m.sgst, m.igst, m.hsn_code,
-             0 as is_out_of_stock
-      FROM inventory_master im
-      JOIN medicines m ON im.medicine_id = m.id
-      WHERE (m.item_code = ? 
-         OR m.name LIKE ? 
-         OR CAST(COALESCE(im.mrp, 0) AS TEXT) LIKE ?
-         OR im.batch_no LIKE ?)
-        AND im.quantity > 0
-        AND date(im.expiry_date) >= date('now')
-      GROUP BY m.id, COALESCE(im.mrp, m.mrp, 0)
-      ORDER BY m.name ASC
-      LIMIT 20
-    `;
-    rows = await db.all(sql, [exactQuery, likeQuery, likeQuery, likeQuery]);
+    
+    if (cleanQuery.length >= 3) {
+      const likeQuery = `%${normalizedQuery}%`;
+      const sql = `
+        SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
+               m.item_code as item_code, m.manufacturer as manufacturer,
+               im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+               COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
+               m.cgst, m.sgst, m.igst, m.hsn_code,
+               0 as is_out_of_stock
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        WHERE (m.item_code = ? 
+           OR m.name LIKE ? 
+           OR CAST(COALESCE(im.mrp, 0) AS TEXT) LIKE ?
+           OR im.batch_no LIKE ?)
+          AND im.quantity > 0
+          AND im.expiry_date >= date('now')
+        ORDER BY m.name ASC, im.expiry_date ASC
+        LIMIT 20
+      `;
+      rows = await db.all(sql, [exactQuery, likeQuery, likeQuery, likeQuery]);
+    } else {
+      // For short terms (length 2), avoid slow infix cast and wildcards
+      const prefixQuery = `${cleanQuery}%`;
+      const sql = `
+        SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
+               m.item_code as item_code, m.manufacturer as manufacturer,
+               im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
+               COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
+               m.cgst, m.sgst, m.igst, m.hsn_code,
+               0 as is_out_of_stock
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        WHERE (m.item_code = ? 
+           OR m.name LIKE ?
+           OR im.batch_no LIKE ?)
+          AND im.quantity > 0
+          AND im.expiry_date >= date('now')
+        ORDER BY m.name ASC, im.expiry_date ASC
+        LIMIT 20
+      `;
+      rows = await db.all(sql, [exactQuery, prefixQuery, prefixQuery]);
+    }
   } else {
     // Alphabetical query: try fast index prefix search on m.name first
     const prefixQuery = `${cleanQuery}%`;
     const prefixSql = `
       SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
              m.item_code as item_code, m.manufacturer as manufacturer,
-             im.batch_no, MIN(im.expiry_date) as expiry_date, SUM(im.quantity) as quantity, 
+             im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
              COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
              m.cgst, m.sgst, m.igst, m.hsn_code,
              0 as is_out_of_stock
@@ -84,20 +106,19 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
       JOIN medicines m ON im.medicine_id = m.id
       WHERE m.name LIKE ?
         AND im.quantity > 0
-        AND date(im.expiry_date) >= date('now')
-      GROUP BY m.id, COALESCE(im.mrp, m.mrp, 0)
-      ORDER BY m.name ASC
+        AND im.expiry_date >= date('now')
+      ORDER BY m.name ASC, im.expiry_date ASC
       LIMIT 20
     `;
     rows = await db.all(prefixSql, [prefixQuery]);
 
-    // Fall back to infix name/item_code search only if we got fewer than 15 rows
-    if (rows.length < 15) {
+    // Fall back to infix name/item_code search only if we got fewer than 15 rows and query >= 3 chars
+    if (rows.length < 15 && cleanQuery.length >= 3) {
       const likeQuery = `%${cleanQuery}%`;
       const fallbackSql = `
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                m.item_code as item_code, m.manufacturer as manufacturer,
-               im.batch_no, MIN(im.expiry_date) as expiry_date, SUM(im.quantity) as quantity, 
+               im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
                m.cgst, m.sgst, m.igst, m.hsn_code,
                0 as is_out_of_stock
@@ -105,9 +126,8 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
         JOIN medicines m ON im.medicine_id = m.id
         WHERE (m.name LIKE ? OR m.item_code LIKE ?)
           AND im.quantity > 0
-          AND date(im.expiry_date) >= date('now')
-        GROUP BY m.id, COALESCE(im.mrp, m.mrp, 0)
-        ORDER BY m.name ASC
+          AND im.expiry_date >= date('now')
+        ORDER BY m.name ASC, im.expiry_date ASC
         LIMIT 20
       `;
       const fallbackRows = await db.all(fallbackSql, [likeQuery, likeQuery]);

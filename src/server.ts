@@ -233,8 +233,9 @@ ensureSchema(DB_PATH).then(async () => {
     try {
       const { productNameFilterService } = await import('./services/productNameFilterService.js');
       console.log('[Boot] Pre-initializing productNameFilterService...');
-      await productNameFilterService.initialize();
-      console.log('[Boot] productNameFilterService pre-initialized successfully.');
+      productNameFilterService.initialize()
+        .then(() => console.log('[Boot] productNameFilterService pre-initialized successfully.'))
+        .catch(err => console.error('Failed to pre-initialize productNameFilterService on startup:', err));
     } catch (err) {
       console.error('Failed to pre-initialize productNameFilterService on startup:', err);
     }
