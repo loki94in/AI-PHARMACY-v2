@@ -336,8 +336,12 @@ export async function ensureSchema(dbPath: string) {
   // Create index on medicines (item_code) after columns are added
   try {
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_item_code ON medicines (item_code);');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_quantity ON inventory_master (quantity);');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_expiry ON inventory_master (expiry_date);');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_generic_name ON medicines (generic_name);');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_manufacturer ON medicines (manufacturer);');
   } catch (err) {
-    console.warn('Failed to create index idx_medicines_item_code:', err);
+    console.warn('Failed to create index idx_medicines_item_code or custom optimization indexes:', err);
   }
 
   // New tables needed by various routes

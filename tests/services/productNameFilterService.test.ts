@@ -46,8 +46,9 @@ describe('ProductNameFilterService', () => {
     } catch {}
   });
 
-  test('should throw error if filterProductNames called before initialize', async () => {
-    await expect(service.filterProductNames('test')).rejects.toThrow('not initialized');
+  test('should automatically initialize if filterProductNames called before initialize', async () => {
+    const result = await service.filterProductNames('Paracetamol 500mg');
+    expect(result.matches).toContain('Paracetamol 500mg');
   });
 
   test('should initialize successfully with test data', async () => {

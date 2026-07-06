@@ -572,8 +572,6 @@ const Topbar = ({
 
   useEffect(() => {
     fetchAlertCount();
-    // Poll every 30 seconds
-    const interval = setInterval(fetchAlertCount, 30000);
     
     // Also refresh on cart refresh/update events
     const handleRefresh = () => {
@@ -583,7 +581,6 @@ const Topbar = ({
     window.addEventListener('refresh-special-orders', handleRefresh);
     
     return () => {
-      clearInterval(interval);
       window.removeEventListener('refresh-pharmarack-cart', handleRefresh);
       window.removeEventListener('refresh-special-orders', handleRefresh);
     };
@@ -612,8 +609,6 @@ const Topbar = ({
       }
     };
     fetchActiveJob();
-    const timer = setInterval(fetchActiveJob, 30000); // Optimized: poll active catalog jobs every 30s instead of 8s
-    return () => clearInterval(timer);
   }, []);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -649,8 +644,6 @@ const Topbar = ({
 
   useEffect(() => {
     fetchDevices();
-    const interval = setInterval(fetchDevices, 30000); // Optimized: poll connected devices every 30s instead of 5s
-    return () => clearInterval(interval);
   }, [fetchDevices]);
 
   useEffect(() => {
@@ -675,99 +668,16 @@ const Topbar = ({
     });
   }, [onNewNotification]);
 
-  // Connect to backend real-time notification SSE stream
+  // Warm up client compact inventory cache on boot
   useEffect(() => {
-    const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-    const cleanBaseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-    const sseUrl = cleanBaseUrl.startsWith('/api')
-      ? `${cleanBaseUrl}/notifications/stream`
-      : `${cleanBaseUrl}/api/notifications/stream`;
-    
-    let eventSource: EventSource | null = null;
-    
-    const connectSSE = () => {
-      eventSource = new EventSource(sseUrl);
-
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'wa_new_message' || data.type === 'wa_message_ack' || data.type === 'wa_chats_updated') {
-            window.dispatchEvent(new CustomEvent('whatsapp_event', { detail: data }));
-          }
-          if (data.type === 'auth_failure' || data.type === 'auth_required' || data.type === 'notification') {
-            toastEvent.trigger(
-              data.payload?.message || data.message || 'Action required',
-              data.payload?.type || 'error',
-              data.payload?.link || '/settings'
-            );
-          } else if (data.type === 'catalog_job_progress' && data.payload) {
-            const payload = data.payload;
-            setCatalogJob(prev => {
-              if (!prev || prev.id === payload.id) {
-                return {
-                  id: payload.id,
-                  status: payload.status || 'processing',
-                  progress: payload.progress !== undefined ? payload.progress : (prev?.progress || 0),
-                  total_count: payload.total_count,
-                  processed_count: payload.processed_count || (payload.progress / 100 * (payload.total_count || 0))
-                };
-              }
-              return prev;
-            });
-          } else if (data.type === 'catalog_job_update' && data.payload) {
-            const payload = data.payload;
-            const status = payload.status;
-            if (status === 'done' || status === 'failed') {
-              setCatalogJob(null);
-            } else {
-              setCatalogJob(prev => {
-                if (!prev || prev.id === payload.id) {
-                  return {
-                    id: payload.id,
-                    status: status,
-                    progress: payload.progress !== undefined ? payload.progress : (prev?.progress || 0),
-                    total_count: payload.total_count,
-                    processed_count: payload.processed_count
-                  };
-                }
-                return prev;
-              });
-            }
-            if (status === 'waiting_for_mapping') {
-              toastEvent.trigger('Catalogue analyzed! Ready for mapping configuration.', 'info', '/catalog');
-            } else if (status === 'done') {
-              toastEvent.trigger('Catalogue ingestion completed successfully!', 'success', '/catalog');
-            } else if (status === 'failed') {
-              toastEvent.trigger('Catalogue processing failed: ' + (payload.error || 'Unknown error'), 'error', '/catalog');
-            }
-          } else if (data.type === 'sales_sync') {
-            toastEvent.trigger(`Mobile synced ${data.payload.count || 1} offline sales bill(s) for review!`, 'info');
-            if (typeof (window as any).refreshStagedCounts === 'function') {
-              (window as any).refreshStagedCounts(true);
-            }
-          } else if (data.type === 'purchases_sync') {
-            toastEvent.trigger(`Mobile synced ${data.payload.count || 1} offline purchase bill(s) for review!`, 'info');
-            if (typeof (window as any).refreshStagedCounts === 'function') {
-              (window as any).refreshStagedCounts(true);
-            }
-          }
-        } catch (err) {
-          console.error('Failed to parse SSE event:', err);
-        }
-      };
-
-      eventSource.onerror = (err) => {
-        console.warn('SSE disconnected or failed, retrying in 5 seconds...', err);
-        eventSource?.close();
-        setTimeout(connectSSE, 5000);
-      };
-    };
-
-    connectSSE();
-
-    return () => {
-      eventSource?.close();
-    };
+    import('../services/api.js').then(async ({ api }) => {
+      try {
+        await api.getCompactInventory();
+        console.log('[Layout] Compact inventory cache loaded.');
+      } catch (err) {
+        console.warn('[Layout] Failed to load compact inventory:', err);
+      }
+    });
   }, []);
 
   const onlineDevicesCount = connectedDevices.filter(d => d.is_online === 1).length;
@@ -920,6 +830,17 @@ const Topbar = ({
             )}
           </Link>
 
+          {/* Refresh Page Cache Button */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('cache-invalidate'));
+            }}
+            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
+            title="Refresh Page Data"
+          >
+            <RefreshCw size={18} />
+          </button>
+
           {/* Backup Center Shortcut Button */}
           <button
             onClick={() => {
@@ -930,7 +851,7 @@ const Topbar = ({
             className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
             title="Backup & Restore Panel"
           >
-            <RefreshCw size={18} />
+            <Database size={18} />
           </button>
 
           {/* Notification bell */}
@@ -1275,8 +1196,6 @@ export const Layout = ({
 
   useEffect(() => {
     fetchRefillData();
-    const timer = setInterval(fetchRefillData, 15000);
-    return () => clearInterval(timer);
   }, [fetchRefillData]);
 
   const [showBackupModal, setShowBackupModal] = useState(false);
@@ -1490,13 +1409,15 @@ export const Layout = ({
             {children}
           </main>
           
-          <RefillControlSidebar
-            expanded={isSidebarExpanded}
-            setExpanded={setIsSidebarExpanded}
-            refills={refills}
-            notifications={stagedNotifications}
-            onActionComplete={fetchRefillData}
-          />
+          {(location.pathname === '/' || location.pathname === '/pos' || location.pathname === '/crm') && (
+            <RefillControlSidebar
+              expanded={isSidebarExpanded}
+              setExpanded={setIsSidebarExpanded}
+              refills={refills}
+              notifications={stagedNotifications}
+              onActionComplete={fetchRefillData}
+            />
+          )}
         </div>
         
         {/* Global Modals */}

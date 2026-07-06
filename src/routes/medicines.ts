@@ -1,5 +1,6 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 
 const router = express.Router();
 
@@ -457,6 +458,63 @@ router.get('/marketed-by', async (req, res) => {
   } catch (error) {
     await dbManager.close();
     console.error('Failed to fetch marketed-by list:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET compact inventory cache instantly
+router.get('/medicines/compact', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const items = await inventoryCache.get(db);
+    await dbManager.close();
+    res.json(items);
+  } catch (error) {
+    await dbManager.close();
+    console.error('Failed to get compact inventory:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET full details and alternatives for selected medicine
+router.get('/medicines/:id/quick-details', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    const medicine = await db.get(
+      'SELECT id, name, generic_name, manufacturer, marketed_by, pack_unit, strength, cgst_per, sgst_per, hsn_code, category, api_reference, schedule_type FROM medicines WHERE id = ?',
+      [id]
+    );
+
+    if (!medicine) {
+      await dbManager.close();
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // Find alternatives: medicines with the same non-empty api_reference or generic_name, excluding this medicine itself
+    let alternatives: any[] = [];
+    if (medicine.api_reference || medicine.generic_name) {
+      alternatives = await db.all(
+        `SELECT m.id, m.name, m.generic_name, m.manufacturer, m.pack_unit, m.strength,
+                COALESCE((SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = m.id), 0) as stock_qty
+         FROM medicines m
+         WHERE m.id <> ? AND (
+           (LOWER(m.api_reference) = LOWER(?) AND m.api_reference <> '') OR
+           (LOWER(m.generic_name) = LOWER(?) AND m.generic_name <> '')
+         )
+         LIMIT 10`,
+        [id, medicine.api_reference || '', medicine.generic_name || '']
+      );
+    }
+
+    await dbManager.close();
+    res.json({
+      ...medicine,
+      alternatives
+    });
+  } catch (error) {
+    await dbManager.close();
+    console.error('Failed to get medicine quick details:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

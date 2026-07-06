@@ -323,7 +323,7 @@ export class ProductNameFilterService {
     const startTime = Date.now();
 
     if (!this.initialized) {
-      throw new Error('ProductNameFilterService not initialized. Call initialize() first.');
+      await this.initialize();
     }
 
     // Merge options with defaults

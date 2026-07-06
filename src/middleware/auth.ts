@@ -16,13 +16,28 @@ import { Request, Response, NextFunction } from 'express';
 import { dbManager } from '../database/connection.js';
 import { config } from '../config/index.js';
 
+let cachedSessionToken: string | null = null;
+let cacheTimestamp = 0;
+const TOKEN_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export function invalidateSessionTokenCache(): void {
+  cachedSessionToken = null;
+  cacheTimestamp = 0;
+}
+
 async function getSessionToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedSessionToken !== null && (now - cacheTimestamp) < TOKEN_CACHE_TTL) {
+    return cachedSessionToken || null;
+  }
   try {
     const db = await dbManager.getConnection();
     const row = await db.get<{ value: string }>(
       "SELECT value FROM app_settings WHERE key = 'license_session_token'"
     );
-    return row?.value || null;
+    cachedSessionToken = row?.value || '';
+    cacheTimestamp = now;
+    return cachedSessionToken || null;
   } catch {
     return null;
   }
