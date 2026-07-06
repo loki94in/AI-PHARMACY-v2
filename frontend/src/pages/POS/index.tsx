@@ -427,6 +427,10 @@ const POS = () => {
 
   // Autofocus the next empty row's medicine input when cart length increases or changes
   useEffect(() => {
+    if (skipEmptyRowAutofocusRef.current) {
+      skipEmptyRowAutofocusRef.current = false;
+      return;
+    }
     if (cart.length > 0) {
       const lastIndex = cart.length - 1;
       const lastItem = cart[lastIndex];
@@ -563,6 +567,7 @@ const POS = () => {
 
   const productSearchRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
+  const skipEmptyRowAutofocusRef = useRef(false);
 
   useOnClickOutside(productSearchRef, () => {
     setSearchResults([]);
@@ -886,20 +891,26 @@ const POS = () => {
     if (pendingMatches.length > 0) {
       alert(`🔔 Pending Out-of-Stock Request:\nCustomer "${pendingMatches[0].requester}" requested ${pendingMatches[0].qty} unit(s) of "${med.name}". Please ensure it is reserved or reconciled if needed!`);
     }
+
+    const cleanCart = cart.filter(item => !item.isEmptyRow);
+    const existingIndex = cleanCart.findIndex(item => {
+      const isDbId = (id: any) => typeof id === 'number' && id < 1000000;
+      const idMatches = isDbId(item.id) && isDbId(med.id) && item.id === med.id;
+      const medicineIdMatch = item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id;
+      const nameMatch = item.name.toLowerCase().trim() === med.name.toLowerCase().trim();
+      return idMatches || medicineIdMatch || nameMatch;
+    });
+
+    const targetIndex = existingIndex !== -1 ? existingIndex : cleanCart.length;
+    skipEmptyRowAutofocusRef.current = true;
+
     updateCart(prevCart => {
       const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
-      const existing = cleanPrev.find(item => {
-        const isDbId = (id: any) => typeof id === 'number' && id < 1000000;
-        const idMatches = isDbId(item.id) && isDbId(med.id) && item.id === med.id;
-        const medicineIdMatch = item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id;
-        const nameMatch = item.name.toLowerCase().trim() === med.name.toLowerCase().trim();
-        return idMatches || medicineIdMatch || nameMatch;
-      });
       const incQty = med.recommendedQty !== undefined ? med.recommendedQty : 1;
       const incLooseQty = med.recommendedLooseQty || 0;
-      if (existing) {
-        return cleanPrev.map(item => 
-          item.id === existing.id ? { 
+      if (existingIndex !== -1) {
+        return cleanPrev.map((item, idx) => 
+          idx === existingIndex ? { 
             ...item, 
             qty: item.qty + incQty,
             looseQty: (item.looseQty || 0) + incLooseQty
@@ -923,6 +934,14 @@ const POS = () => {
         availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0)
       }];
     });
+
+    setTimeout(() => {
+      const qtyInput = document.getElementById(`row-qty-input-${targetIndex}`);
+      if (qtyInput) {
+        qtyInput.focus();
+        (qtyInput as HTMLInputElement).select();
+      }
+    }, 120);
   };
 
   const fetchDetailsAndAddToCart = async (item: any) => {
@@ -1053,6 +1072,7 @@ const POS = () => {
   };
 
   const fetchDetailsAndChangeRowMedicine = async (index: number, med: any) => {
+    skipEmptyRowAutofocusRef.current = true;
     try {
       const details = await api.getMedicineQuickDetails(med.medicine_id);
       changeRowMedicine(index, {
@@ -1071,7 +1091,7 @@ const POS = () => {
         qtyInput.focus();
         (qtyInput as HTMLInputElement).select();
       }
-    }, 100);
+    }, 120);
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
@@ -1441,7 +1461,7 @@ const POS = () => {
                       } else if (e.key === 'ArrowUp') {
                         e.preventDefault();
                         setPatientHighlightIndex(i => Math.max(i - 1, 0));
-                      } else if (e.key === 'Enter' && patientHighlightIndex >= 0) {
+                      } else if ((e.key === 'Enter' || e.key === 'Tab') && patientHighlightIndex >= 0) {
                         e.preventDefault();
                         const sel = patientSuggestions[patientHighlightIndex];
                         updatePatientName(sel.name);
@@ -1543,7 +1563,7 @@ const POS = () => {
                       } else if (e.key === 'ArrowUp') {
                         e.preventDefault();
                         setDoctorHighlightIndex(i => Math.max(i - 1, 0));
-                      } else if (e.key === 'Enter' && doctorHighlightIndex >= 0) {
+                      } else if ((e.key === 'Enter' || e.key === 'Tab') && doctorHighlightIndex >= 0) {
                         e.preventDefault();
                         setDoctor(filteredDoctors[doctorHighlightIndex].name);
                         setIsDoctorDropdownOpen(false);
@@ -1639,7 +1659,7 @@ const POS = () => {
                     } else if (e.key === 'ArrowUp') {
                       e.preventDefault();
                       setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                    } else if (e.key === 'Enter') {
+                    } else if (e.key === 'Enter' || e.key === 'Tab') {
                       if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
                         e.preventDefault();
                         const item = searchResults[searchHighlightIndex];
@@ -2050,7 +2070,7 @@ const POS = () => {
                     return (
                       <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all">
                         {/* Medicine Search/Change */}
-                        <td className="p-2 min-w-[160px] relative">
+                        <td className="p-2 min-w-[163px] relative">
                           <div className="flex items-center">
                             {item.scanImage && (
                               <div className="relative group/thumb shrink-0 mr-2.5 select-none animate-in fade-in duration-200">
@@ -2103,7 +2123,7 @@ const POS = () => {
                                   } else if (e.key === 'ArrowUp') {
                                     e.preventDefault();
                                     setRowSearchHighlightIndex(i => Math.max(i - 1, 0));
-                                  } else if (e.key === 'Enter') {
+                                  } else if (e.key === 'Enter' || e.key === 'Tab') {
                                     if (rowSearchHighlightIndex >= 0 && rowSearchHighlightIndex < rowSearchResults.length) {
                                       e.preventDefault();
                                       fetchDetailsAndChangeRowMedicine(idx, rowSearchResults[rowSearchHighlightIndex]);
@@ -2119,7 +2139,7 @@ const POS = () => {
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchResults.length > 0 && (
-                                <div className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 shadow-2xl">
+                                <div className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-[259px] shadow-2xl">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
                                       o => o.product.toLowerCase().trim() === med.medicine_name.toLowerCase().trim() ||
@@ -2166,6 +2186,13 @@ const POS = () => {
                               placeholder="Batch"
                               readOnly
                               disabled={item.isEmptyRow}
+                              onKeyDown={e => {
+                                const allowedKeys = ['Tab', 'Enter', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete'];
+                                if (!allowedKeys.includes(e.key)) {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onPaste={e => e.preventDefault()}
                               onFocus={() => {
                                 if (item.isEmptyRow) return;
                                 setActiveBatchRowId(item.id);

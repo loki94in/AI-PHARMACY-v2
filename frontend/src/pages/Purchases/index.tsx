@@ -490,6 +490,7 @@ const Purchases: React.FC = () => {
   useOnClickOutside(activeSearchRef, () => {
     setActiveSearchIndex(null);
     setSearchResults([]);
+    setSearchHighlightIndex(-1);
   });
 
   useEffect(() => {
@@ -604,6 +605,7 @@ const Purchases: React.FC = () => {
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [schemeMatchStatus, setSchemeMatchStatus] = useState<{ [key: string]: string }>({});
@@ -792,6 +794,7 @@ const Purchases: React.FC = () => {
     if (term.length < 2) {
       setSearchResults([]);
       setActiveSearchIndex(null);
+      setSearchHighlightIndex(-1);
       return;
     }
 
@@ -802,6 +805,7 @@ const Purchases: React.FC = () => {
         try {
           const response = await api.catalogSearch(term);
           setSearchResults(response || []);
+          setSearchHighlightIndex(-1);
         } catch (error) {
           console.error('Error prefetching medicines:', error);
         }
@@ -817,6 +821,7 @@ const Purchases: React.FC = () => {
       try {
         const response = await api.catalogSearch(term);
         setSearchResults(response || []);
+        setSearchHighlightIndex(-1);
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
@@ -888,6 +893,7 @@ const Purchases: React.FC = () => {
     setItems(newItems);
     setSearchResults([]);
     setActiveSearchIndex(null);
+    setSearchHighlightIndex(-1);
   };
 
   const calculateItemAmount = (item: BillItem): number => {
@@ -1954,6 +1960,25 @@ const Purchases: React.FC = () => {
                             updateItem(index, 'medicine_name', e.target.value);
                             searchMedicines(e.target.value, index);
                           }}
+                          onKeyDown={e => {
+                            if (activeSearchIndex !== index || searchResults.length === 0) return;
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                              if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                                e.preventDefault();
+                                selectMedicine(searchResults[searchHighlightIndex], index);
+                              }
+                            } else if (e.key === 'Escape') {
+                              setActiveSearchIndex(null);
+                              setSearchResults([]);
+                              setSearchHighlightIndex(-1);
+                            }
+                          }}
                           className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
                           placeholder="Search medicine..."
                         />
@@ -1996,11 +2021,11 @@ const Purchases: React.FC = () => {
                               📄 Original Bill Name: {item.original_name}
                             </div>
                           )}
-                          {searchResults.map((medicine) => (
+                          {searchResults.map((medicine, idx) => (
                             <button
                               key={medicine.id}
                               onClick={() => selectMedicine(medicine, index)}
-                              className="w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0"
+                              className={`w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">

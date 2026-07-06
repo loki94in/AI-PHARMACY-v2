@@ -149,11 +149,13 @@ const Returns: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   
   const activeSearchRef = useRef<HTMLDivElement>(null);
   useOnClickOutside(activeSearchRef, () => {
     setActiveSearchIndex(null);
     setSearchResults([]);
+    setSearchHighlightIndex(-1);
   });
   const [groupedReturns, setGroupedReturns] = useState<GroupedReturn[]>([]);
 
@@ -524,6 +526,7 @@ const Returns: React.FC = () => {
     if (term.length < 2) {
       setSearchResults([]);
       setActiveSearchIndex(null);
+      setSearchHighlightIndex(-1);
       return;
     }
 
@@ -534,6 +537,7 @@ const Returns: React.FC = () => {
         try {
           const response = await api.lookupPurchases(term);
           setSearchResults(Array.isArray(response) ? response : (response?.data || []));
+          setSearchHighlightIndex(-1);
         } catch (error) {
           console.error('Error prefetching medicines:', error);
         }
@@ -548,6 +552,7 @@ const Returns: React.FC = () => {
       try {
         const response = await api.lookupPurchases(term);
         setSearchResults(Array.isArray(response) ? response : (response?.data || []));
+        setSearchHighlightIndex(-1);
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
@@ -585,6 +590,7 @@ const Returns: React.FC = () => {
     setItems(newItems);
     setSearchResults([]);
     setActiveSearchIndex(null);
+    setSearchHighlightIndex(-1);
   };
 
   const updateItem = (index: number, field: keyof ReturnItem, value: any, format = false) => {
@@ -1379,6 +1385,25 @@ const Returns: React.FC = () => {
                                 updateItem(index, 'medicine_name', e.target.value);
                                 searchMedicines(e.target.value, index);
                               }}
+                              onKeyDown={e => {
+                                if (activeSearchIndex !== index || searchResults.length === 0) return;
+                                if (e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                                } else if (e.key === 'ArrowUp') {
+                                  e.preventDefault();
+                                  setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                  if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                                    e.preventDefault();
+                                    selectMedicine(searchResults[searchHighlightIndex], index);
+                                  }
+                                } else if (e.key === 'Escape') {
+                                  setActiveSearchIndex(null);
+                                  setSearchResults([]);
+                                  setSearchHighlightIndex(-1);
+                                }
+                              }}
                               className="w-full bg-bg3 border border-glass-border rounded-lg px-2.5 py-1 text-text text-xs focus:ring-1 focus:ring-primary focus:outline-none"
                               placeholder="Search medicine..."
                             />
@@ -1395,11 +1420,11 @@ const Returns: React.FC = () => {
                           </div>
                           {activeSearchIndex === index && searchResults.length > 0 && (
                             <div className="absolute z-30 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                              {searchResults.map((result) => (
+                              {searchResults.map((result, idx) => (
                                 <button
                                   key={result.purchase_item_id}
                                   onClick={() => selectMedicine(result, index)}
-                                  className="w-full text-left px-3 py-2 hover:bg-bg3 text-text text-xs border-b border-glass-border/30 last:border-0"
+                                  className={`w-full text-left px-3 py-2 hover:bg-bg3 text-text text-xs border-b border-glass-border/30 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                 >
                                   <div className="font-semibold">{result.medicine_name}</div>
                                   <div className="text-[10px] text-muted">

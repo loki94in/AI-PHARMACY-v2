@@ -512,7 +512,7 @@ if (ignoreNextSearchRef.current) {
       }
     }
 
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || (e.key === 'Tab' && showSuggestions && activeSuggestionIndex >= 0)) {
       e.preventDefault();
       if (showSuggestions && activeSuggestionIndex >= 0 && activeSuggestionIndex < suggestions.length) {
         selectSuggestion(suggestions[activeSuggestionIndex]);
