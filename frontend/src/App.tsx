@@ -34,8 +34,6 @@ const Sells = lazy(pageImports['/sells']);
 const Learning = lazy(pageImports['/learning']);
 const DatabasePage = lazy(pageImports['/database']);
 const CompositionQueue = lazy(pageImports['/composition-queue']);
-const CustomerReturn = lazy(pageImports['/customer-returns']);
-const CustomerReturnHistory = lazy(pageImports['/customer-return-history']);
 const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
@@ -97,8 +95,8 @@ function App() {
               <Route path="/learning" element={<Learning />} />
               <Route path="/database" element={<DatabasePage />} />
               <Route path="/composition-queue" element={<CompositionQueue />} />
-              <Route path="/customer-returns" element={<CustomerReturn />} />
-              <Route path="/customer-returns-history" element={<CustomerReturnHistory />} />
+              <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
+              <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />
               <Route path="*" element={
                 <div className="flex flex-col items-center justify-center h-full text-muted">
                   <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>

@@ -10,7 +10,9 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import Expiry from '../Expiry';
-import { CalendarDays } from 'lucide-react';
+import CustomerReturn from '../CustomerReturn';
+import CustomerReturnHistory from '../CustomerReturnHistory';
+import { CalendarDays, Users, History } from 'lucide-react';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -757,11 +759,41 @@ const Returns: React.FC = () => {
           <CalendarDays size={14} />
           Expiry Monitor
         </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'customer' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'customer'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Users size={14} />
+          Customer Returns
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'customer-history' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'customer-history'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <History size={14} />
+          Return History
+        </button>
       </div>
 
       {currentTab === 'expiry' ? (
         <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
           <Expiry />
+        </div>
+      ) : currentTab === 'customer' ? (
+        <div className="flex-1 flex flex-col overflow-y-auto relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6 custom-scrollbar">
+          <CustomerReturn />
+        </div>
+      ) : currentTab === 'customer-history' ? (
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
+          <CustomerReturnHistory />
         </div>
       ) : (
         <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text relative">

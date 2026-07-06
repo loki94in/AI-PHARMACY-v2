@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { CheckCircle, RotateCcw, AlertCircle, History } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 interface SaleItem {
   sale_item_id: number;
@@ -23,7 +23,7 @@ export default function CustomerReturn() {
   const [items, setItems] = useState<SaleItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<number, number>>({});
   const [reason, setReason] = useState('');
-  const navigate = useNavigate();
+  const [_, setSearchParams] = useSearchParams();
 
   const handleSearch = async () => {
     if (!invoiceNo.trim()) return;
@@ -122,7 +122,7 @@ export default function CustomerReturn() {
     <div className="space-y-6">
       <div className="flex justify-end">
         <button
-          onClick={() => navigate('/customer-returns-history')}
+          onClick={() => setSearchParams({ tab: 'customer-history' })}
           className="btn-secondary flex items-center gap-2"
         >
           <History className="w-4 h-4" />

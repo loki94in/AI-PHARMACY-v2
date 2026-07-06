@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { api } from '../../services/api';
 import { History, Search, ArrowLeft, Download, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
@@ -11,7 +11,7 @@ import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 
 export default function CustomerReturnHistory() {
-  const navigate = useNavigate();
+  const [_, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
 
   const dateRangeHelper = usePersistedDateRange({
@@ -100,7 +100,7 @@ export default function CustomerReturnHistory() {
       <div className="flex justify-between items-end shrink-0">
         <div>
           <button 
-            onClick={() => navigate('/customer-returns')}
+            onClick={() => setSearchParams({ tab: 'customer' })}
             className="text-muted hover:text-text text-sm flex items-center gap-1 mb-2 transition-colors cursor-pointer bg-transparent border-0"
           >
             <ArrowLeft className="w-4 h-4" /> Back to Returns
