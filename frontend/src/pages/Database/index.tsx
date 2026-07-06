@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus } from 'lucide-react';
+import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload } from 'lucide-react';
 import { api } from '../../services/api';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import CatalogUpload from '../CatalogUpload';
 
 interface MedicineRow {
   id: number;
@@ -28,6 +30,8 @@ interface MedicineRow {
 let cachedMedicines: MedicineRow[] | null = null;
 
 const DatabasePage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'db';
   const queryClient = useQueryClient();
   const [medicines, setMedicines] = useState<MedicineRow[]>(cachedMedicines || []);
   const [loading, setLoading] = useState(!cachedMedicines);
@@ -390,8 +394,39 @@ const DatabasePage = () => {
   }, [productNameInput, mrpInput, apiInput, packagingInput, distributorInput, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm]);
 
   return (
-    <div className="h-full flex flex-col fade-in relative gap-2">
-      <div className="glass-panel flex-1 flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col fade-in relative gap-3">
+      {/* Page Tabs */}
+      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+        <button
+          onClick={() => setSearchParams({ tab: 'db' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'db'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <DatabaseIcon size={14} />
+          Master Database
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'catalog' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'catalog'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Upload size={14} />
+          Catalog Upload
+        </button>
+      </div>
+
+      {currentTab === 'catalog' ? (
+        <div className="glass-panel flex-1 flex flex-col overflow-hidden">
+          <CatalogUpload />
+        </div>
+      ) : (
+        <div className="glass-panel flex-1 flex flex-col overflow-hidden">
         
         {/* Floating Actions */}
         <div className="absolute bottom-8 right-8 flex flex-col gap-3 z-30">
@@ -699,6 +734,7 @@ const DatabasePage = () => {
         </div>
 
       </div>
+      )}
 
       {/* Price History Modal */}
       {showPriceHistoryModal && (
@@ -790,7 +826,7 @@ const DatabasePage = () => {
           }} 
         />
       )}
-
+      
       {/* Add Medicine Modal */}
       {showAddModal && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">

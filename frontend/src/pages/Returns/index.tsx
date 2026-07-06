@@ -8,6 +8,9 @@ import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Laye
 import AICamera from '../../components/AICamera';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import Expiry from '../Expiry';
+import { CalendarDays } from 'lucide-react';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -129,6 +132,8 @@ const getNDaysAgoString = (n: number) => {
 let cachedReturnHistory: any[] | null = null;
 
 const Returns: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'returns';
   const location = useLocation();
 
   const initialTabs = getInitialReturnsTabs();
@@ -727,7 +732,39 @@ const Returns: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex gap-4 p-4 animate-in fade-in duration-500 min-h-0 overflow-hidden text-text bg-bg">
+    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3 p-4">
+      {/* Page Tabs */}
+      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+        <button
+          onClick={() => setSearchParams({ tab: 'returns' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'returns'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <RotateCcw size={14} />
+          Supplier Returns
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'expiry' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'expiry'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <CalendarDays size={14} />
+          Expiry Monitor
+        </button>
+      </div>
+
+      {currentTab === 'expiry' ? (
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
+          <Expiry />
+        </div>
+      ) : (
+        <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text relative">
       {/* Left Sidebar Panel: w-96 */}
       <div className="w-96 flex-shrink-0 flex flex-col gap-4 min-h-0 overflow-hidden bg-bg2 border border-border rounded-xl p-4">
         
@@ -1512,6 +1549,8 @@ const Returns: React.FC = () => {
           onClose={() => { setShowCamera(false); setCameraTargetIndex(null); }}
           onScanResult={handleCameraScanResult}
         />
+      )}
+      </div>
       )}
     </div>
   );

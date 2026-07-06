@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send } from 'lucide-react';
+import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2 } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useSearchParams } from 'react-router-dom';
+import NonMappedDistributors from '../NonMappedDistributors';
 
 interface CartLineItem {
   productId: number | null;
@@ -37,6 +39,8 @@ let cachedPriceHistory: Record<string, any[]> = {};
 let cachedLastFetched: Date | null = null;
 
 export default function PharmarackCart() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'cart';
   const [distributors, setDistributors] = useState<Distributor[]>(() => cachedDistributors);
   const [loading, setLoading] = useState(() => cachedDistributors.length === 0);
   const [error, setError] = useState<string | null>(null);
@@ -395,7 +399,39 @@ export default function PharmarackCart() {
   const totalAmount = distributors.reduce((s, d) => s + d.items.reduce((a, i) => a + i.amount, 0), 0);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text">
+    <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-3 p-6 pb-4">
+      {/* Page Tabs */}
+      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+        <button
+          onClick={() => setSearchParams({ tab: 'cart' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'cart'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <ShoppingCart size={14} />
+          Pharmarack Cart
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'non-mapped' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'non-mapped'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Building2 size={14} />
+          Non-Mapped Distributors
+        </button>
+      </div>
+
+      {currentTab === 'non-mapped' ? (
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
+          <NonMappedDistributors />
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
       {/* ── Top Header ── */}
       <div className="h-16 border-b border-glass-border/40 px-6 flex items-center justify-between shrink-0 bg-glass-bg/10 backdrop-blur-md">
         <div className="flex items-center gap-3">
@@ -839,6 +875,8 @@ export default function PharmarackCart() {
             <span>Proceed to Checkout</span>
           </a>
         </div>
+      )}
+      </div>
       )}
     </div>
   );

@@ -1621,13 +1621,33 @@ router.get('/reconciliation', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     
+    // Cap query to emails from the last 30 days
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    
     // Fetch all emails that are flagged as orders
     const orderEmails = await db.all(`
-      SELECT uid, from_addr, subject, body, date, is_seen, is_saved, distributor_name, has_attachments, medicine_names
+      SELECT uid, from_addr, subject, body, date, is_seen, is_saved, distributor_name, has_attachments, medicine_names, extracted_invoice_no, extracted_distributor
       FROM emails 
-      WHERE is_order = 1 
+      WHERE is_order = 1 AND date >= ?
       ORDER BY uid DESC
-    `);
+    `, [thirtyDaysAgo]);
+
+    const uids = orderEmails.map(e => e.uid);
+    const attachmentsMap = new Map<number, any[]>();
+    
+    if (uids.length > 0) {
+      const placeholders = uids.map(() => '?').join(',');
+      const allAttachments = await db.all(
+        `SELECT uid, filename, size, content_type, local_path FROM email_attachments WHERE uid IN (${placeholders})`,
+        uids
+      );
+      for (const att of allAttachments) {
+        if (!attachmentsMap.has(att.uid)) {
+          attachmentsMap.set(att.uid, []);
+        }
+        attachmentsMap.get(att.uid)!.push(att);
+      }
+    }
 
     // Group emails by distributor name + invoice number to support corrections/revisions
     const grouped = new Map<string, {
@@ -1641,25 +1661,32 @@ router.get('/reconciliation', async (req, res) => {
       extracted_invoice_no: string;
       expected_medicines: Set<string>;
       attachments: any[];
+      matchedPurchase?: any;
     }>();
 
     for (const email of orderEmails) {
-      // Extract invoice details dynamically
-      const orderInfo = emailService.extractOrderInfo({
-        subject: email.subject || '',
-        body: email.body || '',
-        from: email.from_addr || '',
-        attachments: []
-      });
+      let extractedInvoiceNo = email.extracted_invoice_no;
+      let distributorName = email.extracted_distributor;
 
-      const extractedInvoiceNo = orderInfo.invoiceNumber;
-      const distributorName = orderInfo.distributorName || email.distributor_name || 'Unknown Dist.';
+      if (!extractedInvoiceNo || !distributorName) {
+        // Extract invoice details dynamically
+        const orderInfo = emailService.extractOrderInfo({
+          subject: email.subject || '',
+          body: email.body || '',
+          from: email.from_addr || '',
+          attachments: []
+        });
 
-      // Fetch attachment details
-      const attachments = await db.all(
-        'SELECT filename, size, content_type, local_path FROM email_attachments WHERE uid = ?',
-        [email.uid]
-      );
+        extractedInvoiceNo = orderInfo.invoiceNumber || 'N/A';
+        distributorName = orderInfo.distributorName || email.distributor_name || 'Unknown Dist.';
+        
+        await db.run(
+          'UPDATE emails SET extracted_invoice_no = ?, extracted_distributor = ? WHERE uid = ?',
+          [extractedInvoiceNo, distributorName, email.uid]
+        );
+      }
+
+      const attachments = attachmentsMap.get(email.uid) || [];
 
       // Get or parse medicine names
       let medNames: string[] = [];
@@ -1684,6 +1711,13 @@ router.get('/reconciliation', async (req, res) => {
           }
         }
         if (parsedItems.length === 0) {
+          // Re-extract order info if medicines not populated
+          const orderInfo = emailService.extractOrderInfo({
+            subject: email.subject || '',
+            body: email.body || '',
+            from: email.from_addr || '',
+            attachments: []
+          });
           for (const med of orderInfo.medicines) {
             parsedItems.push({ name: med.name });
           }
@@ -1730,48 +1764,90 @@ router.get('/reconciliation', async (req, res) => {
       }
     }
 
-    const result = [];
+    // Pass 1: Gather candidate purchases and perform matching in JS memory
+    const invoiceNos = Array.from(grouped.values())
+      .map(g => g.extracted_invoice_no)
+      .filter(inv => inv && inv !== 'N/A');
+
+    const purchasesMap = new Map<string, any[]>();
+    if (invoiceNos.length > 0) {
+      const placeholders = invoiceNos.map(() => '?').join(',');
+      const candidatePurchases = await db.all(
+        `SELECT p.id, p.invoice_no, p.app_invoice_no, p.total_amount, p.date, d.name as dist_name
+         FROM purchases p
+         LEFT JOIN distributors d ON p.distributor_id = d.id
+         WHERE p.invoice_no IN (${placeholders}) OR p.app_invoice_no IN (${placeholders})`,
+        [...invoiceNos, ...invoiceNos]
+      );
+      for (const p of candidatePurchases) {
+        if (p.invoice_no) {
+          const invKey = p.invoice_no.toLowerCase();
+          if (!purchasesMap.has(invKey)) purchasesMap.set(invKey, []);
+          purchasesMap.get(invKey)!.push(p);
+        }
+        if (p.app_invoice_no && p.app_invoice_no !== p.invoice_no) {
+          const appKey = p.app_invoice_no.toLowerCase();
+          if (!purchasesMap.has(appKey)) purchasesMap.set(appKey, []);
+          purchasesMap.get(appKey)!.push(p);
+        }
+      }
+    }
+
     for (const group of grouped.values()) {
       let matchedPurchase = null;
       if (group.extracted_invoice_no && group.extracted_invoice_no !== 'N/A') {
-        // Cross-check distributor: find purchases matching the invoice number
-        const candidatePurchases = await db.all(
-          `SELECT p.id, p.invoice_no, p.app_invoice_no, p.total_amount, p.date, d.name as dist_name
-           FROM purchases p
-           LEFT JOIN distributors d ON p.distributor_id = d.id
-           WHERE p.invoice_no = ? OR p.app_invoice_no = ?`,
-          [group.extracted_invoice_no, group.extracted_invoice_no]
-        );
-
+        const candidates = purchasesMap.get(group.extracted_invoice_no.toLowerCase()) || [];
         const normDistName = group.extracted_distributor.toLowerCase().replace(/[^a-z0-9]/g, '');
 
         // Match if invoice AND distributor align
-        matchedPurchase = candidatePurchases.find(p => {
+        matchedPurchase = candidates.find(p => {
           if (!p.dist_name) return false;
           const normPDist = p.dist_name.toLowerCase().replace(/[^a-z0-9]/g, '');
           return normPDist.includes(normDistName) || normDistName.includes(normPDist);
         });
 
         // Fallback if distributor ID not set but matched by invoice
-        if (!matchedPurchase && candidatePurchases.length > 0) {
-          matchedPurchase = candidatePurchases.find(p => !p.dist_name) || null;
+        if (!matchedPurchase && candidates.length > 0) {
+          matchedPurchase = candidates.find(p => !p.dist_name) || null;
         }
       }
+      group.matchedPurchase = matchedPurchase;
+    }
 
+    // Pass 2: Batch query purchase items for all matched purchases
+    const matchedPurchaseIds = Array.from(grouped.values())
+      .map(g => g.matchedPurchase?.id)
+      .filter(Boolean) as number[];
+
+    const receivedItemsMap = new Map<number, string[]>();
+    if (matchedPurchaseIds.length > 0) {
+      const placeholders = matchedPurchaseIds.map(() => '?').join(',');
+      const receivedItems = await db.all(`
+        SELECT pi.purchase_id, m.name as medicine_name
+        FROM purchase_items pi
+        JOIN medicines m ON pi.medicine_id = m.id
+        WHERE pi.purchase_id IN (${placeholders})
+      `, matchedPurchaseIds);
+      
+      for (const item of receivedItems) {
+        if (!receivedItemsMap.has(item.purchase_id)) {
+          receivedItemsMap.set(item.purchase_id, []);
+        }
+        receivedItemsMap.get(item.purchase_id)!.push(item.medicine_name);
+      }
+    }
+
+    const result = [];
+    for (const group of grouped.values()) {
+      const matchedPurchase = group.matchedPurchase;
       let status = 'Missing';
       let displayMedicines = Array.from(group.expected_medicines);
 
       if (matchedPurchase) {
-        // Fetch actual received items for this purchase
-        const receivedItems = await db.all(`
-          SELECT m.name as medicine_name
-          FROM purchase_items pi
-          JOIN medicines m ON pi.medicine_id = m.id
-          WHERE pi.purchase_id = ?
-        `, [matchedPurchase.id]);
-
+        // Get received items from the pre-fetched map
+        const receivedMeds = receivedItemsMap.get(matchedPurchase.id) || [];
         const normalizeName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const receivedSet = new Set(receivedItems.map(item => normalizeName(item.medicine_name)));
+        const receivedSet = new Set(receivedMeds.map(name => normalizeName(name)));
 
         // Filter expected medicines to find what is missing/bounced
         const missingMedicines = displayMedicines.filter(expMed => {

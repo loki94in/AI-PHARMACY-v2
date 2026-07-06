@@ -26,12 +26,15 @@ import {
   Sliders,
   Play,
   Stethoscope,
-  Search
+  Search,
+  Truck
 } from 'lucide-react';
 import { apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import Dispatch from '../Dispatch';
 
 interface LearningProfileSummary {
   distributor_id: number;
@@ -63,8 +66,20 @@ interface ProfileDetail {
 }
 
 const Learning: React.FC = () => {
-  // Navigation State
-  const [activeTab, setActiveTab] = useState<'clinical' | 'doctors' | 'distributors' | 'messaging' | 'ingestion' | 'operations'>('clinical');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'clinical';
+  const [activeTab, setActiveTab] = useState<any>(currentTab);
+
+  useEffect(() => {
+    if (searchParams.get('tab')) {
+      setActiveTab(searchParams.get('tab'));
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
+  };
 
   const queryClient = useQueryClient();
 
@@ -682,6 +697,7 @@ const Learning: React.FC = () => {
         {[
           { id: 'clinical', label: 'Clinical AI Engine', icon: Brain },
           { id: 'doctors', label: 'Doctor Affiliations', icon: Stethoscope },
+          { id: 'dispatch', label: 'Dispatch / Delivery', icon: Truck },
           { id: 'distributors', label: 'Distributor Layouts', icon: Database },
           { id: 'messaging', label: 'Messaging Channels', icon: MessageCircle },
           { id: 'ingestion', label: 'Email Ingestion', icon: Mail },
@@ -692,7 +708,7 @@ const Learning: React.FC = () => {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => handleTabChange(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all active:scale-95 ${
                 isActive 
                   ? 'bg-sky-500/10 border border-sky-500/35 text-sky shadow-sm'
@@ -962,6 +978,13 @@ const Learning: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Tab: Dispatch / Delivery */}
+        {activeTab === 'dispatch' && (
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <Dispatch />
           </div>
         )}
 

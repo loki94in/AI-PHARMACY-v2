@@ -229,207 +229,224 @@ ensureSchema(DB_PATH).then(async () => {
   app.listen(PORT, async () => {
     console.log(`Server is running on http://localhost:${PORT}/test`);
 
-    // Pre-initialize fuzzy-matching OCR service in the background (G7)
-    try {
-      const { productNameFilterService } = await import('./services/productNameFilterService.js');
-      console.log('[Boot] Pre-initializing productNameFilterService...');
-      productNameFilterService.initialize()
-        .then(() => console.log('[Boot] productNameFilterService pre-initialized successfully.'))
-        .catch(err => console.error('Failed to pre-initialize productNameFilterService on startup:', err));
-    } catch (err) {
-      console.error('Failed to pre-initialize productNameFilterService on startup:', err);
-    }
-    // Pre-initialize background services if automation is enabled in settings
-    dbManager.getConnection()
-      .then(async (db) => {
-        await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
-        const row = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-        const isAutoEnabled = row && row.value === 'true';
+    // Staggered background initialization to boot under 3-5 seconds (other services run silently)
+    
+    // 1. Pre-initialize fuzzy-matching OCR service in the background after 3 seconds
+    setTimeout(async () => {
+      try {
+        const { productNameFilterService } = await import('./services/productNameFilterService.js');
+        console.log('[Boot] Pre-initializing productNameFilterService...');
+        productNameFilterService.initialize()
+          .then(() => console.log('[Boot] productNameFilterService pre-initialized successfully.'))
+          .catch(err => console.error('Failed to pre-initialize productNameFilterService on startup:', err));
+      } catch (err) {
+        console.error('Failed to pre-initialize productNameFilterService on startup:', err);
+      }
+    }, 3000);
 
-        if (isAutoEnabled) {
-          console.log('Background automation is ENABLED in settings at startup. Running startup catch-up tasks...');
-          
-          // 1. WhatsApp Pre-initialization
-          const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
-          if (waRow && waRow.value === 'true') {
-            const { shouldRouteToBusiness } = await import('./whatsappClient.js');
-            const useBusiness = await shouldRouteToBusiness();
-            if (!useBusiness) {
-              console.log('WhatsApp Web (automated) is enabled, pre-initializing client in the background...');
-              const { initClient } = await import('./whatsappClient.js');
-              await initClient().catch(err => console.error('Background WhatsApp init failed:', err));
-            } else {
-              console.log('WhatsApp Business API is active. Skipping automated client pre-initialization.');
-            }
+    // 2. Pre-initialize background services if automation is enabled in settings after 10 seconds
+    setTimeout(() => {
+      dbManager.getConnection()
+        .then(async (db) => {
+          await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
+          const row = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+          const isAutoEnabled = row && row.value === 'true';
+
+          if (isAutoEnabled) {
+            console.log('Background automation is ENABLED in settings at startup. Running startup catch-up tasks...');
+            
+            // WhatsApp Web (automated) client pre-initialization after 5 more seconds
+            setTimeout(async () => {
+              const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
+              if (waRow && waRow.value === 'true') {
+                const { shouldRouteToBusiness } = await import('./whatsappClient.js');
+                const useBusiness = await shouldRouteToBusiness();
+                if (!useBusiness) {
+                  console.log('WhatsApp Web (automated) is enabled, pre-initializing client in the background...');
+                  const { initClient } = await import('./whatsappClient.js');
+                  await initClient().catch(err => console.error('Background WhatsApp init failed:', err));
+                } else {
+                  console.log('WhatsApp Business API is active. Skipping automated client pre-initialization.');
+                }
+              }
+            }, 5000);
+
+            // Startup catch-up expiry scan after 10 more seconds
+            setTimeout(() => {
+              import('./services/expiryAlertService.js')
+                .then(m => m.checkAndRunScheduledExpiryScan(90))
+                .catch(err => console.error('Failed running startup catch-up scan check:', err));
+            }, 10000);
+
+            // Startup catch-up daily check after 15 more seconds
+            setTimeout(async () => {
+              const d = new Date();
+              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
+              
+              if (!lastCheckRow || lastCheckRow.value !== todayStr) {
+                console.log(`Daily check was missed today (${todayStr}). Running startup catch-up daily check...`);
+                try {
+                  await checkAllRefills(db);
+                  await checkOverdueCreditNotes(db);
+                  
+                  // Auto expiry return on 18th, 19th, 20th of the month
+                  const dayOfMonth = new Date().getDate();
+                  if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
+                    console.log(`Today is the ${dayOfMonth}th. Running startup catch-up for expired medicine returns...`);
+                    const { autoCreateExpiryReturns } = await import('./services/returnsService.js');
+                    await autoCreateExpiryReturns(db);
+                  }
+
+                  await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
+                  console.log('Startup catch-up daily check complete.');
+                } catch (err) {
+                  console.error('Failed running startup catch-up daily check:', err);
+                }
+              } else {
+                console.log(`Daily check has already been run today (${todayStr}). Skipping startup catch-up.`);
+              }
+            }, 15000);
+          } else {
+            console.log('Background automation is DISABLED in settings at startup. Skipping startup catch-up tasks.');
           }
 
-          // 3. Startup catch-up expiry scan (checks for downtime near-expiry alerts)
-          import('./services/expiryAlertService.js')
-            .then(m => m.checkAndRunScheduledExpiryScan(90))
-            .catch(err => console.error('Failed running startup catch-up scan check:', err));
+          // WhatsApp Queue Worker (started always; checks automation_enabled inside processQueue)
+          whatsappQueue.startWorker();
 
-          // 4. Startup catch-up daily check (refills & overdue credit notes)
-          const d = new Date();
-          const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
-          
-          if (!lastCheckRow || lastCheckRow.value !== todayStr) {
-            console.log(`Daily check was missed today (${todayStr}). Running startup catch-up daily check...`);
+          // Start Unified Engine background workers (delayed to let server boot fast)
+          setTimeout(async () => {
             try {
+              const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
+              const { startSubstituteCacheWorker } = await import('./worker/substituteCacheWorker.js');
+              startStockCalculatorWorker();
+              startSubstituteCacheWorker();
+              console.log('[Boot] Unified Engine background workers started');
+            } catch (engineErr) {
+              console.error('Failed to start Unified Engine workers:', engineErr);
+            }
+          }, 8000);
+
+          // Start new background services for Pharmarack, messaging queue and refills (delayed)
+          setTimeout(async () => {
+            try {
+              const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
+              tokenRefreshScheduler.start();
+              
+              const { messagingQueue } = await import('./services/messagingQueue.js');
+              messagingQueue.start();
+
+              const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
+              orderFulfillmentService.start();
+            } catch (srvErr) {
+              console.error('Failed to start background services:', srvErr);
+            }
+          }, 12000);
+
+          // Doctor WhatsApp Reporting Scheduler (delayed)
+          setTimeout(() => {
+            import('./services/doctorReportingService.js')
+              .then(m => m.startDoctorReportingScheduler())
+              .catch(err => console.error('Failed to start doctor reporting scheduler:', err));
+          }, 18000);
+
+          // Daily check at 9:00 AM (registered always; checks dynamically)
+          cron.schedule('0 9 * * *', async () => {
+            try {
+              const db = await dbManager.getConnection();
+              const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+              if (!autoRow || autoRow.value !== 'true') {
+                return;
+              }
+              console.log('Running daily patient refill, bounced products & overdue credit notes check...');
               await checkAllRefills(db);
+              await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
               await checkOverdueCreditNotes(db);
+              
+              // Check for bounced products
+              try {
+                const { bouncedAlertService } = await import('./services/bouncedAlertService.js');
+                await bouncedAlertService.checkAndSendBouncedProductsAlert();
+              } catch (bErr) {
+                console.error('Failed running bounced products alert check:', bErr);
+              }
               
               // Auto expiry return on 18th, 19th, 20th of the month
               const dayOfMonth = new Date().getDate();
               if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-                console.log(`Today is the ${dayOfMonth}th. Running startup catch-up for expired medicine returns...`);
+                console.log(`Today is the ${dayOfMonth}th. Checking and auto-creating supplier returns for expired medicines...`);
                 const { autoCreateExpiryReturns } = await import('./services/returnsService.js');
                 await autoCreateExpiryReturns(db);
               }
 
+              const d = new Date();
+              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
               await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-              console.log('Startup catch-up daily check complete.');
             } catch (err) {
-              console.error('Failed running startup catch-up daily check:', err);
+              console.error('Failed running daily check cron:', err);
             }
-          } else {
-            console.log(`Daily check has already been run today (${todayStr}). Skipping startup catch-up.`);
-          }
-        } else {
-          console.log('Background automation is DISABLED in settings at startup. Skipping startup catch-up tasks.');
-        }
+          });
 
-        // 2. WhatsApp Queue Worker (started always; checks automation_enabled inside processQueue)
-        whatsappQueue.startWorker();
-
-        // Start Unified Engine background workers
-        try {
-          const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
-          const { startSubstituteCacheWorker } = await import('./worker/substituteCacheWorker.js');
-          startStockCalculatorWorker();
-          startSubstituteCacheWorker();
-          console.log('[Boot] Unified Engine background workers started');
-        } catch (engineErr) {
-          console.error('Failed to start Unified Engine workers:', engineErr);
-        }
-
-        // Start new background services for Pharmarack, messaging queue and refills
-        try {
-          const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
-          tokenRefreshScheduler.start();
-          
-          const { messagingQueue } = await import('./services/messagingQueue.js');
-          messagingQueue.start();
-
-          const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
-          orderFulfillmentService.start();
-        } catch (srvErr) {
-          console.error('Failed to start background services:', srvErr);
-        }
-
-        // 8. Doctor WhatsApp Reporting Scheduler (started always; checks internally)
-        import('./services/doctorReportingService.js')
-          .then(m => m.startDoctorReportingScheduler())
-          .catch(err => console.error('Failed to start doctor reporting scheduler:', err));
-
-        // 5. Daily check at 9:00 AM for patient refills & overdue credit notes (registered always; checks dynamically)
-        cron.schedule('0 9 * * *', async () => {
-          try {
-            const db = await dbManager.getConnection();
-            const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-            if (!autoRow || autoRow.value !== 'true') {
-              return;
-            }
-            console.log('Running daily patient refill, bounced products & overdue credit notes check...');
-            await checkAllRefills(db);
-            await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
-            await checkOverdueCreditNotes(db);
-            
-            // Check for bounced products
+          // Automatic near-expiry inventory scan & alerts (Every 15 days at 9:00 AM)
+          cron.schedule('0 9 1,16 * *', async () => {
             try {
-              const { bouncedAlertService } = await import('./services/bouncedAlertService.js');
-              await bouncedAlertService.checkAndSendBouncedProductsAlert();
-            } catch (bErr) {
-              console.error('Failed running bounced products alert check:', bErr);
+              const db = await dbManager.getConnection();
+              const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+              if (!autoRow || autoRow.value !== 'true') {
+                return;
+              }
+              console.log('Running automatic 15-day near-expiry inventory scan...');
+              const { runExpiryScanAndAlert } = await import('./services/expiryAlertService.js');
+              await runExpiryScanAndAlert(90);
+            } catch (err) {
+              console.error('Failed running 15-day expiry scan cron:', err);
             }
-            
-            // Auto expiry return on 18th, 19th, 20th of the month
-            const dayOfMonth = new Date().getDate();
-            if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-              console.log(`Today is the ${dayOfMonth}th. Checking and auto-creating supplier returns for expired medicines...`);
-              const { autoCreateExpiryReturns } = await import('./services/returnsService.js');
-              await autoCreateExpiryReturns(db);
+          });
+
+          // Nightly 9:30 PM backup
+          cron.schedule('30 21 * * *', async () => {
+            try {
+              const db = await dbManager.getConnection();
+              const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+              if (!autoRow || autoRow.value !== 'true') {
+                return;
+              }
+              console.log('[Backup] Running nightly 9:30 PM backup...');
+              const result = await createBackup('Nightly 9:30 PM');
+              console.log(`[Backup] Nightly backup created: ${result.filename}`);
+            } catch (err) {
+              console.error('[Backup] Nightly backup failed:', err);
             }
+          });
+        })
+        .catch(err => console.error('Background automation init check failed:', err));
 
-            const d = new Date();
-            const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-          } catch (err) {
-            console.error('Failed running daily check cron:', err);
-          }
-        });
+      // Backup scheduler is always enabled (reads frequency from app_settings) (delayed)
+      setTimeout(() => {
+        initBackupScheduler().catch(err => console.error('Failed to init backup scheduler:', err));
+      }, 20000);
 
-        // 6. Automatic near-expiry inventory scan & alerts (Every 15 days at 9:00 AM; registered always; checks dynamically)
-        cron.schedule('0 9 1,16 * *', async () => {
-          try {
-            const db = await dbManager.getConnection();
-            const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-            if (!autoRow || autoRow.value !== 'true') {
-              return;
-            }
-            console.log('Running automatic 15-day near-expiry inventory scan...');
-            const { runExpiryScanAndAlert } = await import('./services/expiryAlertService.js');
-            await runExpiryScanAndAlert(90);
-          } catch (err) {
-            console.error('Failed running 15-day expiry scan cron:', err);
-          }
-        });
+      // Start the background worker supervisor (delayed)
+      setTimeout(() => {
+        try {
+          workerSupervisor.start();
+        } catch (err) {
+          console.error('Failed to start worker supervisor:', err);
+        }
+      }, 22000);
 
-        // 7. Nightly 9:30 PM backup (pharmacy closing time; registered always; checks dynamically)
-        cron.schedule('30 21 * * *', async () => {
-          try {
-            const db = await dbManager.getConnection();
-            const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-            if (!autoRow || autoRow.value !== 'true') {
-              return;
-            }
-            console.log('[Backup] Running nightly 9:30 PM backup...');
-            const result = await createBackup('Nightly 9:30 PM');
-            console.log(`[Backup] Nightly backup created: ${result.filename}`);
-          } catch (err) {
-            console.error('[Backup] Nightly backup failed:', err);
-          }
-        });
-      })
-      .catch(err => console.error('Background automation init check failed:', err));
+      // Initialize Telegram Bot Service from DB settings (delayed)
+      setTimeout(async () => {
+        try {
+          const { telegramBotService } = await import('./telegramBot.js');
+          await telegramBotService.initializeOrReloadBot();
+        } catch (err) {
+          console.error('Failed to initialize Telegram Bot Service on startup:', err);
+        }
+      }, 30000);
+    }, 1000);
 
-    // Backup scheduler is always enabled (reads frequency from app_settings)
-    initBackupScheduler().catch(err => console.error('Failed to init backup scheduler:', err));
-
-    // Start the background worker supervisor
-    try {
-      workerSupervisor.start();
-    } catch (err) {
-      console.error('Failed to start worker supervisor:', err);
-    }
-
-    // Start Pharmarack background token refresh scheduler
-    try {
-      const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
-      tokenRefreshScheduler.start();
-    } catch (err) {
-      console.error('Failed to start Pharmarack token refresh scheduler:', err);
-    }
-
-    // Initialize Telegram Bot Service from DB settings
-    try {
-      const { telegramBotService } = await import('./telegramBot.js');
-      await telegramBotService.initializeOrReloadBot();
-    } catch (err) {
-      console.error('Failed to initialize Telegram Bot Service on startup:', err);
-    }
-
-  // Daily licensing tasks disabled permanently
+    // Daily licensing tasks disabled permanently
   });
 }).catch(err => {
   if (err.message === 'DB_INTEGRITY_FAILURE') {

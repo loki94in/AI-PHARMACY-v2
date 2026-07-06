@@ -24,16 +24,12 @@ const Purchases = lazy(pageImports['/purchases']);
 const CRM = lazy(pageImports['/crm']);
 const PurchaseHistory = lazy(pageImports['/purchase-history']);
 const Migration = lazy(pageImports['/migration']);
-const Doctors = lazy(pageImports['/doctors']);
-const Dispatch = lazy(pageImports['/dispatch']);
 const Reports = lazy(pageImports['/reports']);
 const License = lazy(pageImports['/license']);
 const Settings = lazy(pageImports['/settings']);
 const Mail = lazy(pageImports['/mail']);
 const Returns = lazy(pageImports['/returns']);
-const CatalogUpload = lazy(pageImports['/catalog']);
 const Orders = lazy(pageImports['/orders']);
-const Expiry = lazy(pageImports['/expiry']);
 const Sells = lazy(pageImports['/sells']);
 const Learning = lazy(pageImports['/learning']);
 const DatabasePage = lazy(pageImports['/database']);
@@ -41,11 +37,8 @@ const CompositionQueue = lazy(pageImports['/composition-queue']);
 const CustomerReturn = lazy(pageImports['/customer-returns']);
 const CustomerReturnHistory = lazy(pageImports['/customer-return-history']);
 const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
-const NonMappedDistributors = lazy(pageImports['/non-mapped-distributors']);
-const AutomationCenter = lazy(pageImports['/automation-center']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
-const Refills = lazy(pageImports['/refills']);
 
 // ──────────────────────────────────────────────
 // App Component
@@ -79,7 +72,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/returns" element={<Returns />} />
-              <Route path="/expiry" element={<Expiry />} />
+              <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
               <Route path="/pos" element={<POS />} />
               <Route path="/sells" element={<Sells />} />
               <Route path="/phone-sales" element={<PhoneSales />} />
@@ -89,18 +82,18 @@ function App() {
               <Route path="/purchase-history" element={<PurchaseHistory />} />
               <Route path="/crm" element={<CRM />} />
               <Route path="/orders" element={<Orders />} />
-              <Route path="/automation-center" element={<AutomationCenter />} />
-              <Route path="/refills" element={<Refills />} />
+              <Route path="/automation-center" element={<Navigate to="/crm?tab=automation" replace />} />
+              <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
               <Route path="/pharmarack-cart" element={<PharmarackCart />} />
-              <Route path="/non-mapped-distributors" element={<NonMappedDistributors />} />
+              <Route path="/non-mapped-distributors" element={<Navigate to="/pharmarack-cart?tab=non-mapped" replace />} />
               <Route path="/migration" element={<Migration />} />
-              <Route path="/doctors" element={<Doctors />} />
-              <Route path="/dispatch" element={<Dispatch />} />
+              <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
+              <Route path="/dispatch" element={<Navigate to="/learning?tab=dispatch" replace />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/license" element={<License />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/mail" element={<Mail />} />
-              <Route path="/catalog" element={<CatalogUpload />} />
+              <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
               <Route path="/learning" element={<Learning />} />
               <Route path="/database" element={<DatabasePage />} />
               <Route path="/composition-queue" element={<CompositionQueue />} />

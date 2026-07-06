@@ -99,7 +99,7 @@ const Sidebar = ({
   const location = useLocation();
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
-    { path: '/refills', label: 'Patient Refills', icon: <Clock size={18} /> },
+    { path: '/crm?tab=refills', label: 'Patient Refills', icon: <Clock size={18} /> },
     { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
     { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
@@ -107,23 +107,23 @@ const Sidebar = ({
     { path: '/purchases', label: 'Purchases', icon: <Receipt size={18} /> },
     { path: '/purchase-history', label: 'Purchase History', icon: <ClipboardList size={18} /> },
     { path: '/mail', label: 'Distributor Mail', icon: <Activity size={18} /> },
-    { path: '/doctors', label: 'Doctors', icon: <UserPlus size={18} /> },
-    { path: '/expiry', label: 'Expiry Monitor', icon: <CalendarDays size={18} /> },
+    { path: '/learning?tab=doctors', label: 'Doctors', icon: <UserPlus size={18} /> },
+    { path: '/returns?tab=expiry', label: 'Expiry Monitor', icon: <CalendarDays size={18} /> },
     { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
     { path: '/orders', label: 'Orders & Requests', icon: <ClipboardList size={18} /> },
-    { path: '/automation-center', label: 'Automation Center', icon: <Activity size={18} /> },
+    { path: '/crm?tab=automation', label: 'Automation Center', icon: <Activity size={18} /> },
     { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
-    { path: '/non-mapped-distributors', label: 'Non-Mapped Distributors', icon: <Building2 size={18} /> },
+    { path: '/pharmarack-cart?tab=non-mapped', label: 'Non-Mapped Distributors', icon: <Building2 size={18} /> },
     { path: '/database', label: 'Master Database', icon: <Database size={18} /> },
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
     { path: '/crm', label: 'CRM / Patients', icon: <Users size={18} /> },
-    { path: '/catalog', label: 'Catalog Upload', icon: <Database size={18} /> },
+    { path: '/database?tab=catalog', label: 'Catalog Upload', icon: <Database size={18} /> },
     { path: '/customer-returns', label: 'Customer Returns', icon: <RotateCcw size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },
-    { path: '/dispatch', label: 'Dispatch', icon: <Activity size={18} /> },
+    { path: '/learning?tab=dispatch', label: 'Dispatch', icon: <Activity size={18} /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
     { path: '/license', label: 'License', icon: <Database size={18} /> },
   ];
@@ -175,17 +175,32 @@ const Sidebar = ({
         <div className="px-5 mb-2 text-[10px] font-bold tracking-[0.15em] uppercase text-muted/70">Main Menu</div>
         <nav className="flex flex-col gap-1">
           {menuItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = (() => {
+              const [basePath, queryStr] = item.path.split('?');
+              if (location.pathname !== basePath) return false;
+              const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
+              const currentTab = new URLSearchParams(location.search).get('tab');
+              if (targetTab) {
+                return currentTab === targetTab;
+              } else {
+                if (basePath === '/crm') return !currentTab || currentTab === 'crm';
+                if (basePath === '/database') return !currentTab || currentTab === 'products';
+                if (basePath === '/learning') return !currentTab || currentTab === 'clinical';
+                if (basePath === '/returns') return !currentTab || currentTab === 'returns';
+                if (basePath === '/pharmarack-cart') return !currentTab || currentTab === 'cart';
+                return true;
+              }
+            })();
             
             // Staged sync count badges
             let badge = null;
-            if (item.path === '/sells' && stagedSalesCount > 0) {
+            if (item.path.startsWith('/sells') && stagedSalesCount > 0) {
               badge = (
                 <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[9px] font-black text-white px-1 border border-black/40 animate-pulse">
                   {stagedSalesCount}
                 </span>
               );
-            } else if (item.path === '/purchases' && stagedPurchasesCount > 0) {
+            } else if (item.path.startsWith('/purchases') && stagedPurchasesCount > 0) {
               badge = (
                 <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-[9px] font-black text-black px-1 border border-black/40 animate-pulse">
                   {stagedPurchasesCount}
@@ -198,7 +213,8 @@ const Sidebar = ({
                 key={item.path}
                 to={item.path}
                 onMouseEnter={() => {
-                  pageImports[item.path]?.();
+                  const basePath = item.path.split('?')[0];
+                  pageImports[basePath]?.();
                 }}
                 className={`
                   flex items-center gap-3 px-5 py-2.5 mx-2 rounded-lg text-sm font-medium uppercase transition-all duration-200

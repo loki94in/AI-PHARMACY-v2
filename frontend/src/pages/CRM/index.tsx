@@ -1,10 +1,13 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download } from 'lucide-react';
+import { Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download, Activity } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import Refills from '../Refills';
+import AutomationCenter from '../AutomationCenter';
 
 interface Patient {
   id: number;
@@ -120,6 +123,8 @@ const getNDaysAgoString = (n: number) => {
 };
 
 const CRM = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'crm';
   const queryClient = useQueryClient();
   const { data: patients = [], isLoading: loading } = useApiQuery<Patient[]>(
     'patients',
@@ -649,7 +654,54 @@ const CRM = () => {
   };
 
   return (
-    <div className="h-full flex flex-col fade-in relative overflow-hidden">
+    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3">
+      {/* Page Tabs */}
+      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+        <button
+          onClick={() => setSearchParams({ tab: 'crm' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'crm'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Users size={14} />
+          CRM / Patients
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'refills' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'refills'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Clock size={14} />
+          Patient Refills
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'automation' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+            currentTab === 'automation'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          }`}
+        >
+          <Activity size={14} />
+          Automation Center
+        </button>
+      </div>
+
+      {currentTab === 'refills' ? (
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <Refills />
+        </div>
+      ) : currentTab === 'automation' ? (
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <AutomationCenter />
+        </div>
+      ) : (
+        <>
 
 
       {/* 2-Column Split Layout (70/30 using grid grid-cols-10) */}
@@ -1047,6 +1099,8 @@ const CRM = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* Lightbox Modal */}
       {lightbox.isOpen && (

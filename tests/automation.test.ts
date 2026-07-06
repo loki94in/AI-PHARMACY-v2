@@ -47,7 +47,8 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
         pharmarack_mapped INTEGER DEFAULT 0,
         pharmarack_scheme TEXT,
         advance_payment REAL DEFAULT 0.0,
-        source_refill_id INTEGER DEFAULT NULL
+        source_refill_id INTEGER DEFAULT NULL,
+        source TEXT
       )
     `);
     await db.close();

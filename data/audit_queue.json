@@ -34,5 +34,32 @@
     "cloudDetails": null,
     "status": "pending_human_review",
     "createdAt": "2026-07-05T14:21:02.706Z"
+  },
+  {
+    "id": "audit_1783328813470",
+    "imagePath": "data\\audit_images\\audit_1783328813470.jpg",
+    "rawOcrText": "",
+    "cloudSuggestedText": "",
+    "cloudDetails": null,
+    "status": "pending_human_review",
+    "createdAt": "2026-07-06T09:06:53.518Z"
+  },
+  {
+    "id": "audit_1783328973749",
+    "imagePath": "data\\audit_images\\audit_1783328973749.jpg",
+    "rawOcrText": "",
+    "cloudSuggestedText": "",
+    "cloudDetails": null,
+    "status": "pending_human_review",
+    "createdAt": "2026-07-06T09:09:33.794Z"
+  },
+  {
+    "id": "audit_1783329044028",
+    "imagePath": "data\\audit_images\\audit_1783329044028.jpg",
+    "rawOcrText": "",
+    "cloudSuggestedText": "",
+    "cloudDetails": null,
+    "status": "pending_human_review",
+    "createdAt": "2026-07-06T09:10:44.127Z"
   }
 ]

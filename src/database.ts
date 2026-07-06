@@ -312,11 +312,14 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE catalog_jobs ADD COLUMN newly_detected_columns TEXT DEFAULT NULL`,
     `ALTER TABLE return_items ADD COLUMN expiry_date DATETIME`,
     `ALTER TABLE emails ADD COLUMN medicine_names TEXT`,
+    `ALTER TABLE emails ADD COLUMN extracted_invoice_no TEXT`,
+    `ALTER TABLE emails ADD COLUMN extracted_distributor TEXT`,
     // Refill automation updates
     `ALTER TABLE patient_refills ADD COLUMN acknowledged INTEGER DEFAULT 0`,
     `ALTER TABLE patient_refills ADD COLUMN ordering_triggered INTEGER DEFAULT 0`,
     `ALTER TABLE patient_refills ADD COLUMN quick_bill_id INTEGER DEFAULT NULL`,
     `ALTER TABLE special_orders ADD COLUMN source_refill_id INTEGER DEFAULT NULL`,
+    `ALTER TABLE special_orders ADD COLUMN source TEXT`,
     `ALTER TABLE automation_notifications ADD COLUMN needs_confirmation INTEGER DEFAULT 0`,
     `ALTER TABLE automation_notifications ADD COLUMN lifecycle_status TEXT DEFAULT 'sent'`,
     `ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
@@ -531,7 +534,9 @@ export async function ensureSchema(dbPath: string) {
       distributor_name TEXT,
       has_attachments INTEGER DEFAULT 0,
       synced_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-      medicine_names  TEXT
+      medicine_names  TEXT,
+      extracted_invoice_no TEXT,
+      extracted_distributor TEXT
     );
 
     -- Attachment records per email UID (offline-first)

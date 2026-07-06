@@ -27,7 +27,8 @@ async function initOrdersTable(db: any) {
       pharmarack_mrp REAL,
       pharmarack_mapped INTEGER DEFAULT 0,
       pharmarack_scheme TEXT,
-      advance_payment REAL DEFAULT 0.0
+      advance_payment REAL DEFAULT 0.0,
+      source TEXT
     )
   `);
   // Try adding columns if they do not exist
@@ -36,6 +37,9 @@ async function initOrdersTable(db: any) {
   } catch (_) {}
   try {
     await db.exec('ALTER TABLE special_orders ADD COLUMN notified INTEGER DEFAULT 0');
+  } catch (_) {}
+  try {
+    await db.exec('ALTER TABLE special_orders ADD COLUMN source TEXT');
   } catch (_) {}
   try {
     await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_distributor TEXT');
