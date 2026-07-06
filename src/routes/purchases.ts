@@ -1629,10 +1629,22 @@ router.get('/reconciliation', async (req, res) => {
       ORDER BY uid DESC
     `);
 
-    const result = [];
+    // Group emails by distributor name + invoice number to support corrections/revisions
+    const grouped = new Map<string, {
+      email_uid: number;
+      from: string;
+      subject: string;
+      date: string;
+      is_seen: boolean;
+      is_saved: boolean;
+      extracted_distributor: string;
+      extracted_invoice_no: string;
+      expected_medicines: Set<string>;
+      attachments: any[];
+    }>();
 
     for (const email of orderEmails) {
-      // Extract invoice details dynamically using the emailService method
+      // Extract invoice details dynamically
       const orderInfo = emailService.extractOrderInfo({
         subject: email.subject || '',
         body: email.body || '',
@@ -1641,30 +1653,13 @@ router.get('/reconciliation', async (req, res) => {
       });
 
       const extractedInvoiceNo = orderInfo.invoiceNumber;
-      const distributorName = orderInfo.distributorName;
+      const distributorName = orderInfo.distributorName || email.distributor_name || 'Unknown Dist.';
 
-      // Check if a purchase invoice exists matching extracted invoice number
-      let matchedPurchase = null;
-      if (extractedInvoiceNo && extractedInvoiceNo !== 'N/A') {
-        matchedPurchase = await db.get(
-          `SELECT id, invoice_no, app_invoice_no, total_amount, date 
-           FROM purchases 
-           WHERE invoice_no = ? OR app_invoice_no = ? LIMIT 1`,
-          [extractedInvoiceNo, extractedInvoiceNo]
-        );
-      }
-
-      // Fetch attachment filenames
+      // Fetch attachment details
       const attachments = await db.all(
         'SELECT filename, size, content_type, local_path FROM email_attachments WHERE uid = ?',
         [email.uid]
       );
-
-      // Status classification
-      let status = 'Missing';
-      if (matchedPurchase) {
-        status = 'Matched';
-      }
 
       // Get or parse medicine names
       let medNames: string[] = [];
@@ -1698,15 +1693,115 @@ router.get('/reconciliation', async (req, res) => {
         await db.run('UPDATE emails SET medicine_names = ? WHERE uid = ?', [JSON.stringify(medNames), email.uid]);
       }
 
+      // Construct unique key for distributor + invoice
+      // If invoice number is missing, fallback to unique key per email UID
+      const key = (extractedInvoiceNo && extractedInvoiceNo !== 'N/A' && distributorName)
+        ? `${distributorName.toLowerCase()}_${extractedInvoiceNo.toLowerCase()}`
+        : `uid_${email.uid}`;
+
+      const mappedAttachments = attachments.map(a => ({
+        filename: a.filename,
+        size: a.size,
+        content_type: a.content_type
+      }));
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          email_uid: email.uid,
+          from: email.from_addr,
+          subject: email.subject,
+          date: email.date,
+          is_seen: email.is_seen === 1,
+          is_saved: email.is_saved === 1,
+          extracted_distributor: distributorName,
+          extracted_invoice_no: extractedInvoiceNo || 'N/A',
+          expected_medicines: new Set(medNames),
+          attachments: mappedAttachments
+        });
+      } else {
+        // Older email with same invoice number. Merge expected medicines.
+        const existing = grouped.get(key)!;
+        medNames.forEach(name => existing.expected_medicines.add(name));
+        mappedAttachments.forEach(att => {
+          if (!existing.attachments.some(a => a.filename === att.filename)) {
+            existing.attachments.push(att);
+          }
+        });
+      }
+    }
+
+    const result = [];
+    for (const group of grouped.values()) {
+      let matchedPurchase = null;
+      if (group.extracted_invoice_no && group.extracted_invoice_no !== 'N/A') {
+        // Cross-check distributor: find purchases matching the invoice number
+        const candidatePurchases = await db.all(
+          `SELECT p.id, p.invoice_no, p.app_invoice_no, p.total_amount, p.date, d.name as dist_name
+           FROM purchases p
+           LEFT JOIN distributors d ON p.distributor_id = d.id
+           WHERE p.invoice_no = ? OR p.app_invoice_no = ?`,
+          [group.extracted_invoice_no, group.extracted_invoice_no]
+        );
+
+        const normDistName = group.extracted_distributor.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        // Match if invoice AND distributor align
+        matchedPurchase = candidatePurchases.find(p => {
+          if (!p.dist_name) return false;
+          const normPDist = p.dist_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normPDist.includes(normDistName) || normDistName.includes(normPDist);
+        });
+
+        // Fallback if distributor ID not set but matched by invoice
+        if (!matchedPurchase && candidatePurchases.length > 0) {
+          matchedPurchase = candidatePurchases.find(p => !p.dist_name) || null;
+        }
+      }
+
+      let status = 'Missing';
+      let displayMedicines = Array.from(group.expected_medicines);
+
+      if (matchedPurchase) {
+        // Fetch actual received items for this purchase
+        const receivedItems = await db.all(`
+          SELECT m.name as medicine_name
+          FROM purchase_items pi
+          JOIN medicines m ON pi.medicine_id = m.id
+          WHERE pi.purchase_id = ?
+        `, [matchedPurchase.id]);
+
+        const normalizeName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const receivedSet = new Set(receivedItems.map(item => normalizeName(item.medicine_name)));
+
+        // Filter expected medicines to find what is missing/bounced
+        const missingMedicines = displayMedicines.filter(expMed => {
+          const normExp = normalizeName(expMed);
+          for (const recNorm of receivedSet) {
+            if (recNorm.includes(normExp) || normExp.includes(recNorm)) {
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (missingMedicines.length > 0) {
+          status = 'Bounced';
+          displayMedicines = missingMedicines;
+        } else {
+          status = 'Matched';
+          displayMedicines = [];
+        }
+      }
+
       result.push({
-        email_uid: email.uid,
-        from: email.from_addr,
-        subject: email.subject,
-        date: email.date,
-        is_seen: email.is_seen === 1,
-        is_saved: email.is_saved === 1,
-        extracted_distributor: distributorName,
-        extracted_invoice_no: extractedInvoiceNo,
+        email_uid: group.email_uid,
+        from: group.from,
+        subject: group.subject,
+        date: group.date,
+        is_seen: group.is_seen,
+        is_saved: group.is_saved,
+        extracted_distributor: group.extracted_distributor,
+        extracted_invoice_no: group.extracted_invoice_no,
         matched_purchase: matchedPurchase ? {
           id: matchedPurchase.id,
           invoice_no: matchedPurchase.invoice_no,
@@ -1715,16 +1810,12 @@ router.get('/reconciliation', async (req, res) => {
           date: matchedPurchase.date
         } : null,
         status,
-        medicine_names: medNames,
-        attachments: attachments.map(a => ({
-          filename: a.filename,
-          size: a.size,
-          content_type: a.content_type
-        }))
+        medicine_names: displayMedicines,
+        attachments: group.attachments
       });
     }
 
-        res.json(result);
+    res.json(result);
   } catch (error) {
     console.error('Fetch reconciliation error:', error);
     res.status(500).json({ error: 'Internal server error' });

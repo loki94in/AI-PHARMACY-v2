@@ -82,10 +82,12 @@ router.get('/', async (req, res) => {
   try {
     const months = getMonthsInRange(date_from, date_to);
 
-    // If the cache directory doesn't exist yet, this is a first-ever run.
+    // If the cache directory or files don't exist yet, this is a first-ever run or uninitialized state.
     // Fall back to live SQL and trigger a background rebuild for future requests.
-    if (!fs.existsSync(cacheDir)) {
-      console.log('[ExpiryCache] Cache directory missing (first run). Using live SQL and triggering rebuild.');
+    const cacheDirExists = fs.existsSync(cacheDir);
+    const hasCacheFiles = cacheDirExists && fs.readdirSync(cacheDir).some(f => f.startsWith('expiry_') && f.endsWith('.json'));
+    if (!cacheDirExists || !hasCacheFiles) {
+      console.log('[ExpiryCache] Cache directory or files missing. Using live SQL and triggering rebuild.');
       const db = await dbManager.getConnection();
       const rows = await db.all(`
         SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
@@ -157,7 +159,9 @@ router.get('/export', async (req, res) => {
   try {
     const months = getMonthsInRange(date_from, date_to);
 
-    if (!fs.existsSync(cacheDir)) {
+    const cacheDirExists = fs.existsSync(cacheDir);
+    const hasCacheFiles = cacheDirExists && fs.readdirSync(cacheDir).some(f => f.startsWith('expiry_') && f.endsWith('.json'));
+    if (!cacheDirExists || !hasCacheFiles) {
       const db = await dbManager.getConnection();
       items = await db.all(`
         SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,

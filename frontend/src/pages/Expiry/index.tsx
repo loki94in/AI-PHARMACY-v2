@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  CalendarDays, 
   Search, 
   Bell, 
   Check, 
@@ -60,8 +59,8 @@ const Expiry = () => {
   const todayStr = getTodayString();
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'expiry-date-range',
-    defaultFrom: todayStr,
-    defaultTo: getNDaysAgoString(-90),
+    defaultFrom: getNDaysAgoString(365), // Default to 1 year ago to show expired medicines
+    defaultTo: getNDaysAgoString(-90),   // Default to 90 days in the future
     minDate: '2020-01-01',
     maxDate: '2035-12-31',
     futurePresets: true,
@@ -260,16 +259,9 @@ const Expiry = () => {
 
 
       {/* Title Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 select-none">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            <CalendarDays className="text-primary" size={22} />
-            Expiry Monitor
-          </h2>
-          <p className="text-xs text-muted mt-1">Audit near-expiry and expired stock batches, manage inventory levels, and send dispatch alerts.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 select-none">
+          <div className="flex items-center gap-3">
             <button
               onClick={handleSendToReturns}
               className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition-all text-xs font-bold"
@@ -277,30 +269,9 @@ const Expiry = () => {
               <RotateCcw size={13} />
               Return {selectedIds.size} Selected
             </button>
-          )}
-          <button
-            onClick={() => handleExport('pdf')}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white text-muted transition-all text-xs font-semibold"
-          >
-            <FileText size={13} />
-            Export PDF
-          </button>
-          <button
-            onClick={() => handleExport('csv')}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white text-muted transition-all text-xs font-semibold"
-          >
-            <FileText size={13} />
-            Export CSV
-          </button>
-          <button 
-            onClick={() => queryClient.invalidateQueries({ queryKey: expiryKey })} 
-            disabled={refreshing}
-            className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 hover:text-white transition-all text-muted"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 flex-1 min-h-0">
         
@@ -725,6 +696,34 @@ const Expiry = () => {
 
         </div>
 
+      </div>
+
+      {/* Floating Action Buttons */}
+      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
+        <button 
+          onClick={() => queryClient.invalidateQueries({ queryKey: expiryKey })} 
+          disabled={refreshing}
+          className="p-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all shadow-xl hover:scale-105 active:scale-95"
+          title="Refresh"
+        >
+          <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+
+        <button
+          onClick={() => handleExport('csv')}
+          className="flex items-center gap-2 px-5 py-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs"
+        >
+          <FileText size={16} className="text-primary" />
+          Export CSV
+        </button>
+
+        <button
+          onClick={() => handleExport('pdf')}
+          className="flex items-center gap-2 px-5 py-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs"
+        >
+          <FileText size={16} className="text-red" />
+          Export PDF
+        </button>
       </div>
     </div>
   );

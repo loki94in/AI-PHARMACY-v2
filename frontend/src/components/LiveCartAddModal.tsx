@@ -152,6 +152,9 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
 
   // Reconcile Orders (unreconciled distributor email orders)
   const [reconOrders, setReconOrders] = useState<any[]>([]);
+  const [distributorPickerReconIdx, setDistributorPickerReconIdx] = useState<number | null>(null);
+  const [distributorPickerReconMedicine, setDistributorPickerReconMedicine] = useState<string>('');
+  const [addedReconMedicines, setAddedReconMedicines] = useState<Record<number, string[]>>({});
 
   // Distributor Picker States (for Orders & Refills)
   const [distributorPickerOrderId, setDistributorPickerOrderId] = useState<number | null>(null);
@@ -363,6 +366,94 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
       }
     } catch (err: any) {
       console.error('Failed to add pending order to cart:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
+    } finally {
+      setAddingOrderId(null);
+    }
+  };
+
+  const getReconAgeStyle = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const reconDate = new Date(dateStr);
+    const now = new Date();
+    const hoursDiff = (now.getTime() - reconDate.getTime()) / (1000 * 60 * 60);
+    
+    if (hoursDiff > 30) return 'bg-red-500/10 border-l-2 border-l-red-500'; // Urgent
+    if (hoursDiff > 24) return 'bg-amber-500/10 border-l-2 border-l-amber-500'; // Warning
+    return ''; // Normal
+  };
+
+  const handleReconMedicineSelect = async (recon: any, medName: string) => {
+    setDistributorPickerReconMedicine(medName);
+    setDistributorPickerLoading(true);
+    setDistributorPickerResults([]);
+    try {
+      const searchResults = await api.searchPharmarack(medName);
+      if (!searchResults || searchResults.length === 0) {
+        toastEvent.trigger(`No Pharmarack matches found for "${medName}"`, 'error');
+        setDistributorPickerReconMedicine('');
+        return;
+      }
+      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((item) => ({
+        medicine_name: item.name,
+        mrp: item.mrp,
+        isPharmarack: true,
+        distributor: item.distributor,
+        rate: item.rate,
+        mapped: item.mapped,
+        packaging: item.packaging,
+        stock: item.stock,
+        scheme: item.scheme,
+        productId: item.productId,
+        storeId: item.storeId,
+        productCode: item.productCode,
+        company: item.company
+      }));
+      setDistributorPickerResults(mapped);
+    } catch (err: any) {
+      console.error('Failed to search distributors for recon medicine:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
+      setDistributorPickerReconMedicine('');
+    } finally {
+      setDistributorPickerLoading(false);
+    }
+  };
+
+  const handleConfirmReconDistributor = async (recon: any, medName: string, picked: SuggestionMedicine) => {
+    setAddingOrderId(recon.email_uid); // Re-use addingOrderId as generic loading state
+    try {
+      const payload = [{
+        productId: picked.productId!,
+        storeId: picked.storeId!,
+        qty: 1,
+        productCode: picked.productCode,
+        productName: picked.medicine_name,
+        company: picked.company,
+        packaging: picked.packaging,
+        rate: picked.rate || 0,
+        mrp: picked.mrp || 0,
+        storeName: picked.distributor,
+        mapped: picked.mapped
+      }];
+      const res = await api.addPharmarackCart(payload);
+      if (res && res.success) {
+        toastEvent.trigger(`Added "${medName}" to Pharmarack cart!`, 'success');
+        
+        // Track added medicine in session
+        setAddedReconMedicines(prev => ({
+          ...prev,
+          [recon.email_uid]: [...(prev[recon.email_uid] || []), medName]
+        }));
+        
+        setDistributorPickerReconMedicine('');
+        setDistributorPickerResults([]);
+        await fetchCart();
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
+      }
+    } catch (err: any) {
+      console.error('Failed to add recon medicine to cart:', err);
       toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
     } finally {
       setAddingOrderId(null);
@@ -941,26 +1032,120 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                     })}
 
                     {/* Reconcile Orders */}
-                    {reconOrders.map((recon, idx) => (
-                      <tr key={`recon-${recon.email_uid || idx}`} className="hover:bg-bg3/40 transition-colors">
-                        <td className="py-2 px-1">
-                          <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
-                        </td>
-                        <td className="py-2 px-1 min-w-0">
-                          <div className="font-semibold truncate max-w-[130px] text-text" title={recon.extracted_distributor}>
-                            {recon.extracted_distributor || 'Unknown Dist.'}
-                          </div>
-                          <div className="text-muted truncate max-w-[130px]">
-                            {recon.medicine_names?.slice(0, 2).join(', ') || recon.subject || '—'}
-                            {recon.medicine_names?.length > 2 && ` +${recon.medicine_names.length - 2}`}
-                          </div>
-                        </td>
-                        <td className="py-2 px-1 text-right text-muted font-mono">—</td>
-                        <td className="py-2 px-1 text-right">
-                          <span className="text-[8px] font-bold uppercase text-purple-400">Missing</span>
-                        </td>
-                      </tr>
-                    ))}
+                    {reconOrders.map((recon, idx) => {
+                      const addedList = addedReconMedicines[recon.email_uid] || [];
+                      const isAllAdded = recon.medicine_names?.length > 0 && addedList.length === recon.medicine_names.length;
+                      const isPickingForRecon = distributorPickerReconIdx === idx;
+                      
+                      return (
+                        <React.Fragment key={`recon-${recon.email_uid || idx}`}>
+                          <tr className={`transition-colors ${
+                            isAllAdded ? 'bg-emerald-500/5' : isPickingForRecon ? 'bg-purple-500/5' : 'hover:bg-bg3/40'
+                          } ${getReconAgeStyle(recon.date)}`}>
+                            <td className="py-2 px-1">
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
+                                {recon.status === 'Bounced' && (
+                                  <span className="text-[7px] font-bold uppercase px-1 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Bounced</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2 px-1 min-w-0">
+                              <div className={`font-semibold truncate max-w-[130px] ${isAllAdded ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={recon.extracted_distributor}>
+                                {recon.extracted_distributor || 'Unknown Dist.'}
+                              </div>
+                              <div className="text-muted truncate max-w-[130px]" title={recon.medicine_names?.join(', ') || recon.subject}>
+                                {recon.medicine_names?.slice(0, 2).join(', ') || recon.subject || '—'}
+                                {recon.medicine_names?.length > 2 && ` +${recon.medicine_names.length - 2}`}
+                              </div>
+                            </td>
+                            <td className="py-2 px-1 text-right text-muted font-mono">—</td>
+                            <td className="py-2 px-1 text-right">
+                              {isAllAdded ? (
+                                <span className="text-[8px] font-bold text-emerald-400">✓ All Added</span>
+                              ) : isPickingForRecon ? (
+                                <button type="button" onClick={() => { setDistributorPickerReconIdx(null); setDistributorPickerReconMedicine(''); setDistributorPickerResults([]); }}
+                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
+                              ) : (
+                                <button type="button"
+                                  onClick={() => { setDistributorPickerReconIdx(idx); setDistributorPickerReconMedicine(''); setDistributorPickerResults([]); }}
+                                  className="text-[9px] font-bold text-purple-400 hover:text-purple-300 transition-colors">
+                                  Add
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {/* Medicine Dropdown for Recon Order */}
+                          {isPickingForRecon && (
+                            <tr>
+                              <td colSpan={4} className="pb-2 px-1">
+                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-purple-500/5 border border-purple-500/20 rounded-lg p-2 space-y-1">
+                                  <p className="text-[9px] text-muted font-bold uppercase mb-1">Select Medicine to Order:</p>
+                                  {recon.medicine_names?.map((medName: string, medIdx: number) => {
+                                    const isAdded = addedList.includes(medName);
+                                    const isPickingForThisMed = distributorPickerReconMedicine === medName;
+                                    return (
+                                      <div key={medIdx} className="space-y-1">
+                                        <button type="button"
+                                          onClick={() => {
+                                            if (isPickingForThisMed) {
+                                              setDistributorPickerReconMedicine('');
+                                              setDistributorPickerResults([]);
+                                            } else {
+                                              handleReconMedicineSelect(recon, medName);
+                                            }
+                                          }}
+                                          disabled={isAdded}
+                                          className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] transition-all flex items-center justify-between ${
+                                            isAdded
+                                              ? 'bg-emerald-500/5 text-emerald-400 line-through opacity-60 cursor-default'
+                                              : isPickingForThisMed
+                                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-semibold shadow-sm shadow-purple-500/10'
+                                              : 'bg-bg3/50 hover:bg-purple-500/10 border border-border hover:border-purple-500/40 text-text'
+                                          }`}>
+                                          <span className="truncate">
+                                            {isAdded && <span className="mr-1">✓</span>}
+                                            {medName}
+                                          </span>
+                                        </button>
+                                        
+                                        {/* Distributor Picker List for selected Recon Medicine */}
+                                        {isPickingForThisMed && (
+                                          <div className="pl-3 py-1 space-y-1 border-l-2 border-purple-500/30 ml-2">
+                                            {distributorPickerLoading ? (
+                                              <div className="flex items-center gap-1.5 text-[9px] text-muted py-1">
+                                                <Loader2 size={8} className="animate-spin text-purple-400" />
+                                                Searching Pharmarack...
+                                              </div>
+                                            ) : distributorPickerResults.length === 0 ? (
+                                              <p className="text-[9px] text-muted py-1">No distributors found.</p>
+                                            ) : distributorPickerResults.map((dist, distIdx) => (
+                                              <button key={distIdx} type="button"
+                                                onClick={() => handleConfirmReconDistributor(recon, medName, dist)}
+                                                disabled={addingOrderId === recon.email_uid}
+                                                className="w-full text-left px-2 py-1 rounded bg-bg2 hover:bg-purple-500/10 border border-border/50 hover:border-purple-500/30 transition-all flex items-center justify-between gap-2 text-[9px] disabled:opacity-50">
+                                                <div className="flex flex-col min-w-0">
+                                                  <div className="flex items-center gap-1">
+                                                    <span className="font-semibold text-text truncate group-hover:text-purple-400">{dist.distributor || 'Unknown'}</span>
+                                                    {dist.stock && <span className={`text-[6px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
+                                                  </div>
+                                                  {dist.scheme && <span className="text-[8px] text-amber-400">{dist.scheme}</span>}
+                                                </div>
+                                                {dist.rate != null && <span className="font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
 
                   </tbody>
                 </table>
