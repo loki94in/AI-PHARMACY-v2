@@ -1487,14 +1487,14 @@ const POS = () => {
                             setShowPatientSuggestions(false);
                             setPatientHighlightIndex(-1);
                           }}
-                          className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
+                          className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
                             idx === patientHighlightIndex
                               ? 'bg-primary/20 text-text font-bold'
                               : 'text-text hover:bg-primary/10'
                           }`}
                         >
                           <span className="font-semibold truncate">{c.name}</span>
-                          {c.phone && <span className="text-muted font-mono text-[10px] shrink-0">{c.phone}</span>}
+                          {c.phone && <span className="text-muted font-mono text-[13px] shrink-0">{c.phone}</span>}
                         </button>
                       ))}
                     </div>
@@ -1593,7 +1593,7 @@ const POS = () => {
                               setIsDoctorDropdownOpen(false);
                               setDoctorHighlightIndex(-1);
                             }}
-                            className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all font-semibold ${
+                            className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all font-semibold ${
                               idx === doctorHighlightIndex
                                 ? 'bg-sky/20 text-text font-bold'
                                 : 'text-text hover:bg-sky/10'
@@ -1603,7 +1603,7 @@ const POS = () => {
                           </button>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-xs text-muted italic">
+                        <div className="px-3.5 py-2.5 text-[16px] text-muted italic">
                           Press Enter to add custom: "{doctor}"
                         </div>
                       )}
@@ -1682,7 +1682,7 @@ const POS = () => {
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
-                        <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
                         <div className="flex gap-2 flex-wrap">
                           {suggestions.map((sug) => (
                             <button
@@ -1691,7 +1691,7 @@ const POS = () => {
                               onClick={() => {
                                 setSearchTerm(sug.name);
                               }}
-                              className="px-2.5 py-1 text-xs rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                              className="px-2.5 py-1.5 text-[16px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
                             >
                               {sug.name}
                             </button>
@@ -1699,7 +1699,7 @@ const POS = () => {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border-b border-border/30 text-[10px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
+                    <div className="p-3 border-b border-border/30 text-[13px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
                       ⚠️ No matching inventory found
                     </div>
                     <div className="flex flex-col">
@@ -1720,17 +1720,17 @@ const POS = () => {
                           setSearchTerm('');
                           setShowSearchDropdown(false);
                         }}
-                        className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/20 text-left transition-all text-xs w-full group"
+                        className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/20 text-left transition-all text-[16px] w-full group"
                       >
                         <div className="flex flex-col gap-1">
                           <span className="font-semibold text-text group-hover:text-primary transition-all">Add "{searchTerm.trim()}" directly to cart (Quick Add)</span>
-                          <span className="text-[10px] text-muted font-normal">Will use default batch MANUAL and expiry 12/28 (editable later)</span>
+                          <span className="text-[13px] text-muted font-normal">Will use default batch MANUAL and expiry 12/28 (editable later)</span>
                         </div>
-                        <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary py-1 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
+                        <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
                       </button>
 
                       {searchingOnline && (
-                        <div className="flex items-center justify-center p-4 text-xs text-muted gap-2 border-t border-border/20 bg-bg3/20">
+                        <div className="flex items-center justify-center p-4 text-[16px] text-muted gap-2 border-t border-border/20 bg-bg3/20">
                           <Loader2 size={14} className="animate-spin text-sky" />
                           <span>Searching internet for active compositions...</span>
                         </div>
@@ -1738,7 +1738,7 @@ const POS = () => {
 
                       {onlineResults.length > 0 && (
                         <>
-                          <div className="p-3 bg-bg3/55 border-t border-border/30 text-[10px] font-bold text-sky uppercase tracking-wider">
+                          <div className="p-3 bg-bg3/55 border-t border-border/30 text-[13px] font-bold text-sky uppercase tracking-wider">
                             🌐 Internet Suggestion (Auto-Enrich to Database)
                           </div>
                           {onlineResults.map((sug, sidx) => (
@@ -1746,14 +1746,14 @@ const POS = () => {
                               key={`online_${sidx}`}
                               type="button"
                               onClick={() => handleSelectOnlineSuggestion(sug)}
-                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group"
+                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group"
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[10px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
-                                {sug.manufacturer && <span className="text-[9px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
+                                {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[10px] bg-sky/10 border border-sky/20 text-sky py-1 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -1767,7 +1767,7 @@ const POS = () => {
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
-                        <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
                         <div className="flex gap-2 flex-wrap">
                           {suggestions.map((sug) => (
                             <button
@@ -1781,7 +1781,7 @@ const POS = () => {
                                 }).catch(err => console.error('Failed to learn correction:', err));
                                 setSearchTerm(sug.name);
                               }}
-                              className="px-2.5 py-1 text-xs rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                              className="px-2.5 py-1.5 text-[16px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
                             >
                               {sug.name}
                             </button>
@@ -1789,7 +1789,7 @@ const POS = () => {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border-b border-border/30 bg-bg3/55 text-[10px] font-bold text-muted uppercase tracking-wider">
+                    <div className="p-3 border-b border-border/30 bg-bg3/55 text-[13px] font-bold text-muted uppercase tracking-wider">
                       Matching Inventory Records:
                     </div>
                     <div className="flex flex-col">
@@ -1806,14 +1806,14 @@ const POS = () => {
                                 setSearchResults([]);
                                 setShowSearchDropdown(false);
                               }}
-                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                             >
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {isAlt && <span className="text-[9px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
+                                  {isAlt && <span className="text-[13px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
                                   <span className="font-semibold text-text group-hover:text-primary transition-all">{item.medicine_name}</span>
                                 </div>
-                                <span className="text-[9px] text-muted">
+                                <span className="text-[13px] text-muted">
                                   Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
                                   {item.quantity !== undefined && (
                                     <span className="ml-3 font-mono font-semibold text-primary">
@@ -1833,7 +1833,7 @@ const POS = () => {
                                         console.error('Failed to queue medicine from POS:', err);
                                       }
                                     }}
-                                    className="text-[9px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
+                                    className="text-[13px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
                                   >
                                     Verify composition ↗
                                   </span>
@@ -1855,7 +1855,7 @@ const POS = () => {
                                   >
                                     <Edit size={12} />
                                   </button>
-                                  <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary py-1 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
+                                  <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
                                 </div>
                               </div>
                             </button>
@@ -1873,15 +1873,15 @@ const POS = () => {
                         if (isOutOfStock) {
                           return (
                             <div key={`oos_${med.medicine_id}`} className="flex flex-col border-b border-border/10">
-                              <div className="p-3 bg-red-500/5 text-xs w-full flex flex-col gap-1 border-l-2 border-red-500">
+                              <div className="p-3 bg-red-500/5 text-[16px] w-full flex flex-col gap-1 border-l-2 border-red-500">
                                  <div className="flex items-center justify-between">
                                    <div>
                                      <span className="font-bold text-red-400 line-through mr-2">{med.medicine_name}</span>
-                                     <span className="text-[9px] text-red-400 font-bold uppercase border border-red-500/20 px-1.5 py-0.5 rounded bg-red-500/10">Out of Stock</span>
+                                     <span className="text-[13px] text-red-400 font-bold uppercase border border-red-500/20 px-1.5 py-0.5 rounded bg-red-500/10">Out of Stock</span>
                                    </div>
                                  </div>
                                  {med.alternatives && med.alternatives.length > 0 && (
-                                   <div className="text-[10px] text-sky font-bold flex items-center gap-1.5 mt-1">
+                                   <div className="text-[13px] text-sky font-bold flex items-center gap-1.5 mt-1">
                                      <span className="h-1.5 w-1.5 bg-sky rounded-full animate-ping"></span> 
                                      Alternatives in stock (same composition):
                                    </div>
@@ -1897,7 +1897,7 @@ const POS = () => {
                             {renderMedicineItem(med, false)}
                             {med.alternatives && med.alternatives.length > 0 && (
                               <div className="flex flex-col border-l-2 border-sky/30 ml-2 bg-bg3/30">
-                                <div className="px-6 py-1 bg-sky/5 text-[9px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
+                                <div className="px-6 py-1.5 bg-sky/5 text-[13px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
                                   <span className="rotate-90">↱</span> Substitutes Available:
                                 </div>
                                 {med.alternatives.map((alt: any) => renderMedicineItem(alt, true))}
@@ -1908,7 +1908,7 @@ const POS = () => {
                       })}
                       
                       {searchingOnline && (
-                        <div className="flex items-center justify-center p-3 text-xs text-muted gap-2 border-t border-border/10 bg-bg3/25">
+                        <div className="flex items-center justify-center p-3 text-[16px] text-muted gap-2 border-t border-border/10 bg-bg3/25">
                           <Loader2 size={14} className="animate-spin text-sky" />
                           <span>Searching internet for active compositions...</span>
                         </div>
@@ -1916,7 +1916,7 @@ const POS = () => {
 
                       {onlineResults.length > 0 && (
                         <>
-                          <div className="p-2 border-t border-border/30 bg-bg3/55 text-[10px] font-bold text-sky uppercase tracking-wider">
+                          <div className="p-3 border-t border-border/30 bg-bg3/55 text-[13px] font-bold text-sky uppercase tracking-wider">
                             🌐 Internet Suggestion (Auto-Enrich to Database):
                           </div>
                           {onlineResults.map((sug, sidx) => (
@@ -1924,14 +1924,14 @@ const POS = () => {
                               key={`online_${sidx}`}
                               type="button"
                               onClick={() => handleSelectOnlineSuggestion(sug)}
-                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full group"
+                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group"
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[10px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
-                                {sug.manufacturer && <span className="text-[9px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
+                                {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[10px] bg-sky/10 border border-sky/20 text-sky py-1 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -2032,17 +2032,19 @@ const POS = () => {
 
             {/* Cart Table Container */}
             <div className="flex-1 overflow-auto bg-bg/25 scrollbar-thin">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-[16px]">
                 <thead className="sticky top-0 bg-bg2/95 backdrop-blur-xl z-10">
                   <tr>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80">Medicine</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80">Batch</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Expiry</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center text-primary font-extrabold">Qty (Strips/Tablets)</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-center">Disc %</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-right">MRP</th>
-                    <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-border/80 text-right">Total</th>
-                    <th className="p-3 text-xs font-bold text-muted tracking-wider border-b border-border/80"></th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border">Medicine</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border">Batch</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Expiry</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Strip</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
+                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
+                    <th className="p-3 text-[13px] font-bold text-muted tracking-wider border-b-2 border-border"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2068,9 +2070,9 @@ const POS = () => {
                     }
 
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all">
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all h-[52px]">
                         {/* Medicine Search/Change */}
-                        <td className="p-2 min-w-[163px] relative">
+                        <td className="p-3 min-w-[180px] relative">
                           <div className="flex items-center">
                             {item.scanImage && (
                               <div className="relative group/thumb shrink-0 mr-2.5 select-none animate-in fade-in duration-200">
@@ -2093,7 +2095,7 @@ const POS = () => {
                                 id={`row-med-input-${cart.indexOf(item)}`}
                                 type="text" 
                                 autoComplete="off"
-                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-xs font-semibold text-text py-1 px-1 rounded"
+                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-[16px] font-semibold text-text py-1 px-1 rounded"
                                 value={activeRowSearchIndex === cart.indexOf(item) ? rowSearchTerm : item.name}
                                 onChange={e => {
                                   const val = e.target.value;
@@ -2139,7 +2141,7 @@ const POS = () => {
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchResults.length > 0 && (
-                                <div className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-[259px] shadow-2xl">
+                                <div className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-2xl">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
                                       o => o.product.toLowerCase().trim() === med.medicine_name.toLowerCase().trim() ||
@@ -2155,18 +2157,18 @@ const POS = () => {
                                           const idx = cart.indexOf(item);
                                           fetchDetailsAndChangeRowMedicine(idx, med);
                                         }}
-                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+                                        className={`flex flex-col p-3 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                       >
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                           <span className="font-semibold text-text">{med.medicine_name}</span>
                                           {rowHasPending && (
-                                            <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1 py-0.5 rounded text-[8px] font-bold animate-pulse">
+                                            <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[13px] font-bold animate-pulse">
                                               ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
                                             </span>
                                           )}
                                         </div>
-                                        <span className="text-[9px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[9px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => c.medicine_id === med.medicine_id ? sum + c.qty : sum, 0))}</span>
+                                        <span className="text-[13px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
+                                        <span className="text-[13px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => c.medicine_id === med.medicine_id ? sum + c.qty : sum, 0))}</span>
                                       </button>
                                     );
                                   })}
@@ -2177,11 +2179,11 @@ const POS = () => {
                         </td>
 
                         {/* Batch Selection */}
-                        <td className="p-2 relative">
+                        <td className="p-3 relative">
                           <div className="relative">
                             <input
                               type="text"
-                              className={`w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-1.5 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
+                              className={`w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] font-mono font-semibold py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
                               value={item.batch || ''}
                               placeholder="Batch"
                               readOnly
@@ -2215,8 +2217,8 @@ const POS = () => {
                             />
                             
                             {activeBatchRowId === item.id && rowBatchesList.length > 1 && (
-                              <div className="absolute left-1 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-36 overflow-y-auto w-52 text-left shadow-2xl">
-                                <div className="p-1.5 border-b border-border/30 bg-bg3/60 text-[9px] font-bold text-muted uppercase tracking-wider">
+                              <div className="absolute left-1 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 text-left shadow-2xl">
+                                <div className="p-2.5 border-b border-border/30 bg-bg3/60 text-[13px] font-bold text-muted uppercase tracking-wider">
                                   Switch Batch:
                                 </div>
                                 {rowBatchesList.map(b => {
@@ -2249,10 +2251,10 @@ const POS = () => {
                                         }));
                                         setActiveBatchRowId(null);
                                       }}
-                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-[10px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
+                                      className={`w-full text-left px-3 py-2 hover:bg-sky/15 border-b border-border/10 text-[16px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
                                     >
                                       <span className="font-bold block">{b.batch_no}</span>
-                                      <span className="text-muted block text-[8px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
+                                      <span className="text-muted block text-[13px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}
@@ -2262,98 +2264,112 @@ const POS = () => {
                         </td>
                         
                         {/* Expiry */}
-                        <td className="p-2 text-center">
-                          <div className={`font-mono text-[10px] font-bold px-2 py-0.8 rounded-lg inline-block shadow-sm ${expBadgeClass}`}>
+                        <td className="p-3 text-center">
+                          <div className={`font-mono text-[16px] font-bold px-3 py-1 rounded-lg inline-block shadow-sm ${expBadgeClass}`}>
                             {item.isEmptyRow ? '-' : item.expiry}
                           </div>
                         </td>
 
                         {/* Qty & Stock */}
-                        <td className="p-2 text-center min-w-[180px]">
+                        {/* Strip Qty — own column */}
+                        <td className="p-3 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-xs font-bold text-muted bg-bg3/50 px-2 py-1 rounded-lg border border-border/30 inline-block shadow-sm">-</div>;
+                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
                             }
-                            const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
-                            const remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
                             return (
-                              <div className="flex flex-col gap-1.5 items-center justify-center">
-                                <div className="flex items-center gap-1">
-                                  {/* Qty (Str) */}
-                                  <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5">
-                                    <input 
-                                      id={`row-qty-input-${cart.indexOf(item)}`}
-                                      type="number" 
-                                      className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold text-text focus:outline-none"
-                                      value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
-                                      onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                                      min="0"
-                                      placeholder="0"
-                                      disabled={item.isEmptyRow}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          const looseInput = document.getElementById(`row-loose-input-${cart.indexOf(item)}`);
-                                          if (looseInput) {
-                                            looseInput.focus();
-                                            (looseInput as HTMLInputElement).select();
-                                          }
+                              <div className="flex items-center justify-center">
+                                <div className="flex items-center gap-1.5 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-3 py-1">
+                                  <input 
+                                    id={`row-qty-input-${cart.indexOf(item)}`}
+                                    type="number" 
+                                    className="w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-[16px] font-mono font-bold text-text focus:outline-none"
+                                    value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
+                                    onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                                    min="0"
+                                    placeholder="0"
+                                    disabled={item.isEmptyRow}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        const looseInput = document.getElementById(`row-loose-input-${cart.indexOf(item)}`);
+                                        if (looseInput) {
+                                          looseInput.focus();
+                                          (looseInput as HTMLInputElement).select();
                                         }
-                                      }}
-                                    />
-                                    <span className="text-[9px] text-muted font-bold select-none uppercase">Str</span>
-                                  </div>
-
-                                  <span className="text-muted/60 font-mono text-xs font-bold select-none">/</span>
-
-                                  {/* Loose Qty */}
-                                  <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5">
-                                    <input 
-                                      id={`row-loose-input-${cart.indexOf(item)}`}
-                                      type="number" 
-                                      className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold text-amber-500 focus:outline-none"
-                                      value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
-                                      onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                                      min="0"
-                                      placeholder="0"
-                                      disabled={item.isEmptyRow}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          const currentIdx = cart.indexOf(item);
-                                          const nextIdx = currentIdx + 1;
-                                          const nextMedInput = document.getElementById(`row-med-input-${nextIdx}`);
-                                          if (nextMedInput) {
-                                            nextMedInput.focus();
-                                            (nextMedInput as HTMLInputElement).select();
-                                          }
-                                        }
-                                      }}
-                                    />
-                                    <span className="text-[9px] text-muted font-bold select-none uppercase">Tab</span>
-                                  </div>
-                                </div>
-
-                                {/* Available Stock Info */}
-                                <div className={`text-[10px] select-none font-bold font-mono px-2 py-0.5 rounded-lg border ${
-                                  (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
-                                    ? 'bg-red/5 border-red/20 text-red animate-pulse'
-                                    : (typeof remainingStock === 'number' && remainingStock <= 10)
-                                    ? 'bg-amber-500/5 border-amber-500/20 text-amber-500'
-                                    : 'bg-green/5 border-green/20 text-green'
-                                }`}>
-                                  Left: {remainingStock} Str / {remainingLoose} Tab
+                                      }
+                                    }}
+                                  />
                                 </div>
                               </div>
                             );
                           })()}
                         </td>
 
+                        {/* Loose Qty — own column */}
+                        <td className="p-3 text-center">
+                          {(() => {
+                            if (item.isEmptyRow) {
+                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
+                            }
+                            return (
+                              <div className="flex items-center justify-center">
+                                <div className="flex items-center gap-1.5 bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20 rounded-lg px-3 py-1">
+                                  <input 
+                                    id={`row-loose-input-${cart.indexOf(item)}`}
+                                    type="number" 
+                                    className="w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-[16px] font-mono font-bold text-amber-500 focus:outline-none"
+                                    value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
+                                    onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                                    min="0"
+                                    placeholder="0"
+                                    disabled={item.isEmptyRow}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        const currentIdx = cart.indexOf(item);
+                                        const nextIdx = currentIdx + 1;
+                                        const nextMedInput = document.getElementById(`row-med-input-${nextIdx}`);
+                                        if (nextMedInput) {
+                                          nextMedInput.focus();
+                                          (nextMedInput as HTMLInputElement).select();
+                                        }
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </td>
+
+                        {/* Live Stock — own column */}
+                        <td className="p-3 text-center">
+                          {(() => {
+                            if (item.isEmptyRow) {
+                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
+                            }
+                            const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
+                            const remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
+                            return (
+                              <div className={`text-[14px] select-none font-bold font-mono px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 ${
+                                (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
+                                  ? 'bg-red/5 border-red/20 text-red animate-pulse'
+                                  : (typeof remainingStock === 'number' && remainingStock <= 10)
+                                  ? 'bg-amber-500/5 border-amber-500/20 text-amber-500'
+                                  : 'bg-green/5 border-green/20 text-green'
+                              }`}>
+                                {remainingStock} / {remainingLoose}
+                              </div>
+                            );
+                          })()}
+                        </td>
+
                         {/* Discount */}
-                        <td className="p-2 text-center">
+                        <td className="p-3 text-center">
                           <input 
                             type="number" 
-                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-1 px-1 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] font-mono font-bold text-sky py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
                             value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
                             onChange={e => updateCartItem(item.id, 'discount', e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
                             min="0"
@@ -2363,10 +2379,10 @@ const POS = () => {
                         </td>
 
                         {/* MRP */}
-                        <td className="p-2 text-right">
+                        <td className="p-3 text-right">
                           <input 
                             type="number" 
-                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-1 px-1.5 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            className={`w-20 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
                             onChange={e => updateCartItem(item.id, 'mrp', Math.max(0, Number(e.target.value)))}
@@ -2375,14 +2391,14 @@ const POS = () => {
                         </td>
 
                         {/* Total */}
-                        <td className="p-2 text-right">
-                          <div className="font-mono text-xs font-bold text-green pr-1">
+                        <td className="p-3 text-right">
+                          <div className="font-mono text-[16px] font-bold text-green pr-1">
                             {item.isEmptyRow ? '-' : `₹${Math.round(itemTotal)}`}
                           </div>
                         </td>
 
                         {/* Actions */}
-                        <td className="p-2 text-center">
+                        <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
@@ -2394,13 +2410,13 @@ const POS = () => {
                               className={`p-1.5 rounded-lg transition-all ${item.medicine_id ? 'hover:bg-sky/10 text-muted hover:text-sky' : 'opacity-30 cursor-not-allowed text-muted'}`}
                               title="Quick Edit Medicine"
                             >
-                              <Edit size={13} />
+                              <Edit size={16} />
                             </button>
                             <button 
                               onClick={() => removeFromCart(item.id)}
                               className="p-1.5 hover:bg-red/10 text-muted hover:text-red rounded-lg transition-all"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={16} />
                             </button>
                           </div>
                         </td>
