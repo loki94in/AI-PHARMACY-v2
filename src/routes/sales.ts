@@ -799,14 +799,15 @@ router.get('/search-medicine', async (req, res) => {
           JOIN medicines m ON im.medicine_id = m.id
           WHERE (m.item_code = ? 
              OR m.name LIKE ? 
-             OR CAST(COALESCE(im.mrp, 0) AS TEXT) LIKE ?
+             OR im.mrp = ?
              OR im.batch_no LIKE ?)
             AND im.quantity > 0
             AND im.expiry_date >= date('now')
           ORDER BY m.name ASC, im.expiry_date ASC
           LIMIT 30
         `;
-        rows = await db.all(sql, [exactQuery, likeQuery, likeQuery, likeQuery]);
+        const mrpVal = parseFloat(normalizedQuery);
+        rows = await db.all(sql, [exactQuery, likeQuery, isNaN(mrpVal) ? 0 : mrpVal, likeQuery]);
       } else {
         // For short terms (length 2), avoid slow infix cast and wildcards
         const prefixQuery = `${cleanQuery}%`;

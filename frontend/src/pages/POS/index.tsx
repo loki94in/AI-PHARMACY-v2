@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
-import { api, apiClient } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
@@ -110,6 +110,34 @@ const groupBatches = (items: any[]): any[] => {
     }
   }
   return grouped;
+};
+
+const filterLocalInventory = (query: string, inventory: any[]): any[] => {
+  if (!query || query.trim().length < 2) return [];
+  const term = query.trim().toLowerCase();
+  
+  // Prefix matches first
+  const prefixes = inventory.filter(item => 
+    (item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) ||
+    (item.item_code && item.item_code.toLowerCase().startsWith(term)) ||
+    (item.batch_no && item.batch_no.toLowerCase().startsWith(term))
+  );
+  
+  if (prefixes.length >= 15) {
+    return prefixes.slice(0, 30);
+  }
+  
+  // Infix matches second
+  const infixes = inventory.filter(item => 
+    ((item.medicine_name && item.medicine_name.toLowerCase().includes(term)) ||
+    (item.item_code && item.item_code.toLowerCase().includes(term)) ||
+    (item.batch_no && item.batch_no.toLowerCase().includes(term))) &&
+    !(item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) &&
+    !(item.item_code && item.item_code.toLowerCase().startsWith(term)) &&
+    !(item.batch_no && item.batch_no.toLowerCase().startsWith(term))
+  );
+  
+  return [...prefixes, ...infixes].slice(0, 30);
 };
 
 const POS = () => {
@@ -547,22 +575,28 @@ const POS = () => {
     setActiveRowSearchIndex(null);
   });
 
-  // React Query for row search autocomplete
-  const { data: rowSearchData } = useApiQuery(
-    ['row-medicine-search', rowSearchTerm.trim()],
-    () => api.searchMedicine(rowSearchTerm.trim()),
-    { enabled: activeRowSearchIndex !== null && rowSearchTerm.trim().length >= 3, staleTime: 10_000 }
-  );
-
+  // Local row search autocomplete
   useEffect(() => {
-    if (rowSearchData && Array.isArray(rowSearchData)) {
-      setRowSearchResults(groupBatches(rowSearchData));
-      setRowSearchHighlightIndex(-1);
-    } else if (activeRowSearchIndex === null || rowSearchTerm.trim().length < 3) {
+    const term = rowSearchTerm.trim();
+    if (activeRowSearchIndex === null || term.length < 2) {
       setRowSearchResults([]);
       setRowSearchHighlightIndex(-1);
+      return;
     }
-  }, [rowSearchData, rowSearchTerm, activeRowSearchIndex]);
+
+    const compactInventory = getCompactInventoryCache();
+    const mapped = compactInventory.map(item => ({
+      ...item,
+      medicine_name: item.name,
+      quantity: item.stock_qty,
+      alternatives: []
+    }));
+
+    const filtered = filterLocalInventory(term, mapped);
+    const grouped = groupBatches(filtered);
+    setRowSearchResults(grouped);
+    setRowSearchHighlightIndex(-1);
+  }, [rowSearchTerm, activeRowSearchIndex]);
 
   // Fetch customer suggestions for patient autocomplete (P2)
   useEffect(() => {
@@ -780,46 +814,46 @@ const POS = () => {
     return () => clearTimeout(timer);
   }, [searchTerm, searchResults]);
 
-  // React Query autocomplete with dedup + abort
-  const { data: searchResultsData, isLoading: isSearchLoading } = useApiQuery(
-    ['medicine-search', searchTerm.trim()],
-    () => api.searchMedicine(searchTerm.trim()),
-    { enabled: searchTerm.trim().length >= 3, staleTime: 10_000 }
-  );
+  // Local autocomplete (replaces React Query useApiQuery to eliminate layout shift and latency)
+  const isSearchLoading = false;
 
   useEffect(() => {
-    if (searchResultsData && Array.isArray(searchResultsData)) {
-      const groupedData = groupBatches(searchResultsData);
-      // Premium Barcode Auto-Add Feature:
-      const term = searchTerm.trim().toUpperCase();
-      if (groupedData.length === 1) {
-        const matched = groupedData[0];
-        const barcode = (matched.item_code || '').toUpperCase().trim();
-        if (barcode === term && matched.inventory_id && !matched.is_out_of_stock) {
-          addToCart({
-            id: matched.inventory_id,
-            medicine_id: matched.medicine_id,
-            name: matched.medicine_name,
-            batch: matched.batch_no,
-            expiry: matched.expiry_date,
-            mrp: matched.mrp,
-            costPrice: matched.cost_price,
-            salts: matched.salts || matched.hsn_code || 'Generic',
-            packSize: matched.pack_size || 10,
-            quantity: matched.quantity
-          });
-          setSearchTerm('');
-          setSearchResults([]);
-          setSearchHighlightIndex(-1);
-          return;
-        }
-      }
-      setSearchResults(groupedData);
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      setSearchResults([]);
       setSearchHighlightIndex(-1);
-      setOnlineResults([]);
-      setSearchingOnline(false);
+      return;
     }
-  }, [searchResultsData, searchTerm]);
+
+    const compactInventory = getCompactInventoryCache();
+    const mapped = compactInventory.map(item => ({
+      ...item,
+      medicine_name: item.name,
+      quantity: item.stock_qty,
+      alternatives: []
+    }));
+
+    const filtered = filterLocalInventory(term, mapped);
+    const groupedData = groupBatches(filtered);
+
+    // Premium Barcode Auto-Add Feature:
+    const barcodeTerm = term.toUpperCase();
+    if (groupedData.length === 1) {
+      const matched = groupedData[0];
+      const barcode = (matched.item_code || '').toUpperCase().trim();
+      if (barcode === barcodeTerm && matched.inventory_id && !matched.is_out_of_stock) {
+        fetchDetailsAndAddToCart(matched);
+        setSearchTerm('');
+        setSearchResults([]);
+        setSearchHighlightIndex(-1);
+        return;
+      }
+    }
+    setSearchResults(groupedData);
+    setSearchHighlightIndex(-1);
+    setOnlineResults([]);
+    setSearchingOnline(false);
+  }, [searchTerm]);
 
   // Universal Edit state
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
@@ -889,6 +923,39 @@ const POS = () => {
         availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0)
       }];
     });
+  };
+
+  const fetchDetailsAndAddToCart = async (item: any) => {
+    try {
+      const details = await api.getMedicineQuickDetails(item.medicine_id);
+      addToCart({
+        id: item.inventory_id,
+        medicine_id: item.medicine_id,
+        name: item.medicine_name,
+        batch: item.batch_no,
+        expiry: item.expiry_date,
+        mrp: item.mrp,
+        costPrice: item.cost_price,
+        salts: details.api_reference || details.hsn_code || 'Generic',
+        packSize: item.pack_size || 10,
+        quantity: item.quantity,
+        alternatives: details.alternatives
+      });
+    } catch (error) {
+      console.warn('Failed to load quick details, adding with fallback values:', error);
+      addToCart({
+        id: item.inventory_id,
+        medicine_id: item.medicine_id,
+        name: item.medicine_name,
+        batch: item.batch_no,
+        expiry: item.expiry_date,
+        mrp: item.mrp,
+        costPrice: item.cost_price,
+        salts: item.salts || item.hsn_code || 'Generic',
+        packSize: item.pack_size || 10,
+        quantity: item.quantity
+      });
+    }
   };
 
   const handleSelectOnlineSuggestion = async (sug: any) => {
@@ -983,6 +1050,20 @@ const POS = () => {
     setRowSearchTerm('');
     setRowSearchResults([]);
     setRowSearchHighlightIndex(-1);
+  };
+
+  const fetchDetailsAndChangeRowMedicine = async (index: number, med: any) => {
+    try {
+      const details = await api.getMedicineQuickDetails(med.medicine_id);
+      changeRowMedicine(index, {
+        ...med,
+        salts: details.api_reference || details.hsn_code || 'Generic',
+        alternatives: details.alternatives
+      });
+    } catch (error) {
+      console.warn('Failed to load quick details for row change, falling back:', error);
+      changeRowMedicine(index, med);
+    }
 
     setTimeout(() => {
       const qtyInput = document.getElementById(`row-qty-input-${index}`);
@@ -1055,59 +1136,54 @@ const POS = () => {
     const nameQuery = info.potentialName || (result.text ? result.text.split('\n')[0] : '');
     const mrpQuery = info.mrp ? String(info.mrp) : '';
 
-    // Helper to perform the search chain
+    // Helper to perform the search chain locally
     const executeSearchChain = async () => {
+      const compactInventory = getCompactInventoryCache();
+      const mapped = compactInventory.map(item => ({
+        ...item,
+        medicine_name: item.name,
+        quantity: item.stock_qty,
+        alternatives: []
+      }));
+      
       // Step 1: Search by batch number (highest precision)
       if (batchQuery && batchQuery.trim().length > 1) {
-        try {
-          const data = await api.searchMedicine(batchQuery.trim());
-          if (Array.isArray(data) && data.length > 0) {
-            // Find an exact batch match if possible
-            const exactBatch = data.find(m => m.batch_no?.toLowerCase().trim() === batchQuery.toLowerCase().trim());
-            return exactBatch || data[0];
-          }
-        } catch (e) { console.warn('Batch search failed:', e); }
+        const batchTerm = batchQuery.trim().toLowerCase();
+        const matches = mapped.filter(m => m.batch_no && m.batch_no.toLowerCase().includes(batchTerm));
+        if (matches.length > 0) {
+          const exact = matches.find(m => m.batch_no.toLowerCase() === batchTerm);
+          return exact || matches[0];
+        }
       }
 
       // Step 2: Search by medicine name (standard lookup)
       if (nameQuery && nameQuery.trim().length > 1) {
-        try {
-          const data = await api.searchMedicine(nameQuery.trim());
-          if (Array.isArray(data) && data.length > 0) {
-            // Prefer exact name match, otherwise first result
-            return data.find(m => m.medicine_name.toLowerCase().trim() === nameQuery.toLowerCase().trim()) || data[0];
-          }
-        } catch (e) { console.warn('Name search failed:', e); }
+        const nameTerm = nameQuery.trim().toLowerCase();
+        const matches = filterLocalInventory(nameTerm, mapped);
+        if (matches.length > 0) {
+          const exact = matches.find(m => m.medicine_name.toLowerCase() === nameTerm);
+          return exact || matches[0];
+        }
       }
 
       // Step 3: Search by MRP (fallback lookup)
       if (mrpQuery && mrpQuery.trim().length > 0) {
-        try {
-          const data = await api.searchMedicine(mrpQuery.trim());
-          if (Array.isArray(data) && data.length > 0) {
-            return data[0];
-          }
-        } catch (e) { console.warn('MRP search failed:', e); }
+        const mrpVal = Number(mrpQuery.trim());
+        if (!isNaN(mrpVal)) {
+          const matches = mapped.filter(m => Math.abs(m.mrp - mrpVal) < 0.01);
+          if (matches.length > 0) return matches[0];
+        }
       }
 
-      return null; // No database match
+      return null;
     };
 
     executeSearchChain().then(matched => {
       if (matched) {
-        addToCart({
-          id: matched.inventory_id,
-          medicine_id: matched.medicine_id,
-          name: matched.medicine_name,
-          batch: matched.batch_no || info.batchNumber || 'B-GEN',
-          expiry: matched.expiry_date || info.expiryDate || '12/28',
-          mrp: matched.mrp || info.mrp || 0,
-          costPrice: matched.cost_price || (matched.mrp * 0.7),
-          salts: matched.salts || matched.hsn_code || 'Generic',
-          packSize: matched.pack_size || 10,
+        fetchDetailsAndAddToCart({
+          ...matched,
           scanImage: result.capturedImage,
-          rawOcrText: result.text,
-          quantity: matched.quantity
+          rawOcrText: result.text
         });
       } else {
         // Add as custom manual entry from scan details
@@ -1567,18 +1643,7 @@ const POS = () => {
                       if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
                         e.preventDefault();
                         const item = searchResults[searchHighlightIndex];
-                        addToCart({
-                          id: item.inventory_id,
-                          medicine_id: item.medicine_id,
-                          name: item.medicine_name,
-                          batch: item.batch_no,
-                          expiry: item.expiry_date,
-                          mrp: item.mrp,
-                          costPrice: item.cost_price,
-                          salts: item.salts || item.hsn_code || 'Generic',
-                          packSize: item.pack_size || 10,
-                          quantity: item.quantity
-                        });
+                        fetchDetailsAndAddToCart(item);
                         setSearchTerm('');
                         setSearchResults([]);
                         setSearchHighlightIndex(-1);
@@ -1716,18 +1781,7 @@ const POS = () => {
                               key={item.inventory_id || `item_${item.medicine_id}_${Math.random()}`}
                               type="button"
                               onClick={() => {
-                                addToCart({
-                                  id: item.inventory_id,
-                                  medicine_id: item.medicine_id,
-                                  name: item.medicine_name,
-                                  batch: item.batch_no,
-                                  expiry: item.expiry_date,
-                                  mrp: item.mrp,
-                                  costPrice: item.cost_price,
-                                  salts: item.salts || item.hsn_code || 'Generic',
-                                  packSize: item.pack_size || 10,
-                                  quantity: item.quantity
-                                });
+                                fetchDetailsAndAddToCart(item);
                                 setSearchTerm('');
                                 setSearchResults([]);
                                 setShowSearchDropdown(false);
@@ -2052,7 +2106,7 @@ const POS = () => {
                                   } else if (e.key === 'Enter') {
                                     if (rowSearchHighlightIndex >= 0 && rowSearchHighlightIndex < rowSearchResults.length) {
                                       e.preventDefault();
-                                      changeRowMedicine(idx, rowSearchResults[rowSearchHighlightIndex]);
+                                      fetchDetailsAndChangeRowMedicine(idx, rowSearchResults[rowSearchHighlightIndex]);
                                     }
                                   } else if (e.key === 'Escape') {
                                     setActiveRowSearchIndex(null);
@@ -2079,7 +2133,7 @@ const POS = () => {
                                         type="button"
                                         onClick={() => {
                                           const idx = cart.indexOf(item);
-                                          changeRowMedicine(idx, med);
+                                          fetchDetailsAndChangeRowMedicine(idx, med);
                                         }}
                                         className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                       >

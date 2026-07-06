@@ -46,7 +46,7 @@ router.get('/', async (req, res) => {
   const hasFilters = !!(search || medicine || id || batch || expiry || packs || loose || mrp || rack || date_from || date_to);
   const limit = req.query.limit !== undefined 
     ? parseInt(req.query.limit as string) 
-    : (hasFilters ? 5000 : 100);
+    : (hasFilters ? 200 : 100);
   
   try {
     db = await dbManager.getConnection();
@@ -59,11 +59,9 @@ router.get('/', async (req, res) => {
     const params: any[] = [];
     
     if (search) {
-      baseQuery += ` AND (m.name LIKE ? OR im.batch_no LIKE ? OR m.item_code LIKE ? OR im.rack_location LIKE ? OR m.api_reference LIKE ? OR m.generic_name LIKE ?)`;
-      const s = `%${search}%`;
-      params.push(s, s, s, s, s, s);
+      baseQuery += ` AND (m.name LIKE ? OR m.item_code = ? OR im.batch_no LIKE ?)`;
+      params.push(`%${search}%`, search, `%${search}%`);
     }
-
     if (medicine) {
       baseQuery += ` AND m.name LIKE ?`;
       params.push(`%${medicine}%`);
@@ -77,24 +75,36 @@ router.get('/', async (req, res) => {
       params.push(`%${expiry}%`);
     }
     if (packs) {
-      baseQuery += ` AND CAST(im.quantity AS TEXT) LIKE ?`;
-      params.push(`%${normalizeNumericSearch(packs)}%`);
+      const numVal = parseInt(packs, 10);
+      if (!isNaN(numVal)) {
+        baseQuery += ` AND im.quantity = ?`;
+        params.push(numVal);
+      }
     }
     if (loose) {
-      baseQuery += ` AND CAST(im.loose_quantity AS TEXT) LIKE ?`;
-      params.push(`%${normalizeNumericSearch(loose)}%`);
+      const numVal = parseInt(loose, 10);
+      if (!isNaN(numVal)) {
+        baseQuery += ` AND im.loose_quantity = ?`;
+        params.push(numVal);
+      }
     }
     if (mrp) {
-      baseQuery += ` AND CAST(im.mrp AS TEXT) LIKE ?`;
-      params.push(`%${normalizeNumericSearch(mrp)}%`);
+      const numVal = parseFloat(mrp);
+      if (!isNaN(numVal)) {
+        baseQuery += ` AND im.mrp = ?`;
+        params.push(numVal);
+      }
     }
     if (rack) {
       baseQuery += ` AND im.rack_location LIKE ?`;
       params.push(`%${rack}%`);
     }
     if (id) {
-      baseQuery += ` AND CAST(im.id AS TEXT) LIKE ?`;
-      params.push(`%${id}%`);
+      const numVal = parseInt(id, 10);
+      if (!isNaN(numVal)) {
+        baseQuery += ` AND im.id = ?`;
+        params.push(numVal);
+      }
     }
     if (date_from) {
       baseQuery += ` AND date(im.created_at) >= date(?)`;

@@ -67,7 +67,20 @@ apiClient.interceptors.response.use(
     }
     return response;
   },
-  (error) => {
+  async (error) => {
+    const config = error.config;
+    
+    // If 503 Service Initializing, retry up to 5 times
+    if (error.response?.status === 503) {
+      if (config && (!config._retryCount || config._retryCount < 5)) {
+        config._retryCount = (config._retryCount || 0) + 1;
+        const delay = (error.response?.data?.retryAfter || 1) * 1000;
+        console.warn(`[API] Server is initializing. Retrying ${config.url} (Attempt ${config._retryCount}/5) in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return apiClient(config);
+      }
+    }
+
     // Basic global error handling
     if (error.response?.status === 401) {
       console.warn('Unauthorized request. Token might be missing or invalid.');
@@ -95,10 +108,30 @@ export type {
 };
 
 
+let compactInventoryCache: any[] | null = null;
+
+export const getCompactInventoryCache = (): any[] => {
+  if (compactInventoryCache) return compactInventoryCache;
+  if (typeof window !== 'undefined' && (window as any).__INVENTORY__) {
+    compactInventoryCache = (window as any).__INVENTORY__;
+    return compactInventoryCache || [];
+  }
+  return [];
+};
+
+export const setCompactInventoryCache = (data: any[]) => {
+  compactInventoryCache = data;
+};
+
 // API methods mapping
 export const api = {
   getDashboard: () => apiClient.get<DashboardStats>('/dashboard').then(res => res.data),
   dismissDashboardAlert: (id: number) => apiClient.delete(`/dashboard/alerts/${id}`).then(res => res.data),
+  getCompactInventory: () => apiClient.get<any[]>('/medicines/compact').then(res => {
+    setCompactInventoryCache(res.data);
+    return res.data;
+  }),
+  getMedicineQuickDetails: (id: number) => apiClient.get(`/medicines/${id}/quick-details`).then(res => res.data),
   
   // Inventory
   getInventory: (params?: {
