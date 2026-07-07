@@ -169,16 +169,16 @@ router.get('/medicines', async (req, res) => {
 });
 
 router.post('/medicines', async (req, res) => {
-  const { name, generic_name, manufacturer, marketed_by, pack_unit, strength, cgst_per, sgst_per, hsn_code, category } = req.body;
+  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category } = req.body;
   if (!name) return res.status(400).json({ error: 'Medicine name is required' });
   try {
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
     const adjustedName = normalizeMedicineName(name, manufacturer || '');
     const db = await dbManager.getConnection();
     const result = await db.run(
-      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, strength, cgst_per, sgst_per, hsn_code, category)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [adjustedName, generic_name || '', manufacturer || '', marketed_by || '', pack_unit || '', strength || '', parseFloat(cgst_per) || 0, parseFloat(sgst_per) || 0, hsn_code || '', category || '']
+      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [adjustedName, generic_name || '', manufacturer || '', marketed_by || '', pack_unit || '', parseInt(pack_size, 10) || null, strength || '', parseFloat(cgst_per) || 0, parseFloat(sgst_per) || 0, hsn_code || '', category || '']
     );
     const id = result.lastID;
     const savedMed = await db.get('SELECT * FROM medicines WHERE id = ?', [id]);
@@ -482,7 +482,7 @@ router.get('/medicines/:id/quick-details', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const medicine = await db.get(
-      'SELECT id, name, generic_name, manufacturer, marketed_by, pack_unit, strength, cgst_per, sgst_per, hsn_code, category, api_reference, schedule_type FROM medicines WHERE id = ?',
+      'SELECT id, name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, api_reference, schedule_type FROM medicines WHERE id = ?',
       [id]
     );
 
@@ -495,7 +495,7 @@ router.get('/medicines/:id/quick-details', async (req, res) => {
     let alternatives: any[] = [];
     if (medicine.api_reference || medicine.generic_name) {
       alternatives = await db.all(
-        `SELECT m.id, m.name, m.generic_name, m.manufacturer, m.pack_unit, m.strength,
+        `SELECT m.id, m.name, m.generic_name, m.manufacturer, m.pack_unit, m.pack_size, m.strength,
                 COALESCE((SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = m.id), 0) as stock_qty
          FROM medicines m
          WHERE m.id <> ? AND (

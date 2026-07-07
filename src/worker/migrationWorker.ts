@@ -11,6 +11,7 @@ import * as XLSX from 'xlsx';
 import { eventService } from '../services/eventService.js';
 import { normalizeDate } from '../utils/migrationUtils.js';
 import { matchesFilters } from '../utils/preMigrationIntelligence.js';
+import { rebuildStockFromLedger } from '../utils/stockRebuild.js';
 
 // PostgreSQL COPY parser
 import { parseCopyHeader, parseCopyDataRow, isCopyEndMarker, isPgDump } from './parsers/pgCopyParser.js';
@@ -26,10 +27,11 @@ import {
 } from './importers/pgMasterImporter.js';
 
 import {
-  batchMap, purchaseMap, clearPurchaseMap,
+  batchMap, purchaseMap, clearPurchaseMap, stockViewMap,
   importBatch, flushBatches,
   importInventory, flushPurchases,
   importInventoryMedicine, flushPurchaseItems,
+  importStockView,
 } from './importers/pgPurchaseImporter.js';
 
 import {
@@ -770,6 +772,7 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
     'batch': wrap('batch', async (row) => { await importBatch(row, db); stats.batches++; }),
     'inventory': wrap('inventory', async (row) => { await importInventory(row, db); stats.purchases++; }),
     'inventory_medicine': wrap('inventory_medicine', async (row) => { await importInventoryMedicine(row, db); stats.purchaseItems++; }),
+    'stock_view': wrap('stock_view', (row) => { importStockView(row); }),
   }, db);
 
   await flushBatches(db);
@@ -806,28 +809,53 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   await flushReturnItems(db);
   await flushStockLedger(db);
 
-  // Rebuild inventory quantities from stock_ledger (batches were imported with qty=0)
-  migrationStatus.message = 'Rebuilding inventory quantities from stock ledger...';
+  // Set inventory quantities (batches were imported with qty=0).
+  // Source of truth is the legacy app's stock_view (real per-batch strips +
+  // loose, including strip-opening conversions that never hit stock_effects).
+  // Only batches absent from stock_view fall back to ledger reconstruction —
+  // and that reconstruction treats strips+loose as one fungible base-unit
+  // pool (see rebuildStockFromLedger), never as two independent column sums.
+  migrationStatus.message = 'Applying live stock from stock_view (ledger fallback)...';
   try {
-    await db.run(`
-      UPDATE inventory_master
-      SET 
-        quantity = COALESCE((
-          SELECT SUM(sl.quantity)
-          FROM stock_ledger sl
-          WHERE sl.medicine_id = inventory_master.medicine_id
-            AND sl.batch_no = inventory_master.batch_no
-        ), 0),
-        loose_quantity = COALESCE((
-          SELECT SUM(sl.loose_quantity)
-          FROM stock_ledger sl
-          WHERE sl.medicine_id = inventory_master.medicine_id
-            AND sl.batch_no = inventory_master.batch_no
-        ), 0)
-      WHERE legacy_batch_id IS NOT NULL
+    const batchesToRebuild = await db.all(`
+      SELECT im.id, im.medicine_id, im.batch_no, im.legacy_batch_id, COALESCE(m.pack_size, 10) as pack_size
+      FROM inventory_master im
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE im.legacy_batch_id IS NOT NULL
     `);
-    console.log('[Migration] Inventory quantities and loose quantities rebuilt from stock_ledger');
+
+    let fromView = 0;
+    let fromLedger = 0;
+    await db.run('BEGIN TRANSACTION');
+    for (const b of batchesToRebuild) {
+      const viewStock = stockViewMap.get(b.legacy_batch_id);
+      let quantity: number;
+      let loose_quantity: number;
+      if (viewStock) {
+        // Normalize through the same base-units math so the rare negative
+        // loose values in stock_view can't re-introduce impossible stock.
+        ({ quantity, loose_quantity } = rebuildStockFromLedger(
+          [{ quantity: viewStock.quantity, loose_quantity: viewStock.loose }],
+          b.pack_size
+        ));
+        fromView++;
+      } else {
+        const ledgerRows = await db.all(
+          `SELECT quantity, loose_quantity FROM stock_ledger WHERE medicine_id = ? AND batch_no = ?`,
+          [b.medicine_id, b.batch_no]
+        );
+        ({ quantity, loose_quantity } = rebuildStockFromLedger(ledgerRows, b.pack_size));
+        fromLedger++;
+      }
+      await db.run(
+        `UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?`,
+        [quantity, loose_quantity, b.id]
+      );
+    }
+    await db.run('COMMIT');
+    console.log(`[Migration] Inventory stock applied: ${fromView} batches from stock_view, ${fromLedger} rebuilt from stock_ledger`);
   } catch (qtyErr: any) {
+    await db.run('ROLLBACK').catch(() => {});
     console.warn('[Migration] Stock quantity rebuild skipped:', qtyErr.message);
   }
 

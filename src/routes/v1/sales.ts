@@ -583,7 +583,7 @@ router.get('/list', asyncHandler(async (req: express.Request, res: express.Respo
   // Attach items for each invoice
   for (const inv of invoices) {
     inv.items = await db.all(
-      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, m.name as medicine_name, m.mrp, 10 as pack_size
+      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, m.name as medicine_name, m.mrp, COALESCE(m.pack_size, 10) as pack_size
        FROM sale_items si
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
@@ -615,7 +615,7 @@ router.get('/:id', asyncHandler(async (req: express.Request, res: express.Respon
   }
 
   invoice.items = await db.all(
-    `SELECT si.*, im.batch_no as batch_number, im.expiry_date, im.mrp as item_mrp, 10 as pack_size,
+    `SELECT si.*, im.batch_no as batch_number, im.expiry_date, im.mrp as item_mrp, COALESCE(m.pack_size, 10) as pack_size,
             m.name as medicine_name, m.mrp as medicine_mrp
      FROM sale_items si
      JOIN inventory_master im ON si.inventory_id = im.id

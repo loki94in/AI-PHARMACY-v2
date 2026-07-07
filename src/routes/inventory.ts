@@ -1,5 +1,6 @@
 import express from 'express';
 import { inventoryService } from '../services/inventoryService.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -239,7 +240,7 @@ router.get('/peek/:medicine_id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   let db;
   const { id } = req.params;
-  const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity } = req.body;
+  const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity, pack_size } = req.body;
   const qtyVal = quantity !== undefined ? quantity : req.body.stock_quantity;
   const batchNoVal = batch_no !== undefined ? batch_no : req.body.batch_number;
   try {
@@ -261,12 +262,13 @@ router.put('/:id', async (req, res) => {
     
     // 3. Update the medicines table if name or mrp changes
     if (invItem && invItem.medicine_id) {
-      if (name !== undefined || mrp !== undefined) {
+      if (name !== undefined || mrp !== undefined || pack_size !== undefined) {
         const updates = [];
         const params = [];
         if (name !== undefined) { updates.push('name = ?'); params.push(name); }
         if (mrp !== undefined) { updates.push('mrp = ?'); params.push(mrp); }
-        
+        if (pack_size !== undefined) { updates.push('pack_size = ?'); params.push(parseInt(pack_size, 10) || null); }
+
         if (updates.length > 0) {
           params.push(invItem.medicine_id);
           await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -276,6 +278,10 @@ router.put('/:id', async (req, res) => {
       // Check if new stock triggers pending patient refills
       await inventoryService.checkAndTriggerRefillsForMedicine(invItem.medicine_id);
     }
+
+    // POS's search/add-to-cart cache is otherwise only refreshed every 10 minutes —
+    // invalidate now so corrections (pack size, MRP, stock) are usable on the very next sale.
+    inventoryCache.invalidate();
 
         res.json({ success: true, message: 'Inventory updated' });
   } catch (error: any) {

@@ -24,7 +24,7 @@ export interface Medicine {
   purchase_price?: number;
   gst?: string;
   hsn?: string;
-  pack_size?: string;
+  pack_size?: number;
   schedule_type?: string;
 }
 

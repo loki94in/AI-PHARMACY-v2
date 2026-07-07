@@ -14,6 +14,7 @@ export interface CompactInventoryItem {
   item_code: string;
   manufacturer: string;
   packaging: string;
+  pack_size: number | null;
 }
 
 class InventoryCache {
@@ -71,10 +72,11 @@ class InventoryCache {
           COALESCE(im.cost_price, 0) AS cost_price,
           m.item_code,
           m.manufacturer,
-          m.packaging
+          m.packaging,
+          m.pack_size
          FROM inventory_master im
          JOIN medicines m ON im.medicine_id = m.id
-         WHERE im.quantity > 0 AND (im.expiry_date IS NULL OR im.expiry_date >= date('now'))
+         WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR im.expiry_date >= date('now'))
          ORDER BY m.name ASC, im.expiry_date ASC`
       );
 

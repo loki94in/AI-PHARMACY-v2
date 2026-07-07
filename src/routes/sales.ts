@@ -2,6 +2,7 @@ import express from 'express';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
+import { applyStockDelta } from '../utils/stockRebuild.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -220,24 +221,43 @@ router.post('/', async (req, res) => {
         }
       }
 
-      // Stock Level Verification before processing decrement
-      const currentStock = await db.get('SELECT quantity, expiry_date FROM inventory_master WHERE id = ?', [inventory_id]);
-      if (!currentStock || currentStock.quantity < Number(quantity)) {
-        const needed = Number(quantity) - (currentStock ? currentStock.quantity : 0);
-        if (currentStock) {
-          await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [needed, inventory_id]);
-        } else {
-          throw new Error(`Inventory item ID ${inventory_id} does not exist.`);
-        }
+      // Stock Level Verification before processing decrement (strips + loose counted as one pool)
+      const currentStock = await db.get(
+        `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [inventory_id]
+      );
+      if (!currentStock) {
+        throw new Error(`Inventory item ID ${inventory_id} does not exist.`);
+      }
+      const packSize = currentStock.pack_size;
+      const soldQty = Number(quantity);
+      const soldLoose = Number(loose_qty);
+      const currentTotalUnits = currentStock.quantity * packSize + currentStock.loose_quantity;
+      const soldTotalUnits = soldQty * packSize + soldLoose;
+      if (currentTotalUnits < soldTotalUnits) {
+        const neededUnits = soldTotalUnits - currentTotalUnits;
+        const neededStrips = Math.ceil(neededUnits / packSize);
+        await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [neededStrips, inventory_id]);
+        currentStock.quantity += neededStrips;
       }
 
       await db.run(
         'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)',
         [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(item.discount_per || item.discountPer || 0)]
       );
-      
-      // Decrement stock in inventory_master.
-      const decrementResult = await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [Number(quantity), inventory_id]);
+
+      // Decrement stock in inventory_master, auto-converting a strip to loose if the loose sale exceeds current loose stock.
+      const newStock = applyStockDelta(
+        { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+        -soldQty,
+        -soldLoose,
+        packSize
+      );
+      const decrementResult = await db.run(
+        'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+        [newStock.quantity, newStock.loose_quantity, inventory_id]
+      );
       if (decrementResult.changes === 0) {
         throw new Error(`Failed to decrement stock for inventory ID ${inventory_id}`);
       }
@@ -378,12 +398,24 @@ router.post('/hold', async (req, res) => {
       if (item.id && typeof item.id === 'number' && item.id < 1000000) {
         const inventory_id = item.id;
         const qty = Number(item.qty || 0);
-        if (qty > 0) {
-          const currentStock = await db.get('SELECT quantity FROM inventory_master WHERE id = ?', [inventory_id]);
-          if (!currentStock || currentStock.quantity < qty) {
+        const loose = Number(item.looseQty || 0);
+        if (qty > 0 || loose > 0) {
+          const currentStock = await db.get(
+            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+            [inventory_id]
+          );
+          const pSize = currentStock ? currentStock.pack_size : 10;
+          const requestedTotalUnits = qty * pSize + loose;
+          const availableTotalUnits = currentStock ? (currentStock.quantity * pSize + currentStock.loose_quantity) : 0;
+          if (!currentStock || availableTotalUnits < requestedTotalUnits) {
             throw new Error(`Insufficient stock for hold bill item ID ${inventory_id}.`);
           }
-          await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [qty, inventory_id]);
+          const newStock = applyStockDelta(
+            { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+            -qty, -loose, pSize
+          );
+          await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
         }
       }
     }
@@ -706,7 +738,7 @@ router.get('/list', async (req, res) => {
       const placeholders = invoiceIds.map(() => '?').join(',');
       const itemsSql = `
         SELECT si.*, im.batch_no as batch_number, im.expiry_date, m.name as medicine_name,
-               m.mrp, m.id as medicine_id, 10 as pack_size
+               m.mrp, m.id as medicine_id, COALESCE(m.pack_size, 10) as pack_size
         FROM sale_items si
         JOIN inventory_master im ON si.inventory_id = im.id
         JOIN medicines m ON im.medicine_id = m.id
@@ -1170,7 +1202,7 @@ router.get('/:id', async (req, res) => {
 
     invoice.items = await queryAllWithRetry(
       db,
-      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, im.mrp as item_mrp, 10 as pack_size,
+      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, im.mrp as item_mrp, COALESCE(m.pack_size, 10) as pack_size,
               m.name as medicine_name, m.mrp as medicine_mrp, m.id as medicine_id
        FROM sale_items si
        JOIN inventory_master im ON si.inventory_id = im.id
@@ -1217,10 +1249,20 @@ router.put('/:id', async (req, res) => {
 
     // If items changed, reverse old stock and replace
     if (Array.isArray(items)) {
-      // Reverse old stock
-      const oldItems = await db.all('SELECT inventory_id, quantity FROM sale_items WHERE invoice_id = ?', [id]);
+      // Reverse old stock (strips + loose as one pool, same as the original sale deduction)
+      const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
       for (const oi of oldItems) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [oi.quantity, oi.inventory_id]);
+        const oldStock = await db.get(
+          `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+          [oi.inventory_id]
+        );
+        if (!oldStock) continue;
+        const restored = applyStockDelta(
+          { quantity: oldStock.quantity, loose_quantity: oldStock.loose_quantity },
+          Number(oi.quantity), Number(oi.loose_qty || 0), oldStock.pack_size
+        );
+        await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, oi.inventory_id]);
       }
 
       // Delete old items
@@ -1229,11 +1271,18 @@ router.put('/:id', async (req, res) => {
       // Compute new totals
       let subtotal = 0;
       for (const item of items) {
-        const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0 } = item;
-        
-        // Stock Level & Expiry Verification
-        const currentStock = await db.get('SELECT quantity, expiry_date FROM inventory_master WHERE id = ?', [inventory_id]);
-        if (!currentStock || currentStock.quantity < Number(quantity)) {
+        const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, discount_per = 0 } = item;
+
+        // Stock Level & Expiry Verification (strips + loose counted as one pool)
+        const currentStock = await db.get(
+          `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+          [inventory_id]
+        );
+        const pSize = currentStock ? currentStock.pack_size : 10;
+        const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
+        const availableTotalUnits = currentStock ? (currentStock.quantity * pSize + currentStock.loose_quantity) : 0;
+        if (!currentStock || availableTotalUnits < soldTotalUnits) {
           throw new Error(`Insufficient stock for inventory item ID ${inventory_id}. Available: ${currentStock ? currentStock.quantity : 0}, Requested: ${quantity}`);
         }
 
@@ -1254,11 +1303,14 @@ router.put('/:id', async (req, res) => {
         }
 
         await db.run('INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)', [id, inventory_id, quantity, unit_price, loose_qty, discount_per]);
-        await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [quantity, inventory_id]);
-        
+        const newStock = applyStockDelta(
+          { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+          -Number(quantity), -Number(loose_qty), pSize
+        );
+        await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
+
         const q = Number(quantity);
         const l = Number(loose_qty);
-        const pSize = Number(pack_size || 10);
         const d = Number(discount_per);
         const uPrice = Number(unit_price);
         const dPrice = uPrice * (1 - d / 100);
@@ -1302,10 +1354,20 @@ router.delete('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Invoice not found' });
     }
 
-    // Reverse stock
-    const items = await db.all('SELECT inventory_id, quantity FROM sale_items WHERE invoice_id = ?', [id]);
+    // Reverse stock (strips + loose as one pool)
+    const items = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
     for (const item of items) {
-      await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [item.quantity, item.inventory_id]);
+      const stock = await db.get(
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [item.inventory_id]
+      );
+      if (!stock) continue;
+      const restored = applyStockDelta(
+        { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
+        Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size
+      );
+      await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.inventory_id]);
     }
 
     // Delete items then invoice
@@ -1335,7 +1397,17 @@ router.delete('/hold/:id', async (req, res) => {
         const items = JSON.parse(heldBill.cart_data);
         for (const item of items) {
           if (item.id && typeof item.id === 'number' && item.id < 1000000) {
-            await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [Number(item.qty || 0), item.id]);
+            const stock = await db.get(
+              `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+               FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+              [item.id]
+            );
+            if (!stock) continue;
+            const restored = applyStockDelta(
+              { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
+              Number(item.qty || 0), Number(item.looseQty || 0), stock.pack_size
+            );
+            await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.id]);
           }
         }
       } catch (e) { console.error('Failed to parse held bill cart_data:', e); }
@@ -1413,21 +1485,32 @@ router.post('/sync', async (req, res) => {
 
         for (const item of items) {
           const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
-          const currentStock = await db.get('SELECT quantity FROM inventory_master WHERE id = ?', [inventory_id]);
-          if (!currentStock || currentStock.quantity < Number(quantity)) {
-            const needed = Number(quantity) - (currentStock ? currentStock.quantity : 0);
-            if (currentStock) {
-              await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [needed, inventory_id]);
-            } else {
-              throw new Error(`Inventory item ID ${inventory_id} does not exist during direct sync.`);
-            }
+          const currentStock = await db.get(
+            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+            [inventory_id]
+          );
+          if (!currentStock) {
+            throw new Error(`Inventory item ID ${inventory_id} does not exist during direct sync.`);
+          }
+          const pSize = currentStock.pack_size;
+          const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
+          const availableTotalUnits = currentStock.quantity * pSize + currentStock.loose_quantity;
+          if (availableTotalUnits < soldTotalUnits) {
+            const neededStrips = Math.ceil((soldTotalUnits - availableTotalUnits) / pSize);
+            await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [neededStrips, inventory_id]);
+            currentStock.quantity += neededStrips;
           }
 
           await db.run(
             'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)',
             [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(discount_per)]
           );
-          await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [Number(quantity), inventory_id]);
+          const newStock = applyStockDelta(
+            { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+            -Number(quantity), -Number(loose_qty), pSize
+          );
+          await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
         }
         stagedCount++;
       } else {
@@ -1526,7 +1609,18 @@ router.post('/staged/:id/approve', async (req, res) => {
     // Save items & update stock
     for (const item of itemsToProcess) {
       const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
-      await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [Number(quantity), inventory_id]);
+      const currentStock = await db.get(
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [inventory_id]
+      );
+      if (currentStock) {
+        const newStock = applyStockDelta(
+          { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+          -Number(quantity), -Number(loose_qty), currentStock.pack_size
+        );
+        await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
+      }
       await db.run(
         'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)',
         [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(discount_per)]

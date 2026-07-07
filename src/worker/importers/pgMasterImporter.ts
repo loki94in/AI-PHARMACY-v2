@@ -10,6 +10,7 @@
 
 import { Database } from 'sqlite';
 import { normalizeDistributorName } from '../../utils/migrationValidation.js';
+import { parsePackSizeFromPackaging } from '../../utils/packaging.js';
 
 // In-memory lookup maps (legacy_id → new SQLite id)
 export const categoryMap = new Map<string, string>();       // legacy_id → category_name
@@ -325,13 +326,16 @@ export async function importMedicine(row: Record<string, string | null>, db: Dat
   if (row['is_loose'] === 't') metadata.is_loose = true;
   const metadataJson = Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 
+  const packaging = row['medicine_packaging'] || null;
+
   medicineBatch.push({
     name,
     legacy_id: legacyId,
     hsn_code: row['hsn_code'] || null,
     manufacturer: mfgName,
     category: catName || null,
-    packaging: row['medicine_packaging'] || null,
+    packaging,
+    pack_size: parsePackSizeFromPackaging(packaging),
     item_type: row['itemtype'] || null,
     cgst: parseFloat(row['cgst'] || '0') || 0,
     sgst: parseFloat(row['sgst'] || '0') || 0,
@@ -357,9 +361,9 @@ export async function flushMedicines(db: Database) {
     for (const m of medicineBatch) {
       try {
         const result = await db.run(
-          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, item_type, cgst, sgst, igst, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.item_type, m.cgst, m.sgst, m.igst, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
+          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, cgst, sgst, igst, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.cgst, m.sgst, m.igst, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
         );
         medicineMap.set(m.legacy_id, result.lastID!);
       } catch (err: any) {

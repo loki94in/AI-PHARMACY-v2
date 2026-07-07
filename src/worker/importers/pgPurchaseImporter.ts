@@ -13,11 +13,27 @@ import { formatInvoiceWithFY } from '../../utils/migrationValidation.js';
 export const batchMap = new Map<string, number>();     // legacy batch_id → new inventory_master.id
 export const purchaseMap = new Map<string, number>();   // legacy inventory_id → new purchases.id
 export const legacyBatchIdToNoMap = new Map<string, string>(); // legacy batch_id → batch_no
+export const stockViewMap = new Map<string, { quantity: number; loose: number }>(); // legacy batch_id → live stock from stock_view
 
 export function clearPurchaseMap() {
   batchMap.clear();
   purchaseMap.clear();
   legacyBatchIdToNoMap.clear();
+  stockViewMap.clear();
+}
+
+// ─── stock_view → authoritative per-batch live stock ────────
+// The legacy app's stock_view carries the real current strips (quantity) and
+// loose units (loose) per batch — including strip-opening conversions that
+// never appear in stock_effects. Captured here so the post-import rebuild can
+// use it as the source of truth instead of reconstructing from the ledger.
+export function importStockView(row: Record<string, string | null>) {
+  const legacyBatchId = row['batch_id'];
+  if (!legacyBatchId) return;
+  stockViewMap.set(legacyBatchId, {
+    quantity: parseInt(row['quantity'] || '0', 10) || 0,
+    loose: parseInt(row['loose'] || '0', 10) || 0,
+  });
 }
 
 // ─── Batch → inventory_master ───────────────────────────────
