@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
-import { api, apiClient, getCompactInventoryCache } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
@@ -889,6 +889,15 @@ const POS = () => {
   // Local autocomplete (replaces React Query useApiQuery to eliminate layout shift and latency)
   const isSearchLoading = false;
 
+  const [inventoryIndexReady, setInventoryIndexReady] = useState(() => isCompactInventoryCacheReady());
+
+  useEffect(() => {
+    if (inventoryIndexReady) return;
+    const handler = () => setInventoryIndexReady(true);
+    window.addEventListener('inventory-cache-ready', handler);
+    return () => window.removeEventListener('inventory-cache-ready', handler);
+  }, [inventoryIndexReady]);
+
   useEffect(() => {
     const term = searchTerm.trim();
     if (term.length < 2) {
@@ -1764,13 +1773,14 @@ const POS = () => {
             <div className="flex items-center gap-3">
               <div ref={productSearchRef} className="relative flex-1">
                 <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-muted">
-                  <Search size={18} />
+                  {inventoryIndexReady ? <Search size={18} /> : <Loader2 size={18} className="animate-spin" />}
                 </span>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   autoComplete="off"
-                  placeholder="Search medicine by name, composition, batch, or price..." 
-                  className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20"
+                  placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price..." : "Warming up search index..."}
+                  disabled={!inventoryIndexReady}
+                  className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait"
                   value={searchTerm}
                   onFocus={() => setShowSearchDropdown(true)}
                   onChange={e => {

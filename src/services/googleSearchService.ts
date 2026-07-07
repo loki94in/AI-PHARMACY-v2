@@ -63,9 +63,9 @@ class GoogleSearchService {
   public async checkDailyLimit(): Promise<boolean> {
     const db = await dbManager.getConnection();
     
-    // Default limit is 50 queries per day
+    // Default limit is 100 queries per day (user-configurable in Settings)
     const limitRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_search_daily_limit'");
-    const limit = limitRow ? parseInt(limitRow.value, 10) : 50;
+    const limit = limitRow ? parseInt(limitRow.value, 10) : 100;
 
     const countRow = await db.get(
       "SELECT COUNT(*) as count FROM google_search_logs WHERE created_at >= datetime('now', '-1 day')"

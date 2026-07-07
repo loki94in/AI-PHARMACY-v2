@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { dbManager } from '../database/connection.js';
-import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState } from '../worker/compositionEnricher.js';
+import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts } from '../worker/compositionEnricher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +46,48 @@ router.post('/enrichment/start', async (_req, res) => {
     res.json({ success: true, message: 'Enrichment started in background' });
   } catch (error) {
     console.error('Failed to start enrichment:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Backfill suggested_composition for pre-existing needs_review rows ───────
+// POST /api/enrichment/backfill-suggestions
+// Re-scores medicines already marked needs_review that predate the
+// suggested_composition column (or otherwise have it NULL), so they show a
+// suggestion the user can accept instead of an empty composition field.
+router.post('/enrichment/backfill-suggestions', async (_req, res) => {
+  try {
+    const result = await backfillSuggestedCompositions();
+    res.json({ success: true, updated: result.updated });
+  } catch (error) {
+    console.error('Failed to backfill suggested compositions:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Reclassify pre-existing cosmetic/surgical/ayurvedic/etc. rows ───────────
+// POST /api/enrichment/reclassify-non-pharma
+// One-time migration: moves rows already processed before isNonPharmaCategory
+// existed into 'non_pharma' status so they stop showing in the review queue.
+router.post('/enrichment/reclassify-non-pharma', async (_req, res) => {
+  try {
+    const result = await reclassifyNonPharmaProducts();
+    res.json({ success: true, updated: result.updated });
+  } catch (error) {
+    console.error('Failed to reclassify non-pharma products:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Reload reference from the already-saved CSV on disk ─────────────────────
+// POST /api/enrichment/reference/reload-from-disk
+// Useful when the CSV is already at data/reference_medicines.csv — avoids large HTTP upload.
+router.post('/enrichment/reference/reload-from-disk', async (_req, res) => {
+  try {
+    const result = await loadReferenceData({ force: true });
+    res.json({ success: true, loaded: result.loaded, skipped: result.skipped });
+  } catch (error) {
+    console.error('Failed to reload reference from disk:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -145,36 +187,29 @@ router.get('/enrichment/queue', async (req, res) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
-    const filter = (req.query.filter as string) || 'all'; // 'all', 'needs_review', 'unmatched'
+    const filter = (req.query.filter as string) || 'all'; // 'all', 'needs_review', 'unmatched', 'non_pharma'
     const offset = (page - 1) * limit;
 
     const db = await dbManager.getConnection();
+    await ensureEnrichmentColumns(db);
 
+    // 'all' intentionally excludes 'non_pharma' — those are auto-skipped
+    // cosmetic/surgical/ayurvedic/etc. items, not things needing review.
+    // filter=non_pharma is available for admin auditing of what got skipped.
     let whereClause = "WHERE enrichment_status IN ('needs_review', 'unmatched')";
     if (filter === 'needs_review') whereClause = "WHERE enrichment_status = 'needs_review'";
     if (filter === 'unmatched') whereClause = "WHERE enrichment_status = 'unmatched'";
+    if (filter === 'non_pharma') whereClause = "WHERE enrichment_status = 'non_pharma'";
 
     const countRow = await db.get(`SELECT COUNT(*) as total FROM medicines ${whereClause}`);
     const totalItems = countRow?.total || 0;
 
+    // suggested_composition is stored at enrichment time from the exact same
+    // reference row that produced enrichment_confidence — no N+1 lookup needed.
     const items = await db.all(
-      `SELECT id, name, manufacturer, api_reference, enrichment_status, enrichment_confidence FROM medicines ${whereClause} ORDER BY enrichment_confidence DESC LIMIT ? OFFSET ?`,
+      `SELECT id, name, manufacturer, api_reference, enrichment_status, enrichment_confidence, suggested_composition FROM medicines ${whereClause} ORDER BY enrichment_confidence DESC LIMIT ? OFFSET ?`,
       limit, offset
     );
-
-    // For needs_review items, find the suggested composition from reference
-    for (const item of items) {
-      if (item.enrichment_status === 'needs_review') {
-        const ref = await db.get(
-          `SELECT composition1, composition2, name as ref_name FROM medicine_reference WHERE name LIKE ? LIMIT 1`,
-          `%${item.name.split(' ')[0]}%`
-        );
-        if (ref) {
-          item.suggested_composition = [ref.composition1, ref.composition2].filter(Boolean).join(' + ');
-          item.ref_name = ref.ref_name;
-        }
-      }
-    }
 
     await dbManager.close();
 
@@ -201,6 +236,7 @@ router.put('/enrichment/queue/:id', async (req, res) => {
     }
 
     const db = await dbManager.getConnection();
+    await ensureEnrichmentColumns(db);
     await db.run(
       "UPDATE medicines SET api_reference = ?, enrichment_status = 'manual', enrichment_confidence = 1.0 WHERE id = ?",
       composition.trim(), id

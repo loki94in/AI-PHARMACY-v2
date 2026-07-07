@@ -34,6 +34,7 @@ import {
   Building2,
   Clock,
   Edit,
+  Menu,
 } from 'lucide-react';
 import { 
   ChevronLeft as ChevronLeftIcon, 
@@ -91,10 +92,14 @@ const Sidebar = ({
   stagedSalesCount = 0,
   stagedPurchasesCount = 0,
   onOpenReview,
+  mobileOpen = false,
+  onClose,
 }: {
   stagedSalesCount?: number;
   stagedPurchasesCount?: number;
   onOpenReview?: () => void;
+  mobileOpen?: boolean;
+  onClose?: () => void;
 }) => {
   const location = useLocation();
   const menuItems = [
@@ -121,7 +126,24 @@ const Sidebar = ({
   ];
 
   return (
-    <div className="w-64 bg-glass-bg border-r border-glass-border backdrop-blur-xl flex flex-col h-full">
+    <>
+      {/* Mobile/tablet backdrop — click to dismiss */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-[8999] lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={`
+          fixed inset-y-0 left-0 z-drawer w-72 max-w-[85vw]
+          lg:static lg:z-auto lg:w-64 lg:max-w-none
+          bg-glass-bg border-r border-glass-border backdrop-blur-xl flex flex-col h-full
+          transition-transform duration-300 ease-in-out
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
+        `}
+      >
       <div className="p-5 border-b border-glass-border flex flex-col gap-1 bg-white/[0.02] shrink-0">
         <div className="flex items-center gap-3 w-full relative">
           <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-sky/20 to-sky/5 border border-sky/30 shadow-[0_0_15px_rgba(14,165,233,0.2)] shrink-0 transition-all duration-300">
@@ -136,11 +158,18 @@ const Sidebar = ({
             </h1>
             <p className="text-[9px] text-muted tracking-widest uppercase font-bold mt-1.5 leading-none">OS Version 2.0</p>
           </div>
-          <div className="shrink-0 pl-2">
+          <div className="shrink-0 pl-2 flex items-center gap-2">
             <span className="relative flex h-2.5 w-2.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green"></span>
             </span>
+            <button
+              onClick={onClose}
+              aria-label="Close navigation menu"
+              className="lg:hidden p-1.5 -mr-1.5 rounded-lg text-muted hover:text-text hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X size={18} />
+            </button>
           </div>
         </div>
       </div>
@@ -208,6 +237,7 @@ const Sidebar = ({
                   const basePath = item.path.split('?')[0];
                   pageImports[basePath]?.();
                 }}
+                onClick={onClose}
                 className={`
                   flex items-center gap-3 px-5 py-2.5 mx-2 rounded-lg text-sm font-medium uppercase transition-all duration-200
                   ${isActive 
@@ -226,7 +256,8 @@ const Sidebar = ({
         </nav>
       </div>
 
-    </div>
+      </div>
+    </>
   );
 };
 
@@ -527,6 +558,7 @@ const Topbar = ({
   onMarkRead,
   onOpenStagedReview,
   onOpenConnectModal,
+  onMenuClick,
 }: {
   theme: string;
   setTheme: React.Dispatch<React.SetStateAction<string>>;
@@ -538,6 +570,7 @@ const Topbar = ({
   onMarkRead: (id: number) => void;
   onOpenStagedReview: () => void;
   onOpenConnectModal: () => void;
+  onMenuClick?: () => void;
 }) => {
   const location = useLocation();
   const [showPanel, setShowPanel] = useState(false);
@@ -686,9 +719,16 @@ const Topbar = ({
     <>
       <FlashToast toast={flashToast} onDismiss={() => setFlashToast(null)} onOpenReview={onOpenStagedReview} />
       
-      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-6 relative z-30 shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-bold uppercase tracking-wider text-text/90">
+      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 relative z-30 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onMenuClick}
+            aria-label="Open navigation menu"
+            className="lg:hidden shrink-0 p-1.5 -ml-1 rounded-lg text-muted hover:text-text hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="text-sm font-bold uppercase tracking-wider text-text/90 truncate">
             {location.pathname === '/' ? 'POS' : location.pathname.substring(1).replace('-', ' ')}
           </span>
           {catalogJob && (
@@ -1161,6 +1201,11 @@ export const Layout = ({
   const [pendingStagedPurchasesCount, setPendingStagedPurchasesCount] = useState(0);
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [showLiveCartAdd, setShowLiveCartAdd] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   const [refills, setRefills] = useState<any[]>([]);
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
@@ -1386,10 +1431,12 @@ export const Layout = ({
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-text selection:bg-primary/30">
-      <Sidebar 
+      <Sidebar
         stagedSalesCount={pendingStagedSalesCount}
         stagedPurchasesCount={pendingStagedPurchasesCount}
         onOpenReview={() => setShowStagedReview(true)}
+        mobileOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Topbar
@@ -1403,6 +1450,7 @@ export const Layout = ({
           onMarkRead={handleMarkRead}
           onOpenStagedReview={() => setShowStagedReview(true)}
           onOpenConnectModal={() => setShowConnectModal(true)}
+          onMenuClick={() => setMobileNavOpen(true)}
         />
         <div className="flex-1 flex flex-row overflow-hidden relative z-10">
           <main className={`flex-1 flex flex-col ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative z-10 transition-all duration-200`}>

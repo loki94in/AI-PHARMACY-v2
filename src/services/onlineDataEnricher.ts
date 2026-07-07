@@ -1,9 +1,11 @@
 import { checkConnectivity } from '../utils/networkDetector.js';
 import { dbManager } from '../database/connection.js';
 import { OpenFdaClient } from './apiClients/openFdaClient.js';
+import { RxNormClient } from './apiClients/rxNormClient.js';
 import { BaseApiClient } from './apiClients/baseApiClient.js';
 import { cacheService } from './cacheService.js';
 import { mergeOcrAndEnrichedData, MergedMedicineResult } from './dataMerger.js';
+import { withRetry } from '../utils/retry.js';
 
 export class OnlineDataEnricher {
   private apiClients: BaseApiClient[] = [];
@@ -11,6 +13,7 @@ export class OnlineDataEnricher {
 
   constructor() {
     this.apiClients.push(new OpenFdaClient());
+    this.apiClients.push(new RxNormClient());
   }
 
   async enrichMedicineData(ocrResult: any): Promise<MergedMedicineResult> {
@@ -41,7 +44,10 @@ export class OnlineDataEnricher {
     console.log(`[Enricher] System is online. Fetching data for ${medicineName} from APIs...`);
     for (const client of this.apiClients) {
       try {
-        const enrichedData = await client.queryMedicine(medicineName);
+        const enrichedData = await withRetry(
+          () => client.queryMedicine(medicineName),
+          { label: `Enricher/${client.name}` }
+        );
         if (enrichedData) {
           // Store in cache for future offline queries
           await cacheService.set(medicineName, enrichedData);
@@ -78,7 +84,10 @@ export class OnlineDataEnricher {
       // 3. Query APIs
       for (const client of this.apiClients) {
         try {
-          const enrichedData = await client.queryMedicine(cleanName);
+          const enrichedData = await withRetry(
+            () => client.queryMedicine(cleanName),
+            { label: `Enricher/Background/${client.name}` }
+          );
           if (enrichedData) {
             // Store in cache for future queries
             await cacheService.set(cleanName, enrichedData);
@@ -115,7 +124,10 @@ export class OnlineDataEnricher {
       try {
         console.log(`[Enricher] [Background] APIs returned no results for ${cleanName}. Trying Google search discovery fallback...`);
         const { googleSearchService } = await import('./googleSearchService.js');
-        const googleResult = await googleSearchService.discoverMedicineInfo(cleanName);
+        const googleResult = await withRetry(
+          () => googleSearchService.discoverMedicineInfo(cleanName),
+          { label: 'Enricher/Background/GoogleSearch' }
+        );
         if (googleResult && googleResult.api_reference && googleResult.api_reference.trim() !== '') {
           const composition = googleResult.api_reference.trim();
           const db = await dbManager.getConnection();

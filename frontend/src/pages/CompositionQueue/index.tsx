@@ -8,6 +8,7 @@ interface EnrichmentStatus {
   enriched: number;
   needsReview: number;
   unmatched: number;
+  nonPharma: number;
   pending: number;
   isRunning: boolean;
 }
@@ -48,6 +49,8 @@ export default function CompositionQueue() {
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState<Record<number, boolean>>({});
   const [importing, setImporting] = useState(false);
@@ -60,8 +63,10 @@ export default function CompositionQueue() {
       const data = await api.getEnrichmentStatus();
       cachedStatus = data;
       setStatus(data);
+      setStatusError(null);
     } catch (err) {
       console.error('Failed to load enrichment status:', err);
+      setStatusError('Failed to load enrichment status.');
     }
   }, []);
 
@@ -73,8 +78,10 @@ export default function CompositionQueue() {
       cachedQueue = data.data || [];
       setTotalPages(data.totalPages || 1);
       setTotalItems(data.totalItems || 0);
+      setQueueError(null);
     } catch (err) {
       console.error('Failed to load queue:', err);
+      setQueueError('Failed to load queue data. Check your connection and retry.');
     } finally {
       setLoading(false);
     }
@@ -199,6 +206,11 @@ export default function CompositionQueue() {
             <div>
               <h2 className="text-lg font-bold text-text">Composition Enrichment</h2>
               <p className="text-xs text-muted">Auto-fills at ≥85% match · 60–85% needs review · below is unmatched. Verified compositions power same-salt substitutes in billing.</p>
+              {statusError && (
+                <p className="text-xs text-amber-400 mt-0.5 flex items-center gap-1">
+                  <AlertTriangle size={11} />{statusError}
+                </p>
+              )}
             </div>
           </div>
 
@@ -276,7 +288,7 @@ export default function CompositionQueue() {
 
         {/* Stats Row */}
         {status && (
-          <div className="grid grid-cols-4 gap-3 mt-4">
+          <div className="grid grid-cols-5 gap-3 mt-4">
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
               <div className="text-lg font-bold text-emerald-400">{status.enriched.toLocaleString()}</div>
               <div className="text-[10px] text-muted uppercase tracking-wider">Matched</div>
@@ -288,6 +300,10 @@ export default function CompositionQueue() {
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
               <div className="text-lg font-bold text-red-400">{status.unmatched.toLocaleString()}</div>
               <div className="text-[10px] text-muted uppercase tracking-wider">Unmatched</div>
+            </div>
+            <div className="bg-bg3/50 rounded-lg p-3 text-center">
+              <div className="text-lg font-bold text-slate-400">{status.nonPharma.toLocaleString()}</div>
+              <div className="text-[10px] text-muted uppercase tracking-wider">Non-Pharma</div>
             </div>
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
               <div className="text-lg font-bold text-sky-400">{status.pending.toLocaleString()}</div>
@@ -339,6 +355,20 @@ export default function CompositionQueue() {
               {loading ? (
                 <tr><td colSpan={6} className="p-8 text-center text-muted">
                   <Loader2 size={20} className="animate-spin inline mr-2" /> Loading...
+                </td></tr>
+              ) : queueError ? (
+                <tr><td colSpan={6} className="p-8 text-center">
+                  <div className="inline-flex flex-col items-center gap-2 bg-red-500/10 text-red-400 px-6 py-4 rounded-xl border border-red-500/20">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <XCircle size={18} />{queueError}
+                    </div>
+                    <button
+                      onClick={loadQueue}
+                      className="px-3 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-medium transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
                 </td></tr>
               ) : queue.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-muted">

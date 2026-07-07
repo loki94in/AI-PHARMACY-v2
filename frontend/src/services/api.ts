@@ -119,8 +119,13 @@ export const getCompactInventoryCache = (): any[] => {
   return [];
 };
 
+export const isCompactInventoryCacheReady = (): boolean => compactInventoryCache !== null;
+
 export const setCompactInventoryCache = (data: any[]) => {
   compactInventoryCache = data;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('inventory-cache-ready'));
+  }
 };
 
 // API methods mapping

@@ -24,21 +24,21 @@
    Green accents · Purple notification borders
    ═══════════════════════════════════════════ */
 :root.light, html.light, body.light, .light {
-  /* Backgrounds — pure white palette */
-  --bg:         #ffffff;          /* pure white base */
-  --bg2:        #f9fafb;          /* near-white for cards/surfaces */
-  --bg3:        #f3f4f6;          /* light grey for nested panels */
+  /* Backgrounds — pharmacy green tinted palette */
+  --bg:         #f0fdf4;          /* pale mint base */
+  --bg2:        #ffffff;          /* white for card/surface contrast */
+  --bg3:        #dcfce7;          /* light green for nested panels */
 
   /* Borders & lines */
-  --border:     rgba(34, 197, 94, 0.3);   /* fresh green border */
+  --border:     #bbf7d0;          /* fresh green border */
 
   /* Typography */
-  --text:       #111827;          /* near-black — maximum readability */
-  --muted:      #6b7280;          /* medium grey for secondary text */
+  --text:       #14532d;          /* deep green — maximum readability, brand-aligned */
+  --muted:      #5b7a68;          /* desaturated green-grey for secondary text */
 
-  /* Glass panels — pure white frosted */
+  /* Glass panels — white frosted */
   --glass-bg:   rgba(255, 255, 255, 0.97);
-  --glass-border: rgba(34, 197, 94, 0.2); /* soft green glass border */
+  --glass-border: rgba(34, 197, 94, 0.25); /* soft green glass border */
 
   /* Notification / Toast borders — soft purple */
   --notif-border: rgba(167, 139, 250, 0.55);

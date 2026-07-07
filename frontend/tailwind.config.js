@@ -14,8 +14,12 @@ export default {
         text: 'var(--text)',
         muted: 'var(--muted)',
         primary: {
-          DEFAULT: '#3b82f6',
-          glow: 'rgba(59, 130, 246, 0.4)',
+          DEFAULT: '#22c55e',
+          glow: 'rgba(34, 197, 94, 0.4)',
+        },
+        accent: {
+          DEFAULT: '#0ea5e9',
+          glow: 'rgba(14, 165, 233, 0.4)',
         },
         sky: {
           DEFAULT: '#0ea5e9',

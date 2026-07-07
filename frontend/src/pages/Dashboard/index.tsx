@@ -31,7 +31,26 @@ const Dashboard = () => {
   };
 
   if (loading) {
-    return <div className="animate-pulse flex space-x-4">Loading dashboard...</div>;
+    return (
+      <div className="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading dashboard">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-8">
+          <div className="space-y-2">
+            <div className="h-8 w-64 bg-bg3 rounded-lg" />
+            <div className="h-4 w-48 bg-bg3 rounded" />
+          </div>
+          <div className="h-9 w-40 bg-bg3 rounded-full" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="glass-panel p-6 space-y-3">
+              <div className="h-3 w-24 bg-bg3 rounded" />
+              <div className="h-8 w-32 bg-bg3 rounded" />
+              <div className="h-3 w-20 bg-bg3 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (error) {
@@ -41,18 +60,18 @@ const Dashboard = () => {
   return (
     <div className="space-y-6 fade-in">
       {/* Header */}
-      <div className="flex justify-between items-end mb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-8">
         <div>
-          <h2 className="text-3xl font-extrabold tracking-tight mb-1">Welcome back, Admin 👋</h2>
-          <p className="text-muted">Here's what's happening at your pharmacy today.</p>
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-1">Welcome back, Admin</h2>
+          <p className="text-muted text-sm sm:text-base">Here's what's happening at your pharmacy today.</p>
         </div>
-        <div className="text-sm font-semibold text-sky bg-sky-bg px-4 py-2 rounded-full border border-sky/20">
+        <div className="text-sm font-semibold text-sky bg-sky-bg px-4 py-2 rounded-full border border-sky/20 self-start sm:self-auto">
           Today: {dateStr}
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
         {/* Sales Card */}
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[radial-gradient(circle,rgba(16,185,129,0.15)_0%,transparent_70%)] translate-x-8 -translate-y-8" />
@@ -136,7 +155,8 @@ const Dashboard = () => {
                 </div>
                 <button
                   onClick={() => handleDismissAlert(alert.id)}
-                  className="px-3 py-1 bg-white/5 hover:bg-white/10 text-muted hover:text-text text-[10px] font-bold border border-glass-border rounded-lg transition-all"
+                  aria-label={`Dismiss alert: ${alert.description}`}
+                  className="px-3 py-2 min-h-9 bg-white/5 hover:bg-white/10 text-muted hover:text-text text-[10px] font-bold border border-glass-border rounded-lg transition-all cursor-pointer"
                 >
                   Dismiss
                 </button>

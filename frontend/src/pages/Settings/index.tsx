@@ -44,6 +44,7 @@ interface SettingsData {
   gmailPass: string;
   googleClientId: string;
   googleClientSecret: string;
+  googleSearchDailyLimit: number;
   gmailAuthMethod: string;
   emailAutodeleteEnabled: boolean;
   emailAutodeleteLimit: number;
@@ -93,6 +94,7 @@ const Settings = () => {
     gmailPass: '',
     googleClientId: '',
     googleClientSecret: '',
+    googleSearchDailyLimit: 100,
     gmailAuthMethod: 'password',
     emailAutodeleteEnabled: true,
     emailAutodeleteLimit: 10,
@@ -167,6 +169,7 @@ const Settings = () => {
   const setGmailPass = (val: string | ((p: string) => string)) => updateSetting('gmailPass', val);
   const setGoogleClientId = (val: string | ((p: string) => string)) => updateSetting('googleClientId', val);
   const setGoogleClientSecret = (val: string | ((p: string) => string)) => updateSetting('googleClientSecret', val);
+  const setGoogleSearchDailyLimit = (val: number | ((p: number) => number)) => updateSetting('googleSearchDailyLimit', val);
   const setGmailAuthMethod = (val: string | ((p: string) => string)) => updateSetting('gmailAuthMethod', val);
   const setEmailAutodeleteEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAutodeleteEnabled', val);
   const setEmailAutodeleteLimit = (val: number | ((p: number) => number)) => updateSetting('emailAutodeleteLimit', val);
@@ -214,6 +217,7 @@ const Settings = () => {
     gmailPass,
     googleClientId,
     googleClientSecret,
+    googleSearchDailyLimit,
     gmailAuthMethod,
     emailAutodeleteEnabled,
     emailAutodeleteLimit,
@@ -292,6 +296,7 @@ const Settings = () => {
         gmailPass: serverSettings.gmail_pass || '',
         googleClientId: serverSettings.google_client_id || '',
         googleClientSecret: serverSettings.google_client_secret || '',
+        googleSearchDailyLimit: Number(serverSettings.google_search_daily_limit) || 100,
         gmailAuthMethod: serverSettings.gmail_auth_method || 'password',
         emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
         emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
@@ -369,6 +374,7 @@ const Settings = () => {
       gmail_pass: gmailPass,
       google_client_id: googleClientId,
       google_client_secret: googleClientSecret,
+      google_search_daily_limit: googleSearchDailyLimit.toString(),
       gmail_auth_method: gmailAuthMethod,
       email_autodelete_enabled: emailAutodeleteEnabled.toString(),
       email_autodelete_limit: emailAutodeleteLimit.toString(),
@@ -893,6 +899,21 @@ const Settings = () => {
               placeholder="10"
               value={lowStockThreshold}
               onChange={(e) => setLowStockThreshold(Number(e.target.value))}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="googleSearchDailyLimit" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Google Search Daily Limit
+            </label>
+            <input
+              id="googleSearchDailyLimit"
+              type="number"
+              min={0}
+              className="premium-input w-full"
+              placeholder="100"
+              value={googleSearchDailyLimit}
+              onChange={(e) => setGoogleSearchDailyLimit(Number(e.target.value))}
             />
           </div>
 
