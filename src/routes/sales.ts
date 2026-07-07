@@ -171,9 +171,17 @@ router.post('/', async (req, res) => {
 
     // Insert invoice
     const invoiceDateValue = sale_date ? new Date(sale_date).toISOString() : new Date().toISOString();
+    let resolvedDoctorId = doctor_id || null;
+    if (!resolvedDoctorId && doctor_name) {
+      const docRow = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?) LIMIT 1', [doctor_name.trim()]);
+      if (docRow) {
+        resolvedDoctorId = docRow.id;
+      }
+    }
+
     const result = await db.run(
       'INSERT INTO sales_invoices (invoice_no, customer_id, total_amount, tax_amount, payment_medium, payment_status, date, discount, subtotal, doctor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_no, customerId, total, tax, paymentMedium, paymentStatus, invoiceDateValue, Number(discount), subtotal, doctor_id || null]
+      [invoice_no, customerId, total, tax, paymentMedium, paymentStatus, invoiceDateValue, Number(discount), subtotal, resolvedDoctorId]
     );
     const invoiceId = result.lastID;
     if (!invoiceId) {

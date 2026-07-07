@@ -197,25 +197,63 @@ router.post('/doctors/send-daily-reports', async (req, res) => {
 // Get suggestions for a doctor
 router.get('/doctors/:id/suggestions', async (req, res) => {
   const doctorId = req.params.id;
+  const limit = parseInt(req.query.limit as string, 10) || 25;
   try {
     const db = await dbManager.getConnection();
-    // Fetch top 10 most frequently prescribed medicines by this doctor
+    // Fetch top most frequently prescribed medicines by this doctor, including last qty
     const suggestions = await db.all(
-      `SELECT m.id as medicine_id, m.name as medicine_name, m.mrp, COUNT(*) as frequency
+      `SELECT m.id, m.name, COUNT(*) as frequency,
+        (SELECT si.quantity FROM sale_items si
+         JOIN inventory_master im2 ON si.inventory_id = im2.id
+         WHERE im2.medicine_id = m.id
+           AND si.invoice_id IN (SELECT id FROM sales_invoices WHERE doctor_id = ?)
+         ORDER BY si.id DESC LIMIT 1) as last_qty
        FROM sale_items si
        JOIN sales_invoices s ON si.invoice_id = s.id
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
        WHERE s.doctor_id = ?
-       GROUP BY m.id
-       ORDER BY frequency DESC
-       LIMIT 10`,
-      [doctorId]
+       GROUP BY m.id ORDER BY frequency DESC LIMIT ?`,
+      [doctorId, doctorId, limit]
     );
-        res.json(suggestions);
-  } catch (error) {
+    await dbManager.close();
+    res.json(suggestions);
+  } catch (error: any) {
+    await dbManager.close();
     console.error('Failed to fetch doctor suggestions:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
+  }
+});
+
+// Get medicine combinations for a doctor and a specific medicine
+router.get('/doctors/:id/combinations/:medicineId', async (req, res) => {
+  const doctorId = req.params.id;
+  const medicineId = req.params.medicineId;
+  try {
+    const db = await dbManager.getConnection();
+    const combinations = await db.all(
+      `SELECT m.id, m.name, COUNT(*) as co_count,
+        (SELECT si2.quantity FROM sale_items si2
+         JOIN inventory_master im3 ON si2.inventory_id = im3.id
+         WHERE im3.medicine_id = m.id
+           AND si2.invoice_id IN (SELECT s2.id FROM sales_invoices s2 WHERE s2.doctor_id = ?)
+         ORDER BY si2.id DESC LIMIT 1) as last_qty
+       FROM sale_items a
+       JOIN sale_items b ON a.invoice_id = b.invoice_id AND a.inventory_id != b.inventory_id
+       JOIN sales_invoices s ON s.id = a.invoice_id
+       JOIN inventory_master im ON im.id = b.inventory_id
+       JOIN medicines m ON m.id = im.medicine_id
+       JOIN inventory_master im_a ON im_a.id = a.inventory_id
+       WHERE s.doctor_id = ? AND im_a.medicine_id = ?
+       GROUP BY m.id ORDER BY co_count DESC LIMIT 10`,
+      [doctorId, doctorId, medicineId]
+    );
+    await dbManager.close();
+    res.json(combinations);
+  } catch (error: any) {
+    await dbManager.close();
+    console.error('Failed to fetch doctor combinations:', error);
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 

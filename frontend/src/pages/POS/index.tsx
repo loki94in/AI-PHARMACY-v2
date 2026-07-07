@@ -263,6 +263,9 @@ const POS = () => {
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
   const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
   const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(initialActiveTab.selectedDoctorId || null);
+  const [doctorSuggestions, setDoctorSuggestions] = useState<any[]>([]);
+  const [doctorComboSuggestions, setDoctorComboSuggestions] = useState<any[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   
   // Doctor Modal state
@@ -355,7 +358,8 @@ const POS = () => {
         t.isManualDoctor !== isManualDoctor ||
         t.discount !== discount ||
         t.sendWhatsApp !== sendWhatsApp ||
-        t.paymentMedium !== paymentMedium
+        t.paymentMedium !== paymentMedium ||
+        t.selectedDoctorId !== selectedDoctorId
       ) {
         const next = [...prev];
         next[idx] = {
@@ -369,13 +373,14 @@ const POS = () => {
           isManualDoctor,
           discount,
           sendWhatsApp,
-          paymentMedium
+          paymentMedium,
+          selectedDoctorId
         };
         return next;
       }
       return prev;
     });
-  }, [cart, patientName, patientPhone, refillEnabled, refillDays, doctor, isManualDoctor, discount, sendWhatsApp, paymentMedium, activeTabId]);
+  }, [cart, patientName, patientPhone, refillEnabled, refillDays, doctor, isManualDoctor, discount, sendWhatsApp, paymentMedium, selectedDoctorId, activeTabId]);
 
   // Save tabs and activeTabId to localStorage whenever they change
   useEffect(() => {
@@ -467,6 +472,9 @@ const POS = () => {
       setRefillDays(target.refillDays || 30);
       setDoctor(target.doctor || '');
       setIsManualDoctor(target.isManualDoctor || false);
+      setSelectedDoctorId(target.selectedDoctorId || null);
+      setDoctorSuggestions([]);
+      setDoctorComboSuggestions([]);
       setDiscount(target.discount || 0);
       setSendWhatsApp(target.sendWhatsApp || false);
       setPaymentMedium(target.paymentMedium || 'CASH');
@@ -489,7 +497,8 @@ const POS = () => {
       isManualDoctor: false,
       discount: 0,
       sendWhatsApp: false,
-      paymentMedium: 'CASH'
+      paymentMedium: 'CASH',
+      selectedDoctorId: null
     };
 
     setCart([]);
@@ -499,6 +508,9 @@ const POS = () => {
     setRefillDays(30);
     setDoctor('');
     setIsManualDoctor(false);
+    setSelectedDoctorId(null);
+    setDoctorSuggestions([]);
+    setDoctorComboSuggestions([]);
     setDiscount(0);
     setSendWhatsApp(false);
     setPaymentMedium('CASH');
@@ -520,6 +532,9 @@ const POS = () => {
       setRefillDays(fallback.refillDays || 30);
       setDoctor(fallback.doctor || '');
       setIsManualDoctor(fallback.isManualDoctor || false);
+      setSelectedDoctorId(fallback.selectedDoctorId || null);
+      setDoctorSuggestions([]);
+      setDoctorComboSuggestions([]);
       setDiscount(fallback.discount || 0);
       setSendWhatsApp(fallback.sendWhatsApp || false);
       setPaymentMedium(fallback.paymentMedium || 'CASH');
@@ -554,6 +569,58 @@ const POS = () => {
     'crm-doctors',
     () => api.getDoctors()
   );
+
+  const defaultDoctors = useMemo(() => [
+    { id: 901, name: 'Dr. Priya Mehta (Cardiologist)' },
+    { id: 902, name: 'Dr. Raj Sharma (GP)' },
+    { id: 903, name: 'Dr. Anita Patel (Pediatrician)' }
+  ], []);
+
+  const allDoctors = useMemo(() => [
+    ...defaultDoctors,
+    ...doctorsList.filter(d => !defaultDoctors.some(dd => dd.name === d.name))
+  ], [doctorsList, defaultDoctors]);
+
+  const filteredDoctors = useMemo(() => allDoctors.filter(doc => 
+    doc.name.toLowerCase().includes(doctor.toLowerCase())
+  ), [allDoctors, doctor]);
+
+  // Handle auto-resolving doctor ID from typed or selected name
+  useEffect(() => {
+    if (doctor.trim() === '') {
+      setSelectedDoctorId(null);
+      setDoctorSuggestions([]);
+      setDoctorComboSuggestions([]);
+      return;
+    }
+    const match = allDoctors.find(d => d.name.toLowerCase().trim() === doctor.toLowerCase().trim());
+    if (match) {
+      setSelectedDoctorId(match.id);
+    } else {
+      setSelectedDoctorId(null);
+      setDoctorSuggestions([]);
+      setDoctorComboSuggestions([]);
+    }
+  }, [doctor, allDoctors]);
+
+  // Load doctor suggestions when doctor ID changes
+  useEffect(() => {
+    if (selectedDoctorId) {
+      api.getDoctorSuggestions(selectedDoctorId)
+        .then((data: any[]) => {
+          if (Array.isArray(data)) {
+            setDoctorSuggestions(data);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch doctor suggestions:', err);
+          setDoctorSuggestions([]);
+        });
+    } else {
+      setDoctorSuggestions([]);
+    }
+  }, [selectedDoctorId]);
+
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
@@ -906,7 +973,12 @@ const POS = () => {
 
     updateCart(prevCart => {
       const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
-      const incQty = med.recommendedQty !== undefined ? med.recommendedQty : 1;
+      let incQty = 1;
+      if (med.recommendedQty !== undefined) {
+        incQty = med.recommendedQty;
+      } else if (med.last_qty !== undefined && med.last_qty !== null) {
+        incQty = Number(med.last_qty) || 1;
+      }
       const incLooseQty = med.recommendedLooseQty || 0;
       if (existingIndex !== -1) {
         return cleanPrev.map((item, idx) => 
@@ -935,6 +1007,21 @@ const POS = () => {
       }];
     });
 
+    // Fetch doctor combination recommendations
+    const medId = med.medicine_id || med.id;
+    if (selectedDoctorId && medId) {
+      api.getDoctorCombinations(selectedDoctorId, medId)
+        .then((data: any[]) => {
+          if (Array.isArray(data)) {
+            setDoctorComboSuggestions(data);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch doctor combinations:', err);
+          setDoctorComboSuggestions([]);
+        });
+    }
+
     setTimeout(() => {
       const qtyInput = document.getElementById(`row-qty-input-${targetIndex}`);
       if (qtyInput) {
@@ -942,6 +1029,46 @@ const POS = () => {
         (qtyInput as HTMLInputElement).select();
       }
     }, 120);
+  };
+
+  const addMedicineById = async (medicineId: number, lastQty?: number) => {
+    const compactInventory = getCompactInventoryCache();
+    const batches = compactInventory.filter(item => item.medicine_id === medicineId);
+    if (batches.length > 0) {
+      const grouped = groupBatches(batches.map(item => ({
+        ...item,
+        medicine_name: item.name,
+        quantity: item.stock_qty,
+        alternatives: []
+      })));
+      if (grouped.length > 0) {
+        const item = {
+          ...grouped[0],
+          recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1
+        };
+        fetchDetailsAndAddToCart(item);
+        return;
+      }
+    }
+
+    try {
+      const details = await api.getMedicineQuickDetails(medicineId);
+      addToCart({
+        id: Date.now(),
+        medicine_id: medicineId,
+        name: details.name,
+        batch: 'B-GEN',
+        expiry: '12/28',
+        mrp: details.mrp || 0,
+        costPrice: details.mrp ? details.mrp * 0.7 : 0,
+        salts: details.api_reference || 'Generic',
+        packSize: 10,
+        quantity: 0,
+        recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1
+      });
+    } catch (err) {
+      console.error('Failed to add medicine by ID:', err);
+    }
   };
 
   const fetchDetailsAndAddToCart = async (item: any) => {
@@ -958,7 +1085,8 @@ const POS = () => {
         salts: details.api_reference || details.hsn_code || 'Generic',
         packSize: item.pack_size || 10,
         quantity: item.quantity,
-        alternatives: details.alternatives
+        alternatives: details.alternatives,
+        recommendedQty: item.recommendedQty
       });
     } catch (error) {
       console.warn('Failed to load quick details, adding with fallback values:', error);
@@ -972,7 +1100,8 @@ const POS = () => {
         costPrice: item.cost_price,
         salts: item.salts || item.hsn_code || 'Generic',
         packSize: item.pack_size || 10,
-        quantity: item.quantity
+        quantity: item.quantity,
+        recommendedQty: item.recommendedQty
       });
     }
   };
@@ -1337,6 +1466,9 @@ const POS = () => {
       setPatientName('');
       setPatientPhone('');
       setDoctor('');
+      setSelectedDoctorId(null);
+      setDoctorSuggestions([]);
+      setDoctorComboSuggestions([]);
       setDiscount(0);
       setPaymentMedium('CASH');
       setActiveRefillId(null);
@@ -1352,7 +1484,8 @@ const POS = () => {
             doctor: '',
             discount: 0,
             sendWhatsApp: false,
-            paymentMedium: 'CASH'
+            paymentMedium: 'CASH',
+            selectedDoctorId: null
           };
         }
         return t;
@@ -1367,7 +1500,7 @@ const POS = () => {
     try {
       if (!newDoctorName) return;
       const docName = newDoctorSpecialty ? `Dr. ${newDoctorName} (${newDoctorSpecialty})` : `Dr. ${newDoctorName}`;
-      await api.addDoctor({
+      const res = await api.addDoctor({
         name: docName,
         specialization: newDoctorSpecialty || 'General',
         phone: newDoctorPhone,
@@ -1377,6 +1510,9 @@ const POS = () => {
       // Refresh doctors list
       queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
       setDoctor(docName);
+      if (res && res.id) {
+        setSelectedDoctorId(res.id);
+      }
       setShowDoctorModal(false);
       setNewDoctorName('');
       setNewDoctorSpecialty('');
@@ -1389,20 +1525,7 @@ const POS = () => {
     }
   };
 
-  const defaultDoctors = [
-    { id: 901, name: 'Dr. Priya Mehta (Cardiologist)' },
-    { id: 902, name: 'Dr. Raj Sharma (GP)' },
-    { id: 903, name: 'Dr. Anita Patel (Pediatrician)' }
-  ];
-
-  const allDoctors = [
-    ...defaultDoctors,
-    ...doctorsList.filter(d => !defaultDoctors.some(dd => dd.name === d.name))
-  ];
-
-  const filteredDoctors = allDoctors.filter(doc => 
-    doc.name.toLowerCase().includes(doctor.toLowerCase())
-  );
+  // Doctors are defined at the top using useMemo
 
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden pb-2 bg-bg text-text">
@@ -1565,7 +1688,9 @@ const POS = () => {
                         setDoctorHighlightIndex(i => Math.max(i - 1, 0));
                       } else if ((e.key === 'Enter' || e.key === 'Tab') && doctorHighlightIndex >= 0) {
                         e.preventDefault();
-                        setDoctor(filteredDoctors[doctorHighlightIndex].name);
+                        const sel = filteredDoctors[doctorHighlightIndex];
+                        setDoctor(sel.name);
+                        setSelectedDoctorId(sel.id);
                         setIsDoctorDropdownOpen(false);
                         setDoctorHighlightIndex(-1);
                       } else if (e.key === 'Escape') {
@@ -1590,6 +1715,7 @@ const POS = () => {
                             type="button"
                             onMouseDown={() => {
                               setDoctor(doc.name);
+                              setSelectedDoctorId(doc.id);
                               setIsDoctorDropdownOpen(false);
                               setDoctorHighlightIndex(-1);
                             }}
@@ -1951,32 +2077,83 @@ const POS = () => {
               </button>
             </div>
 
-            {/* Quick Add Combinations */}
-            {commonCombinations.length > 0 && (
-              <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
-                  ⚡ Quick Add (Frequently Sold):
+            {/* Doctor Combination Suggestions */}
+            {doctorComboSuggestions.length > 0 && (
+              <div className="flex items-center gap-2 bg-bg2/30 border border-border/20 px-3 py-2 rounded-xl">
+                <span className="text-[10px] font-bold text-muted uppercase tracking-wider select-none">
+                  🤝 Together with:
                 </span>
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-                  {commonCombinations.map(med => (
+                <div className="flex gap-2 overflow-x-auto scrollbar-thin">
+                  {doctorComboSuggestions.map(med => (
                     <button
                       key={med.id}
-                      onClick={() => addToCart(med)}
-                      className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
+                      onClick={() => addMedicineById(med.id, med.last_qty)}
+                      className="flex items-center gap-1.5 bg-bg border border-border hover:border-primary/50 hover:bg-primary/5 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap"
                     >
-                      <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
+                      <span className="text-[11px] font-semibold text-text group-hover:text-primary transition-all">
                         {med.name}
-                        {med.recommendationMsg && (
-                          <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
-                            ({med.recommendedQty > 0 ? `${med.recommendedQty} Str` : `${med.recommendedLooseQty} Tab`})
-                          </span>
-                        )}
+                        <span className="text-[9px] text-sky ml-1 font-mono font-bold">
+                          (x{med.co_count}{med.last_qty ? `, Last: ${med.last_qty}` : ''})
+                        </span>
                       </span>
                       <span className="text-[10px] text-primary font-bold">+</span>
                     </button>
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* Quick Add / Doctor Suggestions */}
+            {doctorSuggestions.length > 0 ? (
+              <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5">
+                <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
+                  ⚡ {doctor}'s Prescriptions:
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                  {doctorSuggestions.map(med => (
+                    <button
+                      key={med.id}
+                      onClick={() => addMedicineById(med.id, med.last_qty)}
+                      className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
+                    >
+                      <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
+                        {med.name}
+                        <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
+                          (x{med.frequency}{med.last_qty ? `, Last: ${med.last_qty}` : ''})
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-primary font-bold">+</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              commonCombinations.length > 0 && (
+                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
+                    ⚡ Quick Add (Frequently Sold):
+                  </span>
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                    {commonCombinations.map(med => (
+                      <button
+                        key={med.id}
+                        onClick={() => addToCart(med)}
+                        className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
+                      >
+                        <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
+                          {med.name}
+                          {med.recommendationMsg && (
+                            <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
+                              ({med.recommendedQty > 0 ? `${med.recommendedQty} Str` : `${med.recommendedLooseQty} Tab`})
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-[10px] text-primary font-bold">+</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
             )}
           </div>
 
