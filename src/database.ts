@@ -1,13 +1,31 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import { dbManager } from './database/connection.js';
+
+// Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
+// On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
+const CURRENT_SCHEMA_VERSION = 1;
 
 /**
  * Ensure required SQLite tables exist.
  * Creates `medicines`, `catalog_jobs`, `processed_files`, `message_templates` and others if they are missing.
  */
 export async function ensureSchema(dbPath: string) {
-  const db = await open({ filename: dbPath, driver: sqlite3.Database });
-  await db.exec('PRAGMA journal_mode = WAL;');
+  const db = await dbManager.getConnection();
+
+  // Ensure app_settings table exists for schema version tracking
+  await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
+
+  // Fast-path: skip entire DDL wall if schema is already at current version
+  try {
+    const versionRow = await db.get("SELECT value FROM app_settings WHERE key = 'schema_version'");
+    if (versionRow && parseInt(versionRow.value, 10) >= CURRENT_SCHEMA_VERSION) {
+      console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} already applied, skipping DDL (fast boot).`);
+      return;
+    }
+  } catch (_) {
+    // Should not happen now that app_settings is explicitly created above
+  }
+
+  console.log(`[Boot] Applying schema v${CURRENT_SCHEMA_VERSION}...`);
 
   // We have removed the strict CHECK constraint on catalog_jobs table.
   // We'll rely on TypeScript for enum enforcement to prevent future SQLite crashes when new statuses are introduced.
@@ -1008,6 +1026,9 @@ export async function ensureSchema(dbPath: string) {
     }
   }
 
-  await db.close();
+  // Stamp schema version so subsequent boots skip all DDL
+  await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('schema_version', ?)", [String(CURRENT_SCHEMA_VERSION)]);
+  console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} applied successfully.`);
 
+  // ponytail: don't close — we reuse the dbManager shared connection
 }

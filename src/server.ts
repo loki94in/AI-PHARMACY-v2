@@ -6,14 +6,13 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { exec } from 'child_process';
 import { authenticateApiKey } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { dbManager } from './database/connection.js';
 import { ensureSchema } from './database.js';
-import { workerSupervisor } from './worker/workerSupervisor.js';
 import { registerProcessGuardian } from './process/processGuardian.js';
+import { activityTracker } from './utils/activityTracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,50 +20,25 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', 'data', 'ap
 
 // Startup check disabled permanently
 
-// Agent 2 (CRM & Utilities) Routers
-import crmRouter from './routes/crm.js';
-import utilitiesRouter from './routes/utilities.js';
-import securityRouter from './routes/security.js';
-// Agent 1 (Core) Routers
-import salesRouter from './routes/sales.js';
-import inventoryRouter from './routes/inventory.js';
-import dashboardRouter from './routes/dashboard.js';
-import purchasesRouter from './routes/purchases.js';
-import returnsRouter from './routes/returns.js';
-import customerReturnsRouter from './routes/customerReturns.js';
-import ordersRouter from './routes/orders.js';
-import expiryRouter from './routes/expiry.js';
-import reportsRouter from './routes/reports.js';
-import complianceRouter from './routes/compliance.js';
-import emailRouter from './routes/email.js';
-import migrationRouter from './routes/migration.js';
-import settingsRouter from './routes/settings.js';
-import pharmarackRouter from './routes/pharmarack.js';
-import dispatchRouter from './routes/dispatch.js';
-import archiveRouter from './routes/archive.js';
-import learningRouter from './routes/learning.js';
-import messagingRouter from './routes/messaging.js';
-import aiCameraRouter from './routes/aiCamera.js';
-import telegramPrescriptionRouter from './routes/telegramPrescription.js';
-import refillsRouter from './routes/refills.js';
-import waBusinessRouter from './routes/whatsappBusiness.js';
-import licenseRouter from './routes/license.js';
-import automationRouter from './routes/automation.js';
-import uploadRouter from './routes/upload.js';
-import catalogRouter from './routes/catalog.js';
-import medicinesRouter from './routes/medicines.js';
-import enrichmentRouter from './routes/enrichment.js';
-import distributorsRouter from './routes/distributors.js';
-import notificationsRouter from './routes/notifications.js';
-import investigationRouter from './routes/investigation.js';
-import medicineAvailabilityRouter from './routes/medicineAvailability.js';
-import './services/pushNotificationService.js';
-import { whatsappQueue } from './services/whatsappQueue.js';
-import cron from 'node-cron';
-import { checkAllRefills } from './services/refillService.js';
-import { checkOverdueCreditNotes, reconcileCreditNote } from './services/creditNoteService.js';
-import { activityTracker } from './utils/activityTracker.js';
-import { createBackup, initBackupScheduler } from './services/backupService.js';
+/**
+ * Lazy-load route factory: defers module import until first request hits this path.
+ * Eliminates ~8-12s of cold boot time from heavy transitive dependencies
+ * (puppeteer, tesseract, onnxruntime, whatsapp-web.js, xlsx, etc.)
+ */
+function lazyRoute(modulePath: string): express.RequestHandler {
+  let router: express.Router | null = null;
+  let loadPromise: Promise<express.Router> | null = null;
+  return (req, res, next) => {
+    if (router) return router(req, res, next);
+    if (!loadPromise) {
+      loadPromise = import(modulePath).then(m => {
+        router = m.default;
+        return router!;
+      });
+    }
+    loadPromise.then(r => r(req, res, next)).catch(next);
+  };
+}
 
 // Register process-level crash handler (logs to crash_log, exits(1) for watchdog restart)
 registerProcessGuardian();
@@ -152,7 +126,8 @@ app.use('/data/search_screenshots', express.static(path.resolve(__dirname, '..',
 
 // Old test console routes have been removed. This server now acts purely as an API backend.
 
-app.use('/api/wa-business/webhook', waBusinessRouter);
+// WhatsApp Business webhook (before auth — needs to be publicly accessible)
+app.use('/api/wa-business/webhook', lazyRoute('./routes/whatsappBusiness.js'));
 
 // Public health check endpoint for mobile connection testing
 app.get('/api/health', (req, res) => {
@@ -162,45 +137,45 @@ app.get('/api/health', (req, res) => {
 // Session token auth for all other API routes
 app.use('/api', authenticateApiKey);
 
-
-// Mount Agent 2 Routers
-app.use('/api/crm', crmRouter);
-app.use('/api/utilities', utilitiesRouter);
-app.use('/api/security', securityRouter);
-app.use('/api/email', emailRouter);
-app.use('/api/migration', migrationRouter);
-app.use('/api/settings', settingsRouter);
-app.use('/api/pharmarack', pharmarackRouter);
-app.use('/api/dispatch', dispatchRouter);
-app.use('/api/archive', archiveRouter);
-app.use('/api/learning', learningRouter);
-app.use('/api/messaging', messagingRouter);
-app.use('/api/aicamera', aiCameraRouter);
-app.use('/api/telegram-prescription', telegramPrescriptionRouter);
-app.use('/api/refills', refillsRouter);
-app.use('/api/wa-business', waBusinessRouter);
-app.use('/api/automation', automationRouter);
+// All routes lazy-loaded: modules import on first request, not at server startup.
+// Agent 2 (CRM & Utilities) Routers
+app.use('/api/crm', lazyRoute('./routes/crm.js'));
+app.use('/api/utilities', lazyRoute('./routes/utilities.js'));
+app.use('/api/security', lazyRoute('./routes/security.js'));
+app.use('/api/email', lazyRoute('./routes/email.js'));
+app.use('/api/migration', lazyRoute('./routes/migration.js'));
+app.use('/api/settings', lazyRoute('./routes/settings.js'));
+app.use('/api/pharmarack', lazyRoute('./routes/pharmarack.js'));
+app.use('/api/dispatch', lazyRoute('./routes/dispatch.js'));
+app.use('/api/archive', lazyRoute('./routes/archive.js'));
+app.use('/api/learning', lazyRoute('./routes/learning.js'));
+app.use('/api/messaging', lazyRoute('./routes/messaging.js'));
+app.use('/api/aicamera', lazyRoute('./routes/aiCamera.js'));
+app.use('/api/telegram-prescription', lazyRoute('./routes/telegramPrescription.js'));
+app.use('/api/refills', lazyRoute('./routes/refills.js'));
+app.use('/api/wa-business', lazyRoute('./routes/whatsappBusiness.js'));
+app.use('/api/automation', lazyRoute('./routes/automation.js'));
 // Core API routes
-app.use('/api/sales', salesRouter);
-app.use('/api/inventory', inventoryRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/purchases', purchasesRouter);
-app.use('/api/returns', returnsRouter);
-app.use('/api/customer-returns', customerReturnsRouter);
-app.use('/api/orders', ordersRouter);
-app.use('/api/expiry', expiryRouter);
-app.use('/api/reports', reportsRouter);
-app.use('/api/compliance', complianceRouter);
-app.use('/api/license', licenseRouter);
-
-app.use('/api', uploadRouter);
-app.use('/api', catalogRouter);
-app.use('/api', medicinesRouter);
-app.use('/api', enrichmentRouter);
-app.use('/api', distributorsRouter);
-app.use('/api', notificationsRouter);
-app.use('/api/investigation', investigationRouter);
-app.use('/api', medicineAvailabilityRouter);
+app.use('/api/sales', lazyRoute('./routes/sales.js'));
+app.use('/api/inventory', lazyRoute('./routes/inventory.js'));
+app.use('/api/dashboard', lazyRoute('./routes/dashboard.js'));
+app.use('/api/purchases', lazyRoute('./routes/purchases.js'));
+app.use('/api/returns', lazyRoute('./routes/returns.js'));
+app.use('/api/customer-returns', lazyRoute('./routes/customerReturns.js'));
+app.use('/api/orders', lazyRoute('./routes/orders.js'));
+app.use('/api/expiry', lazyRoute('./routes/expiry.js'));
+app.use('/api/reports', lazyRoute('./routes/reports.js'));
+app.use('/api/compliance', lazyRoute('./routes/compliance.js'));
+app.use('/api/license', lazyRoute('./routes/license.js'));
+// Generic /api routes
+app.use('/api', lazyRoute('./routes/upload.js'));
+app.use('/api', lazyRoute('./routes/catalog.js'));
+app.use('/api', lazyRoute('./routes/medicines.js'));
+app.use('/api', lazyRoute('./routes/enrichment.js'));
+app.use('/api', lazyRoute('./routes/distributors.js'));
+app.use('/api', lazyRoute('./routes/notifications.js'));
+app.use('/api/investigation', lazyRoute('./routes/investigation.js'));
+app.use('/api', lazyRoute('./routes/medicineAvailability.js'));
 
 
 
@@ -228,8 +203,10 @@ app.listen(PORT, async () => {
       // Initialize and rebuild compact inventory cache
       const { inventoryCache } = await import('./services/inventoryCache.js');
       inventoryCache.initialize(db);
-      await inventoryCache.rebuild(db);
-      console.log('[Boot] Compact inventory cache pre-built successfully.');
+      // ponytail: don't await — cache auto-rebuilds on first get() call, no need to block boot
+      inventoryCache.rebuild(db)
+        .then(() => console.log('[Boot] Compact inventory cache pre-built successfully.'))
+        .catch(err => console.error('[Boot] Inventory cache prebuild failed:', err));
 
       // Mark this boot as unclean (will be flipped to 'true' in gracefulShutdown)
       try {
@@ -249,7 +226,7 @@ app.listen(PORT, async () => {
 
       // Flatten background initialization sequence using flat step array and Promise.allSettled
       // Run steps at T+2 seconds (warm caches, workers, Telegram, schedulers)
-      setTimeout(async () => {
+      setImmediate(async () => {
         console.log('[Boot] Starting background initialization services...');
 
         const initSteps = [
@@ -290,6 +267,8 @@ app.listen(PORT, async () => {
               if (!lastCheckRow || lastCheckRow.value !== todayStr) {
                 console.log(`[Boot] Daily check missed today (${todayStr}). Running catch-up daily check...`);
                 try {
+                  const { checkAllRefills } = await import('./services/refillService.js');
+                  const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
                   await checkAllRefills(db);
                   await checkOverdueCreditNotes(db);
                   
@@ -331,19 +310,24 @@ app.listen(PORT, async () => {
             }, 6000); // 2s baseline + 6s delay = 8s
           }),
 
-          // Step 6: Backup scheduler (delayed)
+          // Step 6: Backup scheduler
           (async () => {
+            const { initBackupScheduler } = await import('./services/backupService.js');
             await initBackupScheduler().catch(err => console.error('[Boot] Failed to init backup scheduler:', err));
           })(),
 
-          // Step 7: Worker supervisor
-          (async () => {
-            try {
-              workerSupervisor.start();
-            } catch (err) {
-              console.error('[Boot] Failed to start worker supervisor:', err);
-            }
-          })(),
+          // Step 7: Worker supervisor (deferred T+5s to avoid blocking boot with fork()x2)
+          new Promise<void>((resolve) => {
+            setTimeout(async () => {
+              try {
+                const { workerSupervisor } = await import('./worker/workerSupervisor.js');
+                workerSupervisor.start();
+              } catch (err) {
+                console.error('[Boot] Failed to start worker supervisor:', err);
+              }
+              resolve();
+            }, 5000);
+          }),
 
           // Step 8: Schedulers for token refresh, messaging queue and refills fulfillment
           // Note: Pharmarack token refresh scheduler and background service starts here.
@@ -374,10 +358,13 @@ app.listen(PORT, async () => {
           console.log('[Boot] Background initialization sequence completed');
         });
 
-        // WhatsApp Queue Worker (started always)
-        whatsappQueue.startWorker();
+        // WhatsApp Queue Worker (started always, lazy-loaded)
+        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
 
-      }, 2000);
+        // Push notification event listener (lazy-loaded)
+        import('./services/pushNotificationService.js').catch(err => console.error('[Boot] Push service load failed:', err));
+
+      });
 
       // Register crons
       setupCrons(db);
@@ -397,13 +384,17 @@ app.listen(PORT, async () => {
   })();
 });
 
-function setupCrons(db: any) {
+async function setupCrons(db: any) {
+  const cron = (await import('node-cron')).default;
+
   // Daily check at 9:00 AM
   cron.schedule('0 9 * * *', async () => {
     try {
       const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
       if (!autoRow || autoRow.value !== 'true') return;
       console.log('Running daily patient refill, bounced products & overdue credit notes check...');
+      const { checkAllRefills } = await import('./services/refillService.js');
+      const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
       await checkAllRefills(db);
       await checkOverdueCreditNotes(db);
       
@@ -445,6 +436,7 @@ function setupCrons(db: any) {
     try {
       const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
       if (!autoRow || autoRow.value !== 'true') return;
+      const { createBackup } = await import('./services/backupService.js');
       const result = await createBackup('Nightly 9:30 PM');
       console.log(`[Backup] Nightly backup created: ${result.filename}`);
     } catch (err) {
@@ -464,12 +456,14 @@ async function gracefulShutdown(signal: string) {
     console.error('[Shutdown] Could not write last_clean_shutdown=true:', flagErr);
   }
   try {
+    const { createBackup } = await import('./services/backupService.js');
     const result = await createBackup(`Shutdown (${signal})`);
     console.log(`[Backup] Shutdown backup created: ${result.filename}`);
   } catch (err) {
     console.error('[Backup] Shutdown backup failed:', err);
   }
   try {
+    const { workerSupervisor } = await import('./worker/workerSupervisor.js');
     workerSupervisor.stop();
   } catch (err) {
     console.error('Error stopping worker supervisor:', err);
