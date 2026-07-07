@@ -48,8 +48,29 @@ A horizontal scrollable strip inserted between the cart tab bar and the table's 
 ## Non-goals
 
 - No row background color-coding (red/yellow) — explicitly declined.
-- No backend/API changes — all three features derive from data already available on the client.
+- No POS backend/API changes — all three POS features derive from data already available on the client.
 - No changes to the "Quick Add" / doctor-suggestion tickers already present below the search box; the new substitutes ticker is a separate bar tied to cart contents, placed above the table.
+
+## Cross-page rollout: Inventory and Sells
+
+The Margin% formula and compact batch/expiry tag should also apply outside POS, scoped per page based on what each page's data and UI already support:
+
+### Inventory (`frontend/src/pages/Inventory/index.tsx`)
+
+- Add Margin% as a **new toggleable column** in the existing column-visibility system (`COL_KEYS`, `visibleCols`, `inv-page-cols` localStorage key, `index.tsx:84-115`), alongside ID/Batch/Expiry/Packs/Loose/MRP/Rack — not forced on.
+- `cost_price` is already returned by the list API via `SELECT im.*` (`src/routes/inventory.ts:121,141`) even though the frontend `InventoryItem`/`Medicine` type only declares `purchase_price` (`frontend/src/types/api.ts:24`). Add `cost_price?: number` to `Medicine` in `types/api.ts` so the field is typed instead of accessed as `any`.
+- Batch and Expiry stay as separate, independently-toggleable columns — they are not merged into a compact tag here, since collapsing them would remove the existing per-column show/hide granularity that Inventory's column system is built around. This is a deliberate difference from POS and Sells.
+
+### Sells (invoice edit table, `frontend/src/pages/Sells/index.tsx:722-736`)
+
+- Batch and Expiry are two plain, non-toggleable columns here (no column-visibility system to preserve), so they collapse into the same compact `{batch} · {expiry}` tag used in POS, freeing table width.
+- Margin% requires a small backend addition first: `GET /sales/:id` (`src/routes/sales.ts:1171-1180`) currently selects `im.batch_no`, `im.expiry_date`, `im.mrp` but not `im.cost_price`. Add `im.cost_price` to that SELECT, and add `cost_price?: number` to the local `SaleItem` interface (`Sells/index.tsx:16-30`).
+- Once `cost_price` is present on each item, Margin% is computed the same way as POS: `((mrp - cost_price) / mrp) * 100`, added as a new column in the invoice items table (after Expiry tag, before CD%).
+
+## Non-goals (cross-page)
+
+- No changes to Inventory's or Sells' other data (purchase workflows, invoice totals, PDF/CSV export column sets) beyond adding the Margin% field where noted.
+- No change to Inventory's Batch/Expiry column-toggle behavior.
 
 ## Testing
 
@@ -58,3 +79,5 @@ Manual verification in the running app (`npm run dev` in `frontend/`):
 - Add a medicine with `costPrice` above `mrp` → confirm margin% renders negative and in red.
 - Add a medicine known to have alternatives in the DB → confirm it appears in the ticker with correct stock/margin, and clicking it swaps the row.
 - Add a medicine with no alternatives → confirm the ticker doesn't render an empty chip for it, and if it's the only cart item, the whole bar is hidden.
+- Inventory: toggle the new Margin% column on/off via the existing column menu and confirm values match `(mrp - cost_price) / mrp * 100` for known items; confirm Batch/Expiry toggles are unaffected.
+- Sells: open an existing invoice for editing, confirm Batch/Expiry now render as one compact tag, and Margin% shows correct values sourced from the updated `GET /sales/:id` response.
