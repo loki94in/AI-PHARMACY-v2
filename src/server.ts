@@ -443,6 +443,31 @@ async function setupCrons(db: any) {
       console.error('[Backup] Nightly backup failed:', err);
     }
   });
+
+  // Daily Pharmarack catalog sync at 3 AM (WhatsApp OCR Pipeline)
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const { pharmarackCatalogCache } = await import('./services/pharmarackCatalogCache.js');
+      const result = await pharmarackCatalogCache.syncCatalog();
+      console.log(`[Catalog Cache] Daily sync complete: ${result.synced} products, ${result.errors} errors`);
+    } catch (err) {
+      console.error('[Catalog Cache] Daily sync cron failed:', err);
+    }
+  });
+
+  // Register OCR completion listener for WhatsApp intent service
+  try {
+    const { eventService } = await import('./services/eventService.js');
+    const { whatsappIntentService } = await import('./services/whatsappIntentService.js');
+    eventService.on('server_event', (event: any) => {
+      if (event?.type === 'ocr_scan_complete') {
+        whatsappIntentService.handleOcrComplete(event.payload);
+      }
+    });
+    console.log('[Boot] WhatsApp OCR intent service registered.');
+  } catch (err) {
+    console.warn('[Boot] WhatsApp intent service registration skipped:', err);
+  }
 }
 
 // Graceful shutdown with auto-backup

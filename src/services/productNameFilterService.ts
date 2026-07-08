@@ -166,6 +166,9 @@ export interface FilterOptions {
   internetApiKey?: string;
   minConfidenceThreshold?: number;
   fallbackTimeoutMs?: number;
+  dosageForm?: string;
+  mrp?: number;
+  mrpTolerance?: number; // default 0.2 = ±20%
 }
 
 export interface FilterResult {
@@ -173,10 +176,12 @@ export interface FilterResult {
   sources: {
     local: boolean;
     internet: boolean;
+    catalog: boolean;
   };
   confidence: number; // Average confidence of matches (0-100)
   fallbackUsed: boolean;
   processingTimeMs: number;
+  catalogResults?: { mapped: any[]; nonMapped: any[] };
 }
 
 export class ProductNameFilterService {
@@ -332,13 +337,16 @@ export class ProductNameFilterService {
       internetApiEndpoint,
       internetApiKey,
       minConfidenceThreshold = this.DEFAULT_THRESHOLD,
-      fallbackTimeoutMs = this.DEFAULT_TIMEOUT
+      fallbackTimeoutMs = this.DEFAULT_TIMEOUT,
+      dosageForm,
+      mrp,
+      mrpTolerance = 0.2
     } = options;
 
     if (!ocrText || ocrText.trim() === '') {
       return {
         matches: [],
-        sources: { local: false, internet: false },
+        sources: { local: false, internet: false, catalog: false },
         confidence: 0,
         fallbackUsed: false,
         processingTimeMs: Date.now() - startTime
@@ -356,11 +364,55 @@ export class ProductNameFilterService {
       console.log(`Using learned correction: "${normalizedOcr}" → "${learnedCorrection.correctName}" (count: ${learnedCorrection.count})`);
     }
 
-    // Local fuzzy matching with score caching
-    for (const medicineName of this.medicineNames) {
-      const similarityScore = enhancedSimilarity(normalizedOcr, medicineName.toLowerCase());
-      if (similarityScore >= minConfidenceThreshold) {
-        scoredMatches.push({ name: medicineName, score: similarityScore });
+    // FTS5 fast-path: use trigram index if available (O(log n) instead of O(n))
+    let fts5Used = false;
+    try {
+      const db = await dbManager.getConnection();
+      let fts5Sql = `SELECT m.id, m.name, m.mrp, m.item_type
+        FROM medicines_fts f JOIN medicines m ON m.id = f.rowid
+        WHERE medicines_fts MATCH ?`;
+      const fts5Params: any[] = [normalizedOcr];
+
+      if (dosageForm) {
+        fts5Sql += ' AND m.item_type = ?';
+        fts5Params.push(dosageForm);
+      }
+      if (mrp && mrp > 0) {
+        const low = mrp * (1 - mrpTolerance);
+        const high = mrp * (1 + mrpTolerance);
+        fts5Sql += ' AND m.mrp BETWEEN ? AND ?';
+        fts5Params.push(low, high);
+      }
+      fts5Sql += ' LIMIT 20';
+
+      const ftsRows = await db.all(fts5Sql, fts5Params);
+      if (ftsRows && ftsRows.length > 0) {
+        fts5Used = true;
+        for (const row of ftsRows) {
+          const nameSim = enhancedSimilarity(normalizedOcr, row.name.toLowerCase());
+          const dosageMatch = dosageForm && row.item_type ? (row.item_type === dosageForm ? 1 : 0) : 0.5;
+          const mrpMatch = mrp && row.mrp ? (1 - Math.abs(mrp - row.mrp) / Math.max(mrp, row.mrp)) : 0.5;
+          const combinedScore = 0.5 * nameSim + 0.25 * dosageMatch + 0.25 * mrpMatch;
+          if (combinedScore >= minConfidenceThreshold) {
+            scoredMatches.push({ name: row.name, score: combinedScore });
+          }
+        }
+      }
+    } catch (ftsErr) {
+      // FTS5 not available — fall through to full-array scan
+      console.warn('[Filter] FTS5 query failed, using full-array fallback:', (ftsErr as any).message);
+    }
+
+    // Full-array fuzzy matching fallback (skip if FTS5 already found enough results)
+    if (!fts5Used || scoredMatches.length < 3) {
+      for (const medicineName of this.medicineNames) {
+        const similarityScore = enhancedSimilarity(normalizedOcr, medicineName.toLowerCase());
+        if (similarityScore >= minConfidenceThreshold) {
+          // Avoid duplicates from FTS5 results
+          if (!scoredMatches.some(m => m.name === medicineName)) {
+            scoredMatches.push({ name: medicineName, score: similarityScore });
+          }
+        }
       }
     }
 
@@ -402,6 +454,25 @@ export class ProductNameFilterService {
       }
     }
 
+    // Pharmarack catalog fallback: if no local/internet match, search offline distributor cache
+    let catalogResults: { mapped: any[]; nonMapped: any[] } | undefined;
+    if (allMatches.length === 0) {
+      try {
+        const { pharmarackCatalogCache } = await import('./pharmarackCatalogCache.js');
+        catalogResults = await pharmarackCatalogCache.searchCatalog(normalizedOcr, dosageForm, mrp, mrpTolerance);
+        if (catalogResults.mapped.length > 0 || catalogResults.nonMapped.length > 0) {
+          // Add catalog product names to matches
+          for (const p of [...catalogResults.mapped, ...catalogResults.nonMapped]) {
+            if (!allMatches.includes(p.name)) {
+              allMatches.push(p.name);
+            }
+          }
+        }
+      } catch (catalogErr) {
+        console.warn('[Filter] Pharmarack catalog fallback failed:', (catalogErr as any).message);
+      }
+    }
+
     // Calculate average confidence
     const totalMatches = allMatches.length;
     let averageConfidence = 0;
@@ -413,11 +484,13 @@ export class ProductNameFilterService {
       matches: allMatches,
       sources: {
         local: localMatches.length > 0,
-        internet: internetMatches.length > 0
+        internet: internetMatches.length > 0,
+        catalog: !!catalogResults && (catalogResults.mapped.length > 0 || catalogResults.nonMapped.length > 0)
       },
       confidence: averageConfidence,
       fallbackUsed,
-      processingTimeMs: Date.now() - startTime
+      processingTimeMs: Date.now() - startTime,
+      catalogResults
     };
   }
 

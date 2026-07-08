@@ -1262,7 +1262,7 @@ const POS = () => {
         
         // Trigger global SQLite database update for pack size if it is a saved inventory item
         if (typeof id === 'number' && id < 1000000) {
-          api.updateMedicine(id, { pack_size: String(pSize) })
+          api.updateMedicine(id, { pack_size: pSize })
             .catch(err => console.error('Error updating pack size in DB:', err));
         }
       }

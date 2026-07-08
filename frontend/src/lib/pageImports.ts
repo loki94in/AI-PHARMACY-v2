@@ -28,4 +28,5 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/investigation': () => import('../pages/Investigation'),
   '/phone-sales': () => import('../pages/PhoneSales'),
   '/refills': () => import('../pages/Refills'),
+  '/message-listener': () => import('../pages/MessageListener'),
 };

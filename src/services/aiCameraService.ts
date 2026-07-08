@@ -67,6 +67,33 @@ class AICameraService {
     }
   }
 
+  /**
+   * Detect dosage form from OCR text (Tab/Cap/Syp/Drops/Inj/Gel/Cream/etc.)
+   */
+  detectDosageForm(text: string): string | null {
+    if (!text) return null;
+    const patterns: [RegExp, string][] = [
+      [/\b(?:tab(?:let)?s?)\b/i, 'Tablet'],
+      [/\b(?:cap(?:sule)?s?)\b/i, 'Capsule'],
+      [/\b(?:syp|syrup)\b/i, 'Syrup'],
+      [/\b(?:susp(?:ension)?)\b/i, 'Suspension'],
+      [/\b(?:inj(?:ection)?)\b/i, 'Injection'],
+      [/\b(?:gel)\b/i, 'Gel'],
+      [/\b(?:cream)\b/i, 'Cream'],
+      [/\b(?:drops?|eye\s*drops?|ear\s*drops?)\b/i, 'Drops'],
+      [/\b(?:oint(?:ment)?)\b/i, 'Ointment'],
+      [/\b(?:lotion)\b/i, 'Lotion'],
+      [/\b(?:powder)\b/i, 'Powder'],
+      [/\b(?:spray)\b/i, 'Spray'],
+      [/\b(?:inh(?:aler)?)\b/i, 'Inhaler'],
+      [/\b(?:sachet)\b/i, 'Sachet'],
+    ];
+    for (const [regex, form] of patterns) {
+      if (regex.test(text)) return form;
+    }
+    return null;
+  }
+
   async processImage(imageData: string | Buffer, skipEnrichment: boolean = false): Promise<any> {
     let buffer: Buffer;
     if (typeof imageData === 'string') {
@@ -183,6 +210,10 @@ class AICameraService {
 
     const priceMatch = localOcrResult.text.match(/(?:mrp|price|₹|rs)\s*[:\-]?\s*(\d+(?:\.\d{2})?)/i);
     if (priceMatch) finalInfo.mrp = parseFloat(priceMatch[1]);
+
+    // Detect dosage form from OCR text
+    const detectedForm = this.detectDosageForm(localOcrResult.text);
+    if (detectedForm) finalInfo.dosageForm = detectedForm;
 
     const ocrResult = {
       text: localOcrResult.text,

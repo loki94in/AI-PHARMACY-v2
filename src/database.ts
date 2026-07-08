@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * Ensure required SQLite tables exist.
@@ -903,7 +903,83 @@ export async function ensureSchema(dbPath: string) {
       edited_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_sales_bill_edit_hist_inv ON sales_bill_edit_history (invoice_id);
+
+    -- WhatsApp OCR Pipeline: Admin-managed ignored numbers
+    CREATE TABLE IF NOT EXISTS ignored_whatsapp_numbers (
+      phone TEXT PRIMARY KEY,
+      reason TEXT,
+      added_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- WhatsApp OCR Pipeline: Prevents re-scanning the same image
+    CREATE TABLE IF NOT EXISTS scanned_messages (
+      msg_id TEXT PRIMARY KEY,
+      chat_id TEXT,
+      result_json TEXT,
+      scanned_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_scanned_msg ON scanned_messages (msg_id);
+
+    -- WhatsApp OCR Pipeline: Offline Pharmarack distributor catalog cache
+    CREATE TABLE IF NOT EXISTS distributor_catalog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_id INTEGER,
+      store_name TEXT,
+      product_name TEXT,
+      mrp REAL,
+      packaging TEXT,
+      dosage_form TEXT,
+      manufacturer TEXT,
+      salt TEXT,
+      strength TEXT,
+      distributor_price REAL,
+      availability TEXT,
+      is_mapped INTEGER DEFAULT 1,
+      last_synced TEXT,
+      UNIQUE(store_id, product_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dist_catalog_name ON distributor_catalog (product_name);
+    CREATE INDEX IF NOT EXISTS idx_dist_catalog_form ON distributor_catalog (dosage_form);
   `);
+
+  // FTS5 trigram index for fast fuzzy medicine name search (separate exec — virtual tables can't be inside multi-statement exec)
+  try {
+    await db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS medicines_fts USING fts5(name, content='medicines', content_rowid='id', tokenize='trigram')`);
+  } catch (ftsErr) {
+    console.warn('[Schema] FTS5 trigram table creation skipped (may already exist):', (ftsErr as any).message);
+  }
+
+  // FTS5 sync triggers — keep medicines_fts in sync with medicines table
+  try {
+    await db.exec(`
+      CREATE TRIGGER IF NOT EXISTS medicines_ai AFTER INSERT ON medicines BEGIN
+        INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
+      END;
+      CREATE TRIGGER IF NOT EXISTS medicines_ad AFTER DELETE ON medicines BEGIN
+        INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
+      END;
+      CREATE TRIGGER IF NOT EXISTS medicines_au AFTER UPDATE ON medicines BEGIN
+        INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
+        INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
+      END;
+    `);
+  } catch (triggerErr) {
+    console.warn('[Schema] FTS5 triggers may already exist:', (triggerErr as any).message);
+  }
+
+  // One-time FTS5 backfill — populate from existing medicines rows
+  try {
+    const ftsCount = await db.get('SELECT COUNT(*) as cnt FROM medicines_fts');
+    if (!ftsCount || ftsCount.cnt === 0) {
+      const medCount = await db.get('SELECT COUNT(*) as cnt FROM medicines');
+      if (medCount && medCount.cnt > 0) {
+        await db.exec('INSERT INTO medicines_fts(rowid, name) SELECT id, name FROM medicines');
+        console.log(`[Schema] FTS5 backfill: indexed ${medCount.cnt} medicine names.`);
+      }
+    }
+  } catch (backfillErr) {
+    console.warn('[Schema] FTS5 backfill skipped:', (backfillErr as any).message);
+  }
 
   // Insert default settings if they don't exist
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('medical_name', 'XYZ MEDICAL')");

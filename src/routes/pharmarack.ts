@@ -166,35 +166,32 @@ async function fetchPharmarack(url: string, options: any = {}): Promise<Response
   return response;
 }
 
-// Helper to clean search queries by removing common dosage forms/suffixes
-function cleanSearchQuery(query: string): string {
+// Helper to clean search queries — now returns detected dosage forms separately for filtering
+function cleanSearchQuery(query: string): { cleaned: string; detectedForms: string[] } {
   const stopwords = [
-    // Drops
     'drop', 'drops', 'eye drop', 'eye drops', 'ear drop', 'ear drops',
-    // Solid forms
     'tab', 'tabs', 'tablet', 'tablets', 'cap', 'caps', 'capsule', 'capsules',
-    // Liquid forms
     'syp', 'syrup', 'syrups', 'suspension', 'liquid', 'liquids', 'solution', 'solutions',
     'emulsion', 'emulsions', 'elixir', 'elixirs',
-    // Tonic (common in pharma product names like "DENTAL TONIC", "HEALTH TONIC")
     'tonic', 'tonics',
-    // Topical forms
     'cream', 'gel', 'gels', 'ointment', 'ointments', 'lotion', 'lotions',
     'liniment', 'liniments', 'paste', 'pastes', 'spray', 'sprays',
-    // Oral care
     'gargle', 'gargles', 'mouthwash', 'mouthwashes',
-    // Other forms
     'inj', 'injection', 'injections',
     'powder', 'powders', 'sachet', 'sachets', 'granules',
     'patch', 'patches', 'inhaler', 'inhalers'
   ];
   
   let cleaned = query;
+  const detectedForms: string[] = [];
   for (const word of stopwords) {
     const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    if (regex.test(query)) {
+      detectedForms.push(word);
+    }
     cleaned = cleaned.replace(regex, '');
   }
-  return cleaned.replace(/\s+/g, ' ').trim();
+  return { cleaned: cleaned.replace(/\s+/g, ' ').trim(), detectedForms };
 }
 
 // Search endpoint
@@ -298,9 +295,9 @@ router.get('/search', async (req, res) => {
       }
       // Stage 3: Cleaned query — removes dosage-form words (syrup, tonic, injection, etc.)
       else {
-        const cleanedQ = cleanSearchQuery(qRaw);
+      const { cleaned: cleanedQ, detectedForms } = cleanSearchQuery(qRaw);
         if (cleanedQ && cleanedQ !== qRaw) {
-          console.log(`[Pharmarack Search] No results for "${qRaw}". Trying cleaned (no dosage form): "${cleanedQ}"`);
+          console.log(`[Pharmarack Search] No results for "${qRaw}". Trying cleaned (no dosage form): "${cleanedQ}" (detected forms: ${detectedForms.join(', ')})`);
           await trySearch(cleanedQ);
         }
       }
@@ -395,6 +392,20 @@ router.get('/distributors', async (req, res) => {
   } catch (err: any) {
     console.error('Pharmarack distributors fetch error:', err);
     return res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Trigger manual Pharmarack catalog sync
+router.post('/catalog/sync', async (_req, res) => {
+  try {
+    const { pharmarackCatalogCache } = await import('../services/pharmarackCatalogCache.js');
+    // Run sync in background, respond immediately
+    res.json({ success: true, message: 'Catalog sync started in background' });
+    pharmarackCatalogCache.syncCatalog()
+      .then(result => console.log(`[Pharmarack] Manual catalog sync complete:`, result))
+      .catch(err => console.error('[Pharmarack] Manual catalog sync failed:', err));
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to start catalog sync: ' + err.message });
   }
 });
 

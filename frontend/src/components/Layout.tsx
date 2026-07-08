@@ -106,6 +106,7 @@ const Sidebar = ({
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
     { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
     { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
+    { path: '/message-listener', label: 'WhatsApp Messages', icon: <MessageSquareIcon size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
     { path: '/inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
     { path: '/purchases', label: 'Purchases', icon: <Receipt size={18} /> },

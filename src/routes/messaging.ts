@@ -256,4 +256,44 @@ router.get('/chats/:chatId/messages/:messageId/media', async (req, res) => {
   }
 });
 
+// GET list of ignored numbers
+router.get('/ignored-phones', async (req, res) => {
+  try {
+    const { dbManager } = await import('../database/connection.js');
+    const db = await dbManager.getConnection();
+    const rows = await db.all('SELECT phone, reason, added_at FROM ignored_whatsapp_numbers');
+    res.json(rows);
+  } catch (err: any) {
+    console.error('Error fetching ignored phones:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch ignored numbers' });
+  }
+});
+
+// POST toggle ignore state for a number
+router.post('/toggle-ignore', async (req, res) => {
+  try {
+    const { phone, ignore, reason = '' } = req.body;
+    if (!phone) {
+      return res.status(400).json({ error: 'Missing phone number' });
+    }
+
+    const { dbManager } = await import('../database/connection.js');
+    const db = await dbManager.getConnection();
+
+    if (ignore) {
+      await db.run(
+        'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
+        [phone, reason]
+      );
+    } else {
+      await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
+    }
+
+    res.json({ success: true, ignore });
+  } catch (err: any) {
+    console.error('Error toggling ignore status:', err);
+    res.status(500).json({ error: err.message || 'Failed to toggle ignore status' });
+  }
+});
+
 export default router;

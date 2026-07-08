@@ -225,6 +225,13 @@ export async function initClient(): Promise<WAClient> {
             hasMedia: msg.hasMedia
           }
         });
+
+        // Route inbound customer messages through WhatsApp intent service
+        if (!msg.fromMe) {
+          import('./services/whatsappIntentService.js')
+            .then(({ whatsappIntentService }) => whatsappIntentService.handleInbound(msg))
+            .catch(err => console.error('[WhatsApp] Intent service error:', err));
+        }
       } catch (err) {
         console.error('[WhatsApp] Error in message_create event handler:', err);
       }
