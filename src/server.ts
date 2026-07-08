@@ -253,7 +253,7 @@ app.listen(PORT, async () => {
             const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
             const { startSubstituteCacheWorker } = await import('./worker/substituteCacheWorker.js');
             startStockCalculatorWorker();
-            startSubstituteCacheWorker();
+            // startSubstituteCacheWorker(); // disabled to prevent SQLite DB locks and redundant 12M rows substitutes table precomputation on boot
             console.log('[Boot] Unified Engine background workers started');
           })(),
 
