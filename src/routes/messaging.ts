@@ -190,7 +190,8 @@ router.get('/chats', async (req, res) => {
           unreadCount: c.unreadCount || 0,
           timestamp: c.timestamp,
           isGroup: !!c.isGroup,
-          lastMessage: c.lastMessage
+          lastMessage: c.lastMessage,
+          resolvedNumber: c.resolvedNumber || c.id.split('@')[0]
         };
       }
       // Raw nested format from whatsapp-web.js client
@@ -200,7 +201,8 @@ router.get('/chats', async (req, res) => {
         unreadCount: c.unreadCount,
         timestamp: c.timestamp,
         isGroup: c.isGroup,
-        lastMessage: c.lastMessage ? c.lastMessage.body : null
+        lastMessage: c.lastMessage ? c.lastMessage.body : null,
+        resolvedNumber: c.id.user
       };
     });
     res.json(sanitizedChats);
@@ -280,19 +282,58 @@ router.post('/toggle-ignore', async (req, res) => {
     const { dbManager } = await import('../database/connection.js');
     const db = await dbManager.getConnection();
 
+    const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
+
     if (ignore) {
-      await db.run(
-        'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
-        [phone, reason]
-      );
+      if (isGroupOrBroadcast) {
+        await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
+      } else {
+        await db.run(
+          'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
+          [phone, reason || 'ignored']
+        );
+      }
     } else {
-      await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
+      if (isGroupOrBroadcast) {
+        await db.run(
+          'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
+          [phone, 'unignored']
+        );
+      } else {
+        await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
+      }
     }
 
     res.json({ success: true, ignore });
   } catch (err: any) {
     console.error('Error toggling ignore status:', err);
     res.status(500).json({ error: err.message || 'Failed to toggle ignore status' });
+  }
+});
+
+// POST manual trigger scan of a specific message ID (OCR intent pipeline)
+router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
+  const { chatId, messageId } = req.params;
+  try {
+    const { initClient } = await import('../whatsappClient.js');
+    const client = await initClient();
+    if (!client) {
+      return res.status(503).json({ error: 'WhatsApp client not connected' });
+    }
+    const chat = await client.getChatById(chatId);
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const msg = messages.find(m => m.id._serialized === messageId);
+    if (!msg) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const { whatsappIntentService } = await import('../services/whatsappIntentService.js');
+    await whatsappIntentService.handleInbound(msg);
+
+    res.json({ success: true, message: 'Message queued for manual scan' });
+  } catch (err: any) {
+    console.error('Failed to trigger scan:', err);
+    res.status(500).json({ error: err.message || 'Failed to trigger scan' });
   }
 });
 

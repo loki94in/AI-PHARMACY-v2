@@ -85,9 +85,27 @@ export async function initClient(): Promise<WAClient> {
       authStrategy: new LocalAuth(),
       puppeteer: execPath ? { 
         executablePath: execPath,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-session-crashed-bubble',
+          '--disable-gpu'
+        ]
       } : {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-session-crashed-bubble',
+          '--disable-gpu'
+        ]
       }
     });
     activeClient = client;
@@ -190,18 +208,34 @@ export async function initClient(): Promise<WAClient> {
           ]
         );
 
+        let resolvedNumber = chatId.split('@')[0];
         let chatName = chatId.split('@')[0];
         try {
           const chat = await msg.getChat();
           if (chat) chatName = chat.name || chatName;
         } catch (e) {}
 
+        if (chatId.endsWith('@lid')) {
+          try {
+            const mapping = await client.getContactLidAndPhone([chatId]);
+            if (mapping && mapping[0] && mapping[0].pn) {
+              resolvedNumber = mapping[0].pn;
+            } else {
+              const contact = await msg.getContact();
+              if (contact && contact.number && contact.number !== resolvedNumber) {
+                resolvedNumber = contact.number;
+              }
+            }
+          } catch (e) {}
+        }
+
         await db.run(
-          `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              timestamp=excluded.timestamp,
              last_message=excluded.last_message,
+             resolved_number=excluded.resolved_number,
              unread_count = CASE WHEN ? = 0 THEN unread_count + 1 ELSE unread_count END`,
           [
             chatId,
@@ -210,6 +244,7 @@ export async function initClient(): Promise<WAClient> {
             msg.timestamp,
             msg.body || '',
             chatId.includes('g.us') ? 1 : 0,
+            resolvedNumber,
             msg.fromMe ? 1 : 0
           ]
         );
@@ -347,7 +382,7 @@ export async function getChats(): Promise<any[]> {
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage 
+      `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage, resolved_number as resolvedNumber 
        FROM whatsapp_chats 
        ORDER BY timestamp DESC`
     );
@@ -454,47 +489,44 @@ async function syncWhatsappData(client: WAClient) {
       const chatId = chat.id._serialized;
       const lastMsg = chat.lastMessage ? chat.lastMessage.body : null;
       
+      // Resolve phone number if LID
+      let resolvedNumber = chatId.split('@')[0];
+      if (chatId.endsWith('@lid')) {
+        try {
+          const mapping = await client.getContactLidAndPhone([chatId]);
+          if (mapping && mapping[0] && mapping[0].pn) {
+            resolvedNumber = mapping[0].pn;
+          } else {
+            const contact = await client.getContactById(chatId);
+            if (contact && contact.number && contact.number !== resolvedNumber) {
+              resolvedNumber = contact.number;
+            }
+          }
+        } catch (e) {
+          console.error(`[WhatsApp] Failed to resolve LID ${chatId}:`, e);
+        }
+      }
+      
       await db.run(
-        `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name=excluded.name,
            unread_count=excluded.unread_count,
            timestamp=excluded.timestamp,
            last_message=excluded.last_message,
-           is_group=excluded.is_group`,
+           is_group=excluded.is_group,
+           resolved_number=excluded.resolved_number`,
         [
           chatId,
           chat.name || chat.id.user,
           chat.unreadCount || 0,
           chat.timestamp || Math.floor(Date.now() / 1000),
           lastMsg,
-          chat.isGroup ? 1 : 0
+          chat.isGroup ? 1 : 0,
+          resolvedNumber
         ]
       );
-
-      // Fetch and sync messages for this chat in the background
-      try {
-        const messages = await chat.fetchMessages({ limit: 50 });
-        for (const msg of messages) {
-          await db.run(
-            `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO NOTHING`,
-            [
-              msg.id._serialized,
-              chatId,
-              msg.body || '',
-              msg.fromMe ? 1 : 0,
-              msg.timestamp,
-              msg.type,
-              msg.hasMedia ? 1 : 0
-            ]
-          );
-        }
-      } catch (err) {
-        console.error(`[WhatsApp] Failed to sync messages for chat ${chatId}:`, err);
-      }
     }
     console.log('[WhatsApp] Background synchronization completed successfully.');
     eventService.broadcast('wa_chats_updated', { success: true });

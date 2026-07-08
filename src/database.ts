@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 6;
 
 /**
  * Ensure required SQLite tables exist.
@@ -143,7 +143,8 @@ export async function ensureSchema(dbPath: string) {
       name TEXT NOT NULL,
       phone TEXT,
       address TEXT,
-      notes TEXT
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS action_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -296,6 +297,8 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE customers ADD COLUMN gender TEXT`,
     `ALTER TABLE customers ADD COLUMN credit_enabled INTEGER DEFAULT 0`,
     `ALTER TABLE customers ADD COLUMN credit_balance REAL DEFAULT 0`,
+    `ALTER TABLE customers ADD COLUMN created_at DATETIME`,
+    `UPDATE customers SET created_at = datetime('now') WHERE created_at IS NULL`,
     `ALTER TABLE sales_invoices ADD COLUMN payment_status TEXT DEFAULT 'PAID'`,
     `ALTER TABLE sales_invoices ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE patient_refills ADD COLUMN hold_for_stock INTEGER DEFAULT 0`,
@@ -344,6 +347,8 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
     `ALTER TABLE patient_refills ADD COLUMN stock_verified_override INTEGER DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN pack_size INTEGER`,
+    `ALTER TABLE whatsapp_chats ADD COLUMN resolved_number TEXT`,
+    `ALTER TABLE staged_medicine_reviews ADD COLUMN source TEXT`,
   ];
   for (const stmt of alterStatements) {
     try {
@@ -377,6 +382,7 @@ export async function ensureSchema(dbPath: string) {
       raw_ocr_text TEXT,
       extracted_json TEXT,
       approved_json TEXT,
+      source TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -444,6 +450,14 @@ export async function ensureSchema(dbPath: string) {
     WHEN NEW.item_code IS NULL
     BEGIN
       UPDATE medicines SET item_code = 'SKU-' || (10000 + NEW.id) WHERE id = NEW.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_customers_created_at
+    AFTER INSERT ON customers
+    FOR EACH ROW
+    WHEN NEW.created_at IS NULL
+    BEGIN
+      UPDATE customers SET created_at = datetime('now') WHERE id = NEW.id;
     END;
 
     CREATE TABLE IF NOT EXISTS doctors (
@@ -680,7 +694,8 @@ export async function ensureSchema(dbPath: string) {
       unread_count INTEGER DEFAULT 0,
       timestamp INTEGER,
       last_message TEXT,
-      is_group INTEGER DEFAULT 0
+      is_group INTEGER DEFAULT 0,
+      resolved_number TEXT
     );
 
     -- WhatsApp local messages cache
@@ -940,6 +955,19 @@ export async function ensureSchema(dbPath: string) {
     );
     CREATE INDEX IF NOT EXISTS idx_dist_catalog_name ON distributor_catalog (product_name);
     CREATE INDEX IF NOT EXISTS idx_dist_catalog_form ON distributor_catalog (dosage_form);
+
+    CREATE TABLE IF NOT EXISTS wa_admin_escalations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      msg_id TEXT,
+      customer_phone TEXT,
+      medicine_key TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      review_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_wa_admin_esc_msg ON wa_admin_escalations (msg_id, medicine_key);
+    CREATE INDEX IF NOT EXISTS idx_wa_admin_esc_phone ON wa_admin_escalations (customer_phone, medicine_key, created_at);
   `);
 
   // FTS5 trigram index for fast fuzzy medicine name search (separate exec — virtual tables can't be inside multi-statement exec)
@@ -1030,6 +1058,10 @@ export async function ensureSchema(dbPath: string) {
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('wa_business_access_token', '')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('wa_business_waba_id', '')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('wa_business_webhook_verify_token', '')");
+
+  // WhatsApp Admin Auto-Escalation defaults
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('wa_auto_share_admin', 'true')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_whatsapp', '')");
 
   // Safely add legacy_id/speciality to doctors if the table already existed without them
   const doctorAlters = [

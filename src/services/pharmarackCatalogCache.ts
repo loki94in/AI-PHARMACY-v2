@@ -172,7 +172,7 @@ export async function searchCatalog(
     params.push(low, high);
   }
 
-  sql += ' LIMIT 50';
+  sql += ' ORDER BY is_mapped DESC, product_name ASC LIMIT 50';
 
   const rows = await db.all(sql, params);
 

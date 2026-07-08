@@ -408,6 +408,11 @@ export const api = {
   getWhatsappMessages: (chatId: string) => apiClient.get(`/messaging/chats/${encodeURIComponent(chatId)}/messages`).then(res => res.data),
   sendWhatsappMessage: (number: string, message: string, file?: { mimetype: string; data: string; filename?: string }) => apiClient.post('/messaging/send', { number, message, file }).then(res => res.data),
   getWhatsappMessageMedia: (chatId: string, messageId: string) => apiClient.get(`/messaging/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/media`).then(res => res.data),
+  getIgnoredPhones: () => apiClient.get('/messaging/ignored-phones').then(res => res.data),
+  toggleIgnore: (phone: string, ignore: boolean, reason?: string) => apiClient.post('/messaging/toggle-ignore', { phone, ignore, reason }).then(res => res.data),
+  triggerManualScan: (chatId: string, messageId: string) => apiClient.post(`/messaging/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/scan`).then(res => res.data),
+  getSettings: () => apiClient.get('/settings').then(res => res.data),
+  saveSettings: (settings: any) => apiClient.post('/settings/save', settings).then(res => res.data),
   
   // Returns
   getReturns: (params?: { search?: string; date_from?: string; date_to?: string; min_amount?: number; max_amount?: number; limit?: number }) => apiClient.get('/returns', { params }).then(res => res.data),
@@ -484,6 +489,7 @@ export const api = {
   resumeCatalogJob: (id: number) => apiClient.post(`/catalog/job/${id}/resume`).then(res => res.data),
   deleteCatalogJob: (id: number) => apiClient.delete(`/catalog/job/${id}`).then(res => res.data),
   getCatalogJobReviews: (id: number) => apiClient.get(`/catalog/job/${id}/reviews`).then(res => res.data),
+  getPendingWhatsappReviews: () => apiClient.get('/catalog/reviews/pending?source=whatsapp').then(res => res.data),
   approveCatalogReview: (id: number, approvedData: any) => apiClient.post(`/catalog/review/${id}/approve`, { approvedData }).then(res => res.data),
   rejectCatalogReview: (id: number) => apiClient.post(`/catalog/review/${id}/reject`).then(res => res.data),
   enrichCatalogReview: (id: number) => apiClient.post(`/catalog/review/${id}/enrich`).then(res => res.data),

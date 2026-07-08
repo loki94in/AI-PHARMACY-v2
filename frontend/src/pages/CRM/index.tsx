@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download, Activity } from 'lucide-react';
+import { Sparkles, Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download, Activity, Eye, EyeOff } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -32,7 +32,8 @@ const WhatsAppMedia = ({
   media, 
   loading, 
   onLoad, 
-  onImageClick 
+  onImageClick,
+  onScan
 }: { 
   msg: any; 
   chatId: string; 
@@ -40,6 +41,7 @@ const WhatsAppMedia = ({
   loading?: boolean; 
   onLoad: () => void; 
   onImageClick: (src: string, name: string) => void;
+  onScan?: () => void;
 }) => {
   useEffect(() => {
     if (!media && !loading) {
@@ -72,6 +74,18 @@ const WhatsAppMedia = ({
       <div className="mt-1 mb-1 max-w-full rounded-lg overflow-hidden border border-glass-border/10 cursor-zoom-in" onClick={() => onImageClick(src, media.filename || 'Image')}>
         <img src={src} alt={media.filename || 'WhatsApp Image'} loading="lazy" decoding="async" className="max-w-full h-auto max-h-48 object-cover hover:scale-[1.02] transition-transform duration-200" />
         {msg.body && <p className="mt-1 text-xs text-text">{msg.body}</p>}
+        {onScan && (
+          <div className="mt-2 flex justify-end" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={onScan}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-all font-bold text-[9px] uppercase tracking-wider border border-primary/20 hover:scale-[1.02] active:scale-[0.98]"
+              title="Scan this image for medicines and create workflow"
+            >
+              <Sparkles size={10} className="animate-pulse" /> Create Workflow
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -113,6 +127,24 @@ const getTodayString = () => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const formatDividerDate = (timestamp: number) => {
+  const date = new Date(timestamp * 1000);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) {
+    return 'Today';
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    return 'Yesterday';
+  } else {
+    if (date.getFullYear() === today.getFullYear()) {
+      return date.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+    }
+    return date.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+};
+
 const getNDaysAgoString = (n: number) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -121,6 +153,16 @@ const getNDaysAgoString = (n: number) => {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 };
+
+// Module-level caching variables for state preservation across page navigation
+// Module-level caching variables for state preservation across page navigation
+let cachedWaChats: any[] = [];
+let cachedWaMessages: any[] = [];
+let cachedActiveWaChat: any = null;
+let cachedWaStatus = { isReady: false, qrUrl: null as string | null, message: '' };
+let cachedSelectedPatient: Patient | null = null;
+let cachedHistory: any[] = [];
+let cachedIgnoredPhones: Map<string, string> = new Map();
 
 const CRM = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -137,8 +179,8 @@ const CRM = () => {
   const [dateFrom, setDateFrom] = useState(getNDaysAgoString(15));
   const [dateTo, setDateTo] = useState(getTodayString());
   const [manualToDate, setManualToDate] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(() => cachedSelectedPatient);
+  const [history, setHistory] = useState<any[]>(() => cachedHistory);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
@@ -165,13 +207,95 @@ const CRM = () => {
 
 
   // WhatsApp states
-  const [waChats, setWaChats] = useState<any[]>([]);
-  const [waMessages, setWaMessages] = useState<any[]>([]);
-  const [activeWaChat, setActiveWaChat] = useState<any>(null);
+  const [waChats, setWaChats] = useState<any[]>(() => cachedWaChats);
+  const [waMessages, setWaMessages] = useState<any[]>(() => cachedWaMessages);
+  const [activeWaChat, setActiveWaChat] = useState<any>(() => cachedActiveWaChat);
   const [waInput, setWaInput] = useState('');
   const [waLoading, setWaLoading] = useState(false);
-  const [waStatus, setWaStatus] = useState({ isReady: false, qrUrl: null as string | null, message: '' });
+  const [waStatus, setWaStatus] = useState(() => cachedWaStatus);
   const [isOpeningWaWindow, setIsOpeningWaWindow] = useState(false);
+  const [ignoredPhones, setIgnoredPhones] = useState<Map<string, string>>(() => cachedIgnoredPhones);
+
+  // Sync state changes back to the module-level cache
+  useEffect(() => {
+    cachedWaChats = waChats;
+  }, [waChats]);
+
+  useEffect(() => {
+    cachedWaMessages = waMessages;
+  }, [waMessages]);
+
+  useEffect(() => {
+    cachedActiveWaChat = activeWaChat;
+  }, [activeWaChat]);
+
+  useEffect(() => {
+    cachedWaStatus = waStatus;
+  }, [waStatus]);
+
+  useEffect(() => {
+    cachedSelectedPatient = selectedPatient;
+  }, [selectedPatient]);
+
+  useEffect(() => {
+    cachedHistory = history;
+  }, [history]);
+
+  useEffect(() => {
+    cachedIgnoredPhones = ignoredPhones;
+  }, [ignoredPhones]);
+
+  // Automatically fetch patient history/timeline when selectedPatient changes
+  useEffect(() => {
+    if (!selectedPatient) {
+      setHistory([]);
+      return;
+    }
+    let active = true;
+    const fetchHistory = async () => {
+      setHistoryLoading(true);
+      try {
+        const data = await api.getPatientHistory(selectedPatient.id);
+        if (active) {
+          setHistory(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (active) setHistory([]);
+      } finally {
+        if (active) setHistoryLoading(false);
+      }
+    };
+    fetchHistory();
+    return () => {
+      active = false;
+    };
+  }, [selectedPatient]);
+
+  // On mount, silently refresh the active chat's messages and selected patient's history in the background
+  useEffect(() => {
+    if (cachedActiveWaChat) {
+      const refreshMessages = async () => {
+        try {
+          const data = await api.getWhatsappMessages(cachedActiveWaChat.id);
+          setWaMessages(Array.isArray(data) ? data : []);
+        } catch (err) {
+          console.error('Failed to refresh WA messages in background', err);
+        }
+      };
+      refreshMessages();
+    }
+    const patient = cachedSelectedPatient;
+    if (patient) {
+      const refreshHistory = async () => {
+        try {
+          const data = await api.getPatientHistory(patient.id);
+          setHistory(Array.isArray(data) ? data : []);
+        } catch { /* ignore */ }
+      };
+      refreshHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastWaHeartbeat = useRef(0);
 
@@ -190,8 +314,60 @@ const CRM = () => {
 
   // Lightbox state
   const [lightbox, setLightbox] = useState<{ isOpen: boolean; src: string; name: string }>({ isOpen: false, src: '', name: '' });
+  const [showIgnoreModal, setShowIgnoreModal] = useState(false);
+  const [newIgnorePhone, setNewIgnorePhone] = useState('');
+
+  const handleAddIgnore = async () => {
+    let clean = newIgnorePhone.trim();
+    if (!clean) return;
+
+    // Sanitize phone input
+    if (!clean.endsWith('@g.us') && !clean.endsWith('@broadcast') && !clean.endsWith('@c.us') && !clean.endsWith('@lid')) {
+      const digits = clean.replace(/\D/g, '');
+      if (digits.length === 10) {
+        clean = `91${digits}@c.us`;
+      } else if (digits.length > 10) {
+        clean = `${digits}@c.us`;
+      }
+    }
+
+    try {
+      await api.toggleIgnore(clean, true);
+      setIgnoredPhones(prev => {
+        const next = new Map(prev);
+        const isGroupOrBroadcast = clean.endsWith('@g.us') || clean.endsWith('@broadcast') || clean.includes('broadcast') || clean === 'status@broadcast' || clean.includes('-');
+        if (isGroupOrBroadcast) {
+          next.delete(clean);
+        } else {
+          next.set(clean, 'ignored');
+        }
+        return next;
+      });
+      setNewIgnorePhone('');
+      showNotif(`Added ${clean} to ignore list`);
+    } catch (err) {
+      console.error('Failed to manually ignore phone:', err);
+      showNotif('Failed to ignore number', 'error');
+    }
+  };
+
   const showNotif = (msg: string, type: 'success' | 'error' = 'success') => {
     toastEvent.trigger(msg, type, '/crm');
+  };
+
+  const handleManualScan = async (chatId: string, msgId: string) => {
+    try {
+      showNotif('Scanning image and extracting medicine info...');
+      const res = await api.triggerManualScan(chatId, msgId);
+      if (res.success) {
+        showNotif('OCR Scan completed successfully');
+      } else {
+        showNotif('Failed to trigger scan', 'error');
+      }
+    } catch (err: any) {
+      console.error('Manual scan failed:', err);
+      showNotif(err?.response?.data?.error || 'Failed to scan image', 'error');
+    }
   };
 
   const fetchWaChats = useCallback(async () => {
@@ -200,6 +376,46 @@ const CRM = () => {
       setWaChats(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch WA chats', err);
+    }
+  }, []);
+
+  const fetchIgnoredPhones = useCallback(async () => {
+    try {
+      const data = await api.getIgnoredPhones();
+      const map = new Map<string, string>(
+        Array.isArray(data) ? data.map((r: any) => [r.phone, r.reason]) : []
+      );
+      setIgnoredPhones(map);
+    } catch (err) {
+      console.error('Failed to fetch ignored phones in CRM', err);
+    }
+  }, []);
+
+  const toggleIgnore = useCallback(async (phone: string, currentIgnored: boolean) => {
+    try {
+      await api.toggleIgnore(phone, !currentIgnored);
+      setIgnoredPhones(prev => {
+        const next = new Map(prev);
+        const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
+        if (currentIgnored) {
+          if (isGroupOrBroadcast) {
+            next.set(phone, 'unignored');
+          } else {
+            next.delete(phone);
+          }
+        } else {
+          if (isGroupOrBroadcast) {
+            next.delete(phone);
+          } else {
+            next.set(phone, 'ignored');
+          }
+        }
+        return next;
+      });
+      showNotif(currentIgnored ? `Scanning ${phone}` : `Ignored ${phone}`);
+    } catch (err) {
+      console.error('Failed to toggle ignore in CRM', err);
+      showNotif('Failed to toggle ignore state', 'error');
     }
   }, []);
 
@@ -243,6 +459,7 @@ const CRM = () => {
 
   useDeferredEffect(() => { 
     fetchWaStatus();
+    fetchIgnoredPhones();
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         if (!waStatus.isReady) {
@@ -302,6 +519,27 @@ const CRM = () => {
       const data = await api.getWhatsappMessages(chat.id);
       setWaMessages(Array.isArray(data) ? data : []);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+      // Auto-select corresponding patient if found in the database
+      const resolved = chat.resolvedNumber || chat.id || '';
+      const phone = resolved.replace(/@[a-z0-9\.]+$/, '');
+      const last10 = phone.replace(/[^0-9]/g, '').slice(-10);
+      if (last10.length >= 10) {
+        try {
+          const matches = await api.getPatients({ q: last10 });
+          const matched = matches.find((p: any) => {
+            const pPhone = (p.phone || '').replace(/[^0-9]/g, '');
+            return pPhone.endsWith(last10);
+          });
+          if (matched) {
+            setSelectedPatient(matched);
+            return;
+          }
+        } catch (err) {
+          console.error('Failed to auto-select patient in loadWaMessages:', err);
+        }
+      }
+      setSelectedPatient(null);
     } catch (err) {
       console.error('Failed to fetch WA messages', err);
     } finally {
@@ -432,7 +670,7 @@ const CRM = () => {
     let matchesDate = true;
     if (dateFrom || dateTo) {
       if (!(p as any).created_at) {
-        matchesDate = false;
+        matchesDate = true;
       } else {
         const itemDate = (p as any).created_at.substring(0, 10);
         const start = dateFrom || '0000-00-00';
@@ -497,34 +735,60 @@ const CRM = () => {
     if (waChats.length === 0) {
       return <div className="p-8 text-center text-muted text-xs">No active chats. Send a message to start.</div>;
     }
-    return waChats.map(chat => (
-      <button
-        key={chat.id}
-        onClick={() => loadWaMessages(chat)}
-        className={`w-full text-left p-3 hover:bg-bg3 transition-colors border-b border-glass-border/10 flex gap-3 items-center ${activeWaChat?.id === chat.id ? 'bg-primary/5 border-l-2 border-primary' : ''}`}
-      >
-        <div className="w-8 h-8 rounded-full bg-bg3 flex items-center justify-center shrink-0">
-          <Users size={16} className="text-muted" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex justify-between items-baseline mb-0.5">
-            <span className="font-semibold text-xs text-text truncate">{chat.name}</span>
-            {chat.timestamp && (
-              <span className="text-[9px] text-muted">
-                {new Date(chat.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-              </span>
+    return waChats.map(chat => {
+      const phone = (chat.id || '').replace(/@c\.us$/, '');
+      const chatId = chat.id || '';
+
+      // Calculate current ignore status (groups and broadcasts ignore by default)
+      let isIgnored = false;
+      const explicitReason = ignoredPhones.get(phone) || ignoredPhones.get(chatId);
+      if (explicitReason !== undefined) {
+        isIgnored = explicitReason !== 'unignored';
+      } else {
+        const isGroupOrBroadcast = chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+        isIgnored = isGroupOrBroadcast;
+      }
+
+      return (
+        <div
+          key={chat.id}
+          className={`w-full text-left p-3 hover:bg-bg3 transition-colors border-b border-glass-border/10 flex gap-3 items-center cursor-pointer ${
+            activeWaChat?.id === chat.id ? 'bg-primary/5 border-l-2 border-primary' : ''
+          } ${isIgnored ? 'opacity-50' : ''}`}
+          onClick={() => loadWaMessages(chat)}
+        >
+          <div className="w-8 h-8 rounded-full bg-bg3 flex items-center justify-center shrink-0">
+            <Users size={16} className="text-muted" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between items-baseline mb-0.5">
+              <span className="font-semibold text-xs text-text truncate">{chat.name}</span>
+              {chat.timestamp && (
+                <span className="text-[9px] text-muted">
+                  {new Date(chat.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-muted truncate">{chat.lastMessage || 'No recent messages'}</p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={isIgnored}
+              onChange={() => toggleIgnore(chatId || phone, isIgnored)}
+              className="w-3.5 h-3.5 rounded border-glass-border bg-bg3 text-primary focus:ring-0 cursor-pointer transition-colors"
+              title={isIgnored ? 'Ignored (Uncheck to scan)' : 'Scanning (Check to ignore)'}
+            />
+            {chat.unreadCount > 0 && (
+              <div className="bg-green text-bg text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center shrink-0">
+                {chat.unreadCount}
+              </div>
             )}
           </div>
-          <p className="text-[10px] text-muted truncate">{chat.lastMessage || 'No recent messages'}</p>
         </div>
-        {chat.unreadCount > 0 && (
-          <div className="bg-green text-bg text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center shrink-0">
-            {chat.unreadCount}
-          </div>
-        )}
-      </button>
-    ));
-  }, [waChats, activeWaChat]);
+      );
+    });
+  }, [waChats, activeWaChat, ignoredPhones, toggleIgnore]);
 
   // Memoize interaction timeline
   const timelineElement = useMemo(() => {
@@ -642,15 +906,8 @@ const CRM = () => {
     } catch { showNotif('Failed to delete', 'error'); }
   };
 
-  const handleSelectPatient = async (p: Patient) => {
+  const handleSelectPatient = (p: Patient) => {
     setSelectedPatient(p);
-    setHistoryLoading(true);
-    setHistory([]);
-    try {
-      const data = await api.getPatientHistory(p.id);
-      setHistory(Array.isArray(data) ? data : []);
-    } catch { setHistory([]); }
-    finally { setHistoryLoading(false); }
   };
 
   return (
@@ -721,6 +978,13 @@ const CRM = () => {
                     <MessageCircle size={16} className="text-green" />
                     <span className="font-bold text-xs text-text">WhatsApp Chats</span>
                   </div>
+                  <button
+                    onClick={() => setShowIgnoreModal(true)}
+                    className="p-1 rounded bg-bg2 text-muted hover:text-text hover:bg-bg3 transition-colors flex items-center justify-center shrink-0"
+                    title="Manage Ignore List"
+                  >
+                    <EyeOff size={13} />
+                  </button>
                 </div>
 
                 {/* Chats List */}
@@ -754,27 +1018,43 @@ const CRM = () => {
                       ) : (
                         <>
                           <div ref={messagesEndRef} />
-                          {[...waMessages].reverse().map((msg, idx) => (
-                            <div key={msg.id || idx} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[75%] rounded-xl p-2.5 text-xs shadow-sm relative border ${msg.fromMe ? 'bg-primary/10 text-text border-primary/20 rounded-tr-none' : 'bg-bg3 text-text border-glass-border rounded-tl-none'}`}>
-                                {msg.hasMedia ? (
-                                  <WhatsAppMedia
-                                    msg={msg}
-                                    chatId={activeWaChat.id}
-                                    media={loadedMedia[msg.id]}
-                                    loading={loadingMedia[msg.id]}
-                                    onLoad={() => fetchMedia(msg.id)}
-                                    onImageClick={(src, name) => setLightbox({ isOpen: true, src, name })}
-                                  />
-                                ) : (
-                                  <span className="whitespace-pre-wrap">{msg.body}</span>
-                                )}
-                                <div className="text-[8px] text-muted mt-1 text-right float-right ml-3 pt-0.5 select-none">
-                                  {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          {[...waMessages].reverse().map((msg, idx, arr) => {
+                            const prevMsg = arr[idx + 1];
+                            const showDateDivider = !prevMsg || 
+                              new Date(msg.timestamp * 1000).toDateString() !== new Date(prevMsg.timestamp * 1000).toDateString();
+
+                            return (
+                              <React.Fragment key={msg.id || idx}>
+                                <div className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
+                                  <div className={`max-w-[75%] rounded-xl p-2.5 text-xs shadow-sm relative border ${msg.fromMe ? 'bg-primary/10 text-text border-primary/20 rounded-tr-none' : 'bg-bg3 text-text border-glass-border rounded-tl-none'}`}>
+                                    {msg.hasMedia ? (
+                                      <WhatsAppMedia
+                                        msg={msg}
+                                        chatId={activeWaChat.id}
+                                        media={loadedMedia[msg.id]}
+                                        loading={loadingMedia[msg.id]}
+                                        onLoad={() => fetchMedia(msg.id)}
+                                        onImageClick={(src, name) => setLightbox({ isOpen: true, src, name })}
+                                        onScan={() => handleManualScan(activeWaChat.id, msg.id)}
+                                      />
+                                    ) : (
+                                      <span className="whitespace-pre-wrap">{msg.body}</span>
+                                    )}
+                                    <div className="text-[8px] text-muted mt-1 text-right float-right ml-3 pt-0.5 select-none">
+                                      {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            </div>
-                          ))}
+                                {showDateDivider && (
+                                  <div className="flex justify-center my-2">
+                                    <span className="bg-bg3 border border-glass-border px-3 py-1 rounded-full text-[9px] font-bold text-muted uppercase tracking-wider select-none shadow-sm">
+                                      {formatDividerDate(msg.timestamp)}
+                                    </span>
+                                  </div>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
                         </>
                       )}
                     </div>
@@ -1115,6 +1395,95 @@ const CRM = () => {
             <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl border border-glass-border/10" />
           </div>
           <p className="mt-4 text-xs font-bold text-text bg-bg3/60 px-3 py-1.5 rounded-full border border-glass-border/20 tracking-wide">{lightbox.name}</p>
+        </div>
+      )}
+      {/* Ignore List Manager Modal */}
+      {showIgnoreModal && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-glass-bg border border-glass-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] overflow-hidden">
+            {/* Header */}
+            <div className="p-4 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2">
+                <EyeOff className="w-4 h-4 text-primary animate-pulse" />
+                <h3 className="font-bold text-xs text-text uppercase tracking-wider">Manage Ignore List</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowIgnoreModal(false);
+                  setNewIgnorePhone('');
+                }}
+                className="text-muted hover:text-text hover:bg-bg2 p-1 rounded-lg transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Add Ignore Form */}
+            <div className="p-4 border-b border-glass-border bg-bg2/40 shrink-0">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">
+                Ignore New Number or Group ID
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. 9876543210 or group ID"
+                  value={newIgnorePhone}
+                  onChange={(e) => setNewIgnorePhone(e.target.value)}
+                  className="flex-1 bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text placeholder-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddIgnore()}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddIgnore}
+                  className="bg-primary/20 hover:bg-primary/30 border border-primary/20 text-primary text-xs font-bold px-4 py-1.5 rounded-lg transition-colors shrink-0"
+                >
+                  Ignore
+                </button>
+              </div>
+              <p className="text-[9px] text-muted mt-1.5 leading-relaxed">
+                Tip: 10-digit phone numbers will be automatically formatted (e.g., adding country prefix 91 and @c.us suffix).
+              </p>
+            </div>
+
+            {/* List of ignored numbers */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-2">
+                Currently Ignored ({ignoredPhones.size})
+              </span>
+              {Array.from(ignoredPhones.entries()).map(([phone, status]) => {
+                const isExplicitUnignored = status === 'unignored';
+                const isGroup = phone.endsWith('@g.us') || phone.includes('-');
+                
+                return (
+                  <div 
+                    key={phone} 
+                    className="flex justify-between items-center bg-bg3/60 border border-glass-border/30 rounded-xl p-2.5 hover:bg-bg3 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-text truncate">{phone}</p>
+                      <p className="text-[8px] text-muted font-mono uppercase mt-0.5">
+                        {isGroup ? 'Group Chat' : 'Individual'} • {isExplicitUnignored ? 'Scanning Allowed (Override)' : 'Muted'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleIgnore(phone, !isExplicitUnignored)}
+                      className="text-xs font-semibold px-2 py-1 rounded bg-red/10 text-red-400 hover:bg-red/20 transition-all uppercase tracking-wider text-[9px] shrink-0"
+                      title={isExplicitUnignored ? 'Mute' : 'Allow Scanning'}
+                    >
+                      {isExplicitUnignored ? 'Mute' : 'Unignore'}
+                    </button>
+                  </div>
+                );
+              })}
+
+              {ignoredPhones.size === 0 && (
+                <div className="text-center py-8 text-muted text-xs">
+                  Ignore list is empty. All active chats will be scanned.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

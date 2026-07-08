@@ -6,6 +6,7 @@ import { parseMessage, isRepeatRequest } from './intentKeywords.js';
 import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog } from './pharmarackCatalogCache.js';
+import { waAdminEscalationService } from './waAdminEscalationService.js';
 
 interface MatchResult {
   customer: { id: number; name: string; phone: string } | null;
@@ -21,13 +22,14 @@ interface MatchResult {
   messageBody: string;
 }
 
-/**
- * Check if a phone number is in the ignored list.
- */
 async function isIgnored(phone: string): Promise<boolean> {
   const db = await dbManager.getConnection();
-  const row = await db.get('SELECT phone FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
-  return !!row;
+  const row = await db.get('SELECT reason FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
+  if (row) {
+    return row.reason !== 'unignored';
+  }
+  const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
+  return isGroupOrBroadcast;
 }
 
 /**
@@ -63,14 +65,31 @@ async function getCustomerHistory(customerId: number): Promise<any[]> {
  */
 export async function handleInbound(msg: any): Promise<void> {
   try {
-    const phone = msg.from || '';
+    let phone = msg.from || '';
     const chatId = msg.from || msg.to || '';
     const body = msg.body || '';
     const msgId = msg.id?._serialized || msg.id || '';
     const hasMedia = !!msg.hasMedia;
 
+    // Resolve standard phone number if sender is an LID
+    if (phone.endsWith('@lid')) {
+      try {
+        const mapping = await msg.client.getContactLidAndPhone([phone]);
+        if (mapping && mapping[0] && mapping[0].pn) {
+          phone = `${mapping[0].pn}@c.us`;
+        } else {
+          const contact = await msg.getContact();
+          if (contact && contact.number) {
+            phone = `${contact.number}@c.us`;
+          }
+        }
+      } catch (e) {
+        console.error('[Intent Service] Failed to get contact for LID:', e);
+      }
+    }
+
     // 1. IGNORE CHECK
-    if (await isIgnored(phone)) return;
+    if (await isIgnored(chatId)) return;
 
     // 2. CUSTOMER LOOKUP
     const customer = await lookupCustomer(phone);
@@ -124,7 +143,10 @@ export async function handleInbound(msg: any): Promise<void> {
         customer,
         isNewCustomer,
         messageBody: body,
-        source: hasMedia ? 'both' : 'text'
+        source: hasMedia ? 'both' : 'text',
+        msgId,
+        phone,
+        hasIntentWords: parsed.rawIntentWords.length > 0
       });
     }
   } catch (err) {
@@ -145,8 +167,11 @@ async function searchAndBroadcast(opts: {
   source: 'text' | 'ocr' | 'both';
   dosageForm?: string;
   mrp?: number;
+  msgId?: string;
+  phone?: string;
+  hasIntentWords?: boolean;
 }): Promise<void> {
-  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp } = opts;
+  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone } = opts;
 
   // Search local medicines DB (FTS5 + fuzzy match)
   let filterResult;
@@ -169,6 +194,13 @@ async function searchAndBroadcast(opts: {
     } catch (catErr) {
       console.warn('[Intent Service] Catalog search failed:', catErr);
     }
+  }
+
+  // Discard as noise if no intent keywords were used and no matches are found in local DB or catalog cache
+  const hasIntent = opts.hasIntentWords || opts.source === 'ocr' || opts.source === 'both';
+  if (!hasIntent && filterResult.matches.length === 0 && (!catalogResults || (catalogResults.mapped.length === 0 && catalogResults.nonMapped.length === 0))) {
+    console.log(`[Intent Service] No intent words and no local/catalog matches for "${medicineName}". Discarding as noise.`);
+    return;
   }
 
   // Live Pharmarack search as last resort (if nothing found locally or in catalog)
@@ -217,6 +249,24 @@ async function searchAndBroadcast(opts: {
     livePharmarackResults
   });
 
+  // Fire-and-forget escalation logic
+  waAdminEscalationService.maybeEscalate({
+    customer,
+    isNewCustomer,
+    medicineName,
+    quantity,
+    unit,
+    localMatches: filterResult.matches,
+    catalogResults,
+    confidence: filterResult.confidence,
+    isRepeat: false,
+    source,
+    messageBody,
+    history,
+    msgId,
+    phone
+  }).catch(err => console.error('[Intent Service] Admin escalation failed:', err));
+
   console.log(`[Intent Service] Match result for "${medicineName}": ${filterResult.matches.length} local, ${catalogResults?.mapped?.length || 0} mapped, ${catalogResults?.nonMapped?.length || 0} non-mapped`);
 }
 
@@ -225,7 +275,7 @@ async function searchAndBroadcast(opts: {
  * Registered as an event listener in server.ts startup.
  */
 export function handleOcrComplete(data: any): void {
-  const { phone, chatId, messageBody, ocrResult } = data;
+  const { phone, chatId, messageBody, ocrResult, msgId } = data;
   if (!ocrResult?.medicineInfo?.potentialName) return;
 
   const medicineName = ocrResult.medicineInfo.potentialName;
@@ -249,7 +299,9 @@ export function handleOcrComplete(data: any): void {
       messageBody: messageBody || '',
       source: textParsed.medicineName ? 'both' : 'ocr',
       dosageForm,
-      mrp
+      mrp,
+      msgId,
+      phone
     }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
   });
 }

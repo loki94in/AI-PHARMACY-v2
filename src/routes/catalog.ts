@@ -292,6 +292,31 @@ router.delete('/catalog/job/:id', async (req, res) => {
   }
 });
 
+// Fetch pending staged reviews for WhatsApp or other sources
+router.get('/catalog/reviews/pending', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const source = req.query.source || 'whatsapp';
+    const reviews = await db.all(
+      'SELECT * FROM staged_medicine_reviews WHERE status = ? AND source = ? ORDER BY id DESC',
+      ['pending', source]
+    );
+    await dbManager.close();
+    
+    const parsedReviews = reviews.map(r => ({
+      ...r,
+      original_row_data: r.original_row_data ? JSON.parse(r.original_row_data) : null,
+      extracted_json: r.extracted_json ? JSON.parse(r.extracted_json) : null,
+      approved_json: r.approved_json ? JSON.parse(r.approved_json) : null
+    }));
+    
+    res.json({ success: true, reviews: parsedReviews });
+  } catch (error: any) {
+    console.error('Fetch pending reviews error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Fetch staged reviews for a catalog job
 router.get('/catalog/job/:id/reviews', async (req, res) => {
   try {

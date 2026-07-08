@@ -48,7 +48,21 @@ const NOISE_WORDS = new Set([
   'hello', 'hi', 'hey', 'good', 'morning', 'evening', 'night',
   'thank', 'thanks', 'thankyou', 'ok', 'okay', 'yes', 'no', 'urgently',
   'urgent', 'jaldi', 'abhi', 'aaj', 'kal', 'today', 'tomorrow',
-  'delivery', 'deliver', 'asap'
+  'delivery', 'deliver', 'asap',
+  // Greetings / Conversational English/Hinglish
+  'hii', 'hiii', 'heyy', 'heyya', 'helloo', 'yoo', 'ola', 'namaste', 'namaskar',
+  'ram', 'shubh', 'pranam', 'gm', 'gn', 'tc', 'bye', 'gd', 'mrng', 'evng',
+  // Marathi / Hindi conversational and question words
+  'aahe', 'ahe', 'ahae', 'na', 're', 'pan', 'pn', 'ca', 'cha', 'ta', 'te', 'ti', 'to',
+  'nhi', 'nahi', 'nahy', 'nakot', 'navhate', 'havey', 'have', 'pahije', 'pahijey',
+  'kya', 'kab', 'kaha', 'kaise', 'kon', 'koni', 'kona', 'konala', 'kasa', 'kashi', 'kase', 'kasala',
+  'yevo', 'yeu', 'yeto', 'yete', 'yetat', 'gheu', 'gheto', 'ghete', 'ghetat', 'havat', 'hvae', 'haye',
+  'kahi', 'kahich', 'pun', 'var', 'war', 'ch', 'c', 'sathi', 'sathy', 'sobat', 'nko', 'nako',
+  'parva', 'ata', 'atta', 'nantar', 'karan', 'mag', 'vel', 'wele', 'time', 'date', 'month', 'year',
+  'divas', 'diwas', 'roj', 'roji', 'daily', 'weekly', 'monthly',
+  'mi', 'majhe', 'maza', 'mazi', 'mazya', 'tuzhe', 'tuza', 'tuzi', 'tuzya', 'aamhi', 'amhi', 'aamche',
+  'tumhi', 'tumche', 'te', 'tya', 'tyanche', 'tyacha', 'tyachi', 'tyachya', 'hye', 'he', 'ha', 'hi', 'he',
+  'ya', 'hyanchi', 'hyancha'
 ]);
 
 export interface ParsedMessage {
@@ -137,12 +151,20 @@ export function parseMessage(text: string): ParsedMessage {
 
   const medicineName = medicineWords.join(' ').trim();
 
+  // A pure numeric string or single/double letter noise is not a valid medicine name by itself
+  const isPureNumber = /^\d+$/.test(medicineName);
+  const isTooShort = medicineName.length <= 2;
+  const isValidMedicineName = medicineName.length > 0 && !isPureNumber && !isTooShort;
+
   // If we found a medicine name, treat it as a request even without explicit intent words
-  const hasIntent = foundIntentWords.length > 0 || medicineName.length > 0;
+  const hasIntent = foundIntentWords.length > 0 || (isValidMedicineName && medicineName.length > 0);
+  
+  // The medicine name is valid if it meets the criteria OR if there are explicit intent words
+  const finalMedicineName = (isValidMedicineName || (foundIntentWords.length > 0 && medicineName.length > 0)) ? medicineName : '';
 
   return {
     isMedicineRequest: hasIntent,
-    medicineName,
+    medicineName: finalMedicineName,
     quantity: quantity || 1, // default to 1 if not specified
     unit: unit || (quantity > 0 ? 'unit' : ''),
     rawIntentWords: foundIntentWords

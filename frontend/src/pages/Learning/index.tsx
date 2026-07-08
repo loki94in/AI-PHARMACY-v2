@@ -1919,6 +1919,24 @@ const Learning: React.FC = () => {
                     </div>
                   </div>
 
+                  <div className="border-t border-glass-border/40 pt-4 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-bold text-text block">Auto-share medicine matches to Admin WhatsApp</span>
+                      <span className="text-[9px] text-muted block leading-none">Auto‑escalate WhatsApp queries (found or catalog matches) directly to Admin</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={settingsData.wa_auto_share_admin === 'true'}
+                        onChange={() => handleToggleSetting('wa_auto_share_admin')}
+                        disabled={savingSetting === 'wa_auto_share_admin'}
+                      />
+                      <div className="w-8 h-4 bg-zinc-700 peer-checked:bg-green rounded-full transition-colors" />
+                      <div className="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-4" />
+                    </label>
+                  </div>
+
                   <div className="flex justify-end pt-2">
                     <button
                       onClick={() => handleSaveConfig()}
