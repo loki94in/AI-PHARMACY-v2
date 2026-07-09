@@ -1,14 +1,14 @@
-# dependencies
+# ─── Dependencies ────────────────────────────────────────────────────────────
 node_modules/
 **/node_modules/
 
-# local env
+# ─── Environment / Secrets ───────────────────────────────────────────────────
 .env
+.env.*
 .env*.local
-.env.development
-*/.env.development
+!.env.example
 
-# SQLite Database & Backups
+# ─── SQLite Databases & Backups ──────────────────────────────────────────────
 data/*.db
 data/*.db-shm
 data/*.db-wal
@@ -22,14 +22,22 @@ backup/
 data/temp_migration/
 data/migration_reports/
 data/cache/
+data/staging.db
+data/archived_migrations/
 
+# ─── Live Operational Data (never commit runtime exports) ────────────────────
+data/audit_queue.json
+data/ocr_corrections.json
+data/search_screenshots/
+data/temp_ocr/
+data/audit_images/
 
-# Media Uploads & Temp files
+# ─── Media Uploads & Temp files ──────────────────────────────────────────────
 uploads/
 **/uploads/
 uploads/temp/
 
-# Build outputs & cache
+# ─── Build Outputs & Cache ───────────────────────────────────────────────────
 dist/
 **/dist/
 .expo/
@@ -37,41 +45,57 @@ dist/
 web-build/
 **/web-build/
 
-# WhatsApp Auth Cache
+# ─── WhatsApp Auth Cache ─────────────────────────────────────────────────────
 .wwebjs_auth/
 .wwebjs_cache/
 **/.wwebjs_auth/
 **/.wwebjs_cache/
 
-# OCR Models & Training Data (large binaries — download at runtime)
+# ─── OCR Models & Training Data (large binaries — download at runtime) ───────
 data/models/
 eng.traineddata
 
-# SQL dumps & staging databases
+# ─── SQL Dumps ───────────────────────────────────────────────────────────────
 *.sql
-data/staging.db
 
-# Temp OCR & audit images
-data/temp_ocr/
-data/audit_images/
-
-# IDE / Tool caches
+# ─── IDE / Tool Caches ───────────────────────────────────────────────────────
 .understand-anything/
 .codegraph/
+.opencode/
 
-# Logs
+# ─── Graphify & Knowledge Graph (generated — run node scripts/quick-update.mjs) ──
+graphify-out/
+3d-knowledge-graph.html
+
+# ─── Scratch / Dev-Only Debug Scripts ────────────────────────────────────────
+# These are one-off investigation scripts, not production code.
+# Files stay on disk but are not shared via git.
+scratch/
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
+logs/
+**/logs/
 
-# Misc temp/test artifacts
+# ─── Misc Temp / Test Artifacts ──────────────────────────────────────────────
 temp.json
 test.csv
 
-# Large archives and database backups
+# ─── Large Archives and Database Backups ─────────────────────────────────────
 *.zip
 *.bak
 MIGRATION SAMPEL/
-data/archived_migrations/
-catalogue/raw/
 
-# Puppeteer Pharmarack browser session profiles
+# ─── Large Binary Data Files (120 MB — too large for git) ────────────────────
+# Download from release assets or team shared drive.
+medicines.csv
+
+# ─── Distributor Catalogs (binary PDFs — bloat repo history) ─────────────────
+# Store in shared drive / release assets instead.
+CATALOG/
+
+# ─── Puppeteer Pharmarack Browser Session Profiles ───────────────────────────
 data/pharmarack_profile/
+
+# ─── Sensitive Credential Scripts ────────────────────────────────────────────
+scratch/print_gmail_creds.cjs
