@@ -95,13 +95,6 @@ medicines.csv
 CATALOG/
 
 # ─── Puppeteer Pharmarack Browser Session Profiles ───────────────────────────
+# Chrome browser session data — thousands of files, never commit
 data/pharmarack_profile/
-
-# ─── Sensitive Credential Scripts ────────────────────────────────────────────
-scratch/print_gmail_creds.cjs
-
-# ─── Pharmarack Integration (proprietary — not for public repos) ─────────────
-frontend/src/pages/PharmarackCart/index.tsx
-src/routes/pharmarack.ts
-src/services/pharmarackCatalogCache.ts
-tests/pharmarackCartNotif.test.ts
+data/pharmarack_profile_temp_*/
