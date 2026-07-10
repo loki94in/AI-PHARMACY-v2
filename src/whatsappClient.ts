@@ -2,6 +2,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import { eventService } from './services/eventService.js';
 import { dbManager } from './database/connection.js';
 import { config as appConfig } from './config/index.js';
@@ -12,6 +13,23 @@ import { whatsappBusinessService } from './services/whatsappBusinessService.js';
 type WAClient = InstanceType<typeof Client>;
 
 let clientInstance: WAClient | null = null;
+
+// Catch and ignore Puppeteer/whatsapp-web.js internal detached frame and context destroyed rejections
+// to prevent them from crashing the server process in dev or production.
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (
+    msg.includes('detached Frame') ||
+    msg.includes('Execution context was destroyed') ||
+    msg.includes('Session closed. Most likely the page has been closed') ||
+    msg.includes('Target closed')
+  ) {
+    console.warn('[WhatsApp SafeGuard] Handled and suppressed internal Puppeteer/WA rejection:', msg);
+    return;
+  }
+  // Let other unhandled rejections bubble or log them
+  console.error('[Unhandled Rejection]', reason);
+});
 
 /** Helper to check whether we should route messages to WhatsApp Business Cloud API */
 export async function shouldRouteToBusiness(): Promise<boolean> {
@@ -49,6 +67,35 @@ export let isReady: boolean = false;
 
 let qrTimeout: NodeJS.Timeout | null = null;
 
+function cleanupProfileLocks() {
+  const sessionPath = path.resolve(process.cwd(), '.wwebjs_auth', 'session');
+  
+  // 1. Terminate any stale Chrome/Edge processes holding this profile lock
+  try {
+    if (process.platform === 'win32') {
+      const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*wwebjs_auth*session*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
+      execSync(cmd, { stdio: 'ignore' });
+      console.log('[WhatsApp Init] Stale WhatsApp browser processes terminated.');
+    }
+  } catch (err: any) {
+    console.warn('[WhatsApp Init] Could not check/kill running browser processes (non-fatal):', err.message);
+  }
+
+  // 2. Remove locks and devtools active port files to avoid Puppeteer launch hangs
+  const filesToClean = ['lockfile', 'SingletonLock', 'DevToolsActivePort'];
+  for (const file of filesToClean) {
+    const filePath = path.join(sessionPath, file);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log(`[WhatsApp Init] Cleaned stale lock file: ${file}`);
+      } catch (err: any) {
+        console.warn(`[WhatsApp Init] Could not delete lock file ${file}: ${err.message}`);
+      }
+    }
+  }
+}
+
 /** Initialize the WhatsApp client and return it */
 export async function initClient(): Promise<WAClient> {
   if (clientInstance) return clientInstance;
@@ -63,6 +110,10 @@ export async function initClient(): Promise<WAClient> {
       check();
     });
   }
+  
+  // Clean up any stale profile locks before initiating Chrome
+  cleanupProfileLocks();
+
   initializing = true;
   return new Promise<WAClient>((resolve, reject) => {
     
@@ -186,12 +237,31 @@ export async function initClient(): Promise<WAClient> {
 
       reject(new Error(msg));
     });
+
+    const isChatIgnored = async (db: any, chatId: string): Promise<boolean> => {
+      const phone = chatId.split('@')[0];
+      const row = await db.get(
+        `SELECT reason FROM ignored_whatsapp_numbers WHERE phone = ? OR phone = ? LIMIT 1`,
+        [chatId, phone]
+      );
+      if (row) {
+        return row.reason !== 'unignored';
+      }
+      const isGroupOrBroadcast = chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+      return isGroupOrBroadcast;
+    };
     
     // Register message creation event listener for offline caching
     client.on('message_create', async (msg) => {
       try {
         const chatId = msg.to && msg.fromMe ? msg.to : msg.from;
         const db = await dbManager.getConnection();
+
+        // Completely skip saving, broadcasting, or processing if the chat is on the ignore list
+        const ignored = await isChatIgnored(db, chatId);
+        if (ignored) {
+          return;
+        }
         
         await db.run(
           `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
@@ -484,9 +554,28 @@ async function syncWhatsappData(client: WAClient) {
     console.log('[WhatsApp] Starting background synchronization of chats and messages...');
     const chats = await client.getChats();
     const db = await dbManager.getConnection();
+
+    // Load ignored list into memory once to avoid N+1 query lookup overhead
+    const ignoreRows = await db.all('SELECT phone, reason FROM ignored_whatsapp_numbers');
+    const ignoreMap = new Map<string, string>();
+    for (const r of ignoreRows) {
+      ignoreMap.set(r.phone, r.reason);
+    }
+
+    const isIgnored = (chatId: string) => {
+      const phone = chatId.split('@')[0];
+      const explicit = ignoreMap.get(chatId) || ignoreMap.get(phone);
+      if (explicit !== undefined) {
+        return explicit !== 'unignored';
+      }
+      return chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+    };
     
     for (const chat of chats) {
       const chatId = chat.id._serialized;
+      if (isIgnored(chatId)) {
+        continue; // Completely skip synchronization for ignored chats
+      }
       const lastMsg = chat.lastMessage ? chat.lastMessage.body : null;
       
       // Resolve phone number if LID

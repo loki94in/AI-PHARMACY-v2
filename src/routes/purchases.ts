@@ -885,16 +885,17 @@ router.post('/manual', async (req, res) => {
       .map((item: any) => item.medicine || item.medicine_name)
       .filter((name: any) => typeof name === 'string' && name.trim().length > 0);
 
-    (async () => {
-      for (const name of medicineNamesToEnrich) {
-        try {
-          await activityTracker.waitUntilIdle();
-          await onlineDataEnricher.enrichMedicineByName(name);
-        } catch (e) {
-          console.error('[Background Enrichment] Error enriching:', name, e);
-        }
-      }
-    })();
+    // [DISABLED] Background enrichment on purchase save - only runs on explicit user action.
+    // (async () => {
+    //   for (const name of medicineNamesToEnrich) {
+    //     try {
+    //       await activityTracker.waitUntilIdle();
+    //       await onlineDataEnricher.enrichMedicineByName(name);
+    //     } catch (e) {
+    //       console.error('[Background Enrichment] Error enriching:', name, e);
+    //     }
+    //   }
+    // })();
 
     // Mark the source email as saved so it stays visible in Mail page for 3 days
     // and is not deleted by the background cleanup job
@@ -1127,16 +1128,17 @@ router.put('/:id/full', async (req, res) => {
       .map((item: any) => item.medicine || item.medicine_name)
       .filter((name: any) => typeof name === 'string' && name.trim().length > 0);
 
-    (async () => {
-      for (const name of medicineNamesToEnrich) {
-        try {
-          await activityTracker.waitUntilIdle();
-          await onlineDataEnricher.enrichMedicineByName(name);
-        } catch (e) {
-          console.error('[Background Enrichment] Error enriching:', name, e);
-        }
-      }
-    })();
+    // [DISABLED] Background enrichment on purchase save - only runs on explicit user action.
+    // (async () => {
+    //   for (const name of medicineNamesToEnrich) {
+    //     try {
+    //       await activityTracker.waitUntilIdle();
+    //       await onlineDataEnricher.enrichMedicineByName(name);
+    //     } catch (e) {
+    //       console.error('[Background Enrichment] Error enriching:', name, e);
+    //     }
+    //   }
+    // })();
 
         res.json({ success: true, message: 'Purchase updated successfully' });
   } catch (error) {

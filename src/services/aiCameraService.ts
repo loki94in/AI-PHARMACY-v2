@@ -30,6 +30,7 @@ interface OCRResult {
 class AICameraService {
   private worker: any = null;
   private initialized: boolean = false;
+  private ignoreListLoaded: boolean = false;
 
   private async preprocess(buffer: Buffer): Promise<Buffer> {
     try {
@@ -39,6 +40,63 @@ class AICameraService {
     } catch (err) {
       console.error('Preprocessing failed, using original:', err);
       return buffer;
+    }
+  }
+
+  /**
+   * Load all API composition and drug generic words from the database
+   * dynamically to ignore them during OCR fuzzy matching.
+   */
+  public async loadDatabaseIgnoreList(): Promise<void> {
+    if (this.ignoreListLoaded) return;
+    try {
+      const db = await dbManager.getConnection();
+      
+      // 1. Fetch api_reference from medicines
+      const medicineApis = await db.all('SELECT DISTINCT api_reference FROM medicines WHERE api_reference IS NOT NULL AND api_reference <> ""');
+      for (const row of medicineApis) {
+        if (row.api_reference) {
+          const words = row.api_reference.split(/[\s,;:|+\-()\[\]{}\/\\]+/);
+          for (const word of words) {
+            const cleanWord = word.trim().toLowerCase();
+            if (cleanWord.length > 2) {
+              this.STOP_WORDS.add(cleanWord);
+            }
+          }
+        }
+      }
+
+      // 2. Fetch compositions from medicine_reference
+      try {
+        const refApis = await db.all('SELECT DISTINCT composition1, composition2 FROM medicine_reference');
+        for (const row of refApis) {
+          if (row.composition1) {
+            const words = row.composition1.split(/[\s,;:|+\-()\[\]{}\/\\]+/);
+            for (const word of words) {
+              const cleanWord = word.trim().toLowerCase();
+              if (cleanWord.length > 2) {
+                this.STOP_WORDS.add(cleanWord);
+              }
+            }
+          }
+          if (row.composition2) {
+            const words = row.composition2.split(/[\s,;:|+\-()\[\]{}\/\\]+/);
+            for (const word of words) {
+              const cleanWord = word.trim().toLowerCase();
+              if (cleanWord.length > 2) {
+                this.STOP_WORDS.add(cleanWord);
+              }
+            }
+          }
+        }
+      } catch (refErr) {
+        console.warn('[AiCamera] Could not load from medicine_reference table:', refErr);
+      }
+
+      this.ignoreListLoaded = true;
+      console.log(`[AiCamera] Dynamically loaded drug generic/API ignore list from DB. Total stop words: ${this.STOP_WORDS.size}`);
+    } catch (err) {
+      console.error('[AiCamera] Failed to load database ignore list:', err);
     }
   }
 
@@ -59,12 +117,63 @@ class AICameraService {
         user_defined_dictionary: './data/medicine_dict.txt', // Custom medicine dictionary
         user_patterns_file: './data/medicine_patterns.txt',  // Patterns like "\\d+mg", "\\d+ tablet"
       });
+      
+      await this.loadDatabaseIgnoreList();
+      
       this.initialized = true;
       console.log('AI Camera Service initialized with local Tesseract.js config and medicine dictionary');
     } catch (error) {
       console.error('Failed to initialize AI Camera Service:', error);
       throw error;
     }
+  }
+
+  /**
+   * Stop words and common pharma label words that should NOT be passed to
+   * the fuzzy product-name matcher. These are high-frequency words that appear
+   * on every medicine label but are NOT part of the product name.
+   * Covers: English function words, pharma label keywords, dosage units.
+   */
+  private readonly STOP_WORDS = new Set([
+    // English function / filler words
+    'the','of','is','a','an','and','or','for','in','on','at','to','by','with',
+    'be','are','was','not','this','that','from','as','it','its',
+    // Pharma label noise
+    'tab','tablet','tablets','cap','capsule','capsules','syp','syrup',
+    'inj','injection','drops','cream','gel','ointment','lotion','powder',
+    'spray','inhaler','sachet','solution','suspension',
+    'mg','ml','mcg','g','iu','gm','kg','mm','cm',
+    'mrp','mfg','exp','batch','lot','no','nos','each','qty',
+    'manufactured','marketed','distributed','by','pvt','ltd','inc',
+    'pharma','pharmaceuticals','laboratories','lab','labs','care',
+    // Verbal/chat words that may appear due to OCR misreads
+    'api','chat','verbal','call','text','message','send','please','note',
+  ]);
+
+  /**
+   * Returns candidate search tokens from an OCR text line by:
+   * 1. Splitting into words
+   * 2. Removing stop words, single-char tokens, and pure-numeric tokens
+   * Only the remaining "uncertain" / unknown words are worth fuzzy-matching.
+   */
+  private extractCandidateTokens(line: string): string[] {
+    return line
+      .split(/[\s,;:|()\[\]{}\/\\]+/)
+      .map(w => w.trim().toLowerCase())
+      .filter(w => w.length > 2 && !this.STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  }
+
+  /**
+   * If the OCR text already contains a recognizable API / composition pattern
+   * (e.g. "Paracetamol 500mg", "Amoxicillin+Clavulanic") we can skip the
+   * expensive fuzzy DB scan — the composition already identifies the medicine.
+   * Returns the matched API string, or null if none detected.
+   */
+  private detectKnownApi(text: string): string | null {
+    // Pattern: a multi-character word followed by a strength (e.g. 500mg, 0.5%, 5ml)
+    const apiPattern = /\b([A-Za-z]{5,})(?:\s*\+\s*[A-Za-z]{4,})*\s+\d+\s*(?:mg|ml|mcg|g|iu|%)/i;
+    const m = text.match(apiPattern);
+    return m ? m[0].trim() : null;
   }
 
   /**
@@ -164,22 +273,62 @@ class AICameraService {
       }
     }
 
-    // Check matches in local database using fuzzy matching
+    // --- Step 1: Skip fuzzy scan if a known API/composition is already present ---
+    // If the label already shows a composition like "Paracetamol 500mg", the API
+    // text itself identifies the medicine — no need to run the expensive fuzzy scan.
     let matches: string[] = [];
-    try {
-      const filterResult = await productNameFilterService.filterProductNames(localOcrResult.text, {
-        minConfidenceThreshold: 0.7
-      });
-      matches = filterResult.matches;
-    } catch (e) {
+    const detectedApiText = this.detectKnownApi(localOcrResult.text);
+    if (detectedApiText) {
+      console.log(`[AiCamera] Known API detected in OCR ("${detectedApiText}") — skipping fuzzy scan.`);
+      // Use the detected API text directly as the best match candidate
+      matches = [detectedApiText];
+    } else {
+      // --- Step 2: Fuzzy match — only on "uncertain" candidate tokens, not stop words ---
+      // Split text into lines, strip stop words from each line, then try the
+      // cleaned candidate line (not the full OCR blob) against the DB.
       try {
+        await this.loadDatabaseIgnoreList();
+        
         await productNameFilterService.initialize();
-        const filterResult = await productNameFilterService.filterProductNames(localOcrResult.text, {
-          minConfidenceThreshold: 0.7
-        });
-        matches = filterResult.matches;
+
+        // Filter lines down to only those containing actual candidate (brand name) tokens
+        const candidateLines = localOcrResult.text
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => l.length > 2 && l.length < 100)
+          .map(line => ({ original: line, tokens: this.extractCandidateTokens(line) }))
+          .filter(item => item.tokens.length > 0);
+
+        for (const item of candidateLines) {
+          const cleanedLine = item.tokens.join(' ');
+          // Try the full cleaned line first (best for multi-word names)
+          const filterResult = await productNameFilterService.filterProductNames(cleanedLine, {
+            minConfidenceThreshold: 0.65,
+            rawOcrText: localOcrResult.text
+          });
+
+          if (filterResult.matches.length > 0) {
+            matches = filterResult.matches;
+            break;
+          }
+
+          // If the line-level query found nothing, try individual uncertain tokens
+          // (handles cases where only one word in the line is the product name)
+          for (const token of item.tokens) {
+            if (token.length < 4) continue; // skip very short tokens
+            const tokenResult = await productNameFilterService.filterProductNames(token, {
+              minConfidenceThreshold: 0.7,
+              rawOcrText: localOcrResult.text
+            });
+            if (tokenResult.matches.length > 0) {
+              matches = tokenResult.matches;
+              break;
+            }
+          }
+          if (matches.length > 0) break;
+        }
       } catch (err: any) {
-        console.error('Filter service query/init failed:', err);
+        console.error('[AiCamera] Fuzzy match failed:', err);
       }
     }
 

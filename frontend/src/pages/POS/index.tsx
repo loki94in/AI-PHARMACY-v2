@@ -1428,17 +1428,41 @@ const POS = () => {
       }
     }
     
+    // Stock Level Verification (Strips + Loose units pool check)
+    for (const item of cart) {
+      if (item.isEmptyRow) continue;
+      
+      // Only enforce for items that are linked to actual inventory master items
+      if (typeof item.id === 'number' && item.id < 1000000) {
+        const packSize = item.packSize || 10;
+        const reqQty = Number(item.qty || 0);
+        const reqLoose = Number(item.looseQty || 0);
+        const reqTotalUnits = reqQty * packSize + reqLoose;
+        
+        const availQty = Number(item.availableStock !== undefined ? item.availableStock : 0);
+        const availLoose = Number(item.availableLooseStock !== undefined ? item.availableLooseStock : 0);
+        const availTotalUnits = availQty * packSize + availLoose;
+        
+        if (availTotalUnits < reqTotalUnits) {
+          alert(`❌ INSUFFICIENT STOCK:\n\nMedicine: ${item.name || 'Medicine'}\nRequested: ${reqQty} strips & ${reqLoose} loose (${reqTotalUnits} units)\nAvailable: ${availQty} strips & ${availLoose} loose (${availTotalUnits} units)\n\nPlease reduce the quantity to match available stock before proceeding.`);
+          return;
+        }
+      }
+    }
+    
     try {
       const salesItems = cart.filter(item => !item.isEmptyRow).map(item => {
         const itemDiscount = item.discount || item.discountPer || 0;
+        // Resolve unit price: prefer explicit unitPrice, then mrp, then 1 as absolute fallback
+        const resolvedUnitPrice = Number(item.unitPrice || item.mrp || item.unit_price || 1);
         return {
           inventory_id: typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined,
           medicine_name: item.name,
           batch_no: item.batch,
           expiry_date: item.expiry,
-          mrp: item.mrp,
-          quantity: item.qty || 0,
-          unit_price: item.unitPrice || item.mrp,
+          mrp: item.mrp || resolvedUnitPrice,
+          quantity: Math.max(item.qty || 0, item.quantity || 0),
+          unit_price: resolvedUnitPrice,
           loose_qty: item.looseQty || 0,
           discount_per: itemDiscount,
           pack_size: item.packSize || 10
@@ -1462,6 +1486,9 @@ const POS = () => {
 
       const result = await api.createSale(payload);
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
+      
+      // Invalidate the Sells page cache so the new bill appears immediately
+      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
       
       setLastSavedInvoiceNo(invoiceNo);
       setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
@@ -1499,9 +1526,11 @@ const POS = () => {
         }
         return t;
       }));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error completing sale:', error);
-      alert('Failed to save sale to database. Please check connection.');
+      // Show actual server error message to help diagnose the issue
+      const serverMsg = error?.response?.data?.error || error?.message || 'Unknown error';
+      alert(`Failed to save sale:\n\n${serverMsg}\n\nIf this persists, check that the backend server is running.`);
     }
   };
 

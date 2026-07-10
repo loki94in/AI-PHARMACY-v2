@@ -1,4 +1,4 @@
-import { parseMessage } from '../src/services/intentKeywords.js';
+import { parseMessage, isPlausibleMedicineName } from '../src/services/intentKeywords.js';
 
 describe('WhatsApp Intent Keywords Parsing Tests', () => {
   test('Filters out greetings and conversational noise', () => {
@@ -47,11 +47,51 @@ describe('WhatsApp Intent Keywords Parsing Tests', () => {
     expect(res2.rawIntentWords).toContain('need');
   });
 
-  test('Handles medicine requests with explicit intent words even for numbers/short words', () => {
-    // If there is an explicit intent word like 'send' or 'order', treat it as a request
+  test('Intent words NEVER resurrect an invalid medicine name (production "118" leak)', () => {
+    // "send 118" is a request, but "118" must not be searched as a medicine
     const res1 = parseMessage('send 118');
-    expect(res1.isMedicineRequest).toBe(true);
-    expect(res1.medicineName).toBe('118');
+    expect(res1.medicineName).toBe('');
     expect(res1.rawIntentWords).toContain('send');
+
+    // "118 do" was the observed leak ('do' used to be an intent word)
+    const res2 = parseMessage('118 do');
+    expect(res2.medicineName).toBe('');
+  });
+
+  test('Filters out Marathi conversational leaks observed in production', () => {
+    for (const text of ['Asudet', 'Baki aahet ना', 'Aahe ka aaj', 'Yevo ka', 'thik aahe', 'kadhi milel']) {
+      const res = parseMessage(text);
+      expect(res.medicineName).toBe('');
+    }
+  });
+
+  test('Genuine medicine names still pass with new intent words', () => {
+    const res1 = parseMessage('pathva Telma 40');
+    expect(res1.isMedicineRequest).toBe(true);
+    expect(res1.medicineName).toBe('Telma 40');
+    expect(res1.rawIntentWords).toContain('pathva');
+  });
+
+  describe('isPlausibleMedicineName', () => {
+    test('rejects numbers, punctuation, short and Devanagari-only strings', () => {
+      expect(isPlausibleMedicineName('118')).toBe(false);
+      expect(isPlausibleMedicineName('118 2')).toBe(false);
+      expect(isPlausibleMedicineName('12.5')).toBe(false);
+      expect(isPlausibleMedicineName('ab')).toBe(false);
+      expect(isPlausibleMedicineName('ना')).toBe(false);
+      expect(isPlausibleMedicineName('बाकी आहेत')).toBe(false);
+      expect(isPlausibleMedicineName('')).toBe(false);
+    });
+
+    test('rejects strings made entirely of noise words', () => {
+      expect(isPlausibleMedicineName('baki aahet')).toBe(false);
+      expect(isPlausibleMedicineName('asudet')).toBe(false);
+    });
+
+    test('accepts real medicine names', () => {
+      expect(isPlausibleMedicineName('Novastat 20')).toBe(true);
+      expect(isPlausibleMedicineName('AB Phylline')).toBe(true);
+      expect(isPlausibleMedicineName('Dolo 650')).toBe(true);
+    });
   });
 });

@@ -582,6 +582,7 @@ const Topbar = ({
     total_count?: number;
     processed_count?: number;
   } | null>(null);
+  const [enrichmentRunning, setEnrichmentRunning] = useState(false);
 
   const [orderAlertCount, setOrderAlertCount] = useState(0);
 
@@ -642,6 +643,19 @@ const Topbar = ({
       }
     };
     fetchActiveJob();
+
+    // Poll enrichment status to show/hide the header pill
+    const pollEnrichment = async () => {
+      try {
+        const { data } = await apiClient.get('/enrichment/status');
+        setEnrichmentRunning(!!data?.isRunning);
+      } catch {
+        // silently ignore — don't surface a UI error just for the header pill
+      }
+    };
+    pollEnrichment();
+    const enrichmentPollInterval = setInterval(pollEnrichment, 5000);
+    return () => clearInterval(enrichmentPollInterval);
   }, []);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -737,6 +751,12 @@ const Topbar = ({
               <span className="text-[10px] font-bold uppercase tracking-wider">
                 Catalog: {catalogJob.status === 'pending_analysis' ? 'Analyzing' : catalogJob.status === 'processing_analysis' ? 'Processing analysis' : 'Ingesting'} ({Math.round(catalogJob.progress)}%)
               </span>
+            </div>
+          )}
+          {enrichmentRunning && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-violet-500/10 border border-violet-500/20 rounded-xl text-violet-400">
+              <RefreshCw size={12} className="animate-spin" />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Enriching compositions...</span>
             </div>
           )}
         </div>

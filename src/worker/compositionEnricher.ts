@@ -26,7 +26,7 @@ const DOSAGE_FORMS = [
   'OF', 'ML', 'GM', 'MG', 'MCG', 'IU', 'DRY', 'BAK'
 ];
 
-const DOSAGE_FORM_SET = new Set(DOSAGE_FORMS);
+export const DOSAGE_FORM_SET = new Set(DOSAGE_FORMS);
 
 function cleanMedicineName(name: string): string {
   return name
@@ -161,9 +161,31 @@ export interface EnrichmentStatus {
 }
 
 let isEnrichmentRunning = false;
+let enrichmentStopRequested = false;
+
+// Daily auto-enrichment quota — tracks how many items were auto-processed today
+// so background runs (triggered after catalog import) are capped at AUTO_DAILY_LIMIT.
+// Manual runs (user clicks Start Enrichment) bypass this counter entirely.
+const AUTO_DAILY_LIMIT = 10;
+let autoEnrichedDate = ''; // 'YYYY-MM-DD' of the current day's run
+let autoEnrichedTodayCount = 0; // items processed today by auto-trigger
+
+/** Returns today's date as a YYYY-MM-DD string (local time). */
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export function getEnrichmentRunningState(): boolean {
   return isEnrichmentRunning;
+}
+
+export function requestEnrichmentStop(): void {
+  enrichmentStopRequested = true;
+}
+
+export function isEnrichmentStopRequested(): boolean {
+  return enrichmentStopRequested;
 }
 
 /**
@@ -187,6 +209,11 @@ export async function ensureEnrichmentColumns(db: DbConnection): Promise<void> {
   }
   try {
     await db.run("ALTER TABLE medicines ADD COLUMN suggested_composition TEXT DEFAULT NULL");
+  } catch {
+    // Column already exists
+  }
+  try {
+    await db.run("ALTER TABLE medicines ADD COLUMN search_term_override TEXT DEFAULT NULL");
   } catch {
     // Column already exists
   }
@@ -400,12 +427,32 @@ export async function reclassifyNonPharmaProducts(): Promise<{ updated: number }
   return { updated };
 }
 
-export async function runEnrichment(onProgress?: (pct: number, matched: number) => void): Promise<{ matched: number; needsReview: number; unmatched: number; nonPharma: number }> {
+export async function runEnrichment(
+  onProgress?: (pct: number, matched: number) => void,
+  opts?: { dailyAutoLimit?: number }
+): Promise<{ matched: number; needsReview: number; unmatched: number; nonPharma: number; skippedQuota?: boolean }> {
   if (isEnrichmentRunning) {
     throw new Error('Enrichment is already running');
   }
 
+  // ── Daily auto-limit guard ────────────────────────────────────────────────
+  if (opts?.dailyAutoLimit !== undefined) {
+    const today = todayStr();
+    if (autoEnrichedDate !== today) {
+      // New calendar day — reset counter
+      autoEnrichedDate = today;
+      autoEnrichedTodayCount = 0;
+    }
+    const remaining = opts.dailyAutoLimit - autoEnrichedTodayCount;
+    if (remaining <= 0) {
+      console.log(`[Enrichment] Daily auto-limit of ${opts.dailyAutoLimit} already reached for ${today}. Skipping auto-run.`);
+      return { matched: 0, needsReview: 0, unmatched: 0, nonPharma: 0, skippedQuota: true };
+    }
+    console.log(`[Enrichment] Auto-run: will process up to ${remaining} of ${opts.dailyAutoLimit} daily quota.`);
+  }
+
   isEnrichmentRunning = true;
+  enrichmentStopRequested = false; // reset on each new run
   let matched = 0;
   let needsReview = 0;
   let unmatched = 0;
@@ -423,9 +470,12 @@ export async function runEnrichment(onProgress?: (pct: number, matched: number) 
       return { matched: 0, needsReview: 0, unmatched: 0, nonPharma: 0 };
     }
 
-    // Get all medicines that need enrichment (no api_reference yet)
+    // Get medicines that need enrichment; apply daily limit when in auto mode
+    const limitClause = opts?.dailyAutoLimit !== undefined
+      ? `LIMIT ${opts.dailyAutoLimit - autoEnrichedTodayCount}`
+      : '';
     const medicines = await db.all(
-      "SELECT id, name FROM medicines WHERE (api_reference IS NULL OR api_reference = '') AND enrichment_status IS NULL"
+      `SELECT id, name FROM medicines WHERE (api_reference IS NULL OR api_reference = '') AND enrichment_status IS NULL ${limitClause}`
     );
 
     const total = medicines.length;
@@ -495,10 +545,10 @@ export async function runEnrichment(onProgress?: (pct: number, matched: number) 
           );
           unmatched++;
 
-          // Trigger background online enrichment fallback silently!
-          onlineDataEnricher.enrichMedicineByName(med.name).catch(err =>
-            console.warn('[Enricher] Background online query failed:', err)
-          );
+          // [DISABLED] Background online enrichment fallback — only runs on explicit user action.
+          // onlineDataEnricher.enrichMedicineByName(med.name).catch(err =>
+          //   console.warn('[Enricher] Background online query failed:', err)
+          // );
         }
       }
       await db.run('COMMIT');
@@ -509,10 +559,23 @@ export async function runEnrichment(onProgress?: (pct: number, matched: number) 
       if ((i / BATCH) % 10 === 0) {
         console.log(`Enrichment progress: ${pct}% (${matched} matched, ${needsReview} review, ${unmatched} unmatched, ${nonPharma} non-pharma)`);
       }
+
+      // Check for stop request between batches
+      if (enrichmentStopRequested) {
+        console.log(`Enrichment stopped by user at ${pct}% (${matched} matched so far)`);
+        break;
+      }
     }
 
     await dbManager.close();
     console.log(`Enrichment complete: ${matched} matched, ${needsReview} needs review, ${unmatched} unmatched, ${nonPharma} non-pharma`);
+
+    // Update daily auto-limit counter if this was an auto-triggered run
+    if (opts?.dailyAutoLimit !== undefined) {
+      const processed = matched + needsReview + unmatched + nonPharma;
+      autoEnrichedTodayCount += processed;
+      console.log(`[Enrichment] Auto daily count: ${autoEnrichedTodayCount}/${opts.dailyAutoLimit} for ${autoEnrichedDate}`);
+    }
   } finally {
     isEnrichmentRunning = false;
   }

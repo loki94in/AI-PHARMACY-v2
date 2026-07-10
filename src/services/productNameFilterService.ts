@@ -141,7 +141,7 @@ function ngramSimilarity(s1: string, s2: string, n: number = 2): number {
 }
 
 // Enhanced similarity function combining multiple techniques
-function enhancedSimilarity(s1: string, s2: string): number {
+export function enhancedSimilarity(s1: string, s2: string): number {
   // Convert to lowercase and clean for better matching
   const clean1 = s1.toLowerCase().replace(/[^a-z0-9]/g, '');
   const clean2 = s2.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -149,12 +149,20 @@ function enhancedSimilarity(s1: string, s2: string): number {
   if (clean1 === clean2) return 1.0; // Exact match after cleaning
 
   // Calculate individual similarities
-  const levSim = levenshteinSimilarity(clean1, clean2);
+  let levSim = levenshteinSimilarity(clean1, clean2);
+  
+  // Prefix match boost: if one string starts with the other, it's a very strong indicator
+  if (clean2.startsWith(clean1) || clean1.startsWith(clean2)) {
+    const ratio = Math.min(clean1.length, clean2.length) / Math.max(clean1.length, clean2.length);
+    // Prefix match gets a high score (minimum 0.75, up to 1.0)
+    levSim = 0.75 + 0.25 * ratio;
+  }
+
   const phoneSim = phoneticSimilarity(clean1, clean2);
   const ngramSim = ngramSimilarity(clean1, clean2, 2); // Bigrams
 
   // Weighted combination optimized for medicine names
-  // Levenshtein: good for overall character differences
+  // Levenshtein/Prefix: good for overall character differences and partial inputs
   // Phonetic: good for OCR errors (O/Q, 1/I/l, etc.)
   // N-gram: good for transposed/missing characters
   return (levSim * 0.5) + (phoneSim * 0.3) + (ngramSim * 0.2);
@@ -169,6 +177,7 @@ export interface FilterOptions {
   dosageForm?: string;
   mrp?: number;
   mrpTolerance?: number; // default 0.2 = ±20%
+  rawOcrText?: string;   // Full raw OCR text for chemical API verification
 }
 
 export interface FilterResult {
@@ -182,6 +191,8 @@ export interface FilterResult {
   fallbackUsed: boolean;
   processingTimeMs: number;
   catalogResults?: { mapped: any[]; nonMapped: any[] };
+  scoredMatches?: Array<{ name: string; score: number }>; // local matches with real similarity scores, sorted desc
+  topScore?: number; // best local similarity score (0-1); 0 when no local match
 }
 
 export class ProductNameFilterService {
@@ -340,7 +351,8 @@ export class ProductNameFilterService {
       fallbackTimeoutMs = this.DEFAULT_TIMEOUT,
       dosageForm,
       mrp,
-      mrpTolerance = 0.2
+      mrpTolerance = 0.2,
+      rawOcrText
     } = options;
 
     if (!ocrText || ocrText.trim() === '') {
@@ -349,7 +361,9 @@ export class ProductNameFilterService {
         sources: { local: false, internet: false, catalog: false },
         confidence: 0,
         fallbackUsed: false,
-        processingTimeMs: Date.now() - startTime
+        processingTimeMs: Date.now() - startTime,
+        scoredMatches: [],
+        topScore: 0
       };
     }
 
@@ -368,10 +382,13 @@ export class ProductNameFilterService {
     let fts5Used = false;
     try {
       const db = await dbManager.getConnection();
-      let fts5Sql = `SELECT m.id, m.name, m.mrp, m.item_type
+      let fts5Sql = `SELECT m.id, m.name, m.mrp, m.item_type, m.api_reference
         FROM medicines_fts f JOIN medicines m ON m.id = f.rowid
         WHERE medicines_fts MATCH ?`;
-      const fts5Params: any[] = [normalizedOcr];
+      // FTS5 MATCH treats raw OCR text as boolean operators — sanitize by
+      // stripping special chars and wrapping in quotes for a safe phrase search.
+      const fts5SafeQuery = `"${normalizedOcr.replace(/[^a-z0-9 ]/g, ' ').trim().replace(/\s+/g, ' ')}"`;
+      const fts5Params: any[] = [fts5SafeQuery];
 
       if (dosageForm) {
         fts5Sql += ' AND m.item_type = ?';
@@ -392,7 +409,15 @@ export class ProductNameFilterService {
           const nameSim = enhancedSimilarity(normalizedOcr, row.name.toLowerCase());
           const dosageMatch = dosageForm && row.item_type ? (row.item_type === dosageForm ? 1 : 0) : 0.5;
           const mrpMatch = mrp && row.mrp ? (1 - Math.abs(mrp - row.mrp) / Math.max(mrp, row.mrp)) : 0.5;
-          const combinedScore = 0.5 * nameSim + 0.25 * dosageMatch + 0.25 * mrpMatch;
+          
+          let apiMatch = 0.5;
+          if (rawOcrText && row.api_reference) {
+            const apiTokens = row.api_reference.toLowerCase().split(/[^a-z0-9]+/);
+            const hasTokenMatch = apiTokens.some((token: string) => token.length > 3 && rawOcrText.toLowerCase().includes(token));
+            apiMatch = hasTokenMatch ? 1.0 : 0.2;
+          }
+
+          const combinedScore = 0.4 * nameSim + 0.2 * dosageMatch + 0.2 * mrpMatch + 0.2 * apiMatch;
           if (combinedScore >= minConfidenceThreshold) {
             scoredMatches.push({ name: row.name, score: combinedScore });
           }
@@ -490,7 +515,9 @@ export class ProductNameFilterService {
       confidence: averageConfidence,
       fallbackUsed,
       processingTimeMs: Date.now() - startTime,
-      catalogResults
+      catalogResults,
+      scoredMatches,
+      topScore: scoredMatches.length > 0 ? scoredMatches[0].score : 0
     };
   }
 

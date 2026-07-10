@@ -234,10 +234,10 @@ router.post('/catalog/import', async (req, res) => {
     
     await dbManager.close();
 
-    // Auto-feed enrichment after catalog import
-    if (!getEnrichmentRunningState()) {
-      runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
-    }
+    // [DISABLED] Auto-feed enrichment after catalog import — only runs on explicit user action.
+    // if (!getEnrichmentRunningState()) {
+    //   runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
+    // }
 
     res.json({ success: true, message: 'Catalog imported successfully' });
   } catch (error) {
@@ -488,10 +488,10 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
     
     await dbManager.close();
 
-    // Auto-feed enrichment after catalog approve
-    if (!getEnrichmentRunningState()) {
-      runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
-    }
+    // [DISABLED] Auto-feed enrichment after catalog approve — only runs on explicit user action.
+    // if (!getEnrichmentRunningState()) {
+    //   runEnrichment().catch(err => console.warn('[CatalogRoute] Background enrichment failed:', err));
+    // }
     
     const { eventService } = await import('../services/eventService.js');
     eventService.broadcast('catalog_review_updated', {

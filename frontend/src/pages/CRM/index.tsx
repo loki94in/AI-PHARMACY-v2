@@ -333,16 +333,8 @@ const CRM = () => {
 
     try {
       await api.toggleIgnore(clean, true);
-      setIgnoredPhones(prev => {
-        const next = new Map(prev);
-        const isGroupOrBroadcast = clean.endsWith('@g.us') || clean.endsWith('@broadcast') || clean.includes('broadcast') || clean === 'status@broadcast' || clean.includes('-');
-        if (isGroupOrBroadcast) {
-          next.delete(clean);
-        } else {
-          next.set(clean, 'ignored');
-        }
-        return next;
-      });
+      // Re-fetch from DB to get the accurate list (avoids optimistic-update bugs)
+      await fetchIgnoredPhones();
       setNewIgnorePhone('');
       showNotif(`Added ${clean} to ignore list`);
     } catch (err) {
@@ -394,30 +386,23 @@ const CRM = () => {
   const toggleIgnore = useCallback(async (phone: string, currentIgnored: boolean) => {
     try {
       await api.toggleIgnore(phone, !currentIgnored);
-      setIgnoredPhones(prev => {
-        const next = new Map(prev);
-        const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
-        if (currentIgnored) {
-          if (isGroupOrBroadcast) {
-            next.set(phone, 'unignored');
-          } else {
-            next.delete(phone);
-          }
-        } else {
-          if (isGroupOrBroadcast) {
-            next.delete(phone);
-          } else {
-            next.set(phone, 'ignored');
-          }
-        }
-        return next;
-      });
+      // Re-fetch from DB to get the accurate list
+      await fetchIgnoredPhones();
       showNotif(currentIgnored ? `Scanning ${phone}` : `Ignored ${phone}`);
+
+      // If we are ignoring the active chat, close it
+      if (!currentIgnored && activeWaChat && activeWaChat.id === phone) {
+        setActiveWaChat(null);
+        setWaMessages([]);
+      }
+      
+      // Refresh chat list to remove the ignored chat from the database view
+      fetchWaChats();
     } catch (err) {
       console.error('Failed to toggle ignore in CRM', err);
       showNotif('Failed to toggle ignore state', 'error');
     }
-  }, []);
+  }, [fetchIgnoredPhones, fetchWaChats, activeWaChat]);
 
   const fetchWaStatus = useCallback(async () => {
     try {
@@ -478,6 +463,31 @@ const CRM = () => {
 
   // Listen for real-time WhatsApp events pushed via SSE
   useEffect(() => {
+    const evtSource = new EventSource('/api/events');
+
+    evtSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'wa_new_message' && data.payload) {
+          const { chat_id, message } = data.payload;
+          
+          if (activeWaChat && activeWaChat.id === chat_id) {
+            setWaMessages(prev => {
+              if (prev.some(m => m.id === message.id)) return prev;
+              const updated = [...prev, message];
+              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+              return updated;
+            });
+          }
+          fetchWaChats();
+        } else if (data.type === 'wa_chats_updated') {
+          fetchWaChats();
+        }
+      } catch (err) {
+        console.error('Failed to parse SSE event in CRM:', err);
+      }
+    };
+
     const handleWaEvent = (e: Event) => {
       const eventData = (e as CustomEvent).detail;
       if (!eventData) return;
@@ -506,7 +516,10 @@ const CRM = () => {
     };
 
     window.addEventListener('whatsapp_event', handleWaEvent);
-    return () => window.removeEventListener('whatsapp_event', handleWaEvent);
+    return () => {
+      evtSource.close();
+      window.removeEventListener('whatsapp_event', handleWaEvent);
+    };
   }, [activeWaChat, fetchWaChats]);
 
   const loadWaMessages = async (chat: any) => {
@@ -755,7 +768,13 @@ const CRM = () => {
           className={`w-full text-left p-3 hover:bg-bg3 transition-colors border-b border-glass-border/10 flex gap-3 items-center cursor-pointer ${
             activeWaChat?.id === chat.id ? 'bg-primary/5 border-l-2 border-primary' : ''
           } ${isIgnored ? 'opacity-50' : ''}`}
-          onClick={() => loadWaMessages(chat)}
+          onClick={() => {
+            if (isIgnored) {
+              showNotif('This chat is ignored. Uncheck the checkbox to scan and open it.', 'error');
+              return;
+            }
+            loadWaMessages(chat);
+          }}
         >
           <div className="w-8 h-8 rounded-full bg-bg3 flex items-center justify-center shrink-0">
             <Users size={16} className="text-muted" />

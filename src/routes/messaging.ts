@@ -293,6 +293,12 @@ router.post('/toggle-ignore', async (req, res) => {
           [phone, reason || 'ignored']
         );
       }
+      // Delete all cached chats and messages for this number from DB to remove it from the UI immediately
+      await db.run('DELETE FROM whatsapp_messages WHERE chat_id = ?', [phone]);
+      await db.run('DELETE FROM whatsapp_chats WHERE id = ?', [phone]);
+      const phoneDigits = phone.split('@')[0];
+      await db.run('DELETE FROM whatsapp_messages WHERE chat_id = ?', [phoneDigits]);
+      await db.run('DELETE FROM whatsapp_chats WHERE id = ?', [phoneDigits]);
     } else {
       if (isGroupOrBroadcast) {
         await db.run(

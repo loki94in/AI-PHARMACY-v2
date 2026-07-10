@@ -223,7 +223,7 @@ router.post('/', async (req, res) => {
 
       // Stock Level Verification before processing decrement (strips + loose counted as one pool)
       const currentStock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+        `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [inventory_id]
       );
@@ -236,10 +236,7 @@ router.post('/', async (req, res) => {
       const currentTotalUnits = currentStock.quantity * packSize + currentStock.loose_quantity;
       const soldTotalUnits = soldQty * packSize + soldLoose;
       if (currentTotalUnits < soldTotalUnits) {
-        const neededUnits = soldTotalUnits - currentTotalUnits;
-        const neededStrips = Math.ceil(neededUnits / packSize);
-        await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [neededStrips, inventory_id]);
-        currentStock.quantity += neededStrips;
+        throw new Error(`Insufficient stock for "${currentStock.db_medicine_name || medicine_name || 'Medicine'}". Available: ${currentStock.quantity} strips & ${currentStock.loose_quantity} loose. Requested: ${soldQty} strips & ${soldLoose} loose.`);
       }
 
       await db.run(

@@ -6,7 +6,7 @@ import { dbManager } from '../database/connection.js';
 
 const INTENT_WORDS_EN = new Set([
   'send', 'order', 'need', 'want', 'give', 'refill', 'same', 'required',
-  'chahiye', 'bhej', 'do', 'dena', 'lao', 'mangta'
+  'chahiye', 'bhej', 'dena', 'dedo', 'lao', 'mangta', 'pathva', 'pathav'
 ]);
 
 const INTENT_WORDS_HI = new Set([
@@ -62,7 +62,18 @@ const NOISE_WORDS = new Set([
   'divas', 'diwas', 'roj', 'roji', 'daily', 'weekly', 'monthly',
   'mi', 'majhe', 'maza', 'mazi', 'mazya', 'tuzhe', 'tuza', 'tuzi', 'tuzya', 'aamhi', 'amhi', 'aamche',
   'tumhi', 'tumche', 'te', 'tya', 'tyanche', 'tyacha', 'tyachi', 'tyachya', 'hye', 'he', 'ha', 'hi', 'he',
-  'ya', 'hyanchi', 'hyancha'
+  'ya', 'hyanchi', 'hyancha',
+  // More Marathi/Hindi conversational leaks observed in production
+  'asudet', 'asu', 'asel', 'aslel', 'aahet', 'ahet', 'hote', 'hota', 'hoti', 'zale', 'zala', 'zali',
+  'baki', 'bakiche', 'bakichya', 'urlele', 'shillak',
+  'milel', 'milte', 'milto', 'milali', 'milala', 'bhetel', 'bhetla', 'bhetli',
+  'kadhi', 'kevha', 'udya', 'udhya', 'sandhyakali', 'sakali', 'dupari', 'ratri',
+  'thik', 'theek', 'thike', 'barobar', 'hoy', 'chalel', 'chala', 'done', 'accha', 'acha', 'bara', 'bar',
+  'madam', 'tai', 'dada', 'kaka', 'anna', 'bhau', 'saheb',
+  // Common Devanagari chatter (greetings/particles/questions)
+  'ना', 'नाही', 'आहे', 'आहेत', 'का', 'हो', 'हा', 'नको', 'ठीक', 'बाकी', 'आज', 'उद्या',
+  'कधी', 'केव्हा', 'कसे', 'कसा', 'काय', 'क्या', 'कब', 'कहा', 'कैसे', 'हां', 'हाँ', 'जी',
+  'नमस्ते', 'नमस्कार', 'धन्यवाद'
 ]);
 
 export interface ParsedMessage {
@@ -71,6 +82,24 @@ export interface ParsedMessage {
   quantity: number;
   unit: string;
   rawIntentWords: string[];
+}
+
+/**
+ * Is this extracted string plausibly a medicine name?
+ * Used by BOTH the text-parse path and the OCR path before any search runs.
+ * Rules: length >= 3, not pure numbers/punctuation (blocks "118", "118 2"),
+ * at least 3 Latin letters (catalog/medicine names are Latin — blocks
+ * Devanagari-only chatter and emoji), and not made up entirely of noise words.
+ */
+export function isPlausibleMedicineName(name: string): boolean {
+  const trimmed = (name || '').trim();
+  if (trimmed.length < 3) return false;
+  if (/^[\d\s.,/\-]+$/.test(trimmed)) return false;
+  const latinLetters = trimmed.match(/[a-zA-Z]/g);
+  if (!latinLetters || latinLetters.length < 3) return false;
+  const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length > 0 && tokens.every(t => NOISE_WORDS.has(t))) return false;
+  return true;
 }
 
 /**
@@ -151,16 +180,16 @@ export function parseMessage(text: string): ParsedMessage {
 
   const medicineName = medicineWords.join(' ').trim();
 
-  // A pure numeric string or single/double letter noise is not a valid medicine name by itself
-  const isPureNumber = /^\d+$/.test(medicineName);
-  const isTooShort = medicineName.length <= 2;
-  const isValidMedicineName = medicineName.length > 0 && !isPureNumber && !isTooShort;
+  // A residual is only a medicine name if it survives the plausibility rules.
+  // Intent words alone can NEVER resurrect an invalid name (e.g. "send 118"
+  // must not search "118" — 'do'/'send' + number was a production leak).
+  const isValidMedicineName = isPlausibleMedicineName(medicineName);
 
-  // If we found a medicine name, treat it as a request even without explicit intent words
-  const hasIntent = foundIntentWords.length > 0 || (isValidMedicineName && medicineName.length > 0);
-  
-  // The medicine name is valid if it meets the criteria OR if there are explicit intent words
-  const finalMedicineName = (isValidMedicineName || (foundIntentWords.length > 0 && medicineName.length > 0)) ? medicineName : '';
+  // Intent words still mark the message as a request (useful downstream signal),
+  // but the searched name must independently be plausible.
+  const hasIntent = foundIntentWords.length > 0 || isValidMedicineName;
+
+  const finalMedicineName = isValidMedicineName ? medicineName : '';
 
   return {
     isMedicineRequest: hasIntent,

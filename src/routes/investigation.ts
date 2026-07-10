@@ -47,7 +47,7 @@ router.get('/timeline', async (req, res) => {
         c.name AS customer_name,
         si.quantity AS quantity,
         si.loose_qty AS loose_quantity,
-        si.batch_no AS batch_no,
+        im.batch_no AS batch_no,
         m.name AS medicine_name,
         m.id AS medicine_id,
         im.id AS inventory_id,
@@ -141,7 +141,7 @@ router.get('/timeline', async (req, res) => {
 
     if (batchNo) {
       const batchFilter = `%${batchNo}%`;
-      salesQuery += ` AND si.batch_no LIKE ?`;
+      salesQuery += ` AND im.batch_no LIKE ?`;
       salesParams.push(batchFilter);
       purchasesQuery += ` AND pi.batch_no LIKE ?`;
       purchasesParams.push(batchFilter);
@@ -173,7 +173,7 @@ router.get('/timeline', async (req, res) => {
 
     if (q) {
       const qFilter = `%${q}%`;
-      salesQuery += ` AND (m.name LIKE ? OR si.batch_no LIKE ? OR sinv.invoice_no LIKE ? OR c.name LIKE ?)`;
+      salesQuery += ` AND (m.name LIKE ? OR im.batch_no LIKE ? OR sinv.invoice_no LIKE ? OR c.name LIKE ?)`;
       salesParams.push(qFilter, qFilter, qFilter, qFilter);
       purchasesQuery += ` AND (m.name LIKE ? OR pi.batch_no LIKE ? OR p.invoice_no LIKE ? OR d.name LIKE ?)`;
       purchasesParams.push(qFilter, qFilter, qFilter, qFilter);
@@ -185,25 +185,24 @@ router.get('/timeline', async (req, res) => {
 
     if (sqlDateFilter) {
       if (dateFrom) {
-        salesQuery += ` AND sinv.date >= ?`;
+        salesQuery += ` AND DATE(sinv.date) >= DATE(?)`;
         salesParams.push(dateFrom);
-        purchasesQuery += ` AND p.date >= ?`;
+        purchasesQuery += ` AND DATE(p.date) >= DATE(?)`;
         purchasesParams.push(dateFrom);
-        returnsQuery += ` AND r.date >= ?`;
+        returnsQuery += ` AND DATE(r.date) >= DATE(?)`;
         returnsParams.push(dateFrom);
-        logsQuery += ` AND al.created_at >= ?`;
+        logsQuery += ` AND DATE(al.created_at) >= DATE(?)`;
         logsParams.push(dateFrom);
       }
       if (dateTo) {
-        const toStr = `${dateTo} 23:59:59.999`;
-        salesQuery += ` AND sinv.date <= ?`;
-        salesParams.push(toStr);
-        purchasesQuery += ` AND p.date <= ?`;
-        purchasesParams.push(toStr);
-        returnsQuery += ` AND r.date <= ?`;
-        returnsParams.push(toStr);
-        logsQuery += ` AND al.created_at <= ?`;
-        logsParams.push(toStr);
+        salesQuery += ` AND DATE(sinv.date) <= DATE(?)`;
+        salesParams.push(dateTo);
+        purchasesQuery += ` AND DATE(p.date) <= DATE(?)`;
+        purchasesParams.push(dateTo);
+        returnsQuery += ` AND DATE(r.date) <= DATE(?)`;
+        returnsParams.push(dateTo);
+        logsQuery += ` AND DATE(al.created_at) <= DATE(?)`;
+        logsParams.push(dateTo);
       }
     }
 

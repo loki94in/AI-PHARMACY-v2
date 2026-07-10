@@ -61,6 +61,20 @@ function App() {
     try { localStorage.setItem('theme', theme); } catch { }
   }, [theme]);
 
+  useEffect(() => {
+    // Prefetch all other page chunks in the background after initial render to make page transitions instant
+    const timer = setTimeout(() => {
+      Object.keys(pageImports).forEach((key) => {
+        try {
+          pageImports[key]();
+        } catch (err) {
+          console.warn(`Failed to prefetch page chunk: ${key}`, err);
+        }
+      });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <BrowserRouter>
       <Suspense fallback={<PageLoader />}>

@@ -66,17 +66,8 @@ export default function MessageListener() {
 
     try {
       await api.toggleIgnore(clean, true);
-      setIgnoredPhones(prev => {
-        const next = new Map(prev);
-        const isGroupOrBroadcast = clean.endsWith('@g.us') || clean.endsWith('@broadcast') || clean.includes('broadcast') || clean === 'status@broadcast' || clean.includes('-');
-        if (isGroupOrBroadcast) {
-          next.delete(clean);
-        } else {
-          next.set(clean, 'ignored');
-        }
-        cachedIgnored = next;
-        return next;
-      });
+      // Re-fetch from DB to get the accurate list (avoids optimistic-update bugs)
+      await fetchIgnoredPhones();
       setNewIgnorePhone('');
       showNotif(`Added ${clean} to ignore list`);
     } catch (err) {
@@ -186,29 +177,23 @@ export default function MessageListener() {
   const toggleIgnore = useCallback(async (phone: string, currentIgnored: boolean) => {
     try {
       await api.toggleIgnore(phone, !currentIgnored);
-      setIgnoredPhones(prev => {
-        const next = new Map(prev);
-        const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
-        if (currentIgnored) {
-          if (isGroupOrBroadcast) {
-            next.set(phone, 'unignored');
-          } else {
-            next.delete(phone);
-          }
-        } else {
-          if (isGroupOrBroadcast) {
-            next.delete(phone);
-          } else {
-            next.set(phone, 'ignored');
-          }
-        }
-        cachedIgnored = next;
-        return next;
-      });
+      // Re-fetch from DB to get the accurate list
+      await fetchIgnoredPhones();
+      showNotif(currentIgnored ? `Scanning ${phone}` : `Ignored ${phone}`);
+
+      // If we are ignoring the active chat, close it
+      if (!currentIgnored && activeChat && activeChat.id === phone) {
+        setActiveChat(null);
+        setChatMessages([]);
+      }
+      
+      // Refresh chat list to remove the ignored chat from the database view
+      fetchMessages();
     } catch (err) {
       console.error('Failed to toggle ignore:', err);
+      showNotif('Failed to update ignore status', 'error');
     }
-  }, []);
+  }, [fetchIgnoredPhones, fetchMessages, activeChat]);
 
   const filtered = messages.filter(m => {
     if (!search) return true;
@@ -310,7 +295,13 @@ export default function MessageListener() {
             return (
               <div
                 key={chat.id}
-                onClick={() => selectChat(chat)}
+                onClick={() => {
+                  if (isIgnored) {
+                    showNotif('This chat is ignored. Uncheck the checkbox to scan and open it.', 'error');
+                    return;
+                  }
+                  selectChat(chat);
+                }}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer ${
                   activeChat?.id === chat.id
                     ? 'bg-primary/10 border-primary/30 shadow-sm'

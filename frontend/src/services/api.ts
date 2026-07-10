@@ -376,6 +376,7 @@ export const api = {
   // Composition Enrichment
   getEnrichmentStatus: () => apiClient.get('/enrichment/status').then(res => res.data),
   startEnrichment: () => apiClient.post('/enrichment/start').then(res => res.data),
+  stopEnrichment: () => apiClient.post('/enrichment/stop').then(res => res.data),
   getEnrichmentQueue: (page: number = 1, limit: number = 50, filter: string = 'all') =>
     apiClient.get('/enrichment/queue', { params: { page, limit, filter } }).then(res => res.data),
   updateComposition: (id: number, composition: string) =>
@@ -545,6 +546,11 @@ export const api = {
   // Online enrichment & search
   onlineSearch: (q: string) => apiClient.get('/medicines/online-search', { params: { q } }).then(res => res.data),
   autoEnrich: (data: { name: string; api_reference: string; manufacturer?: string }) => apiClient.post('/medicines/auto-enrich', data).then(res => res.data),
+
+  // Search term token editor
+  getTokenPreview: (name: string) => apiClient.get<{ tokens: { text: string; included: boolean }[]; preview: string }>('/enrichment/preview-tokens', { params: { name } }).then(res => res.data),
+  setSearchTerm: (id: number, searchTerm: string) => apiClient.post('/enrichment/set-search-term', { id, searchTerm }).then(res => res.data),
+  triggerOnlineEnrichment: (id: number) => apiClient.post(`/enrichment/trigger-online/${id}`).then(res => res.data),
   
   // Reports
   getReportsSummary: (params: { fromDate?: string; toDate?: string }) => apiClient.get('/reports', { params }).then(res => res.data),

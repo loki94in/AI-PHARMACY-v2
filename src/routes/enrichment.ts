@@ -4,7 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { dbManager } from '../database/connection.js';
-import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts } from '../worker/compositionEnricher.js';
+import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, requestEnrichmentStop, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts, DOSAGE_FORM_SET } from '../worker/compositionEnricher.js';
+import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,20 @@ router.post('/enrichment/start', async (_req, res) => {
     res.json({ success: true, message: 'Enrichment started in background' });
   } catch (error) {
     console.error('Failed to start enrichment:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Stop enrichment process ──────────────────────────────────────────────────
+router.post('/enrichment/stop', async (_req, res) => {
+  try {
+    if (!getEnrichmentRunningState()) {
+      return res.status(409).json({ error: 'Enrichment is not currently running' });
+    }
+    requestEnrichmentStop();
+    res.json({ success: true, message: 'Stop signal sent — enrichment will halt at next batch boundary' });
+  } catch (error) {
+    console.error('Failed to stop enrichment:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -246,6 +261,100 @@ router.put('/enrichment/queue/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to update composition:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Preview token classification for a medicine name ────────────────────────
+// GET /api/enrichment/preview-tokens?name=<raw_name>
+// Splits the raw name into tokens and marks each as included/excluded using
+// the same DOSAGE_FORM_SET logic as cleanMedicineName(). The UI uses this
+// to render the token chip selector.
+router.get('/enrichment/preview-tokens', (_req, res) => {
+  const rawName = ((_req.query.name as string) || '').trim();
+  if (!rawName) {
+    return res.status(400).json({ error: 'name query param is required' });
+  }
+
+  // Split on whitespace + common separators, preserving original casing for display
+  const rawTokens = rawName.split(/[\s\-\/]+/).filter(t => t.length > 0);
+
+  const tokens = rawTokens.map(token => {
+    const upper = token.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const isPureNumber = /^\d+$/.test(upper);
+    const isDosageAmount = /^\d+(MG|ML|MCG|GM|IU|NO|NOS|S)$/i.test(upper);
+    const isDosageForm = DOSAGE_FORM_SET.has(upper);
+    const included = !isPureNumber && !isDosageAmount && !isDosageForm && upper.length > 0;
+    return { text: token, included };
+  });
+
+  const preview = tokens
+    .filter(t => t.included)
+    .map(t => t.text.toUpperCase())
+    .join(' ');
+
+  res.json({ tokens, preview });
+});
+
+// ─── Save user's custom search term for a medicine ───────────────────────────
+// POST /api/enrichment/set-search-term
+// Body: { id: number, searchTerm: string }
+// Saves search_term_override to DB so future online enrichment uses it.
+router.post('/enrichment/set-search-term', async (req, res) => {
+  try {
+    const id = parseInt(req.body.id);
+    const searchTerm = (req.body.searchTerm || '').trim();
+    if (!id || !searchTerm) {
+      return res.status(400).json({ error: 'id and searchTerm are required' });
+    }
+
+    const db = await dbManager.getConnection();
+    await ensureEnrichmentColumns(db);
+    await db.run(
+      'UPDATE medicines SET search_term_override = ? WHERE id = ?',
+      searchTerm, id
+    );
+    await dbManager.close();
+
+    res.json({ success: true, searchTerm });
+  } catch (error) {
+    console.error('Failed to set search term override:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Trigger online enrichment for a single medicine ─────────────────────────
+// POST /api/enrichment/trigger-online/:id
+// Fires the full online enrichment pipeline (OpenFDA → RxNorm → Google)
+// using the saved search_term_override for the Google query.
+router.post('/enrichment/trigger-online/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: 'id is required' });
+    }
+
+    const db = await dbManager.getConnection();
+    await ensureEnrichmentColumns(db);
+    const row = await db.get(
+      'SELECT name, search_term_override FROM medicines WHERE id = ?',
+      id
+    );
+    await dbManager.close();
+
+    if (!row) {
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // Fire-and-forget — responds immediately, enrichment runs in background
+    onlineDataEnricher.enrichMedicineByName(
+      row.name,
+      row.search_term_override || undefined
+    ).catch(err => console.warn('[Enricher] Manual trigger failed:', err));
+
+    res.json({ success: true, medicineName: row.name, searchTerm: row.search_term_override || null });
+  } catch (error) {
+    console.error('Failed to trigger online enrichment:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

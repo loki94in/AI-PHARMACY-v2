@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 
 // 1. Mock the WhatsApp Client sendMessage method BEFORE importing internal code
-const mockSendMessage = jest.fn(() => Promise.resolve());
+const mockSendMessage = jest.fn((...args: any[]) => Promise.resolve());
 
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
@@ -42,7 +42,8 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
     await db.run('DELETE FROM wa_admin_escalations');
     await db.run('DELETE FROM staged_medicine_reviews');
     await db.run('DELETE FROM medicines');
-    
+    await db.run('DELETE FROM whatsapp_chats');
+
     // Seed default settings needed for escalation
     await db.run("INSERT INTO app_settings (key, value) VALUES ('wa_auto_share_admin', 'true')");
     await db.run("INSERT INTO app_settings (key, value) VALUES ('admin_whatsapp', '919876543210')");
@@ -158,7 +159,6 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
   });
 
   test('pharmarack outcome sends Type-2 message and inserts staged review review_id', async () => {
-    const { dbManager } = await import('../src/database.js'); // Use src/database to find types or connection
     const { dbManager: dbConn } = await import('../src/database/connection.js');
     const db = await dbConn.getConnection();
 
@@ -197,6 +197,143 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
     // Escalation record must point to this review ID
     const escalation = await db.get('SELECT * FROM wa_admin_escalations WHERE msg_id = ?', ['msg-aspirin']);
     expect(escalation.review_id).toBe(review.id);
+  });
+
+  test('pharmarack message shows manufacturer, score %, wa.me link, and mapped/other groups', async () => {
+    await waAdminEscalationService.maybeEscalate({
+      customer: { id: 3, name: 'Ramesh Patil', phone: '919822012345' },
+      isNewCustomer: false,
+      medicineName: 'Novastat 20',
+      quantity: 1,
+      unit: 'strip',
+      localMatches: [],
+      catalogResults: {
+        mapped: [
+          { name: "NOVASTAT 20MG TAB 10'S", mrp: 85, packaging: '10 Tab', distributor: 'XYZ Pharma', manufacturer: 'Cipla', isMapped: true, score: 0.82 }
+        ],
+        nonMapped: [
+          { name: 'NOVASTAT 10MG TAB', mrp: 60, packaging: '10 Tab', distributor: 'ABC Distributors', manufacturer: 'Cipla', isMapped: false, score: 0.7 }
+        ]
+      },
+      confidence: 82,
+      isRepeat: false,
+      source: 'text',
+      messageBody: 'novastt 20 pathva',
+      msgId: 'msg-novastat',
+      phone: '919822012345@c.us'
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(text).toContain('*Old Customer*: Ramesh Patil');
+    expect(text).toContain('https://wa.me/919822012345');
+    expect(text).toContain('✅ *Mapped distributors*');
+    expect(text).toContain('📦 *Other distributors*');
+    expect(text).toContain('Cipla');
+    expect(text).toContain('82%');
+    // Mapped match must be listed before the non-mapped one
+    expect(text.indexOf("NOVASTAT 20MG TAB 10'S")).toBeLessThan(text.indexOf('NOVASTAT 10MG TAB'));
+
+    // Staged review must persist manufacturer + score
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
+    const review = await db.get("SELECT * FROM staged_medicine_reviews WHERE source = 'whatsapp'");
+    const rowData = JSON.parse(review.original_row_data);
+    expect(rowData.topMatches[0].manufacturer).toBe('Cipla');
+    expect(rowData.topMatches[0].score).toBe(0.82);
+  });
+
+  test('unresolved @lid sender falls back to whatsapp_chats.resolved_number for phone + link', async () => {
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
+    await db.run(
+      `INSERT INTO whatsapp_chats (id, name, resolved_number) VALUES (?, ?, ?)`,
+      ['123456789012345@lid', 'Lid User', '919923777352']
+    );
+
+    await waAdminEscalationService.maybeEscalate({
+      customer: null,
+      isNewCustomer: true,
+      medicineName: 'Dolo 650',
+      quantity: 1,
+      unit: 'strip',
+      localMatches: [],
+      catalogResults: {
+        mapped: [{ name: 'DOLO 650 TAB', mrp: 30, packaging: '15 Tab', distributor: 'XYZ Pharma', manufacturer: 'Micro Labs', isMapped: true, score: 0.9 }],
+        nonMapped: []
+      },
+      confidence: 90,
+      isRepeat: false,
+      source: 'text',
+      messageBody: 'dolo 650 pathva',
+      msgId: 'msg-lid-1',
+      phone: '123456789012345@lid',
+      chatId: '123456789012345@lid'
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(text).toContain('*New Customer*');
+    expect(text).toContain('+919923777352');
+    expect(text).toContain('https://wa.me/919923777352');
+    expect(text).not.toContain('123456789012345');
+  });
+
+  test('old-customer context block renders purchases, refills, and recent messages', async () => {
+    await waAdminEscalationService.maybeEscalate({
+      customer: { id: 4, name: 'Sunita Deshmukh', phone: '919800011122' },
+      isNewCustomer: false,
+      medicineName: 'Telma 40',
+      quantity: 1,
+      unit: 'strip',
+      localMatches: [],
+      catalogResults: {
+        mapped: [{ name: 'TELMA 40 TAB', mrp: 120, packaging: '15 Tab', distributor: 'ABC', manufacturer: 'Glenmark', isMapped: true, score: 0.95 }],
+        nonMapped: []
+      },
+      confidence: 95,
+      isRepeat: false,
+      source: 'text',
+      messageBody: 'telma 40 send',
+      msgId: 'msg-ctx-1',
+      phone: '919800011122@c.us',
+      context: {
+        purchases: [{ date: '2026-06-12', name: 'Dolo 650', quantity: 2 }],
+        refills: [{ medicine_name: 'Telma 40', next_refill_date: '2026-07-15', last_refill_date: '2026-06-15' }],
+        lastMessages: [{ body: 'kal ka order aaya?' }]
+      }
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(text).toContain('🧾 *Recent purchases*: Dolo 650 x2');
+    expect(text).toContain('🔁 *Refills*: Telma 40');
+    expect(text).toContain('💬 *Recent msgs*: "kal ka order aaya?"');
+  });
+
+  test('new customer gets no context block even if context is passed', async () => {
+    await waAdminEscalationService.maybeEscalate({
+      customer: null,
+      isNewCustomer: true,
+      medicineName: 'Telma 40',
+      quantity: 1,
+      unit: 'strip',
+      localMatches: [],
+      catalogResults: {
+        mapped: [{ name: 'TELMA 40 TAB', mrp: 120, packaging: '15 Tab', distributor: 'ABC', manufacturer: 'Glenmark', isMapped: true, score: 0.95 }],
+        nonMapped: []
+      },
+      confidence: 95,
+      isRepeat: false,
+      source: 'text',
+      messageBody: 'telma 40',
+      msgId: 'msg-ctx-2',
+      phone: '919800099887@c.us',
+      context: { purchases: [], refills: [], lastMessages: [{ body: 'hello' }] }
+    });
+
+    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(text).not.toContain('Recent msgs');
   });
 
   test('wa_auto_share_admin = false gates the escalation', async () => {

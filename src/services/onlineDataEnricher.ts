@@ -63,7 +63,7 @@ export class OnlineDataEnricher {
     return mergeOcrAndEnrichedData(ocrResult, null);
   }
 
-  async enrichMedicineByName(medicineName: string): Promise<void> {
+  async enrichMedicineByName(medicineName: string, searchTerm?: string): Promise<void> {
     if (!medicineName) return;
     const cleanName = medicineName.trim();
     if (!cleanName) return;
@@ -125,7 +125,7 @@ export class OnlineDataEnricher {
         console.log(`[Enricher] [Background] APIs returned no results for ${cleanName}. Trying Google search discovery fallback...`);
         const { googleSearchService } = await import('./googleSearchService.js');
         const googleResult = await withRetry(
-          () => googleSearchService.discoverMedicineInfo(cleanName),
+          () => googleSearchService.discoverMedicineInfo(cleanName, searchTerm),
           { label: 'Enricher/Background/GoogleSearch' }
         );
         if (googleResult && googleResult.api_reference && googleResult.api_reference.trim() !== '') {

@@ -162,7 +162,7 @@ class GoogleSearchService {
   /**
    * Run Google Search via Puppeteer, handle verification, and return OCR parsed data
    */
-  public async discoverMedicineInfo(medicineName: string): Promise<SearchEnrichmentResult | null> {
+  public async discoverMedicineInfo(medicineName: string, searchTerm?: string): Promise<SearchEnrichmentResult | null> {
     if (!medicineName) return null;
 
     const chromePath = findChromePath();
@@ -190,7 +190,7 @@ class GoogleSearchService {
     console.log(`[GoogleSearchService] Throttling query for "${medicineName}". Delaying ${throttleDelay}ms...`);
     await this.sleep(throttleDelay);
 
-    const query = `${medicineName} API`;
+    const query = `${searchTerm || medicineName} API`;
     await this.logSearch(query);
 
     let browser: any = null;

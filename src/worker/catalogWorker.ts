@@ -969,10 +969,13 @@ export async function runCatalogImport(jobId: number) {
     await db.run("UPDATE catalog_jobs SET status = 'done', progress = 100, new_count = ?, existing_count = ?, duplicate_count = ?, processed_count = ? WHERE id = ?", [newCount, existingCount, duplicateCount, processedCount, jobId]);
     eventService.broadcast('catalog_job_update', { id: jobId, status: 'done', progress: 100, new_count: newCount, existing_count: existingCount, duplicate_count: duplicateCount, total_count: totalToProcess });
 
-    // Auto-feed enrichment after catalog import
-    if (!getEnrichmentRunningState()) {
-      runEnrichment().catch(err => console.warn('[CatalogWorker] Background enrichment failed:', err));
-    }
+    // [DISABLED] Auto-feed enrichment after catalog import — commented out to stop background enrichment.
+    // To re-enable: remove the block comment below.
+    /* if (!getEnrichmentRunningState()) {
+      runEnrichment(undefined, { dailyAutoLimit: 10 }).catch(err =>
+        console.warn('[CatalogWorker] Background enrichment failed:', err)
+      );
+    } */
   } catch (err: any) {
     console.error('Batch import failed', err);
     try {
@@ -1045,8 +1048,9 @@ export async function startWorker() {
           console.log(`[Worker] Found pending job ${job.id}, triggering runCatalogImport.`);
           await runCatalogImport(job.id);
         } else {
-          // Process staged reviews background enrichment
-          const pendingReviews = await db.all(
+          // [DISABLED] Google discovery for staged medicine reviews — commented out to stop CAPTCHA flood.
+          // To re-enable: remove the block comment below.
+          /* const pendingReviews = await db.all(
             "SELECT * FROM staged_medicine_reviews WHERE status = 'pending' AND screenshot_path IS NULL ORDER BY id ASC LIMIT 50"
           );
           
@@ -1093,7 +1097,7 @@ export async function startWorker() {
               console.log(`[Worker] Google discovery failed or throttled for "${pendingReview.medicine_name}".`);
               failedDiscoveryAttempts.set(pendingReview.medicine_name, Date.now());
             }
-          }
+          } */
         }
       }
     } catch (err) {
