@@ -1327,7 +1327,13 @@ const Purchases: React.FC = () => {
       setSourceFileHeaders([]);
       setMappingConfig({});
       setEditPurchaseId(null);
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
       queryClient.invalidateQueries({ queryKey: ['purchase-history'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.message || 'Failed to save purchase';

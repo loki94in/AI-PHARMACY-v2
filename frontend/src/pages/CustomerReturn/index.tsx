@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { CheckCircle, RotateCcw, AlertCircle, History } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface SaleItem {
   sale_item_id: number;
@@ -16,6 +17,7 @@ interface SaleItem {
 }
 
 export default function CustomerReturn() {
+  const queryClient = useQueryClient();
   const [invoiceNo, setInvoiceNo] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,13 @@ export default function CustomerReturn() {
         reason
       });
       alert('Return processed successfully!');
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
+      queryClient.invalidateQueries({ queryKey: ['customer-returns-history-list'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
       setInvoice(null);
       setItems([]);
       setReturnQuantities({});

@@ -13,6 +13,7 @@ import {
   Download
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
@@ -102,6 +103,7 @@ const getNDaysAgoString = (n: number) => {
 };
 
 const InvestigationCenter = () => {
+  const queryClient = useQueryClient();
   // Column-header inline filters
   const [colFilterMedicine, setColFilterMedicine] = useState('');
   const [colFilterBatch, setColFilterBatch] = useState('');
@@ -373,6 +375,13 @@ const InvestigationCenter = () => {
           setEditingType(null);
           setConfirmModal(null);
           runSearch(1, false);
+          // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
+          queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          queryClient.invalidateQueries({ queryKey: ['sells-list'] });
+          queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
+          queryClient.invalidateQueries({ queryKey: ['reports'] });
+          queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to update inventory', 'error');
         }
@@ -554,6 +563,13 @@ const InvestigationCenter = () => {
           setEditingType(null);
           setConfirmModal(null);
           runSearch(1, false);
+          // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
+          queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          queryClient.invalidateQueries({ queryKey: ['sells-list'] });
+          queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
+          queryClient.invalidateQueries({ queryKey: ['reports'] });
+          queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to save correction.', 'error');
         }

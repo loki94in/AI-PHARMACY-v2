@@ -169,7 +169,7 @@ export const api = {
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
   
   // Sells (invoice list/edit)
-  listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number; page?: number }) =>
+  listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number; page?: number; include_items?: string }) =>
     apiClient.get('/sales/list', { params }).then(res => res.data),
   getSale: (id: number) => apiClient.get(`/sales/${id}`).then(res => res.data),
   updateSale: (id: number, data: any) => apiClient.put(`/sales/${id}`, data).then(res => res.data),

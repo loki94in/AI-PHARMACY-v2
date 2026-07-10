@@ -1,6 +1,13 @@
 import { Calendar, X, RotateCcw } from 'lucide-react';
 import { usePersistedDateRange } from '../hooks/usePersistedDateRange';
 
+const getLocalDateString = (d: Date = new Date()) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 interface DateRangeFilterProps {
   helper?: {
     dateRange: { from: string; to: string };
@@ -60,13 +67,13 @@ export function DateRangeFilter({
     const isFuture = h.futurePresets || false;
     
     if (isFuture) {
-      expectedFrom = d.toISOString().split('T')[0];
+      expectedFrom = getLocalDateString(d);
       d.setDate(d.getDate() + days);
-      expectedTo = d.toISOString().split('T')[0];
+      expectedTo = getLocalDateString(d);
     } else {
       d.setDate(d.getDate() - days);
-      expectedFrom = d.toISOString().split('T')[0];
-      expectedTo = h.maxDate || new Date().toISOString().split('T')[0];
+      expectedFrom = getLocalDateString(d);
+      expectedTo = h.maxDate || getLocalDateString(new Date());
     }
     
     return currentValue.from === expectedFrom && currentValue.to === expectedTo;

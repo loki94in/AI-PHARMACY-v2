@@ -14,6 +14,13 @@ interface UsePersistedDateRangeOptions {
   futurePresets?: boolean;
 }
 
+const getLocalDateString = (d: Date = new Date()) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 export function usePersistedDateRange({
   storageKey,
   defaultFrom,
@@ -22,7 +29,7 @@ export function usePersistedDateRange({
   maxDate,
   futurePresets = false,
 }: UsePersistedDateRangeOptions) {
-  const today = maxDate || new Date().toISOString().split('T')[0];
+  const today = maxDate || getLocalDateString(new Date());
   
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     try {
@@ -80,13 +87,13 @@ export function usePersistedDateRange({
   const setPreset = (days: number) => {
     const d = new Date();
     if (futurePresets) {
-      const from = d.toISOString().split('T')[0];
+      const from = getLocalDateString(d);
       d.setDate(d.getDate() + days);
-      const to = d.toISOString().split('T')[0];
+      const to = getLocalDateString(d);
       setDateRange({ from, to });
     } else {
       d.setDate(d.getDate() - days);
-      const from = d.toISOString().split('T')[0];
+      const from = getLocalDateString(d);
       const to = today;
       setDateRange({ from, to });
     }

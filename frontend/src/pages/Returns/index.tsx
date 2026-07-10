@@ -205,7 +205,12 @@ const Returns: React.FC = () => {
     try {
       await api.deleteReturn(ret.id);
       if (selectedHistoryReturn?.id === ret.id) handleClearHistorySelection();
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
       queryClient.invalidateQueries({ queryKey: ['return-history'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (err) {
       console.error('Failed to delete return:', err);
       alert('Failed to delete return');
@@ -227,7 +232,12 @@ const Returns: React.FC = () => {
       await api.updateReturn(selectedHistoryReturn.id, { items: validItems, total_amount: total });
       setIsEditingHistory(false);
       await handleSelectHistoryReturn(selectedHistoryReturn);
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
       queryClient.invalidateQueries({ queryKey: ['return-history'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (err) {
       console.error('Failed to save return:', err);
       alert('Failed to save changes');
@@ -698,7 +708,12 @@ const Returns: React.FC = () => {
       alert(`Successfully processed ${grouped.length} return(s)!`);
       setItems([createEmptyItem()]);
       setShowGroupedPreview(false);
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
       queryClient.invalidateQueries({ queryKey: ['return-history'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     } catch (error) {
       console.error('Error processing return:', error);
       alert('Failed to process return');

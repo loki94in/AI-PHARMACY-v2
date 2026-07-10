@@ -164,9 +164,14 @@ const Sells = () => {
       return false;
     }
     if (colFilterName) {
-      const nameMatch = (inv.customer_name || 'Walk-in').toLowerCase().includes(colFilterName.toLowerCase());
+      const searchLower = colFilterName.toLowerCase();
+      const nameMatch = (inv.customer_name || 'Walk-in').toLowerCase().includes(searchLower);
       const phoneMatch = (inv.customer_phone || '').includes(colFilterName);
-      if (!nameMatch && !phoneMatch) return false;
+      const medicineMatch = inv.items?.some(it => 
+        (it.medicine_name || '').toLowerCase().includes(searchLower) ||
+        (it.batch_number || '').toLowerCase().includes(searchLower)
+      );
+      if (!nameMatch && !phoneMatch && !medicineMatch) return false;
     }
     if (colFilterDrName && !((inv.doctor_name || '').toLowerCase().includes(colFilterDrName.toLowerCase()))) {
       return false;
@@ -208,6 +213,7 @@ const Sells = () => {
         limit: 100,
         date_from: filters.date_from,
         date_to: filters.date_to,
+        include_items: 'true',
       });
       const data = res.invoices || [];
       const totalItems = res.meta?.total || data.length;
@@ -271,9 +277,12 @@ const Sells = () => {
       setEditInvoice(null);
       fetchInvoices(true);
       
-      // Invalidate query caches so other pages update their stock/dashboard numbers immediately
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
+      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
 
       // Refresh the shared inventory cache so POS search reflects the adjusted stock
@@ -293,9 +302,12 @@ const Sells = () => {
       setDeleteConfirm(null);
       fetchInvoices(true);
       
-      // Invalidate query caches so other pages update their stock/dashboard numbers immediately
+      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
+      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
 
       // Refresh the shared inventory cache so POS search reflects the restored stock
@@ -430,7 +442,7 @@ const Sells = () => {
                 <td className="p-2 flex-1 min-w-0">
                   <input
                     type="text"
-                    placeholder="Search patient/phone..."
+                    placeholder="Search patient/phone/medicine..."
                     value={colFilterName}
                     onChange={e => setColFilterName(e.target.value)}
                     className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
@@ -620,6 +632,11 @@ const Sells = () => {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-bold text-text group-hover:text-primary transition-colors truncate">{inv.customer_name || 'Walk-in'}</div>
                           {inv.customer_phone && <div className="text-[10px] text-muted font-medium mt-0.5 font-mono">{inv.customer_phone}</div>}
+                          {inv.items && inv.items.length > 0 && (
+                            <div className="text-[11px] text-muted mt-1 truncate max-w-[300px] font-sans" title={inv.items.map(it => `${it.medicine_name} (${it.quantity} Str${it.loose_qty ? `, ${it.loose_qty} Tab` : ''})`).join(', ')}>
+                              <span className="font-semibold text-primary/80">Items:</span> {inv.items.map(it => `${it.medicine_name} (${it.quantity} Str${it.loose_qty ? `, ${it.loose_qty} Tab` : ''})`).join(', ')}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>

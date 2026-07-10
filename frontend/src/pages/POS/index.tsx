@@ -11,6 +11,13 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
 
+const getLocalDateString = (d: Date = new Date()) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
 const ModalSkeleton = () => (
@@ -295,7 +302,7 @@ const POS = () => {
   const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
   const [patientHighlightIndex, setPatientHighlightIndex] = useState(-1);
   const [discount, setDiscount] = useState(initialActiveTab.discount || 0);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString());
   const [cart, setCart] = useState<any[]>(initialActiveTab.items || []);
   const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
   const [paymentMedium, setPaymentMedium] = useState<string>(initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
@@ -1706,7 +1713,16 @@ const POS = () => {
         patient_name: patientName || 'Walk-in Customer',
         patient_phone: patientPhone,
         doctor_name: doctor || undefined,
-        sale_date: date,
+        sale_date: (() => {
+          const dateParts = date.split('-');
+          const combinedDate = new Date();
+          if (dateParts.length === 3) {
+            combinedDate.setFullYear(parseInt(dateParts[0], 10));
+            combinedDate.setMonth(parseInt(dateParts[1], 10) - 1);
+            combinedDate.setDate(parseInt(dateParts[2], 10));
+          }
+          return combinedDate.toISOString();
+        })(),
         paymentMedium: paymentMedium,
         paymentStatus: paymentMedium === 'CREDIT' ? 'UNPAID' : 'PAID',
         sendWhatsApp: paymentMedium === 'CREDIT' ? true : sendWhatsApp,
@@ -1718,10 +1734,12 @@ const POS = () => {
       const result = await api.createSale(payload);
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
       
-      // Invalidate queries so that all pages (Sells, Inventory, Dashboard) update immediately
+      // Invalidate queries so that all pages (Sells, Inventory, Dashboard, Investigation, Reports) update immediately
       queryClient.invalidateQueries({ queryKey: ['sells-list'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
@@ -2844,6 +2862,7 @@ const POS = () => {
                             
                             let remainingStock: number | string = 'N/A';
                             let remainingLoose = 0;
+                            const packSize = item.packSize || 10;
                             
                             if (medicineBatches.length > 0) {
                               const totalAvailableStock = medicineBatches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
@@ -2862,11 +2881,22 @@ const POS = () => {
                                 return sum;
                               }, 0);
 
-                              remainingStock = Math.max(0, totalAvailableStock - totalCartQty);
-                              remainingLoose = Math.max(0, totalAvailableLooseStock - totalCartLoose);
+                              const totalUnits = (totalAvailableStock * packSize) + totalAvailableLooseStock;
+                              const cartUnits = (totalCartQty * packSize) + totalCartLoose;
+                              const remainingUnits = Math.max(0, totalUnits - cartUnits);
+
+                              remainingStock = Math.floor(remainingUnits / packSize);
+                              remainingLoose = remainingUnits % packSize;
                             } else if (item.availableStock !== undefined) {
-                              remainingStock = Math.max(0, item.availableStock - item.qty);
-                              remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
+                              const totalAvailableStock = item.availableStock;
+                              const totalAvailableLooseStock = item.availableLooseStock || 0;
+
+                              const totalUnits = (totalAvailableStock * packSize) + totalAvailableLooseStock;
+                              const cartUnits = (item.qty * packSize) + (item.looseQty || 0);
+                              const remainingUnits = Math.max(0, totalUnits - cartUnits);
+
+                              remainingStock = Math.floor(remainingUnits / packSize);
+                              remainingLoose = remainingUnits % packSize;
                             }
                             return (
                               <div className={`text-[14px] select-none font-bold font-mono px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 ${
