@@ -650,6 +650,36 @@ const POS = () => {
   const productSearchRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
   const skipEmptyRowAutofocusRef = useRef(false);
+  const patientSuggestionsRef = useRef<HTMLDivElement>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+  const rowSearchResultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (patientHighlightIndex >= 0 && patientSuggestionsRef.current) {
+      const highlighted = patientSuggestionsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [patientHighlightIndex]);
+
+  useEffect(() => {
+    if (searchHighlightIndex >= 0 && searchResultsRef.current) {
+      const highlighted = searchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [searchHighlightIndex]);
+
+  useEffect(() => {
+    if (rowSearchHighlightIndex >= 0 && rowSearchResultsRef.current) {
+      const highlighted = rowSearchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [rowSearchHighlightIndex]);
 
   useOnClickOutside(productSearchRef, () => {
     setSearchResults([]);
@@ -816,6 +846,17 @@ const POS = () => {
           handleSavePatientProfileRef.current();
         } else {
           handleCompleteSaleRef.current();
+        }
+        return;
+      }
+
+      // Ctrl + 1: Focus Patient/Customer Input
+      if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+        e.preventDefault();
+        const input = document.getElementById('patient-name-input');
+        if (input) {
+          input.focus();
+          (input as HTMLInputElement).select();
         }
         return;
       }
@@ -1801,6 +1842,7 @@ const POS = () => {
                 <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Patient / Customer</label>
                 <div className="flex gap-1 items-center">
                   <input 
+                    id="patient-name-input"
                     type="text" 
                     autoComplete="off"
                     className="premium-input text-xs h-9 px-3 flex-1 w-full bg-bg2/40 border-border/60 rounded-xl" 
@@ -1832,11 +1874,12 @@ const POS = () => {
                     aria-label="Patient Name"
                   />
                   {showPatientSuggestions && (
-                    <div className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
+                    <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
                       {patientSuggestions.map((c, idx) => (
                         <button
                           key={c.id}
                           type="button"
+                          data-highlighted={idx === patientHighlightIndex ? "true" : "false"}
                           onMouseDown={() => {
                             updatePatientName(c.name);
                             setPatientPhone(c.phone || '');
@@ -2124,7 +2167,7 @@ const POS = () => {
                 
                 {/* Search results dropdown */}
                 {showSearchDropdown && searchResults.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
+                  <div ref={searchResultsRef} className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
                         <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
@@ -2160,6 +2203,7 @@ const POS = () => {
                             <button
                               key={item.inventory_id || `item_${item.medicine_id}_${Math.random()}`}
                               type="button"
+                              data-highlighted={isHighlighted ? "true" : "false"}
                               onClick={() => {
                                 fetchDetailsAndAddToCart(item);
                                 setSearchTerm('');
@@ -2568,7 +2612,7 @@ const POS = () => {
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchResults.length > 0 && (
-                                <div className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-2xl">
+                                <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-2xl">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
                                       o => o.product.toLowerCase().trim() === med.medicine_name.toLowerCase().trim() ||
@@ -2580,6 +2624,7 @@ const POS = () => {
                                       <button
                                         key={med.inventory_id}
                                         type="button"
+                                        data-highlighted={isRowHighlighted ? "true" : "false"}
                                         onClick={() => {
                                           const idx = cart.indexOf(item);
                                           fetchDetailsAndChangeRowMedicine(idx, med);
