@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useQueryClient } from '@tanstack/react-query';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -81,6 +82,7 @@ const exportColumns = [
 ];
 
 const Sells = () => {
+  const queryClient = useQueryClient();
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'sells-date-range',
     defaultFrom: '',
@@ -118,6 +120,12 @@ const Sells = () => {
 
   // Date Filter Popover state
   const [showDatePopover, setShowDatePopover] = useState(false);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isDateFilterExcludingToday = !!(
+    (dateRangeHelper.dateRange.from && dateRangeHelper.dateRange.from > todayStr) ||
+    (dateRangeHelper.dateRange.to && dateRangeHelper.dateRange.to < todayStr)
+  );
 
   const formatShortDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -262,8 +270,17 @@ const Sells = () => {
       toastEvent.trigger('Invoice updated successfully', 'success');
       setEditInvoice(null);
       fetchInvoices(true);
-    } catch (err) {
-      toastEvent.trigger('Failed to update invoice', 'error');
+      
+      // Invalidate query caches so other pages update their stock/dashboard numbers immediately
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+
+      // Refresh the shared inventory cache so POS search reflects the adjusted stock
+      api.getCompactInventory().catch(() => {});
+    } catch (err: any) {
+      const serverMsg = err?.response?.data?.error || 'Failed to update invoice';
+      toastEvent.trigger(serverMsg, 'error');
     } finally {
       setSaving(false);
     }
@@ -275,6 +292,14 @@ const Sells = () => {
       toastEvent.trigger('Invoice deleted, stock restored', 'success');
       setDeleteConfirm(null);
       fetchInvoices(true);
+      
+      // Invalidate query caches so other pages update their stock/dashboard numbers immediately
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+
+      // Refresh the shared inventory cache so POS search reflects the restored stock
+      api.getCompactInventory().catch(() => {});
     } catch (err) {
       toastEvent.trigger('Failed to delete invoice', 'error');
     }
@@ -349,6 +374,29 @@ const Sells = () => {
           </button>
         </div>
       </div>
+
+      {/* Date filter exclusion warning banner */}
+      {isDateFilterExcludingToday && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs shrink-0 animate-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+            <span>
+              Today's sales are hidden because your date filter is currently set to{' '}
+              <strong className="text-amber-100">
+                {dateRangeHelper.dateRange.from ? formatShortDate(dateRangeHelper.dateRange.from) : 'start'}
+                {' to '}
+                {dateRangeHelper.dateRange.to ? formatShortDate(dateRangeHelper.dateRange.to) : 'end'}
+              </strong>.
+            </span>
+          </div>
+          <button
+            onClick={() => dateRangeHelper.clearFilters()}
+            className="px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-bold transition-all cursor-pointer"
+          >
+            Show All Dates / Today
+          </button>
+        </div>
+      )}
 
       {/* Invoices Table */}
       <div className="bg-white/10 backdrop-blur-lg rounded-xl p-0 border border-white/20 flex-1 flex flex-col overflow-hidden min-h-0">

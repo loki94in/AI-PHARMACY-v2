@@ -195,6 +195,7 @@ router.post('/override', async (req, res) => {
       await inventoryService.checkAndTriggerRefillsForMedicine(invItem.medicine_id);
     }
 
+    inventoryCache.invalidate();
         res.json({ success: true, message: 'Stock updated' });
   } catch (error: any) {
     if (db)     console.error(JSON.stringify({
@@ -367,6 +368,7 @@ router.post('/', async (req, res) => {
       ]
     );
     
+    inventoryCache.invalidate();
         res.json({
       success: true,
       message: 'Medicine and inventory registered successfully',

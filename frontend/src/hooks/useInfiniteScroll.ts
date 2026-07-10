@@ -72,6 +72,7 @@ export function useInfiniteScroll<T>({
     },
     staleTime: 30000, // 30 seconds
     gcTime: 300000, // 5 minutes
+    refetchOnMount: true,
   });
 
   // Sync React Query data with local state & module cache

@@ -13,6 +13,7 @@ import { productNameFilterService } from '../services/productNameFilterService.j
 import { emailService } from '../services/emailService.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 import { activityTracker } from '../utils/activityTracker.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 import fs from 'fs';
 
 
@@ -849,6 +850,7 @@ router.post('/manual', async (req, res) => {
     }
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     if (invoice_no) {
       notificationService.notifyDistributorAboutDeliveryBoy(invoice_no).catch(err => {
@@ -1116,6 +1118,7 @@ router.put('/:id/full', async (req, res) => {
     }
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     if (invoice_no) {
       notificationService.notifyDistributorAboutDeliveryBoy(invoice_no).catch(err => {
@@ -1197,6 +1200,7 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM purchases WHERE id = ?', [id]);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
         res.json({ success: true, message: 'Purchase deleted, stock reversed' });
   } catch (error) {
     if (db) {
@@ -2111,6 +2115,7 @@ router.post('/reconciliation/reissue', async (req, res) => {
     );
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     // Trigger refills and special orders after transaction commits successfully
     const { inventoryService } = await import('../services/inventoryService.js');
@@ -2219,6 +2224,7 @@ router.post('/sync', async (req, res) => {
       stagedCount++;
     }
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     // Broadcast update notification to dashboard via SSE
     try {
@@ -2341,6 +2347,7 @@ router.post('/staged/:id/approve', async (req, res) => {
     await db.run(`UPDATE staged_purchases SET status = 'approved' WHERE id = ?`, [id]);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     const invoiceNo = finalInvoiceNo;
     if (invoiceNo) {

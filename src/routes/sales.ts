@@ -3,6 +3,7 @@ import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
 import { applyStockDelta } from '../utils/stockRebuild.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -194,31 +195,33 @@ router.post('/', async (req, res) => {
       let { inventory_id, quantity, unit_price, loose_qty = 0, medicine_name, batch_no, expiry_date, mrp } = item;
       
       if (!inventory_id) {
+        // Strict inventory-only sales: never auto-create medicines or fabricate stock.
+        // Resolve the item to an existing inventory row or reject the whole sale.
         const cleanName = (medicine_name || 'Custom Medicine').trim();
         const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
         const adjustedName = normalizeMedicineName(cleanName);
-        let dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [adjustedName]);
-        let medicineId;
-        if (dbMed) {
-          medicineId = dbMed.id;
-        } else {
-          const medResult = await db.run('INSERT INTO medicines (name, mrp) VALUES (?, ?)', [adjustedName, mrp || unit_price]);
-          medicineId = medResult.lastID;
+        const dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [adjustedName]);
+        if (!dbMed) {
+          throw new Error(`Cannot sell "${cleanName}": this medicine is not in your inventory. Add it via Purchases/Inventory before selling.`);
         }
 
-        const bNo = (batch_no || 'MANUAL').trim();
-        const expDate = expiry_date || '12/28';
-        let invRow = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medicineId, bNo]);
-        if (invRow) {
-          inventory_id = invRow.id;
-        } else {
-          const insertRes = await db.run(
-            `INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp, loose_quantity)
-             VALUES (?, ?, ?, ?, ?, ?, 0)`,
-            [medicineId, Math.max(100, Number(quantity)), bNo, expDate, unit_price * 0.7, mrp || unit_price]
+        const bNo = (batch_no || '').trim();
+        let invRow = bNo
+          ? await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [dbMed.id, bNo])
+          : null;
+        if (!invRow) {
+          // Fall back to the earliest-expiry batch that still has stock
+          invRow = await db.get(
+            `SELECT id FROM inventory_master
+             WHERE medicine_id = ? AND (quantity > 0 OR loose_quantity > 0)
+             ORDER BY expiry_date ASC LIMIT 1`,
+            [dbMed.id]
           );
-          inventory_id = insertRes.lastID;
         }
+        if (!invRow) {
+          throw new Error(`Cannot sell "${cleanName}": no stock available in inventory.`);
+        }
+        inventory_id = invRow.id;
       }
 
       // Stock Level Verification before processing decrement (strips + loose counted as one pool)
@@ -313,7 +316,8 @@ router.post('/', async (req, res) => {
 
     // Commit transaction
     await db.run('COMMIT');
-    
+    inventoryCache.invalidate();
+
     // Trigger WhatsApp invoice sending if requested
     if (sendWhatsApp) {
       import('../services/whatsappInvoiceService.js')
@@ -1054,7 +1058,7 @@ router.get('/search-medicine', async (req, res) => {
 });
 
 // Get fuzzy medicine suggestions when search results are thin
-router.get('/sales/suggest-medicine', async (req, res) => {
+router.get('/suggest-medicine', async (req, res) => {
   const query = req.query.q as string;
   if (!query || query.trim().length < 2) {
     return res.json([]);
@@ -1090,7 +1094,7 @@ router.get('/sales/suggest-medicine', async (req, res) => {
 });
 
 // Add a medicine to the composition queue from POS
-router.post('/sales/queue-from-pos', async (req, res) => {
+router.post('/queue-from-pos', async (req, res) => {
   const { medicine_id } = req.body;
   if (!medicine_id) {
     return res.status(400).json({ error: 'medicine_id is required' });
@@ -1328,6 +1332,7 @@ router.put('/:id', async (req, res) => {
     }
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
         res.json({ success: true, message: 'Invoice updated' });
   } catch (error) {
     if (db) {
@@ -1371,6 +1376,7 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
     await db.run('DELETE FROM sales_invoices WHERE id = ?', [id]);
 
+    inventoryCache.invalidate();
         res.json({ success: true, message: 'Invoice deleted, stock restored' });
   } catch (error) {
     const err = error as Error;
@@ -1483,7 +1489,7 @@ router.post('/sync', async (req, res) => {
         for (const item of items) {
           const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
           const currentStock = await db.get(
-            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
              FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
             [inventory_id]
           );
@@ -1494,9 +1500,7 @@ router.post('/sync', async (req, res) => {
           const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
           const availableTotalUnits = currentStock.quantity * pSize + currentStock.loose_quantity;
           if (availableTotalUnits < soldTotalUnits) {
-            const neededStrips = Math.ceil((soldTotalUnits - availableTotalUnits) / pSize);
-            await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [neededStrips, inventory_id]);
-            currentStock.quantity += neededStrips;
+            throw new Error(`Insufficient stock for "${currentStock.db_medicine_name || 'Medicine'}" during device sync. Available: ${currentStock.quantity} strips & ${currentStock.loose_quantity} loose. Requested: ${Number(quantity)} strips & ${Number(loose_qty)} loose.`);
           }
 
           await db.run(
@@ -1520,6 +1524,7 @@ router.post('/sync', async (req, res) => {
       }
     }
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     // Broadcast update notification to dashboard via SSE
     try {
@@ -1628,6 +1633,7 @@ router.post('/staged/:id/approve', async (req, res) => {
     await db.run(`UPDATE staged_sales SET status = 'approved' WHERE id = ?`, [id]);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
 
     // Automatically send WhatsApp Invoice PDF
     if (invoiceId) {

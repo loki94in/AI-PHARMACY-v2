@@ -22,7 +22,7 @@ class InventoryCache {
   private lastUpdated = 0;
   private refreshInterval: NodeJS.Timeout | null = null;
   private db: Database | null = null;
-  private isRebuilding = false;
+  private rebuildPromise: Promise<void> | null = null;
 
   public initialize(db: Database) {
     this.db = db;
@@ -46,47 +46,51 @@ class InventoryCache {
     return this.cache || [];
   }
 
-  public async rebuild(db?: Database): Promise<void> {
+  public rebuild(db?: Database): Promise<void> {
     const activeDb = db || this.db;
     if (!activeDb) {
       console.warn('[InventoryCache] Cannot rebuild, no database reference');
-      return;
+      return Promise.resolve();
     }
 
-    if (this.isRebuilding) return;
-    this.isRebuilding = true;
+    // Share the in-flight rebuild so concurrent get() calls wait for fresh data
+    // instead of seeing a null cache and returning an empty list.
+    if (this.rebuildPromise) return this.rebuildPromise;
 
-    try {
-      // Query essential columns for active inventory items. Limit fields to optimize memory.
-      const items = await activeDb.all<CompactInventoryItem[]>(
-        `SELECT 
-          m.id AS medicine_id,
-          im.id AS inventory_id,
-          m.name,
-          im.batch_no,
-          im.expiry_date,
-          COALESCE(im.mrp, m.mrp, 0) AS mrp,
-          im.quantity AS stock_qty,
-          im.loose_quantity,
-          im.unit_price,
-          COALESCE(im.cost_price, 0) AS cost_price,
-          m.item_code,
-          m.manufacturer,
-          m.packaging,
-          m.pack_size
-         FROM inventory_master im
-         JOIN medicines m ON im.medicine_id = m.id
-         WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR im.expiry_date >= date('now'))
-         ORDER BY m.name ASC, im.expiry_date ASC`
-      );
+    this.rebuildPromise = (async () => {
+      try {
+        // Query essential columns for active inventory items. Limit fields to optimize memory.
+        const items = await activeDb.all<CompactInventoryItem[]>(
+          `SELECT
+            m.id AS medicine_id,
+            im.id AS inventory_id,
+            m.name,
+            im.batch_no,
+            im.expiry_date,
+            COALESCE(im.mrp, m.mrp, 0) AS mrp,
+            im.quantity AS stock_qty,
+            im.loose_quantity,
+            im.unit_price,
+            COALESCE(im.cost_price, 0) AS cost_price,
+            m.item_code,
+            m.manufacturer,
+            m.packaging,
+            m.pack_size
+           FROM inventory_master im
+           JOIN medicines m ON im.medicine_id = m.id
+           WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR im.expiry_date >= date('now'))
+           ORDER BY m.name ASC, im.expiry_date ASC`
+        );
 
-      this.cache = items;
-      this.lastUpdated = Date.now();
-    } catch (err) {
-      console.error('[InventoryCache] Error rebuilding cache:', err);
-    } finally {
-      this.isRebuilding = false;
-    }
+        this.cache = items;
+        this.lastUpdated = Date.now();
+      } catch (err) {
+        console.error('[InventoryCache] Error rebuilding cache:', err);
+      } finally {
+        this.rebuildPromise = null;
+      }
+    })();
+    return this.rebuildPromise;
   }
 
   public invalidate(): void {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 
 const router = express.Router();
 
@@ -136,6 +137,7 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
     return { returnNo, totalRefund };
   });
 
+  inventoryCache.invalidate();
   res.json({ success: true, return_no: result.returnNo, total_refund: result.totalRefund });
 }));
 

@@ -76,11 +76,23 @@ let cachedSpecialOrders: any[] | null = null;
 const groupBatches = (items: any[]): any[] => {
   const grouped: any[] = [];
   const map = new Map<number, any>();
-  
+
+  // FEFO rank for choosing which batch the sale will actually target:
+  // batches that still have strips beat loose-only batches; among those, earliest expiry wins.
+  const fefoRank = (stripQty: number, exp?: string) =>
+    `${Number(stripQty) > 0 ? 0 : 1}|${exp || '9999-12'}`;
+
   for (const item of items) {
     const medId = item.medicine_id || item.inventory_id || Math.random();
+    const stripQty = item.quantity || 0;
     if (!map.has(medId)) {
-      const copy = { ...item, quantity: item.quantity || 0 };
+      const copy = {
+        ...item,
+        quantity: stripQty, // running total across batches (display only)
+        batch_quantity: stripQty, // stock of the chosen batch — what the sale can actually use
+        loose_quantity: item.loose_quantity || 0,
+        __fefoRank: fefoRank(stripQty, item.expiry_date)
+      };
       if (item.alternatives && Array.isArray(item.alternatives)) {
         copy.alternatives = groupBatches(item.alternatives);
       } else {
@@ -90,20 +102,23 @@ const groupBatches = (items: any[]): any[] => {
       grouped.push(copy);
     } else {
       const existing = map.get(medId);
-      existing.quantity = (existing.quantity || 0) + (item.quantity || 0);
-      
-      // FEFO (First Expiry, First Out): prefer the batch details of the batch with the earliest valid expiry date
-      const existingExp = existing.expiry_date;
-      const currentExp = item.expiry_date;
-      if (currentExp && (!existingExp || currentExp < existingExp)) {
+      existing.quantity = (existing.quantity || 0) + stripQty;
+
+      // FEFO (First Expiry, First Out): adopt this batch if it ranks better,
+      // keeping its OWN stock figures so the cart never mixes one batch's id with another's quantity.
+      const rank = fefoRank(stripQty, item.expiry_date);
+      if (rank < existing.__fefoRank) {
+        existing.__fefoRank = rank;
         existing.inventory_id = item.inventory_id;
         existing.batch_no = item.batch_no;
         existing.expiry_date = item.expiry_date;
         existing.mrp = item.mrp;
         existing.cost_price = item.cost_price;
         existing.unit_price = item.unit_price;
+        existing.batch_quantity = stripQty;
+        existing.loose_quantity = item.loose_quantity || 0;
       }
-      
+
       if (item.alternatives && Array.isArray(item.alternatives) && item.alternatives.length > 0) {
         existing.alternatives = groupBatches([...existing.alternatives, ...item.alternatives]);
       }
@@ -939,6 +954,158 @@ const POS = () => {
   // Universal Edit state
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
 
+  const rebalanceCartMedicine = (prevCart: any[], medicineId: number, targetItemId: number, updatedFields: { qty?: number; looseQty?: number }) => {
+    // 1. Find all cart items of this medicine
+    const medicineItems = prevCart.filter(item => !item.isEmptyRow && item.medicine_id === medicineId);
+    if (medicineItems.length === 0) return prevCart;
+
+    // 2. Determine the new total requested quantity for this medicine.
+    let totalRequestedTablets = 0;
+    const packSize = medicineItems[0].packSize || 10;
+
+    for (const item of medicineItems) {
+      let itemQty = item.qty || 0;
+      let itemLoose = item.looseQty || 0;
+      if (item.id === targetItemId) {
+        if (updatedFields.qty !== undefined) itemQty = updatedFields.qty;
+        if (updatedFields.looseQty !== undefined) itemLoose = updatedFields.looseQty;
+      }
+      totalRequestedTablets += (itemQty * packSize) + itemLoose;
+    }
+
+    // 3. Fetch all active batches for this medicine from the local inventory cache
+    const compactInventory = getCompactInventoryCache();
+    const activeBatches = compactInventory
+      .filter(item => item.medicine_id === medicineId && (item.stock_qty > 0 || item.loose_quantity > 0))
+      .map(item => {
+        const expiryStr = item.expiry_date || '';
+        let isExpired = false;
+        if (expiryStr) {
+          let expDate: Date;
+          if (expiryStr.includes('/')) {
+            const parts = expiryStr.split('/');
+            let year = parseInt(parts[1], 10);
+            const month = parseInt(parts[0], 10) - 1;
+            if (year < 100) year += 2000;
+            expDate = new Date(year, month + 1, 0);
+          } else {
+            expDate = new Date(expiryStr);
+          }
+          if (expDate < new Date()) isExpired = true;
+        }
+        return { ...item, isExpired };
+      })
+      .filter(item => !item.isExpired);
+
+    if (activeBatches.length === 0) {
+      toastEvent.trigger("This medicine is completely out of stock or expired", "error");
+      return prevCart.map(item => {
+        if (item.id === targetItemId) {
+          return { ...item, qty: 0, looseQty: 0 };
+        }
+        return item;
+      }).filter(item => item.id === targetItemId || item.medicine_id !== medicineId);
+    }
+
+    // Sort batches by FEFO (First Expiry, First Out):
+    // Active batches that have full strips first, then loose-only. Earliest expiry first.
+    activeBatches.sort((a, b) => {
+      const aHasStrips = (a.stock_qty || 0) > 0 ? 0 : 1;
+      const bHasStrips = (b.stock_qty || 0) > 0 ? 0 : 1;
+      if (aHasStrips !== bHasStrips) return aHasStrips - bHasStrips;
+      
+      const aExp = a.expiry_date || '9999-12-31';
+      const bExp = b.expiry_date || '9999-12-31';
+      return aExp.localeCompare(bExp);
+    });
+
+    // 4. Distribute the total requested quantity across batches
+    let remainingTablets = totalRequestedTablets;
+    const allocations: { batch: any; qty: number; looseQty: number }[] = [];
+    let totalAvailableTablets = 0;
+
+    for (const batch of activeBatches) {
+      const batchStockTablets = (batch.stock_qty || 0) * packSize + (batch.loose_quantity || 0);
+      totalAvailableTablets += batchStockTablets;
+      
+      if (remainingTablets > 0 && batchStockTablets > 0) {
+        const takenTablets = Math.min(remainingTablets, batchStockTablets);
+        const qty = Math.floor(takenTablets / packSize);
+        const looseQty = takenTablets % packSize;
+
+        allocations.push({
+          batch,
+          qty,
+          looseQty
+        });
+        remainingTablets -= takenTablets;
+      }
+    }
+
+    // 5. If requested exceeds available stock, alert the user and cap the allocations
+    if (totalRequestedTablets > totalAvailableTablets) {
+      toastEvent.trigger(`Only ${totalAvailableTablets} units available in stock. Capped to maximum.`, "info");
+      
+      remainingTablets = totalAvailableTablets;
+      allocations.length = 0;
+      for (const batch of activeBatches) {
+        const batchStockTablets = (batch.stock_qty || 0) * packSize + (batch.loose_quantity || 0);
+        if (remainingTablets > 0 && batchStockTablets > 0) {
+          const takenTablets = Math.min(remainingTablets, batchStockTablets);
+          const qty = Math.floor(takenTablets / packSize);
+          const looseQty = takenTablets % packSize;
+          allocations.push({ batch, qty, looseQty });
+          remainingTablets -= takenTablets;
+        }
+      }
+    }
+
+    if (allocations.length === 0) {
+      allocations.push({
+        batch: activeBatches[0],
+        qty: 0,
+        looseQty: 0
+      });
+    }
+
+    // 6. Build the new cart rows for this medicine
+    const firstMedItem = medicineItems[0];
+    const newMedRows = allocations.map((alloc) => {
+      return {
+        ...firstMedItem,
+        id: alloc.batch.inventory_id,
+        batch: alloc.batch.batch_no,
+        expiry: alloc.batch.expiry_date,
+        qty: alloc.qty,
+        looseQty: alloc.looseQty,
+        mrp: alloc.batch.mrp,
+        costPrice: alloc.batch.cost_price || (alloc.batch.mrp * 0.7),
+        unitPrice: alloc.batch.unit_price || alloc.batch.mrp,
+        availableStock: alloc.batch.stock_qty,
+        availableLooseStock: alloc.batch.loose_quantity,
+        alternative_batches: activeBatches.filter(b => b.inventory_id !== alloc.batch.inventory_id)
+      };
+    });
+
+    // 7. Replace all old rows of this medicine in the cart with the new rows
+    const newCart: any[] = [];
+    let inserted = false;
+    for (const item of prevCart) {
+      if (item.medicine_id === medicineId) {
+        if (!inserted) {
+          newCart.push(...newMedRows);
+          inserted = true;
+        }
+      } else {
+        newCart.push(item);
+      }
+    }
+    if (!inserted) {
+      newCart.push(...newMedRows);
+    }
+    return newCart;
+  };
+
   const addToCart = (med: any) => {
     // Expiry check
     const expiryStr = med.expiry || med.expiry_date || '';
@@ -989,16 +1156,15 @@ const POS = () => {
         incQty = Number(med.last_qty) || 1;
       }
       const incLooseQty = med.recommendedLooseQty || 0;
+      
       if (existingIndex !== -1) {
-        return cleanPrev.map((item, idx) => 
-          idx === existingIndex ? { 
-            ...item, 
-            qty: item.qty + incQty,
-            looseQty: (item.looseQty || 0) + incLooseQty
-          } : item
-        );
+        const existingItem = cleanPrev[existingIndex];
+        const newQty = existingItem.qty + incQty;
+        const newLoose = (existingItem.looseQty || 0) + incLooseQty;
+        return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id, existingItem.id, { qty: newQty, looseQty: newLoose });
       }
-      return [...cleanPrev, { 
+      
+      const newItem = { 
         id: med.id, 
         medicine_id: med.medicine_id || med.id,
         name: med.name, 
@@ -1011,9 +1177,13 @@ const POS = () => {
         mrp: med.mrp, 
         costPrice: med.costPrice || (med.mrp * 0.7),
         salts: med.salts || '',
-        availableStock: med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0),
-        availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0)
-      }];
+        availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0)),
+        availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0),
+        alternative_batches: med.alternative_batches || []
+      };
+      
+      const nextCart = [...cleanPrev, newItem];
+      return rebalanceCartMedicine(nextCart, newItem.medicine_id, newItem.id, { qty: incQty, looseQty: incLooseQty });
     });
 
     // Fetch doctor combination recommendations
@@ -1094,6 +1264,8 @@ const POS = () => {
         salts: details.api_reference || details.hsn_code || 'Generic',
         packSize: item.pack_size || 10,
         quantity: item.quantity,
+        batch_quantity: item.batch_quantity,
+        loose_quantity: item.loose_quantity,
         alternatives: details.alternatives,
         recommendedQty: item.recommendedQty
       });
@@ -1110,6 +1282,8 @@ const POS = () => {
         salts: item.salts || item.hsn_code || 'Generic',
         packSize: item.pack_size || 10,
         quantity: item.quantity,
+        batch_quantity: item.batch_quantity,
+        loose_quantity: item.loose_quantity,
         recommendedQty: item.recommendedQty
       });
     }
@@ -1196,7 +1370,7 @@ const POS = () => {
           costPrice: med.cost_price,
           salts: med.salts || med.hsn_code || 'Generic',
           packSize: med.pack_size || 10,
-          availableStock: med.quantity !== undefined ? med.quantity : 0,
+          availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
           availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
           isEmptyRow: false
         };
@@ -1233,52 +1407,64 @@ const POS = () => {
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
-    updateCart(prevCart => prevCart.map(item => {
-      if (item.id !== id) return item;
-      
-      let updatedItem = { ...item, [field]: value };
-      
-      if (field === 'looseQty') {
-        const looseVal = Math.max(0, Number(value));
-        const pSize = updatedItem.packSize || 10;
-        if (looseVal >= pSize) {
-          const extraStrips = Math.floor(looseVal / pSize);
-          updatedItem.qty = (updatedItem.qty || 0) + extraStrips;
-          updatedItem.looseQty = looseVal % pSize;
-        } else {
-          updatedItem.looseQty = looseVal;
+    updateCart(prevCart => {
+      const item = prevCart.find(i => i.id === id);
+      if (!item) return prevCart;
+
+      if (field === 'qty' || field === 'looseQty') {
+        let updatedQty = item.qty;
+        let updatedLoose = item.looseQty;
+
+        if (field === 'qty') {
+          updatedQty = Math.max(0, Number(value));
+        } else if (field === 'looseQty') {
+          const looseVal = Math.max(0, Number(value));
+          const pSize = item.packSize || 10;
+          if (looseVal >= pSize) {
+            const extraStrips = Math.floor(looseVal / pSize);
+            updatedQty = (item.qty || 0) + extraStrips;
+            updatedLoose = looseVal % pSize;
+          } else {
+            updatedLoose = looseVal;
+          }
         }
+
+        return rebalanceCartMedicine(prevCart, item.medicine_id, id, { qty: updatedQty, looseQty: updatedLoose });
       }
 
-      if (field === 'packSize') {
-        const pSize = Math.max(1, Number(value));
-        updatedItem.packSize = pSize;
-        const looseVal = updatedItem.looseQty || 0;
-        if (looseVal >= pSize) {
-          const extraStrips = Math.floor(looseVal / pSize);
-          updatedItem.qty = (updatedItem.qty || 0) + extraStrips;
-          updatedItem.looseQty = looseVal % pSize;
-        }
-        
-        // Trigger global SQLite database update for pack size if it is a saved inventory item
-        if (typeof id === 'number' && id < 1000000) {
-          api.updateMedicine(id, { pack_size: pSize })
-            .catch(err => console.error('Error updating pack size in DB:', err));
-        }
-      }
+      // Standard mapping for other fields
+      return prevCart.map(item => {
+        if (item.id !== id) return item;
+        let updatedItem = { ...item, [field]: value };
 
-      if (field === 'mrp' && typeof id === 'number' && id < 1000000) {
-        api.updateMedicine(id, { mrp: Number(value) })
-          .catch(err => console.error('Error updating MRP in DB:', err));
-      }
+        if (field === 'packSize') {
+          const pSize = Math.max(1, Number(value));
+          updatedItem.packSize = pSize;
+          const looseVal = updatedItem.looseQty || 0;
+          if (looseVal >= pSize) {
+            const extraStrips = Math.floor(looseVal / pSize);
+            updatedItem.qty = (updatedItem.qty || 0) + extraStrips;
+            updatedItem.looseQty = looseVal % pSize;
+          }
+          if (typeof id === 'number' && id < 1000000) {
+            api.updateMedicine(id, { pack_size: pSize })
+              .catch(err => console.error('Error updating pack size in DB:', err));
+          }
+        }
 
-      if (field === 'costPrice' && typeof id === 'number' && id < 1000000) {
-        api.updateMedicine(id, { purchase_price: Number(value) })
-          .catch(err => console.error('Error updating Cost Price in DB:', err));
-      }
-      
-      return updatedItem;
-    }));
+        if (field === 'mrp' && typeof id === 'number' && id < 1000000) {
+          api.updateMedicine(id, { mrp: Number(value) })
+            .catch(err => console.error('Error updating MRP in DB:', err));
+        }
+
+        if (field === 'costPrice' && typeof id === 'number' && id < 1000000) {
+          api.updateMedicine(id, { purchase_price: Number(value) })
+            .catch(err => console.error('Error updating Cost Price in DB:', err));
+        }
+
+        return updatedItem;
+      });
+    });
   };
 
   const clearCart = () => {
@@ -1434,11 +1620,15 @@ const POS = () => {
       
       // Only enforce for items that are linked to actual inventory master items
       if (typeof item.id === 'number' && item.id < 1000000) {
+        // Skip when stock data never loaded with the item (e.g. restored held bills / old saved tabs);
+        // the server re-verifies stock authoritatively and rejects the sale if truly insufficient.
+        if (item.availableStock === undefined && item.availableLooseStock === undefined) continue;
+
         const packSize = item.packSize || 10;
         const reqQty = Number(item.qty || 0);
         const reqLoose = Number(item.looseQty || 0);
         const reqTotalUnits = reqQty * packSize + reqLoose;
-        
+
         const availQty = Number(item.availableStock !== undefined ? item.availableStock : 0);
         const availLoose = Number(item.availableLooseStock !== undefined ? item.availableLooseStock : 0);
         const availTotalUnits = availQty * packSize + availLoose;
@@ -1461,7 +1651,7 @@ const POS = () => {
           batch_no: item.batch,
           expiry_date: item.expiry,
           mrp: item.mrp || resolvedUnitPrice,
-          quantity: Math.max(item.qty || 0, item.quantity || 0),
+          quantity: Number(item.qty !== undefined ? item.qty : (item.quantity || 0)),
           unit_price: resolvedUnitPrice,
           loose_qty: item.looseQty || 0,
           discount_per: itemDiscount,
@@ -1487,8 +1677,13 @@ const POS = () => {
       const result = await api.createSale(payload);
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
       
-      // Invalidate the Sells page cache so the new bill appears immediately
+      // Invalidate queries so that all pages (Sells, Inventory, Dashboard) update immediately
       queryClient.invalidateQueries({ queryKey: ['sells-list'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+
+      // Refresh the local inventory cache so POS search shows the reduced stock immediately
+      api.getCompactInventory().catch(() => {});
       
       setLastSavedInvoiceNo(invoiceNo);
       setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
@@ -1572,10 +1767,10 @@ const POS = () => {
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
         
         {/* LEFT WORKSPACE (approx 72-75% width) - Takes up full height */}
-        <div className="flex-1 flex flex-col gap-4 min-h-0">
+        <div className="flex-1 flex flex-col gap-4 min-h-0 min-w-0">
           
           {/* Patient & Doctor Context Bar */}
-          <div className="glass-panel p-4 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl">
+          <div className="glass-panel p-4 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl w-full min-w-0">
             {matchedRefill && (
               <div className="mb-3 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold flex justify-between items-center">
                 <div className="flex items-center gap-2">
@@ -1798,7 +1993,7 @@ const POS = () => {
           </div>
 
           {/* A. Search & Scan Medicine Area (Header) */}
-          <div className="glass-panel p-4 flex flex-col gap-3 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-md">
+          <div className="glass-panel p-4 flex flex-col gap-3 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-md w-full min-w-0 overflow-hidden">
             <div className="flex items-center gap-3">
               <div ref={productSearchRef} className="relative flex-1">
                 <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-muted">
@@ -1980,12 +2175,28 @@ const POS = () => {
                                 </div>
                                 <span className="text-[13px] text-muted">
                                   Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
-                                  {item.quantity !== undefined && (
-                                    <span className="ml-3 font-mono font-semibold text-primary">
-                                      Stock: {Math.max(0, item.quantity - cart.reduce((sum, c) => c.medicine_id === item.medicine_id ? sum + c.qty : sum, 0))} Str
-                                      {item.loose_quantity !== undefined && item.loose_quantity > 0 && ` / ${item.loose_quantity} Tab`}
-                                    </span>
-                                  )}
+                                  {item.quantity !== undefined && (() => {
+                                    const packSize = item.pack_size || 10;
+                                    const totalUnits = (item.quantity || 0) * packSize + (item.loose_quantity || 0);
+                                    const cartUnits = cart.reduce((sum, c) => {
+                                      const isSameMed = c.medicine_id === item.medicine_id || 
+                                        (c.name || c.medicine_name || '').toLowerCase().trim() === (item.medicine_name || '').toLowerCase().trim();
+                                      if (isSameMed && !c.isEmptyRow) {
+                                        return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
+                                      }
+                                      return sum;
+                                    }, 0);
+                                    const remainingUnits = Math.max(0, totalUnits - cartUnits);
+                                    const remainingPacks = Math.floor(remainingUnits / packSize);
+                                    const remainingLoose = remainingUnits % packSize;
+                                    const hasLoose = (item.loose_quantity !== undefined && item.loose_quantity > 0) || remainingLoose > 0;
+                                    return (
+                                      <span className="ml-3 font-mono font-semibold text-primary">
+                                        Stock: {remainingPacks} Str
+                                        {hasLoose && ` / ${remainingLoose} Tab`}
+                                      </span>
+                                    );
+                                  })()}
                                 </span>
                                 {!isAlt && (!item.api_reference || item.api_reference.trim() === '') && (
                                   <span 
@@ -2118,11 +2329,11 @@ const POS = () => {
 
             {/* Doctor Combination Suggestions */}
             {doctorComboSuggestions.length > 0 && (
-              <div className="flex items-center gap-2 bg-bg2/30 border border-border/20 px-3 py-2 rounded-xl">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider select-none">
+              <div className="flex items-center gap-2 bg-bg2/30 border border-border/20 px-3 py-2 rounded-xl w-full min-w-0 overflow-hidden">
+                <span className="text-[10px] font-bold text-muted uppercase tracking-wider select-none shrink-0">
                   🤝 Together with:
                 </span>
-                <div className="flex gap-2 overflow-x-auto scrollbar-thin">
+                <div className="flex gap-2 overflow-x-auto scrollbar-thin min-w-0 flex-1 w-full">
                   {doctorComboSuggestions.map(med => (
                     <button
                       key={med.id}
@@ -2144,11 +2355,11 @@ const POS = () => {
 
             {/* Quick Add / Doctor Suggestions */}
             {doctorSuggestions.length > 0 ? (
-              <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5">
+              <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
                 <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
                   ⚡ {doctor}'s Prescriptions:
                 </span>
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
                   {doctorSuggestions.map(med => (
                     <button
                       key={med.id}
@@ -2168,11 +2379,11 @@ const POS = () => {
               </div>
             ) : (
               commonCombinations.length > 0 && (
-                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5">
+                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
                   <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
                     ⚡ Quick Add (Frequently Sold):
                   </span>
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
                     {commonCombinations.map(med => (
                       <button
                         key={med.id}
@@ -2197,7 +2408,7 @@ const POS = () => {
           </div>
 
           {/* B. Cart Panel - Takes up all remaining height */}
-          <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border relative z-10 min-h-0 shadow-md">
+          <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border relative z-10 min-h-0 min-w-0 shadow-md w-full">
             {/* Cart Header / Tab System */}
             <div className="p-2.5 border-b border-border flex items-center justify-between gap-3 bg-bg3/30 flex-nowrap shrink-0 rounded-t-[2rem]">
               <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 scrollbar-thin py-0.5">
@@ -2384,7 +2595,25 @@ const POS = () => {
                                           )}
                                         </div>
                                         <span className="text-[13px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[13px] text-green font-bold font-mono mt-0.5">MRP: ₹{Math.round(med.mrp)} | Stock: {Math.max(0, med.quantity - cart.reduce((sum, c) => c.medicine_id === med.medicine_id ? sum + c.qty : sum, 0))}</span>
+                                        <span className="text-[13px] text-green font-bold font-mono mt-0.5">
+                                          MRP: ₹{Math.round(med.mrp)} | Stock: {(() => {
+                                            const packSize = med.pack_size || 10;
+                                            const totalUnits = (med.quantity || 0) * packSize + (med.loose_quantity || med.loose_qty || 0);
+                                            const cartUnits = cart.reduce((sum, c) => {
+                                              const isSameMed = c.medicine_id === med.medicine_id || 
+                                                (c.name || c.medicine_name || '').toLowerCase().trim() === (med.medicine_name || '').toLowerCase().trim();
+                                              if (isSameMed && !c.isEmptyRow) {
+                                                return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
+                                              }
+                                              return sum;
+                                            }, 0);
+                                            const remainingUnits = Math.max(0, totalUnits - cartUnits);
+                                            const remainingPacks = Math.floor(remainingUnits / packSize);
+                                            const remainingLoose = remainingUnits % packSize;
+                                            const hasLoose = (med.loose_quantity !== undefined && med.loose_quantity > 0) || (med.loose_qty !== undefined && med.loose_qty > 0) || remainingLoose > 0;
+                                            return `${remainingPacks} Str${hasLoose ? ` / ${remainingLoose} Tab` : ''}`;
+                                          })()}
+                                        </span>
                                       </button>
                                     );
                                   })}
@@ -2565,8 +2794,35 @@ const POS = () => {
                             if (item.isEmptyRow) {
                               return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
                             }
-                            const remainingStock = item.availableStock !== undefined ? Math.max(0, item.availableStock - item.qty) : 'N/A';
-                            const remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
+                            const compactInventory = getCompactInventoryCache();
+                            const medicineBatches = compactInventory.filter(inv => inv.medicine_id === item.medicine_id);
+                            
+                            let remainingStock: number | string = 'N/A';
+                            let remainingLoose = 0;
+                            
+                            if (medicineBatches.length > 0) {
+                              const totalAvailableStock = medicineBatches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
+                              const totalAvailableLooseStock = medicineBatches.reduce((sum, b) => sum + (b.loose_quantity || 0), 0);
+                              
+                              const totalCartQty = cart.reduce((sum, c) => {
+                                if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
+                                  return sum + (c.qty || 0);
+                                }
+                                return sum;
+                              }, 0);
+                              const totalCartLoose = cart.reduce((sum, c) => {
+                                if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
+                                  return sum + (c.looseQty || 0);
+                                }
+                                return sum;
+                              }, 0);
+
+                              remainingStock = Math.max(0, totalAvailableStock - totalCartQty);
+                              remainingLoose = Math.max(0, totalAvailableLooseStock - totalCartLoose);
+                            } else if (item.availableStock !== undefined) {
+                              remainingStock = Math.max(0, item.availableStock - item.qty);
+                              remainingLoose = item.availableLooseStock !== undefined ? Math.max(0, item.availableLooseStock - (item.looseQty || 0)) : 0;
+                            }
                             return (
                               <div className={`text-[14px] select-none font-bold font-mono px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 ${
                                 (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
