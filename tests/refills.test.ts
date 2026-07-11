@@ -31,8 +31,8 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refill-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     // Create special_orders table which is queried by inventory overrides
     const { open } = await import('sqlite');
@@ -183,5 +183,16 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
 
     expect(refill.is_ready).toBe(1);
     expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (_) {}
   });
 });

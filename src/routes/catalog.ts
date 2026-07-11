@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import { dbManager } from '../database/connection.js';
 import { runEnrichment, getEnrichmentRunningState } from '../worker/compositionEnricher.js';
+import { medicineService } from '../services/medicineService.js';
 
 const router = express.Router();
 
@@ -187,17 +188,47 @@ router.post('/catalog/import-job/:id', async (req, res) => {
   }
 });
 
+async function findSimilarMedicine(db: any, name: string): Promise<any | null> {
+  const firstWord = name.split(' ')[0] || '';
+  if (firstWord.length < 3) return null;
+  
+  const candidates = await db.all(
+    'SELECT id, name, api_reference, strength, manufacturer FROM medicines WHERE name LIKE ?',
+    [`${firstWord}%`]
+  );
+  
+  const { scoreProductName } = await import('../services/pharmarackCatalogCache.js');
+  
+  let bestCandidate = null;
+  let bestScore = 0;
+  
+  for (const cand of candidates) {
+    if (cand.name.toLowerCase() === name.toLowerCase()) continue;
+    
+    const score = scoreProductName(name, cand.name);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCandidate = cand;
+    }
+  }
+  
+  if (bestScore >= 0.75) {
+    return bestCandidate;
+  }
+  return null;
+}
+
 // New Catalog Import Endpoint (Receives confirmed preview data)
 router.post('/catalog/import', async (req, res) => {
   const { medicines } = req.body;
   if (!Array.isArray(medicines)) {
     return res.status(400).json({ error: 'Invalid payload, expected array of medicines' });
   }
-  
   try {
     const db = await dbManager.getConnection();
     
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
+    const { recordApiSubstance } = await import('../worker/compositionEnricher.js');
     
     for (const med of medicines) {
       if (!med.name) continue;
@@ -205,31 +236,14 @@ router.post('/catalog/import', async (req, res) => {
       const cleanName = med.name.trim();
       const adjustedName = normalizeMedicineName(cleanName, med.manufacturer);
       
-      const existing = await db.get(`SELECT id FROM medicines WHERE lower(name) = lower(?)`, adjustedName);
-      if (existing) {
-        const updates = ["name = ?"];
-        const params = [adjustedName];
-        
-        if (med.manufacturer) { updates.push("manufacturer = COALESCE(NULLIF(manufacturer, ''), ?)"); params.push(med.manufacturer); }
-        if (med.marketed_by) { updates.push("marketed_by = COALESCE(NULLIF(marketed_by, ''), ?)"); params.push(med.marketed_by); }
-        if (med.api_reference) { updates.push("api_reference = COALESCE(NULLIF(api_reference, ''), ?)"); params.push(med.api_reference); }
-        if (med.strength) { updates.push("strength = COALESCE(NULLIF(strength, ''), ?)"); params.push(med.strength); }
-        if (med.packaging_type) { updates.push("packaging = COALESCE(NULLIF(packaging, ''), ?)"); params.push(med.packaging_type); }
-        
-        params.push(existing.id);
-        const setClause = updates.join(', ');
-        await db.run(`UPDATE medicines SET ${setClause} WHERE id = ?`, ...params);
-      } else {
-        await db.run(
-          `INSERT INTO medicines (name, api_reference, strength, packaging, manufacturer, marketed_by) VALUES (?, ?, ?, ?, ?, ?)`,
-          adjustedName,
-          med.api_reference || null,
-          med.strength || null,
-          med.packaging_type || null,
-          med.manufacturer || null,
-          med.marketed_by || null
-        );
-      }
+      await medicineService.addOrUpdateMedicine(db, {
+        name: adjustedName,
+        apiReference: med.api_reference || undefined,
+        strength: med.strength || undefined,
+        packaging: med.packaging_type || undefined,
+        manufacturer: med.manufacturer || undefined,
+        marketedBy: med.marketed_by || undefined
+      });
     }
     
     await dbManager.close();
@@ -301,15 +315,26 @@ router.get('/catalog/reviews/pending', async (req, res) => {
       'SELECT * FROM staged_medicine_reviews WHERE status = ? AND source = ? ORDER BY id DESC',
       ['pending', source]
     );
+
+    const parsedReviews = [];
+    for (const r of reviews) {
+      let duplicateProduct = null;
+      if (r.possible_duplicate_of) {
+        duplicateProduct = await db.get(
+          'SELECT id, name, api_reference, strength, manufacturer, marketed_by FROM medicines WHERE id = ?',
+          [r.possible_duplicate_of]
+        );
+      }
+      parsedReviews.push({
+        ...r,
+        original_row_data: r.original_row_data ? JSON.parse(r.original_row_data) : null,
+        extracted_json: r.extracted_json ? JSON.parse(r.extracted_json) : null,
+        approved_json: r.approved_json ? JSON.parse(r.approved_json) : null,
+        duplicateProduct
+      });
+    }
     await dbManager.close();
-    
-    const parsedReviews = reviews.map(r => ({
-      ...r,
-      original_row_data: r.original_row_data ? JSON.parse(r.original_row_data) : null,
-      extracted_json: r.extracted_json ? JSON.parse(r.extracted_json) : null,
-      approved_json: r.approved_json ? JSON.parse(r.approved_json) : null
-    }));
-    
+
     res.json({ success: true, reviews: parsedReviews });
   } catch (error: any) {
     console.error('Fetch pending reviews error:', error);
@@ -325,15 +350,26 @@ router.get('/catalog/job/:id/reviews', async (req, res) => {
       'SELECT * FROM staged_medicine_reviews WHERE job_id = ? ORDER BY id ASC',
       req.params.id
     );
+
+    const parsedReviews = [];
+    for (const r of reviews) {
+      let duplicateProduct = null;
+      if (r.possible_duplicate_of) {
+        duplicateProduct = await db.get(
+          'SELECT id, name, api_reference, strength, manufacturer, marketed_by FROM medicines WHERE id = ?',
+          [r.possible_duplicate_of]
+        );
+      }
+      parsedReviews.push({
+        ...r,
+        original_row_data: r.original_row_data ? JSON.parse(r.original_row_data) : null,
+        extracted_json: r.extracted_json ? JSON.parse(r.extracted_json) : null,
+        approved_json: r.approved_json ? JSON.parse(r.approved_json) : null,
+        duplicateProduct
+      });
+    }
     await dbManager.close();
-    
-    const parsedReviews = reviews.map(r => ({
-      ...r,
-      original_row_data: r.original_row_data ? JSON.parse(r.original_row_data) : null,
-      extracted_json: r.extracted_json ? JSON.parse(r.extracted_json) : null,
-      approved_json: r.approved_json ? JSON.parse(r.approved_json) : null
-    }));
-    
+
     res.json({ success: true, reviews: parsedReviews });
   } catch (error: any) {
     console.error('Fetch reviews error:', error);
@@ -369,6 +405,10 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
     }
     
     let medId = med ? med.id : null;
+    const choice = req.body.choice || (approvedData && approvedData.choice);
+    if (!medId && review.possible_duplicate_of && choice === 'merge') {
+      medId = review.possible_duplicate_of;
+    }
     
     const customMappings = Object.entries(mapping)
       .filter(([csvCol, targetCol]) => targetCol && String(targetCol).startsWith('custom_col_'))
@@ -377,54 +417,31 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
         dbCol: String(targetCol).substring(11).trim().replace(/\s+/g, '_').toLowerCase()
       }));
       
-    if (medId) {
-      const updates: string[] = ["name = ?", "api_reference = ?"];
-      const params: any[] = [approvedData.name || review.medicine_name, approvedData.api_reference || null];
-      
-      if (approvedData.strength !== undefined) { updates.push("strength = ?"); params.push(approvedData.strength); }
-      if (approvedData.packaging !== undefined) { updates.push("packaging = ?"); params.push(approvedData.packaging); }
-      if (approvedData.manufacturer !== undefined) { updates.push("manufacturer = ?"); params.push(approvedData.manufacturer); }
-      if (approvedData.marketed_by !== undefined) { updates.push("marketed_by = ?"); params.push(approvedData.marketed_by); }
-      if (row.hsn_code !== undefined) { updates.push("hsn_code = ?"); params.push(row.hsn_code); }
-      if (row.schedule_type !== undefined) { updates.push("schedule_type = ?"); params.push(row.schedule_type); }
-      if (row.mrp !== undefined) { updates.push("mrp = ?"); params.push(parseFloat(row.mrp) || 0); }
-      
-      for (const cm of customMappings) {
-        if (row[cm.csvCol] !== undefined) {
-          updates.push(`"${cm.dbCol}" = ?`);
-          params.push(row[cm.csvCol]);
-        }
+    // Build medicine data object
+    const medData: any = {
+      name: approvedData.name || review.medicine_name,
+      apiReference: approvedData.api_reference || undefined,
+      strength: approvedData.strength || undefined,
+      packaging: approvedData.packaging || undefined,
+      manufacturer: approvedData.manufacturer || undefined,
+      marketedBy: approvedData.marketed_by || undefined,
+      hsnCode: row.hsn_code || undefined,
+      scheduleType: row.schedule_type || undefined,
+      mrp: parseFloat(row.mrp) || undefined
+    };
+
+    for (const cm of customMappings) {
+      if (row[cm.csvCol] !== undefined) {
+        medData[cm.dbCol] = row[cm.csvCol];
       }
-      
-      params.push(medId);
-      await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, ...params);
-    } else {
-      const columns = ['name', 'api_reference', 'strength', 'packaging', 'manufacturer', 'marketed_by', 'hsn_code', 'schedule_type', 'mrp'];
-      const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?'];
-      const params = [
-        approvedData.name || review.medicine_name,
-        approvedData.api_reference || null,
-        approvedData.strength || null,
-        approvedData.packaging || null,
-        approvedData.manufacturer || null,
-        approvedData.marketed_by || null,
-        row.hsn_code || null,
-        row.schedule_type || null,
-        parseFloat(row.mrp) || 0
-      ];
-      
-      for (const cm of customMappings) {
-        columns.push(`"${cm.dbCol}"`);
-        placeholders.push('?');
-        params.push(row[cm.csvCol] !== undefined ? row[cm.csvCol] : null);
-      }
-      
-      const result = await db.run(
-        `INSERT INTO medicines (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
-        params
-      );
-      medId = result.lastID!;
     }
+
+    const writeResult = await medicineService.addOrUpdateMedicine(db, medData, {
+      skipSimilarityCheck: true,
+      choice: choice
+    });
+
+    medId = writeResult.medicine.id;
     
     // 2. Learning
     if (approvedData.api_reference) {
@@ -438,6 +455,9 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
             approvedData.manufacturer || null
           ]
         );
+
+        const { recordApiSubstance } = await import('../worker/compositionEnricher.js');
+        await recordApiSubstance(approvedData.api_reference);
 
         // Precompute substitutes in the background
         import('../worker/substituteCacheWorker.js')

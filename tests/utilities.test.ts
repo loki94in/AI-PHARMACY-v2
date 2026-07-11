@@ -16,8 +16,8 @@ describe('Utilities routes', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
     // Import router after setting DB_PATH
     const { default: utilitiesRouter } = await import('../src/routes/utilities.js');
     app = express();
@@ -25,7 +25,12 @@ describe('Utilities routes', () => {
     app.use('/utils', utilitiesRouter);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   });
 

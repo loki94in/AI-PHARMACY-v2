@@ -382,12 +382,12 @@ const Learning: React.FC = () => {
 
   const handleDisconnectGoogle = async () => {
     try {
-      await apiClient.post('/settings/google/disconnect');
-      toastEvent.trigger('Google account disconnected successfully', 'success');
+      const res = await apiClient.post('/settings/google/disconnect');
+      toastEvent.trigger(res.data?.message || 'Gmail connection cleared successfully', 'success');
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
-      console.error('Failed to disconnect Google account', error);
-      toastEvent.trigger('Failed to disconnect Google account', 'error');
+      console.error('Failed to disconnect Gmail', error);
+      toastEvent.trigger('Failed to disconnect Gmail', 'error');
     }
   };
 
@@ -1606,174 +1606,213 @@ const Learning: React.FC = () => {
                   </label>
                 </div>
 
-                {settingsData.automation_enabled === 'true' && (
-                  <div className="space-y-4 pt-3 border-t border-glass-border/40">
-                    <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
-                      <span>Status: <strong className="text-green font-bold">GMAIL MONITOR LISTENING</strong></span>
-                      <button 
-                        onClick={() => setShowEmailConfig(!showEmailConfig)}
-                        className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
-                      >
-                        {showEmailConfig ? 'Hide Credentials' : 'Configure Scanner'}
-                      </button>
-                    </div>
+                {settingsData.automation_enabled === 'true' && (() => {
+                  const isGmailConfigured = settingsData.gmail_auth_method === 'oauth2'
+                    ? !!settingsData.gmail_oauth_refresh_token
+                    : (!!settingsData.gmail_user && !!settingsData.gmail_pass);
 
-                    {showEmailConfig && (
-                      <div className="space-y-4 bg-bg border border-glass-border/40 p-4 rounded-xl">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-muted uppercase">Ingestion Authentication Scheme</label>
-                          <div className="flex gap-4 py-1">
-                            <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
-                              <input
-                                type="radio"
-                                name="gmailAuthMethod"
-                                value="password"
-                                checked={settingsData.gmail_auth_method === 'password'}
-                                onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'password' })}
-                                className="mr-1 accent-green"
-                              />
-                              App-Specific Password
-                            </label>
-                            <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
-                              <input
-                                type="radio"
-                                name="gmailAuthMethod"
-                                value="oauth2"
-                                checked={settingsData.gmail_auth_method === 'oauth2'}
-                                onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'oauth2' })}
-                                className="mr-1 accent-green"
-                              />
-                              OAuth2 Google authorization
-                            </label>
-                          </div>
+                  let statusText = 'GMAIL NOT CONFIGURED';
+                  let statusColor = 'text-muted';
+
+                  if (isGmailConfigured) {
+                    if (settingsData.gmail_auth_status === 'failed') {
+                      statusText = 'GMAIL AUTHENTICATION FAILED';
+                      statusColor = 'text-red font-bold animate-pulse';
+                    } else {
+                      statusText = 'GMAIL MONITOR LISTENING';
+                      statusColor = 'text-green font-bold';
+                    }
+                  }
+
+                  return (
+                    <div className="space-y-4 pt-3 border-t border-glass-border/40">
+                      <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
+                        <div className="flex flex-col gap-0.5 text-left">
+                          <span>Status: <strong className={statusColor}>{statusText}</strong></span>
+                          {isGmailConfigured && settingsData.gmail_auth_status === 'failed' && settingsData.gmail_auth_error && (
+                            <span className="text-[9px] text-red/80 font-medium">
+                              Error: {settingsData.gmail_auth_error}
+                            </span>
+                          )}
                         </div>
+                        <button 
+                          onClick={() => setShowEmailConfig(!showEmailConfig)}
+                          className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
+                        >
+                          {showEmailConfig ? 'Hide Credentials' : 'Configure Scanner'}
+                        </button>
+                      </div>
 
-                        {settingsData.gmail_auth_method === 'password' ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-bold text-muted uppercase">Gmail Ingestion Account</label>
-                              <input
-                                type="email"
-                                className="premium-input w-full text-xs"
-                                placeholder="pharmacy@gmail.com"
-                                value={settingsData.gmail_user || ''}
-                                onChange={(e) => {
-                                  const emailVal = e.target.value;
-                                  let host = settingsData.imap_host || '';
-                                  let port = settingsData.imap_port || '993';
-                                  let tls = settingsData.imap_tls !== 'false';
-                                  
-                                  const lowerEmail = emailVal.toLowerCase();
-                                  if (lowerEmail.includes('@gmail.com')) {
-                                    host = 'imap.gmail.com';
-                                    port = '993';
-                                    tls = true;
-                                  } else if (lowerEmail.includes('@outlook.com') || lowerEmail.includes('@hotmail.com')) {
-                                    host = 'outlook.office365.com';
-                                    port = '993';
-                                    tls = true;
-                                  }
-                                  
-                                  setSettingsData({
-                                    ...settingsData,
-                                    gmail_user: emailVal,
-                                    imap_host: host,
-                                    imap_port: port,
-                                    imap_tls: tls.toString()
-                                  });
-                                }}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-bold text-muted uppercase">Gmail App Password</label>
-                              <input
-                                type="password"
-                                className="premium-input w-full text-xs"
-                                placeholder="16-character authorization key"
-                                value={settingsData.gmail_pass || ''}
-                                onChange={(e) => setSettingsData({ ...settingsData, gmail_pass: e.target.value })}
-                              />
+                      {showEmailConfig && (
+                        <div className="space-y-4 bg-bg border border-glass-border/40 p-4 rounded-xl">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-muted uppercase">Ingestion Authentication Scheme</label>
+                            <div className="flex gap-4 py-1">
+                              <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
+                                <input
+                                  type="radio"
+                                  name="gmailAuthMethod"
+                                  value="password"
+                                  checked={settingsData.gmail_auth_method === 'password'}
+                                  onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'password' })}
+                                  className="mr-1 accent-green"
+                                />
+                                App-Specific Password
+                              </label>
+                              <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
+                                <input
+                                  type="radio"
+                                  name="gmailAuthMethod"
+                                  value="oauth2"
+                                  checked={settingsData.gmail_auth_method === 'oauth2'}
+                                  onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'oauth2' })}
+                                  className="mr-1 accent-green"
+                                />
+                                OAuth2 Google authorization
+                              </label>
                             </div>
                           </div>
-                        ) : (
-                          <div className="space-y-3 bg-bg3/40 p-3.5 rounded-xl border border-glass-border/40 text-left">
-                            {settingsData.gmail_oauth_refresh_token ? (
-                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-emerald-500/5 p-3 rounded-lg border border-emerald-500/10">
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
-                                    <span className="text-[10px] font-black uppercase text-green tracking-wider">Connected</span>
-                                  </div>
-                                  <span className="text-xs font-semibold text-text">{settingsData.gmail_user || 'Google Account'}</span>
+
+                          {settingsData.gmail_auth_method === 'password' ? (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-muted uppercase">Gmail Ingestion Account</label>
+                                  <input
+                                    type="email"
+                                    className="premium-input w-full text-xs"
+                                    placeholder="pharmacy@gmail.com"
+                                    value={settingsData.gmail_user || ''}
+                                    onChange={(e) => {
+                                      const emailVal = e.target.value;
+                                      let host = settingsData.imap_host || '';
+                                      let port = settingsData.imap_port || '993';
+                                      let tls = settingsData.imap_tls !== 'false';
+                                      
+                                      const lowerEmail = emailVal.toLowerCase();
+                                      if (lowerEmail.includes('@gmail.com')) {
+                                        host = 'imap.gmail.com';
+                                        port = '993';
+                                        tls = true;
+                                      } else if (lowerEmail.includes('@outlook.com') || lowerEmail.includes('@hotmail.com')) {
+                                        host = 'outlook.office365.com';
+                                        port = '993';
+                                        tls = true;
+                                      }
+                                      
+                                      setSettingsData({
+                                        ...settingsData,
+                                        gmail_user: emailVal,
+                                        imap_host: host,
+                                        imap_port: port,
+                                        imap_tls: tls.toString()
+                                      });
+                                    }}
+                                  />
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={handleDisconnectGoogle}
-                                  className="text-[9px] font-bold bg-red-500/10 hover:bg-red-500/20 text-red px-3 py-1.5 rounded-lg border border-red-500/20 transition-all uppercase tracking-wider"
-                                >
-                                  Disconnect
-                                </button>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-bold text-muted uppercase">Gmail App Password</label>
+                                  <input
+                                    type="password"
+                                    className="premium-input w-full text-xs"
+                                    placeholder="16-character authorization key"
+                                    value={settingsData.gmail_pass || ''}
+                                    onChange={(e) => setSettingsData({ ...settingsData, gmail_pass: e.target.value })}
+                                  />
+                                </div>
                               </div>
-                            ) : (
-                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-800/10 p-3 rounded-lg border border-glass-border/40">
-                                <div className="space-y-0.5">
-                                  <span className="text-[10px] font-black uppercase text-muted tracking-wider">Status</span>
-                                  <span className="text-xs font-semibold text-muted block">Google account not connected</span>
+                              {settingsData.gmail_user && settingsData.gmail_pass && (
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={handleDisconnectGoogle}
+                                    className="text-[9px] font-bold bg-red-500/10 hover:bg-red-500/20 text-red px-3 py-1.5 rounded-lg border border-red-500/20 transition-all uppercase tracking-wider"
+                                  >
+                                    Clear Credentials
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    await apiClient.post('/settings/save', settingsData);
-                                    const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                                    window.open(`${backendUrl}/api/email/auth/google`, '_blank');
-                                  }}
-                                  className="text-[9px] font-bold bg-sky-500/20 hover:bg-sky-500/35 text-sky px-4 py-2 rounded-lg border border-sky-500/30 transition-all uppercase tracking-wider"
-                                >
-                                  Connect Google Account
-                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-3 bg-bg3/40 p-3.5 rounded-xl border border-glass-border/40 text-left">
+                              {settingsData.gmail_oauth_refresh_token ? (
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-emerald-500/5 p-3 rounded-lg border border-emerald-500/10">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+                                      <span className="text-[10px] font-black uppercase text-green tracking-wider">Connected</span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-text">{settingsData.gmail_user || 'Google Account'}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={handleDisconnectGoogle}
+                                    className="text-[9px] font-bold bg-red-500/10 hover:bg-red-500/20 text-red px-3 py-1.5 rounded-lg border border-red-500/20 transition-all uppercase tracking-wider"
+                                  >
+                                    Disconnect
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-800/10 p-3 rounded-lg border border-glass-border/40">
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] font-black uppercase text-muted tracking-wider">Status</span>
+                                    <span className="text-xs font-semibold text-muted block">Google account not connected</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await apiClient.post('/settings/save', settingsData);
+                                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
+                                      window.open(`${backendUrl}/api/email/auth/google`, '_blank');
+                                    }}
+                                    className="text-[9px] font-bold bg-sky-500/20 hover:bg-sky-500/35 text-sky px-4 py-2 rounded-lg border border-sky-500/30 transition-all uppercase tracking-wider"
+                                  >
+                                    Connect Google Account
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* File Retention settings */}
+                          <div className="pt-2 border-t border-glass-border/30 flex flex-col md:flex-row gap-4 items-start md:items-center">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                className="accent-green"
+                                checked={settingsData.email_autodelete_enabled !== 'false'}
+                                onChange={(e) => setSettingsData({ ...settingsData, email_autodelete_enabled: e.target.checked.toString() })}
+                              />
+                              <span className="text-[10px] font-bold text-muted uppercase">Auto-delete processed attachment files</span>
+                            </label>
+
+                            {settingsData.email_autodelete_enabled !== 'false' && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-bold text-muted uppercase">Retention Count limit:</span>
+                                <input
+                                  type="number"
+                                  className="premium-input w-16 text-xs text-center py-1 px-2"
+                                  placeholder="10"
+                                  value={settingsData.email_autodelete_limit || 10}
+                                  onChange={(e) => setSettingsData({ ...settingsData, email_autodelete_limit: e.target.value })}
+                                />
                               </div>
                             )}
                           </div>
-                        )}
 
-                        {/* File Retention settings */}
-                        <div className="pt-2 border-t border-glass-border/30 flex flex-col md:flex-row gap-4 items-start md:items-center">
-                          <label className="flex items-center gap-2 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              className="accent-green"
-                              checked={settingsData.email_autodelete_enabled !== 'false'}
-                              onChange={(e) => setSettingsData({ ...settingsData, email_autodelete_enabled: e.target.checked.toString() })}
-                            />
-                            <span className="text-[10px] font-bold text-muted uppercase">Auto-delete processed attachment files</span>
-                          </label>
-
-                          {settingsData.email_autodelete_enabled !== 'false' && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[9px] font-bold text-muted uppercase">Retention Count limit:</span>
-                              <input
-                                type="number"
-                                className="premium-input w-16 text-xs text-center py-1 px-2"
-                                placeholder="10"
-                                value={settingsData.email_autodelete_limit || 10}
-                                onChange={(e) => setSettingsData({ ...settingsData, email_autodelete_limit: e.target.value })}
-                              />
-                            </div>
-                          )}
+                          <div className="flex gap-2 pt-2 border-t border-glass-border/30">
+                            <button
+                              onClick={() => handleSaveConfig()}
+                              className="text-[10px] font-bold bg-green/20 text-green px-4 py-2 rounded-lg hover:bg-green/35"
+                            >
+                              Save Ingestion Rules
+                            </button>
+                          </div>
                         </div>
-
-                        <div className="flex gap-2 pt-2 border-t border-glass-border/30">
-                          <button
-                            onClick={() => handleSaveConfig()}
-                            className="text-[10px] font-bold bg-green/20 text-green px-4 py-2 rounded-lg hover:bg-green/35"
-                          >
-                            Save Ingestion Rules
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ) : null}
           </div>

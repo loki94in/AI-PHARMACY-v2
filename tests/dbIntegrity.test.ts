@@ -23,12 +23,22 @@ async function runIntegrityCheck(db: any): Promise<string> {
 describe('DB Integrity Check', () => {
   beforeAll(async () => {
     if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
+    process.env.DB_PATH = DB_PATH;
     const { ensureSchema } = await import('../src/database.js');
     await ensureSchema(DB_PATH);
   });
 
-  afterAll(() => {
-    if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        fs.unlinkSync(DB_PATH);
+      } catch (e) {}
+    }
   });
 
   test('healthy DB passes integrity_check without needing recovery', async () => {

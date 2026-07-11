@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 export interface MedicineData {
   name: string;
   apiReference?: string;
+  strength?: string;
   mrp?: number;
   hsnCode?: string;
   scheduleType?: string;
@@ -19,12 +20,15 @@ export interface MedicineData {
   sgst?: number;
   igst?: number;
   rack?: string;
+  source?: string;
+  possibleDuplicateOf?: number;
 }
 
 export interface MedicineResult {
   id: number;
   name: string;
   apiReference?: string;
+  strength?: string;
   mrp?: number;
   hsnCode?: string;
   scheduleType?: string;
@@ -39,6 +43,8 @@ export interface MedicineResult {
   sgst?: number;
   igst?: number;
   rack?: string;
+  source?: string;
+  possibleDuplicateOf?: number;
 }
 
 export class MedicineService {
@@ -72,13 +78,14 @@ export class MedicineService {
     return await dbManager.transaction(async (db) => {
       const result = await db.run(
         `INSERT INTO medicines (
-          name, api_reference, mrp, hsn_code, schedule_type, manufacturer,
+          name, api_reference, strength, mrp, hsn_code, schedule_type, manufacturer,
           category, marketed_by, manufactured_by, legacy_id, packaging,
-          item_type, cgst, sgst, igst, rack
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          item_type, cgst, sgst, igst, rack, source, possible_duplicate_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.name,
           data.apiReference ?? null,
+          data.strength ?? null,
           data.mrp ?? null,
           data.hsnCode ?? null,
           data.scheduleType ?? null,
@@ -92,12 +99,13 @@ export class MedicineService {
           data.cgst ?? null,
           data.sgst ?? null,
           data.igst ?? null,
-          data.rack ?? null
+          data.rack ?? null,
+          data.source ?? 'manual',
+          data.possibleDuplicateOf ?? null
         ]
       );
 
       const id = result.lastID;
-      // Ensure id is a number (SQLite3 returns number for lastID)
       const medicineId = typeof id === 'number' ? id : 0;
       const medicine = await this.findById(medicineId);
       if (!medicine) {
@@ -112,7 +120,6 @@ export class MedicineService {
    */
   async updateMedicine(id: number, data: Partial<MedicineData>): Promise<MedicineResult | null> {
     return await dbManager.transaction(async (db) => {
-      // Build dynamic update query
       const fields: string[] = [];
       const values: any[] = [];
 
@@ -123,6 +130,10 @@ export class MedicineService {
       if (data.apiReference !== undefined) {
         fields.push('api_reference = ?');
         values.push(data.apiReference);
+      }
+      if (data.strength !== undefined) {
+        fields.push('strength = ?');
+        values.push(data.strength);
       }
       if (data.mrp !== undefined || data.mrp === null) {
         fields.push('mrp = ?');
@@ -180,13 +191,20 @@ export class MedicineService {
         fields.push('rack = ?');
         values.push(data.rack);
       }
+      if (data.source !== undefined) {
+        fields.push('source = ?');
+        values.push(data.source);
+      }
+      if (data.possibleDuplicateOf !== undefined) {
+        fields.push('possible_duplicate_of = ?');
+        values.push(data.possibleDuplicateOf);
+      }
 
       if (fields.length === 0) {
-        // No fields to update
         return await this.findById(id);
       }
 
-      values.push(id); // for WHERE clause
+      values.push(id);
 
       await db.run(
         `UPDATE medicines SET ${fields.join(', ')} WHERE id = ?`,
@@ -199,12 +217,164 @@ export class MedicineService {
   }
 
   /**
+   * Thin-core unified write method: Add or Update a medicine in the database
+   */
+  async addOrUpdateMedicine(
+    db: any,
+    data: Partial<MedicineData> & { name: string },
+    options: {
+      skipSimilarityCheck?: boolean;
+      choice?: 'merge' | 'keep_new';
+    } = {}
+  ): Promise<{ medicine: MedicineResult; status: 'created' | 'updated' | 'staged' }> {
+    const key = data.name.trim().toLowerCase();
+    
+    // 1. Exact match check
+    let existing = await db.get('SELECT * FROM medicines WHERE lower(name) = ?', [key]);
+    if (!existing) {
+      const alias = await db.get('SELECT medicine_id FROM medicine_aliases WHERE lower(alias_name) = ?', [key]);
+      if (alias) {
+        existing = await db.get('SELECT * FROM medicines WHERE id = ?', [alias.medicine_id]);
+      }
+    }
+
+    if (existing) {
+      const fields: string[] = [];
+      const values: any[] = [];
+      
+      const fieldMappings: Record<string, string> = {
+        name: 'name',
+        apiReference: 'api_reference',
+        strength: 'strength',
+        mrp: 'mrp',
+        hsnCode: 'hsn_code',
+        scheduleType: 'schedule_type',
+        manufacturer: 'manufacturer',
+        category: 'category',
+        marketedBy: 'marketed_by',
+        manufacturedBy: 'manufactured_by',
+        legacyId: 'legacy_id',
+        packaging: 'packaging',
+        itemType: 'item_type',
+        cgst: 'cgst',
+        sgst: 'sgst',
+        igst: 'igst',
+        rack: 'rack',
+        source: 'source',
+        possibleDuplicateOf: 'possible_duplicate_of'
+      };
+
+      for (const [jsKey, dbKey] of Object.entries(fieldMappings)) {
+        if (data[jsKey as keyof MedicineData] !== undefined) {
+          fields.push(`${dbKey} = ?`);
+          values.push(data[jsKey as keyof MedicineData]);
+        }
+      }
+
+      if (fields.length > 0) {
+        values.push(existing.id);
+        await db.run(`UPDATE medicines SET ${fields.join(', ')} WHERE id = ?`, values);
+      }
+      
+      if (data.apiReference) {
+        const { recordApiSubstance } = await import('../worker/compositionEnricher.js');
+        await recordApiSubstance(data.apiReference);
+      }
+
+      const updated = await db.get('SELECT * FROM medicines WHERE id = ?', [existing.id]);
+      return { medicine: updated as MedicineResult, status: 'updated' };
+    }
+
+    // 2. Similarity / Deduplication check
+    if (!options.skipSimilarityCheck && options.choice !== 'keep_new') {
+      const firstWord = data.name.split(' ')[0] || '';
+      if (firstWord.length >= 3) {
+        const candidates = await db.all(
+          'SELECT id, name, api_reference, strength, manufacturer FROM medicines WHERE name LIKE ?',
+          [`${firstWord}%`]
+        );
+        
+        const { scoreProductName } = await import('./pharmarackCatalogCache.js');
+        let bestCandidate = null;
+        let bestScore = 0;
+        
+        for (const cand of candidates) {
+          const score = scoreProductName(data.name, cand.name);
+          if (score > bestScore) {
+            bestScore = score;
+            bestCandidate = cand;
+          }
+        }
+        
+        if (bestScore >= 0.75 && bestCandidate) {
+          if (options.choice === 'merge') {
+            const result = await this.updateMedicine(bestCandidate.id, data);
+            return { medicine: result as MedicineResult, status: 'updated' };
+          }
+          
+          await db.run(
+            `INSERT INTO staged_medicine_reviews (
+              medicine_name, status, original_row_data, source, possible_duplicate_of, extracted_json
+            ) VALUES (?, 'pending', ?, 'catalog', ?, ?)`,
+            [
+              data.name,
+              JSON.stringify(data),
+              bestCandidate.id,
+              JSON.stringify(data)
+            ]
+          );
+          return { medicine: { id: 0, name: data.name }, status: 'staged' };
+        }
+      }
+    }
+
+    // 3. New record INSERT path
+    const result = await db.run(
+      `INSERT INTO medicines (
+        name, api_reference, strength, mrp, hsn_code, schedule_type, manufacturer,
+        category, marketed_by, manufactured_by, legacy_id, packaging,
+        item_type, cgst, sgst, igst, rack, source, possible_duplicate_of
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data.name,
+        data.apiReference ?? null,
+        data.strength ?? null,
+        data.mrp ?? null,
+        data.hsnCode ?? null,
+        data.scheduleType ?? null,
+        data.manufacturer ?? null,
+        data.category ?? null,
+        data.marketedBy ?? null,
+        data.manufacturedBy ?? null,
+        data.legacyId ?? null,
+        data.packaging ?? null,
+        data.itemType ?? null,
+        data.cgst ?? null,
+        data.sgst ?? null,
+        data.igst ?? null,
+        data.rack ?? null,
+        data.source ?? 'manual',
+        data.possibleDuplicateOf ?? null
+      ]
+    );
+
+    const medicineId = result.lastID;
+    
+    if (data.apiReference) {
+      const { recordApiSubstance } = await import('../worker/compositionEnricher.js');
+      await recordApiSubstance(data.apiReference);
+    }
+
+    const created = await db.get('SELECT * FROM medicines WHERE id = ?', [medicineId]);
+    return { medicine: created as MedicineResult, status: 'created' };
+  }
+
+  /**
    * Delete medicine by ID
    */
   async deleteMedicine(id: number): Promise<boolean> {
     return await dbManager.transaction(async (db) => {
       const result = await db.run('DELETE FROM medicines WHERE id = ?', [id]);
-      // Changes will be 1 if a row was deleted, 0 if not found
       const changes = result.changes ?? 0;
       return changes > 0;
     });

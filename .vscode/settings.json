@@ -4,5 +4,9 @@
         "style-disabled": false,
         "inline-style-disabled": false
     },
-    "css.lint.unknownAtRules": "ignore"
+    "css.lint.unknownAtRules": "ignore",
+    "python.defaultInterpreterPath": "${workspaceFolder}/python/scan_nlp/.venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/python/scan_nlp"
+    ]
 }

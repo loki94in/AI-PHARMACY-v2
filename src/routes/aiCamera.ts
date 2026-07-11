@@ -61,19 +61,12 @@ router.post('/audit/resolve', async (req, res) => {
       const adjustedName = normalizeMedicineName(name.trim());
       const db = await dbManager.getConnection();
 
-      // Check if medicine already exists
-      let med = await db.get('SELECT id FROM medicines WHERE name = ?', [adjustedName]);
-      let medicineId: number;
-
-      if (!med) {
-        const result = await db.run(
-          `INSERT INTO medicines (name, mrp) VALUES (?, ?)`,
-          [adjustedName, mrp || 0]
-        );
-        medicineId = result.lastID!;
-      } else {
-        medicineId = med.id;
-      }
+      const { medicineService } = await import('../services/medicineService.js');
+      const writeResult = await medicineService.addOrUpdateMedicine(db, {
+        name: adjustedName,
+        mrp: mrp || undefined
+      }, { skipSimilarityCheck: true });
+      const medicineId = writeResult.medicine.id;
 
       // Insert batch/inventory if batch number provided
       if (batchNumber && batchNumber.trim() !== '') {

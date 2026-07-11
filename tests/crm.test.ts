@@ -14,8 +14,8 @@ describe('CRM routes', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
     const { default: crmRouter } = await import('../src/routes/crm.js');
     // Insert a customer directly via db
     const { open } = await import('sqlite');
@@ -28,7 +28,12 @@ describe('CRM routes', () => {
     app.use('/crm', crmRouter);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   });
 

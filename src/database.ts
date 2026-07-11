@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 8;
 
 /**
  * Ensure required SQLite tables exist.
@@ -91,6 +91,12 @@ export async function ensureSchema(dbPath: string) {
       UNIQUE(name)
     );
     CREATE INDEX IF NOT EXISTS idx_medicine_reference_name ON medicine_reference (name);
+
+    CREATE TABLE IF NOT EXISTS api_substances (
+      api TEXT PRIMARY KEY,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_substances_api ON api_substances (api);
 
     -- Agent A: Core Business & Inventory Schemas
     CREATE TABLE IF NOT EXISTS inventory_master (
@@ -349,6 +355,9 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE medicines ADD COLUMN pack_size INTEGER`,
     `ALTER TABLE whatsapp_chats ADD COLUMN resolved_number TEXT`,
     `ALTER TABLE staged_medicine_reviews ADD COLUMN source TEXT`,
+    `ALTER TABLE medicines ADD COLUMN source TEXT DEFAULT 'manual'`,
+    `ALTER TABLE medicines ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL`,
+    `ALTER TABLE staged_medicine_reviews ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL`,
   ];
   for (const stmt of alterStatements) {
     try {

@@ -122,4 +122,17 @@ describe('Catalog pipeline', () => {
     await db.close();
     fs.rmSync(mismatchCatalog, { recursive: true });
   });
+
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        fs.unlinkSync(DB_PATH);
+      } catch (e) {}
+    }
+  });
 });

@@ -190,7 +190,7 @@ export async function maybeEscalate(payload: EscalationPayload): Promise<void> {
           `INSERT INTO staged_medicine_reviews (job_id, medicine_name, status, source, search_query, original_row_data)
            VALUES (NULL, ?, 'pending', 'whatsapp', ?, ?)`,
           [
-            payload.medicineName || bestMatch.name || bestMatch.productName,
+            bestMatch.name || bestMatch.productName || payload.medicineName,
             payload.medicineName,
             JSON.stringify(original_row_data)
           ]

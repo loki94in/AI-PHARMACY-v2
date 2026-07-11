@@ -62,7 +62,7 @@ export interface AppConfig {
 
 export const config: AppConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
-  dbPath: process.env.DB_PATH || path.join(appDataDir, 'data', 'app.db'),
+  get dbPath() { return process.env.DB_PATH || path.join(appDataDir, 'data', 'app.db'); },
   uploadDir: process.env.UPLOAD_DIR || path.join(appDataDir, 'uploads'),
   tempDir: process.env.TEMP_DIR || path.join(appDataDir, 'uploads', 'temp'),
   backupDir: process.env.BACKUP_DIR || path.join(appDataDir, 'backup'),

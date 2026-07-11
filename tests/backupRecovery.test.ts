@@ -20,8 +20,8 @@ describe('Backup & Recovery Service and Routes', () => {
     // Set up a temporary database in a temp directory
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'backup-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     // Dynamically load the utilities router after setting DB_PATH
     const { default: utilitiesRouter } = await import('../src/routes/utilities.js');

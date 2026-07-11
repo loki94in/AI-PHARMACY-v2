@@ -339,6 +339,12 @@ app.listen(PORT, async () => {
               } catch (err) {
                 console.error('[Boot] Failed to start worker supervisor:', err);
               }
+              try {
+                const { startScispacySidecar } = await import('./services/scispacyClient.js');
+                startScispacySidecar();
+              } catch (err) {
+                console.error('[Boot] Failed to start scispaCy sidecar:', err);
+              }
               resolve();
             }, 5000);
           }),
@@ -506,6 +512,12 @@ async function gracefulShutdown(signal: string) {
     workerSupervisor.stop();
   } catch (err) {
     console.error('Error stopping worker supervisor:', err);
+  }
+  try {
+    const { stopScispacySidecar } = await import('./services/scispacyClient.js');
+    stopScispacySidecar();
+  } catch (err) {
+    console.error('Error stopping scispaCy sidecar:', err);
   }
   await dbManager.close(true);
   process.exit(0);

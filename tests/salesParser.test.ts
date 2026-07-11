@@ -18,6 +18,7 @@ describe('salesParser', () => {
     if (fs.existsSync(TEST_DB_PATH)) {
       fs.unlinkSync(TEST_DB_PATH);
     }
+    process.env.DB_PATH = TEST_DB_PATH;
 
     // Open a test SQLite database
     db = await open({
@@ -45,6 +46,11 @@ describe('salesParser', () => {
 
   afterAll(async () => {
     await db.close();
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
     // Clean up test database
     if (fs.existsSync(TEST_DB_PATH)) {
       fs.unlinkSync(TEST_DB_PATH);

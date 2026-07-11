@@ -173,11 +173,19 @@ class AICameraService {
    * expensive fuzzy DB scan — the composition already identifies the medicine.
    * Returns the matched API string, or null if none detected.
    */
-  private detectKnownApi(text: string): string | null {
+  private async detectKnownApi(text: string): Promise<string | null> {
+    await this.ensureApiMap();
     // Pattern: a multi-character word followed by a strength (e.g. 500mg, 0.5%, 5ml)
     const apiPattern = /\b([A-Za-z]{5,})(?:\s*\+\s*[A-Za-z]{4,})*\s+\d+\s*(?:mg|ml|mcg|g|iu|%)/i;
     const m = text.match(apiPattern);
-    return m ? m[0].trim() : null;
+    if (!m) return null;
+    const word = m[1].toLowerCase();
+    
+    // Check if the extracted word is a known API or stem
+    if (this.apiGenericMap && (this.apiGenericMap.has(word) || this.apiStemIndex.some(s => s.api.includes(word)))) {
+      return m[0].trim();
+    }
+    return null;
   }
 
   // ─── API / stem → generic tablet-name resolver ───────────────────────
@@ -205,6 +213,22 @@ class AICameraService {
           map.set(api, name);
           if (api.length >= 5) stems.push({ api, name });
         }
+      }
+
+      // Also load unique API substances to resolve stems to proper substances
+      try {
+        const apiRows = await db.all('SELECT api FROM api_substances');
+        for (const ar of apiRows) {
+          const api = (ar.api || '').toString().trim().toLowerCase();
+          if (api && api.length >= 5) {
+            if (!map.has(api)) {
+              map.set(api, ar.api);
+            }
+            stems.push({ api, name: ar.api });
+          }
+        }
+      } catch (err) {
+        console.warn('[AiCamera] Failed to load from api_substances:', err);
       }
     } catch {
       /* DB unavailable — fall back to the raw OCR token */
@@ -332,7 +356,7 @@ class AICameraService {
     // If the label already shows a composition like "Paracetamol 500mg", the API
     // text itself identifies the medicine — no need to run the expensive fuzzy scan.
     let matches: string[] = [];
-    const detectedApiText = this.detectKnownApi(localOcrResult.text);
+    const detectedApiText = await this.detectKnownApi(localOcrResult.text);
     if (detectedApiText) {
       console.log(`[AiCamera] Known API detected in OCR ("${detectedApiText}") — skipping fuzzy scan.`);
       // Use the detected API text directly as the best match candidate
@@ -460,6 +484,17 @@ class AICameraService {
     // Detect dosage form from OCR text
     const detectedForm = this.detectDosageForm(localOcrResult.text);
     if (detectedForm) finalInfo.dosageForm = detectedForm;
+
+    // Query scispaCy sidecar if enabled
+    try {
+      const { queryScispacy } = await import('./scispacyClient.js');
+      const nlpData = await queryScispacy(localOcrResult.text);
+      if (nlpData) {
+        finalInfo.nlp = nlpData;
+      }
+    } catch (nlpErr) {
+      console.warn('[AiCamera] scispaCy query failed:', nlpErr);
+    }
 
     const ocrResult = {
       text: localOcrResult.text,

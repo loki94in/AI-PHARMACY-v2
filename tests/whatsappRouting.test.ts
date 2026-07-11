@@ -23,8 +23,8 @@ describe('WhatsApp Routing Logic Tests', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-routing-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     // Dynamically import sendMessage and the mocked service
     sendMessage = (await import('../src/whatsappClient.js')).sendMessage;

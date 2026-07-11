@@ -14,6 +14,7 @@ describe('Email Attachments API', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'email-attachment-test-'));
     dbPath = path.join(tmpDir, 'app.db');
+    process.env.DB_PATH = dbPath;
     await ensureSchema(dbPath);
 
     // Create special_orders table which is queried by inventory overrides
@@ -41,8 +42,6 @@ describe('Email Attachments API', () => {
       )
     `);
     await db.close();
-
-    process.env.DB_PATH = dbPath;
 
     // Create a mock uploads directory inside our tmpDir
     uploadsDir = path.join(tmpDir, 'uploads');
@@ -90,5 +89,17 @@ describe('Email Attachments API', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.type).toBe('text');
     expect(res.body.content).toContain('Paracetamol 650mg');
+  });
+
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
+    delete process.env.UPLOADS_DIR;
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (_) {}
   });
 });

@@ -569,7 +569,11 @@ router.post('/reset-data', async (req, res) => {
 
     // 2b. Drop every table
     for (const { name } of tables) {
-      await db.run(`DROP TABLE IF EXISTS "${name}"`);
+      try {
+        await db.run(`DROP TABLE IF EXISTS "${name}"`);
+      } catch (err: any) {
+        console.warn(`[Reset] Failed to drop table "${name}":`, err.message);
+      }
     }
 
     // 2c. Close the now-empty connection so ensureSchema gets a fresh one
@@ -828,6 +832,22 @@ router.post('/clear-cache', async (req, res) => {
   } catch (error: any) {
     console.error('Clear cache error:', error);
     res.status(500).json({ error: 'Failed to clear cache: ' + error.message });
+  }
+});
+
+// POST /api/utilities/db/unlock
+router.post('/db/unlock', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('ROLLBACK');
+    res.json({ success: true, message: 'Database transaction rolled back and unlocked successfully.' });
+  } catch (err: any) {
+    if (err.message.includes('no transaction is active')) {
+      res.json({ success: true, message: 'Database was already unlocked (no active transaction).' });
+    } else {
+      console.error('[DB Unlock] Failed to force-unlock database:', err);
+      res.status(500).json({ error: 'Failed to unlock database: ' + err.message });
+    }
   }
 });
 

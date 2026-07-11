@@ -98,3 +98,9 @@ CATALOG/
 # Chrome browser session data — thousands of files, never commit
 data/pharmarack_profile/
 data/pharmarack_profile_temp_*/
+
+# ─── Python Virtual Environments & Cache ──────────────────────────────────────
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc

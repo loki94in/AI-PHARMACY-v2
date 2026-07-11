@@ -702,30 +702,30 @@ const Purchases: React.FC = () => {
       alert('Distributor name is required');
       return;
     }
-    if (!newDistributor.phone?.trim()) {
-      alert('Distributor phone number is required');
-      return;
-    }
-    if (!newDistributor.address?.trim()) {
-      alert('Distributor address is required');
-      return;
-    }
-    if (!newDistributor.state_code?.trim()) {
-      alert('Distributor state code is required');
-      return;
-    }
 
     setSavingDistributor(true);
     try {
       if (editDistributorId) {
         const response = await apiClient.put(`/settings/distributors/${editDistributorId}`, newDistributor);
         const saved = response.data.data || response.data;
+        queryClient.setQueryData(['distributors'], (old: any) => {
+          if (Array.isArray(old)) {
+            return old.map(d => d.id === editDistributorId ? saved : d);
+          }
+          return [saved];
+        });
         queryClient.invalidateQueries({ queryKey: ['distributors'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
       } else {
         const response = await apiClient.post('/settings/distributors', newDistributor);
         const saved = response.data.data || response.data;
+        queryClient.setQueryData(['distributors'], (old: any) => {
+          if (Array.isArray(old)) {
+            return [...old, saved];
+          }
+          return [saved];
+        });
         queryClient.invalidateQueries({ queryKey: ['distributors'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
@@ -734,9 +734,10 @@ const Purchases: React.FC = () => {
       setNewDistributor({ name: '', phone: '', email: '', address: '', state_code: '' });
       setEditDistributorId(null);
       setShowDistributorModal(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving distributor:', error);
-      alert('Failed to save distributor');
+      const errMsg = error.response?.data?.error || error.response?.data?.message || 'Failed to save distributor';
+      alert(errMsg);
     } finally {
       setSavingDistributor(false);
     }
@@ -1334,7 +1335,7 @@ const Purchases: React.FC = () => {
       api.getCompactInventory().catch(() => {});
     } catch (error: any) {
       console.error('Error saving purchase:', error);
-      const errMsg = error.response?.data?.error || error.message || 'Failed to save purchase';
+      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
       alert(errMsg);
     } finally {
       setSaving(false);
@@ -2360,7 +2361,7 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Phone *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Phone (Optional)</label>
                 <input
                   type="tel"
                   value={newDistributor.phone}
@@ -2382,7 +2383,7 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Address *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Address (Optional)</label>
                 <textarea
                   value={newDistributor.address}
                   onChange={(e) => setNewDistributor({ ...newDistributor, address: e.target.value })}
@@ -2393,13 +2394,13 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">State Code *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">State Code (Optional)</label>
                 <select
                   value={newDistributor.state_code}
                   onChange={(e) => setNewDistributor({ ...newDistributor, state_code: e.target.value })}
                   className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="" disabled>Select State Code</option>
+                  <option value="">Select State Code (Optional)</option>
                   {INDIAN_STATE_CODES.sort((a, b) => a.name.localeCompare(b.name)).map((state) => (
                     <option key={state.code} value={state.code}>
                       {state.code} - {state.name}

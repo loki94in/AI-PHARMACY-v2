@@ -1036,7 +1036,8 @@ export class EmailService {
     try {
       const db = await dbManager.getConnection();
       const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
-      if (!authMethodRow || authMethodRow.value !== 'oauth2') {
+      // Missing row defaults to oauth2, matching buildImapConfig(); only bail if explicitly set to another method.
+      if (authMethodRow && authMethodRow.value !== 'oauth2') {
                 return null;
       }
 
@@ -2775,23 +2776,49 @@ export class EmailService {
    */
   private async buildImapConfig(): Promise<{ imapConfig: any; isConfigured: boolean }> {
     let user = this.imapConfig.user ? this.imapConfig.user.trim() : '';
+    let password = '';
+    let authMethod = 'oauth2';
     let xoauth2: string | undefined = undefined;
 
     try {
       const db = await dbManager.getConnection();
       const userRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
       if (userRow && userRow.value) user = userRow.value.trim();
+
+      const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
+      if (authMethodRow && authMethodRow.value) authMethod = authMethodRow.value.trim();
+
+      const passRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
+      if (passRow && passRow.value) password = passRow.value.trim();
+
+      // Gmail shows app passwords as "abcd efgh ijkl mnop"; users paste them with
+      // spaces, which IMAP rejects. Strip whitespace when that leaves a 16-letter key.
+      const compact = password.replace(/\s+/g, '');
+      if (/^[a-zA-Z]{16}$/.test(compact)) password = compact;
     } catch (_) {}
 
-    // OAuth is the only supported auth method — App Password is not accepted.
-    const accessToken = await this.getGmailAccessToken();
-    if (!accessToken || !user) {
-      console.log('[Sync] Gmail OAuth token not configured. Connect Gmail via Settings → Google Sign-In.');
-      return { imapConfig: null, isConfigured: false };
+    if (authMethod === 'password') {
+      if (!user || !password) {
+        console.log('[Sync] Gmail App Password authentication selected but user or password not configured.');
+        return { imapConfig: null, isConfigured: false };
+      }
+    } else {
+      // OAuth
+      const accessToken = await this.getGmailAccessToken();
+      if (!accessToken || !user) {
+        // A stale/missing auth method row must not strand a valid App Password setup.
+        if (user && password) {
+          console.log('[Sync] Gmail OAuth token unavailable; falling back to App Password authentication.');
+          authMethod = 'password';
+        } else {
+          console.log('[Sync] Gmail not configured: no OAuth token and no App Password. Configure via Learning → Email Invoice Ingestion → Configure Scanner.');
+          return { imapConfig: null, isConfigured: false };
+        }
+      } else {
+        const authData = [`user=${user}`, `auth=Bearer ${accessToken}`, '', ''].join('\x01');
+        xoauth2 = Buffer.from(authData, 'utf-8').toString('base64');
+      }
     }
-
-    const authData = [`user=${user}`, `auth=Bearer ${accessToken}`, '', ''].join('\x01');
-    xoauth2 = Buffer.from(authData, 'utf-8').toString('base64');
 
     // Auto-detect host from email domain; fall back to imap_host setting if set.
     let host = 'imap.gmail.com';
@@ -2816,9 +2843,14 @@ export class EmailService {
       tls,
       authTimeout: 5000,
       tlsOptions: { rejectUnauthorized: false },
-      xoauth2,
     };
-    delete imapConfig.password;
+
+    if (authMethod === 'password') {
+      imapConfig.password = password;
+    } else {
+      imapConfig.xoauth2 = xoauth2;
+      delete imapConfig.password;
+    }
 
     return { imapConfig, isConfigured: true };
   }
@@ -2991,6 +3023,12 @@ export class EmailService {
       });
 
       console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
+      try {
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'connected')");
+        await db.run("DELETE FROM app_settings WHERE key = 'gmail_auth_error'");
+      } catch (dbErr) {
+        console.error('Failed to save gmail auth success:', dbErr);
+      }
     } catch (err: any) {
       const errMsg = err.message || '';
       if (errMsg.includes('AUTHENTICATIONFAILED') || errMsg.includes('Invalid credentials') || errMsg.includes('login') || errMsg.includes('auth')) {
@@ -2998,6 +3036,13 @@ export class EmailService {
           message: 'Gmail authentication failed. Please update your credentials in Settings.',
           service: 'gmail'
         });
+        try {
+          const dbConn = await dbManager.getConnection();
+          await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'failed')");
+          await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_error', ?)", [errMsg]);
+        } catch (dbErr) {
+          console.error('Failed to save gmail auth error:', dbErr);
+        }
       }
       console.error('[Sync] syncNewEmailsFromIMAP error:', err);
     } finally {

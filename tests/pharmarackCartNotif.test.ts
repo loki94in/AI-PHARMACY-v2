@@ -27,8 +27,8 @@ describe('Pharmarack Cart Notifications Tests', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cart-notif-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     notificationService = (await import('../src/services/notificationService.js')).notificationService;
     dbManager = (await import('../src/database/connection.js')).dbManager;

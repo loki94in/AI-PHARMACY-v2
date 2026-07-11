@@ -24,6 +24,7 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'automation-test-'));
     dbPath = path.join(tmpDir, 'app.db');
+    process.env.DB_PATH = dbPath;
     await ensureSchema(dbPath);
 
     // Create special_orders table which is queried by inventory overrides
@@ -52,8 +53,6 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
       )
     `);
     await db.close();
-
-    process.env.DB_PATH = dbPath;
 
     mockSendMessage = (await import('../src/whatsappClient.js')).sendMessage;
 

@@ -665,8 +665,9 @@ router.get('/earliest-date', async (req, res) => {
 
 router.post('/manual', async (req, res) => {
   const { distributor, distributor_id, invoice_no, date, cd_per, extra_credit, cn_amount, cn_number, reconcile_expiry_return_id, items, source_filename, source_file_headers, mapping_config, email_uid } = req.body;
+  let db;
   try {
-    const db = await dbManager.getConnection();
+    db = await dbManager.getConnection();
     await db.run('BEGIN TRANSACTION');
 
     // 1. Handle distributor
@@ -675,18 +676,24 @@ router.post('/manual', async (req, res) => {
 
     if (distId) {
       const dbDist = await db.get('SELECT name FROM distributors WHERE id = ?', [distId]);
-      distName = dbDist.name;
-    } else if (distName) {
+      if (dbDist) {
+        distName = dbDist.name;
+      } else {
+        distId = null;
+      }
+    }
+
+    if (!distId && distName) {
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
       const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
-      distId = dbDist.id;
+      if (dbDist) distId = dbDist.id;
     }
 
     if (!distId && !distName) {
       distName = 'Default Distributor';
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
       const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
-      distId = dbDist.id;
+      if (dbDist) distId = dbDist.id;
     }
 
     if (distId && invoice_no) {
@@ -753,11 +760,13 @@ router.post('/manual', async (req, res) => {
     }
     const appInvoiceNo = `P-${nextSeq.toString().padStart(3, '0')}`;
 
+    const purchaseDate = date && date.trim() ? date.trim() : new Date().toISOString().slice(0, 10);
+
     // 2. Insert into purchases
     const purchRes = await db.run(
       `INSERT INTO purchases (distributor_id, invoice_no, app_invoice_no, date, total_amount, cgst_value, sgst_value, cn_amount, cn_number, original_amount) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [distId, invoice_no, appInvoiceNo, date, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount]
+      [distId, invoice_no, appInvoiceNo, purchaseDate, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount]
     );
     const purchaseId = purchRes.lastID;
 
@@ -794,8 +803,14 @@ router.post('/manual', async (req, res) => {
 
       if (medId) {
         const dbMed = await db.get('SELECT name FROM medicines WHERE id = ?', [medId]);
-        medName = dbMed.name;
-      } else if (medName) {
+        if (dbMed) {
+          medName = dbMed.name;
+        } else {
+          medId = null;
+        }
+      }
+      
+      if (!medId && medName) {
         const cleanName = medName.trim();
         let dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [cleanName]);
         if (dbMed) {
@@ -882,12 +897,6 @@ router.post('/manual', async (req, res) => {
       }
     }
 
-    // Background enrichment for medicines in this purchase
-    const medicineNamesToEnrich = items
-      .map((item: any) => item.medicine || item.medicine_name)
-      .filter((name: any) => typeof name === 'string' && name.trim().length > 0);
-
-    // [DISABLED] Background enrichment on purchase save - only runs on explicit user action.
     // (async () => {
     //   for (const name of medicineNamesToEnrich) {
     //     try {
@@ -908,9 +917,13 @@ router.post('/manual', async (req, res) => {
     }
 
     res.json({ success: true, message: 'Purchase saved successfully', app_invoice_no: appInvoiceNo });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Manual purchase error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    try {
+      const db = await dbManager.getConnection();
+      await db.run('ROLLBACK');
+    } catch (e) {}
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
 
@@ -955,8 +968,9 @@ router.get('/items/all', async (req, res) => {
 router.put('/:id/full', async (req, res) => {
   const { id } = req.params;
   const { distributor, distributor_id, invoice_no, date, cd_per, extra_credit, cn_amount, cn_number, reconcile_expiry_return_id, items } = req.body;
+  let db;
   try {
-    const db = await dbManager.getConnection();
+    db = await dbManager.getConnection();
     await db.run('BEGIN TRANSACTION');
 
     // 1. Revert old items from inventory
@@ -1144,9 +1158,12 @@ router.put('/:id/full', async (req, res) => {
     // })();
 
         res.json({ success: true, message: 'Purchase updated successfully' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Full purchase update error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+    }
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 });
 

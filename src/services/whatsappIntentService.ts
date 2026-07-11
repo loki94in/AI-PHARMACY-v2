@@ -7,6 +7,7 @@ import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
 import { waAdminEscalationService } from './waAdminEscalationService.js';
+import { GATE_VARIANTS } from '../../scanGateAlgorithms.js';
 
 // Confidence gate: below these similarity scores a message is discarded as
 // chit-chat instead of being broadcast/escalated. Tune here; every discard is
@@ -442,12 +443,28 @@ export function handleOcrComplete(data: any): void {
     ocrResult?.medicineInfo?.rawOcrText,
     typeof ocrResult?.cloudDetails === 'string' ? ocrResult.cloudDetails : ocrResult?.cloudDetails?.text,
   ].filter(Boolean).join(' ');
-  if (!isMedicineLikely(ocrRaw, finalName)) {
-    console.log(`[Intent Service] Scan gate: skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
-    return;
-  }
 
-  lookupCustomer(phone).then(customer => {
+  // Fetch known API substances dynamically and run V2 Signal-Required Gate
+  Promise.all([
+    lookupCustomer(phone),
+    dbManager.getConnection().then(db => db.all('SELECT api FROM api_substances'))
+  ]).then(([customer, rows]) => {
+    const knownApis = new Set(rows.map(r => (r.api || '').toLowerCase()));
+    const v2Gate = GATE_VARIANTS.find(v => v.id === 'V2');
+    // Fail open: with an empty api_substances dictionary the gate cannot recognize
+    // medicines and would drop every scan that lacks a dose-form/strength token.
+    let decision = 'identify';
+    if (knownApis.size === 0) {
+      console.warn('[Intent Service] Scan gate bypassed: api_substances is empty. Run reference enrichment to enable gating.');
+    } else if (v2Gate) {
+      decision = v2Gate.decide(ocrRaw, finalName, { knownApis });
+    }
+
+    if (decision === 'skip') {
+      console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
+      return;
+    }
+
     searchAndBroadcast({
       medicineName: finalName,
       quantity: textParsed.quantity || 1,
@@ -463,6 +480,8 @@ export function handleOcrComplete(data: any): void {
       chatId,
       hasIntentWords: textParsed.rawIntentWords.length > 0
     }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
+  }).catch(err => {
+    console.error('[Intent Service] Error in handleOcrComplete lookup:', err);
   });
 }
 

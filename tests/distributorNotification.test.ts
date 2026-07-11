@@ -23,8 +23,8 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dist-notif-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     mockSendMessage = (await import('../src/whatsappClient.js')).sendMessage;
     notificationService = (await import('../src/services/notificationService.js')).notificationService;

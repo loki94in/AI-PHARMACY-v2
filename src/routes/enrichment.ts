@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { dbManager } from '../database/connection.js';
-import { loadReferenceData, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, requestEnrichmentStop, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts, DOSAGE_FORM_SET } from '../worker/compositionEnricher.js';
+import { loadReferenceData, loadApiSubstances, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, requestEnrichmentStop, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts, DOSAGE_FORM_SET } from '../worker/compositionEnricher.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -97,10 +97,16 @@ router.post('/enrichment/reclassify-non-pharma', async (_req, res) => {
 // ─── Reload reference from the already-saved CSV on disk ─────────────────────
 // POST /api/enrichment/reference/reload-from-disk
 // Useful when the CSV is already at data/reference_medicines.csv — avoids large HTTP upload.
-router.post('/enrichment/reference/reload-from-disk', async (_req, res) => {
+router.post('/reference/reload-from-disk', async (_req, res) => {
   try {
     const result = await loadReferenceData({ force: true });
-    res.json({ success: true, loaded: result.loaded, skipped: result.skipped });
+    const apiResult = await loadApiSubstances({ force: true });
+    res.json({
+      success: true,
+      loaded: result.loaded,
+      skipped: result.skipped,
+      apiLoaded: apiResult.loaded
+    });
   } catch (error) {
     console.error('Failed to reload reference from disk:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -110,7 +116,7 @@ router.post('/enrichment/reference/reload-from-disk', async (_req, res) => {
 // ─── Import salt master CSV ───────────────────────────────────────────────────
 // POST /api/enrichment/reference/import
 // Accepts multipart CSV; saves to data/reference_medicines.csv; force-reloads into medicine_reference.
-router.post('/enrichment/reference/import', upload.single('file'), async (req, res) => {
+router.post('/reference/import', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -124,10 +130,16 @@ router.post('/enrichment/reference/import', upload.single('file'), async (req, r
     fs.writeFileSync(tmpPath, req.file.buffer);
     fs.renameSync(tmpPath, REFERENCE_CSV);
 
-    // Force-reload into medicine_reference table
+    // Force-reload into reference tables
     const result = await loadReferenceData({ force: true });
+    const apiResult = await loadApiSubstances({ force: true });
 
-    res.json({ success: true, loaded: result.loaded, skipped: result.skipped });
+    res.json({
+      success: true,
+      loaded: result.loaded,
+      skipped: result.skipped,
+      apiLoaded: apiResult.loaded
+    });
   } catch (error) {
     console.error('Failed to import reference CSV:', error);
     res.status(500).json({ error: 'Internal server error' });

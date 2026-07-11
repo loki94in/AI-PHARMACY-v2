@@ -17,8 +17,8 @@ describe('Investigation routes', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'investigation-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
 
     const { default: investigationRouter } = await import('../src/routes/investigation.js');
 
@@ -192,5 +192,16 @@ describe('Investigation routes', () => {
     res = await request(app).get('/investigation/timeline').query({ party: 'PharmaCorp' });
     expect(res.status).toBe(200);
     expect(res.body.data.every((tx: any) => tx.party === 'PharmaCorp')).toBe(true);
+  });
+
+  afterAll(async () => {
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch {}
+    delete process.env.DB_PATH;
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (_) {}
   });
 });

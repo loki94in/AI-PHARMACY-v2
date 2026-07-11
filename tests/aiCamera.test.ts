@@ -14,10 +14,8 @@ describe('AI Camera Audit Routes', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aicamera-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
-    
-    // Set env variables
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
     
     auditQueuePath = path.join(tmpDir, 'audit_queue.json');
     // Set initial template

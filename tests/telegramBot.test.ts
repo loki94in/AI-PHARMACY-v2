@@ -27,8 +27,8 @@ describe('Telegram Bot Service Configuration & Reload', () => {
   beforeAll(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-test-'));
     dbPath = path.join(tmpDir, 'app.db');
-    await ensureSchema(dbPath);
     process.env.DB_PATH = dbPath;
+    await ensureSchema(dbPath);
   });
 
   afterAll(async () => {

@@ -43,6 +43,16 @@ function cleanMedicineName(name: string): string {
     .trim();
 }
 
+export function cleanSubstanceName(composition: string): string {
+  return composition
+    .toUpperCase()
+    .replace(/\(.*?\)/g, '') // remove parentheses details like (500 MG)
+    .replace(/\b\d+(\.\d+)?\s*(MG|ML|MCG|GM|IU|%)\b/gi, '') // remove standalone dosages
+    .replace(/[^A-Z0-9\s\-]/g, ' ') // remove other symbols except letters, numbers, spaces, hyphens
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Joins a reference row's composition1/composition2 into the display/storage string used everywhere. */
 function formatComposition(ref: { composition1: string | null; composition2: string | null }): string {
   return [ref.composition1, ref.composition2].filter(Boolean).join(' + ');
@@ -145,6 +155,86 @@ export async function loadReferenceData({ force }: { force?: boolean } = {}): Pr
 
   await dbManager.close();
   console.log(`Reference data loaded: ${loaded} medicines`);
+  return { loaded, skipped: 0 };
+}
+
+export async function loadApiSubstances({ force }: { force?: boolean } = {}): Promise<{ loaded: number; skipped: number }> {
+  const db = await dbManager.getConnection();
+
+  // Check if already loaded (skip when force=false)
+  if (!force) {
+    const count = await db.get('SELECT COUNT(*) as c FROM api_substances');
+    if (count && count.c > 0) {
+      await dbManager.close();
+      return { loaded: 0, skipped: count.c };
+    }
+  } else {
+    // Force reload: clear existing rows so we re-insert fresh data
+    await db.run('DELETE FROM api_substances');
+  }
+
+  if (!fs.existsSync(REFERENCE_CSV)) {
+    await dbManager.close();
+    console.warn('Reference CSV not found at:', REFERENCE_CSV);
+    return { loaded: 0, skipped: 0 };
+  }
+
+  console.log('Loading API substances from CSV...');
+
+  const substanceSet = new Set<string>();
+
+  await new Promise<void>((resolve, reject) => {
+    fs.createReadStream(REFERENCE_CSV)
+      .pipe(csvParser())
+      .on('data', (row: any) => {
+        const comp1 = (row['short_composition1'] || row['composition1'] || '').trim();
+        const comp2 = (row['short_composition2'] || row['composition2'] || '').trim();
+
+        if (comp1) {
+          const norm1 = cleanSubstanceName(comp1);
+          if (norm1 && norm1.length >= 3) substanceSet.add(norm1);
+        }
+        if (comp2) {
+          const norm2 = cleanSubstanceName(comp2);
+          if (norm2 && norm2.length >= 3) substanceSet.add(norm2);
+        }
+      })
+      .on('end', resolve)
+      .on('error', reject);
+  });
+
+  const substances = Array.from(substanceSet);
+  console.log(`Extracted ${substances.length} unique API substances for insertion.`);
+
+  // Bulk insert in batches of 500
+  const BATCH = 500;
+  let loaded = 0;
+  const now = new Date().toISOString();
+
+  await db.run('BEGIN TRANSACTION');
+  try {
+    for (let i = 0; i < substances.length; i += BATCH) {
+      const batch = substances.slice(i, i + BATCH);
+      for (const api of batch) {
+        try {
+          await db.run(
+            'INSERT OR IGNORE INTO api_substances (api, created_at) VALUES (?, ?)',
+            api, now
+          );
+          loaded++;
+        } catch {
+          // Skip duplicates silently
+        }
+      }
+    }
+    await db.run('COMMIT');
+  } catch (err) {
+    await db.run('ROLLBACK');
+    throw err;
+  }
+
+  await dbManager.close();
+  console.log(`API substances loaded: ${loaded} rows`);
   return { loaded, skipped: 0 };
 }
 
@@ -627,3 +717,27 @@ export async function runEnrichment(
 
   return { matched, needsReview, unmatched, nonPharma };
 }
+
+export async function recordApiSubstance(apiReference: string | null | undefined): Promise<void> {
+  if (!apiReference) return;
+  const db = await dbManager.getConnection();
+  try {
+    // An apiReference might contain multiple substances separated by "+" or comma (e.g. "Paracetamol + Ibuprofen")
+    const parts = apiReference.split(/[\s,;:|+\-()\[\]{}\/\\]+/);
+    const now = new Date().toISOString();
+    for (const part of parts) {
+      const clean = cleanSubstanceName(part);
+      if (clean && clean.length >= 3) {
+        await db.run(
+          'INSERT OR IGNORE INTO api_substances (api, created_at) VALUES (?, ?)',
+          clean, now
+        );
+      }
+    }
+  } catch (err) {
+    console.error('[compositionEnricher] Failed to record API substance:', err);
+  } finally {
+    await dbManager.close();
+  }
+}
+

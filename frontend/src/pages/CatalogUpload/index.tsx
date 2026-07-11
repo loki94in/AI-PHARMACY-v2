@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, Upload, FileText, CheckCircle, AlertCircle, Loader2, History, Check, AlertTriangle, Play, RefreshCw, Trash2, X } from 'lucide-react';
+import { Database, Upload, FileText, CheckCircle, AlertCircle, Loader2, History, Check, AlertTriangle, Play, RefreshCw, Trash2, X, Plus } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -211,6 +211,84 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
         )}
       </div>
 
+      {review.possible_duplicate_of && review.duplicateProduct && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-xl flex flex-col gap-3">
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <AlertTriangle size={18} className="text-amber-500 animate-pulse" />
+            <span>Looks Like This Medicine Already Exists</span>
+          </div>
+          <div className="text-xs text-muted space-y-1">
+            <p>
+              A similar product was found in the database:
+            </p>
+            <div className="bg-black/30 border border-glass-border/30 rounded p-3 text-white font-mono grid grid-cols-1 md:grid-cols-2 gap-2 mt-1">
+              <div><span className="text-muted font-sans font-bold">Name:</span> {review.duplicateProduct.name}</div>
+              <div><span className="text-muted font-sans font-bold">API Reference:</span> {review.duplicateProduct.api_reference || '—'}</div>
+              <div><span className="text-muted font-sans font-bold">Strength:</span> {review.duplicateProduct.strength || '—'}</div>
+              <div><span className="text-muted font-sans font-bold">Manufacturer:</span> {review.duplicateProduct.manufacturer || '—'}</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2.5 mt-1">
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSubmitting(true);
+                try {
+                  const data = {
+                    name,
+                    api_reference: apiReference,
+                    strength,
+                    packaging,
+                    manufacturer,
+                    marketed_by: marketedBy,
+                    choice: 'merge'
+                  };
+                  await api.approveCatalogReview(review.id, data);
+                  alert('Merged with the existing database medicine successfully.');
+                  onApproved();
+                } catch (err: any) {
+                  alert('Failed to merge: ' + (err.response?.data?.error || err.message));
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Check size={14} /> Merge with Existing
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSubmitting(true);
+                try {
+                  const data = {
+                    name,
+                    api_reference: apiReference,
+                    strength,
+                    packaging,
+                    manufacturer,
+                    marketed_by: marketedBy,
+                    choice: 'keep_new'
+                  };
+                  await api.approveCatalogReview(review.id, data);
+                  alert('Saved as a new medicine record.');
+                  onApproved();
+                } catch (err: any) {
+                  alert('Failed to approve as new: ' + (err.response?.data?.error || err.message));
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-green hover:bg-green/90 text-white font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Plus size={14} /> Keep New Medicine
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row gap-5">
         {/* Form Inputs (Left) */}
         <div className="flex-1 flex flex-col gap-4">
@@ -280,13 +358,15 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
           </div>
 
           <div className="flex flex-wrap gap-3 mt-4">
-            <button
-              onClick={handleApprove}
-              disabled={isSubmitting}
-              className="px-5 py-2.5 bg-green hover:bg-green/90 text-white text-xs font-bold rounded-lg shadow-lg hover:shadow-green/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <Check size={14} /> Approve & Save
-            </button>
+            {!review.possible_duplicate_of && (
+              <button
+                onClick={handleApprove}
+                disabled={isSubmitting}
+                className="px-5 py-2.5 bg-green hover:bg-green/90 text-white text-xs font-bold rounded-lg shadow-lg hover:shadow-green/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Check size={14} /> Approve & Save
+              </button>
+            )}
             <button
               onClick={handleReject}
               disabled={isSubmitting}

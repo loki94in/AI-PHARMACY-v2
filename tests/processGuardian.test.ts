@@ -17,7 +17,15 @@ describe('ProcessGuardian', () => {
   });
 
   afterAll(async () => {
-    if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
+    try {
+      const { dbManager } = await import('../src/database/connection.js');
+      await dbManager.close(true);
+    } catch (e) {}
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        fs.unlinkSync(DB_PATH);
+      } catch (e) {}
+    }
   });
 
   test('writeCrashLog inserts a row into crash_log', async () => {

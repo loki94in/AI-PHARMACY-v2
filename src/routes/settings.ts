@@ -217,9 +217,20 @@ router.post('/google/disconnect', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run(
-      "DELETE FROM app_settings WHERE key IN ('gmail_oauth_refresh_token', 'gmail_oauth_access_token', 'gmail_oauth_token_expiry', 'gmail_user')"
+      `DELETE FROM app_settings WHERE key IN (
+        'gmail_oauth_refresh_token',
+        'gmail_oauth_access_token',
+        'gmail_oauth_token_expiry',
+        'gmail_user',
+        'gmail_pass',
+        'gmail_auth_status',
+        'gmail_auth_error'
+      )`
     );
-    res.json({ success: true, message: 'Google account disconnected successfully' });
+    await db.run(
+      "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_method', 'password')"
+    );
+    res.json({ success: true, message: 'Gmail connection cleared successfully' });
   } catch (error: any) {
     console.error('Failed to disconnect Google account:', error);
     res.status(500).json({ error: 'Failed to disconnect Google account' });

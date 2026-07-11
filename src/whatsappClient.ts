@@ -487,72 +487,69 @@ export async function getChatMessages(chatId: string, limit: number = 50): Promi
 
   try {
     const db = await dbManager.getConnection();
+
+    // If the live client is connected, fetch latest messages to keep cache updated
+    if (clientInstance) {
+      try {
+        const chat = await clientInstance.getChatById(cleanId);
+        if (chat) {
+          const liveMsgs = await chat.fetchMessages({ limit }).catch(() => []);
+          for (const msg of liveMsgs) {
+            await db.run(
+              `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 body=excluded.body,
+                 from_me=excluded.from_me,
+                 timestamp=excluded.timestamp,
+                 type=excluded.type,
+                 has_media=excluded.has_media`,
+              [
+                msg.id._serialized,
+                cleanId,
+                msg.body || '',
+                msg.fromMe ? 1 : 0,
+                msg.timestamp,
+                msg.type,
+                msg.hasMedia ? 1 : 0
+              ]
+            );
+          }
+        }
+      } catch (clientErr) {
+        console.warn('[WhatsApp Client] Failed to fetch live messages:', clientErr);
+      }
+    }
+
     const rows = await db.all(
       `SELECT id, body, from_me as fromMe, timestamp, type, has_media as hasMedia 
        FROM whatsapp_messages 
-       WHERE chat_id = ? 
+       WHERE chat_id = ? AND (body != '' OR has_media = 1)
        ORDER BY timestamp ASC 
        LIMIT ?`,
       [cleanId, limit]
     );
 
-    if (rows.length > 0) {
-      return rows;
-    }
-
-    if (clientInstance) {
-      const chat = await clientInstance.getChatById(cleanId).catch(() => null);
-      if (chat) {
-        const liveMsgs = await chat.fetchMessages({ limit }).catch(() => []);
-        (async () => {
-          try {
-            const dbConn = await dbManager.getConnection();
-            for (const msg of liveMsgs) {
-              await dbConn.run(
-                `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(id) DO NOTHING`,
-                [
-                  msg.id._serialized,
-                  cleanId,
-                  msg.body || '',
-                  msg.fromMe ? 1 : 0,
-                  msg.timestamp,
-                  msg.type,
-                  msg.hasMedia ? 1 : 0
-                ]
-              );
-            }
-          } catch (err) {
-            console.error('Error saving fallback live messages:', err);
-          }
-        })();
-        return liveMsgs.map(m => ({
-          id: m.id._serialized,
-          body: m.body,
-          fromMe: m.fromMe,
-          timestamp: m.timestamp,
-          type: m.type,
-          hasMedia: m.hasMedia
-        }));
-      }
-    }
-    return [];
+    return rows;
   } catch (err) {
     console.error('Error fetching messages from SQLite:', err);
     if (clientInstance) {
-      const chat = await clientInstance.getChatById(cleanId).catch(() => null);
-      if (chat) {
-        const liveMsgs = await chat.fetchMessages({ limit }).catch(() => []);
-        return liveMsgs.map(m => ({
-          id: m.id._serialized,
-          body: m.body,
-          fromMe: m.fromMe,
-          timestamp: m.timestamp,
-          type: m.type,
-          hasMedia: m.hasMedia
-        }));
-      }
+      try {
+        const chat = await clientInstance.getChatById(cleanId);
+        if (chat) {
+          const liveMsgs = await chat.fetchMessages({ limit }).catch(() => []);
+          return liveMsgs
+            .filter(m => (m.body || m.hasMedia))
+            .map(m => ({
+              id: m.id._serialized,
+              body: m.body,
+              fromMe: m.fromMe,
+              timestamp: m.timestamp,
+              type: m.type,
+              hasMedia: m.hasMedia
+            }));
+        }
+      } catch (_) {}
     }
     return [];
   }

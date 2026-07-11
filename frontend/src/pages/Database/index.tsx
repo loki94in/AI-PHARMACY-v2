@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload } from 'lucide-react';
+import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock } from 'lucide-react';
 import { api } from '../../services/api';
 import { UniversalMedicineEditModal, updateMedicineNameWithPackSize } from '../../components/UniversalMedicineEditModal';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -26,6 +26,8 @@ interface MedicineRow {
   last_purchase_rate?: number;
   last_purchase_mrp?: number;
   last_distributor_name?: string;
+  source?: string;
+  possible_duplicate_of?: number;
 }
 
 // Module-level cache for instant re-mount
@@ -457,6 +459,21 @@ const DatabasePage = () => {
           </button>
 
           <button 
+            className="w-12 h-12 rounded-full shadow-[0_0_20px_rgba(245,158,11,0.5)] bg-bg3 border border-glass-border hover:bg-bg2 text-amber-400 flex items-center justify-center transition-all group hover:-translate-y-1"
+            onClick={async () => {
+              try {
+                const res = await api.unlockDatabase();
+                alert(res.message);
+              } catch (err: any) {
+                alert(err.response?.data?.error || err.message || 'Failed to unlock database');
+              }
+            }} 
+            title="Force Unlock Database"
+          >
+            <Unlock size={20} className="group-hover:scale-110 transition-transform" />
+          </button>
+
+          <button 
             className="w-12 h-12 rounded-full shadow-[0_0_20px_rgba(14,165,233,0.5)] bg-sky-500 text-white hover:bg-sky-400 flex items-center justify-center transition-all group hover:-translate-y-1"
             onClick={() => { setPage(1); loadDatabase(); }} 
             title="Refresh Data"
@@ -635,6 +652,20 @@ const DatabasePage = () => {
                             {item.api_reference}
                           </span>
                         )}
+                        {item.source && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
+                            item.source === 'ocr' ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' :
+                            item.source === 'catalog' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
+                            'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                          }`} title={`Ingested via ${item.source}`}>
+                            {item.source}
+                          </span>
+                        )}
+                        {item.possible_duplicate_of ? (
+                          <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full" title={`Merge-resolved duplicate of ID: ${item.possible_duplicate_of}`}>
+                            ⚠ Merge Resolved
+                          </span>
+                        ) : null}
                       </div>
                     </td>
                     <td className="p-4 text-xs text-sky-400 max-w-[200px] truncate" title={item.api_reference || ''}>
