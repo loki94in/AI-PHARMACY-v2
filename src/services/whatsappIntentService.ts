@@ -2,7 +2,7 @@
 // Routes messages through: ignore check → customer lookup → text parse → OCR → smart match.
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
-import { parseMessage, isRepeatRequest, isPlausibleMedicineName } from './intentKeywords.js';
+import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely } from './intentKeywords.js';
 import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
@@ -44,6 +44,16 @@ async function isIgnored(phone: string): Promise<boolean> {
     return row.reason !== 'unignored';
   }
   const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
+  if (isGroupOrBroadcast) {
+    try {
+      await db.run(
+        `INSERT OR IGNORE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)`,
+        [phone, phone.endsWith('@g.us') ? 'group' : 'broadcast']
+      );
+    } catch (e) {
+      console.warn('[WhatsApp Intent] Failed to auto-insert ignored phone:', e);
+    }
+  }
   return isGroupOrBroadcast;
 }
 
@@ -218,6 +228,9 @@ export async function handleInbound(msg: any): Promise<void> {
 
     // 6. TEXT-BASED SEARCH — if we parsed a medicine name from text
     if (parsed.isMedicineRequest && parsed.medicineName) {
+      // Detect dosage form from the text itself so the search and admin report
+      // know what presentation was requested (tab/cap/susp/drops/…).
+      const textForm = detectDosageForm(body);
       await searchAndBroadcast({
         medicineName: parsed.medicineName,
         quantity: parsed.quantity,
@@ -226,6 +239,7 @@ export async function handleInbound(msg: any): Promise<void> {
         isNewCustomer,
         messageBody: body,
         source: hasMedia ? 'both' : 'text',
+        dosageForm: textForm || undefined,
         msgId,
         phone,
         chatId,
@@ -273,7 +287,11 @@ async function searchAndBroadcast(opts: {
 
   // If no local match, also try direct Pharmarack catalog search
   let catalogResults = filterResult.catalogResults || null;
-  if (filterResult.matches.length === 0 && !catalogResults) {
+  // Consult Pharmarack whenever there is NO exact local brand match (near-match
+  // or no-match), not only when local is completely empty — so admin always sees
+  // real distributor availability instead of a possibly-wrong local name.
+  const isExactLocal = (filterResult.topScore ?? 0) >= 0.95;
+  if ((filterResult.matches.length === 0 || !isExactLocal) && !catalogResults) {
     try {
       catalogResults = await searchCatalog(medicineName, dosageForm, mrp);
     } catch (catErr) {
@@ -291,7 +309,7 @@ async function searchAndBroadcast(opts: {
   let livePharmarackResults: any[] | null = null;
   const nothingFound = filterResult.matches.length === 0 &&
     (!catalogResults || (catalogResults.mapped.length === 0 && catalogResults.nonMapped.length === 0));
-  if (nothingFound && (hasIntentWords || source !== 'text')) {
+  if ((nothingFound || !isExactLocal) && (hasIntentWords || source !== 'text')) {
     try {
       const response = await fetch(`http://localhost:${process.env.PORT || 3000}/api/pharmarack/search?q=${encodeURIComponent(medicineName)}`, {
         signal: AbortSignal.timeout(6000)
@@ -350,6 +368,7 @@ async function searchAndBroadcast(opts: {
     medicineName,
     quantity,
     unit,
+    dosageForm,
     localMatches: filterResult.matches,
     catalogResults,
     confidence,
@@ -367,6 +386,7 @@ async function searchAndBroadcast(opts: {
     medicineName,
     quantity,
     unit,
+    dosageForm,
     localMatches: filterResult.matches,
     catalogResults,
     confidence,
@@ -411,6 +431,21 @@ export function handleOcrComplete(data: any): void {
     }
   }
   if (!finalName) return;
+
+  // Stage 0 Scan Gate: skip images that are clearly NOT medicines
+  // (booking/ticket/bill/finance docs, food packets, random photos).
+  // Without this, every image triggers a search + admin escalation even
+  // when it is a train ticket or a biscuit packet.
+  const ocrRaw = [
+    ocrResult?.text,
+    ocrResult?.rawText,
+    ocrResult?.medicineInfo?.rawOcrText,
+    typeof ocrResult?.cloudDetails === 'string' ? ocrResult.cloudDetails : ocrResult?.cloudDetails?.text,
+  ].filter(Boolean).join(' ');
+  if (!isMedicineLikely(ocrRaw, finalName)) {
+    console.log(`[Intent Service] Scan gate: skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
+    return;
+  }
 
   lookupCustomer(phone).then(customer => {
     searchAndBroadcast({

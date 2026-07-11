@@ -2,6 +2,7 @@
 import { createWorker } from 'tesseract.js';
 import { Jimp } from 'jimp';
 import { productNameFilterService } from './productNameFilterService.js';
+import { isPlausibleMedicineName } from './intentKeywords.js';
 import { onnxOcrService } from './onnxOcrService.js';
 import { onlineDataEnricher } from './onlineDataEnricher.js';
 import { dbManager } from '../database/connection.js';
@@ -146,6 +147,9 @@ class AICameraService {
     'mrp','mfg','exp','batch','lot','no','nos','each','qty',
     'manufactured','marketed','distributed','by','pvt','ltd','inc',
     'pharma','pharmaceuticals','laboratories','lab','labs','care',
+    // Route / administration descriptors (NOT brand names)
+    'ophthalmic','oral','topical','intravenous','subcutaneous','nasal','rectal',
+    'vaginal','otic','dermal','buccal','sublingual','inhaled','iv','im',
     // Verbal/chat words that may appear due to OCR misreads
     'api','chat','verbal','call','text','message','send','please','note',
   ]);
@@ -346,7 +350,41 @@ class AICameraService {
     const finalInfo: any = {};
     // Use OCR extraction matching
     const lines = localOcrResult.text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    finalInfo.potentialName = matches.length > 0 ? matches[0] : (lines.length > 0 ? lines[0] : '');
+
+    // Brand-name selection. If a DB match exists, use its canonical name.
+    // Otherwise pick the most brand-like OCR line INSTEAD of the first line
+    // (which is often a barcode/batch/garbage). Candidate lines are filtered
+    // through extractCandidateTokens (which strips API words, dosage units,
+    // company/function stop words), so only a real medicine name survives.
+    let brandName = '';
+    if (matches.length === 0) {
+      const cands = lines
+        .map(line => {
+          const toks = this.extractCandidateTokens(line);
+          return { line, joined: toks.join(' ') };
+        })
+        .filter(c => c.joined.length > 0 && isPlausibleMedicineName(c.joined));
+      if (cands.length > 0) {
+        // Score each candidate line. A real brand name is usually a single
+        // coherent capitalized word. OCR noise tends to be short fragments
+        // (<=3 chars), generic/API words (end in -fenac/-statin/…), or several
+        // broken tokens. Penalize those so the brand wins.
+        const isGeneric = (t: string) =>
+          /(fenac|cin|mycin|olol|statin|prazole|sartan|dine|pine|pram|xacin|azole|gest|dron|vir|phen|mab|tide|oxacin)$/i.test(t) ||
+          t.length > 11;
+        const scoreOf = (c: { line: string; joined: string }) => {
+          const tokens = c.joined.split(' ');
+          let s = /[A-Z]/.test(c.line) ? 2 : 0;
+          if (tokens.some(t => t.length <= 3)) s -= 1;   // likely OCR fragment
+          if (tokens.some(isGeneric)) s -= 1;             // generic / API word
+          s -= (tokens.length - 1) * 0.5;                 // prefer one coherent word
+          return s;
+        };
+        cands.sort((a, b) => scoreOf(b) - scoreOf(a));
+        brandName = cands[0].joined;
+      }
+    }
+    finalInfo.potentialName = matches.length > 0 ? matches[0] : brandName;
 
     const strengthMatch = localOcrResult.text.match(/\d+\s*(?:mg|g|ml|μg|iu)/i);
     if (strengthMatch) finalInfo.strength = strengthMatch[0];

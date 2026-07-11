@@ -416,7 +416,7 @@ class TelegramBotService {
                 if (isBill) {
                   this.bot?.sendMessage(chatId, '📄 Invoice detected. Processing items into inventory...');
                   
-                  const medicines: Array<{ name: string; quantity: number }> = [];
+                  const medicines: Array<{ name: string; quantity: number; costPrice?: number | null; mrp?: number | null }> = [];
                   const lines = (result.text || '').split('\n');
                   for (const line of lines) {
                     const trimmed = line.trim();
@@ -426,14 +426,27 @@ class TelegramBotService {
                       const qty = parseInt(qtyMatch[1] || qtyMatch[2]) || 10;
                       let name = trimmed.replace(qtyMatch[0], '').replace(/[:\-\t\r\n]/g, ' ').trim();
                       if (name && name.length > 3 && isNaN(Number(name))) {
-                        medicines.push({ name, quantity: qty });
+                        let costPrice: number | null = null;
+                        let mrp: number | null = null;
+                        const decimals = trimmed.match(/\b\d+\.\d+\b/g);
+                        if (decimals && decimals.length > 0) {
+                          if (decimals.length === 1) {
+                            mrp = parseFloat(decimals[0]);
+                            costPrice = Number((mrp * 0.7).toFixed(2));
+                          } else {
+                            const sorted = decimals.map((d: string) => parseFloat(d)).sort((a: number, b: number) => a - b);
+                            costPrice = sorted[0];
+                            mrp = sorted[sorted.length - 1];
+                          }
+                        }
+                        medicines.push({ name, quantity: qty, costPrice, mrp });
                       }
                     }
                   }
 
                   if (medicines.length === 0) {
                     const potentialName = result.medicineInfo?.potentialName || 'Unknown Product';
-                    medicines.push({ name: potentialName, quantity: 10 });
+                    medicines.push({ name: potentialName, quantity: 10, costPrice: null, mrp: null });
                   }
 
                   const db = await dbManager.getConnection();
@@ -452,7 +465,7 @@ class TelegramBotService {
                     dist = await db.get('SELECT id FROM distributors WHERE name = ?', [distributorName]);
                   }
                   
-                  const rawInvoiceNo = 'TG-INV-' + Date.now().toString().slice(-4);
+                  const rawInvoiceNo = `TG-INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                   let billDate = new Date().toISOString();
                   const extractedDate = extractDateFromText(result.text || '');
                   if (extractedDate) {
@@ -461,35 +474,57 @@ class TelegramBotService {
                   
                   const invoiceNo = formatInvoiceWithFY(rawInvoiceNo, billDate);
                   
+                  let totalAmount = 0;
+                  let hasUnparseablePrices = false;
+                  for (const item of medicines) {
+                    if (item.mrp) {
+                      totalAmount += (item.mrp * item.quantity);
+                    } else {
+                      hasUnparseablePrices = true;
+                    }
+                  }
+
                   const purchaseResult = await db.run(
                     'INSERT INTO purchases (distributor_id, invoice_no, total_amount, date, business_date) VALUES (?, ?, ?, ?, ?)',
-                    [dist.id, invoiceNo, 100 * medicines.length, billDate, billDate]
+                    [dist.id, invoiceNo, totalAmount, billDate, billDate]
                   );
                   const purchaseId = purchaseResult.lastID;
 
                   let importDetails = '';
                   for (const item of medicines) {
-                    let med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
+                    let med = await db.get('SELECT id FROM medicines WHERE name = ? LIMIT 1', [item.name]);
                     if (!med) {
-                      const medResult = await db.run('INSERT INTO medicines (name) VALUES (?)', [item.name]);
-                      med = { id: medResult.lastID };
+                      med = await db.get('SELECT id FROM medicines WHERE LOWER(REPLACE(name, " ", "")) = LOWER(REPLACE(?, " ", "")) LIMIT 1', [item.name]);
                     }
+                    if (!med) {
+                      const enrichmentStatus = item.mrp ? null : 'needs_review';
+                      const medResult = await db.run('INSERT INTO medicines (name, enrichment_status) VALUES (?, ?)', [item.name, enrichmentStatus]);
+                      med = { id: medResult.lastID };
+                    } else if (!item.mrp) {
+                      await db.run("UPDATE medicines SET enrichment_status = 'needs_review' WHERE id = ? AND enrichment_status IS NULL", [med.id]);
+                    }
+                    
+                    const itemCost = item.costPrice || 0;
+                    const itemMrp = item.mrp || 0;
                     
                     await db.run(
                       'INSERT INTO purchase_items (purchase_id, medicine_id, quantity, cost_price, mrp) VALUES (?, ?, ?, ?, ?)',
-                      [purchaseId, med.id, item.quantity, 10, 15]
+                      [purchaseId, med.id, item.quantity, itemCost, itemMrp]
                     );
 
                     const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? LIMIT 1', [med.id]);
                     if (existingInv) {
-                      await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [item.quantity, existingInv.id]);
+                      await db.run(
+                        'UPDATE inventory_master SET quantity = quantity + ?, mrp = COALESCE(?, mrp), cost_price = COALESCE(?, cost_price) WHERE id = ?', 
+                        [item.quantity, itemMrp || null, itemCost || null, existingInv.id]
+                      );
                     } else {
                       await db.run(
                         'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, unit_price, cost_price, reorder_level, mrp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                        [med.id, item.quantity, 'B-TG-' + Date.now().toString().slice(-4), '2028-12-31', 10, 8, 10, 15]
+                        [med.id, item.quantity, 'B-TG-' + Date.now().toString().slice(-4), '2028-12-31', itemMrp, itemCost, 10, itemMrp]
                       );
                     }
-                    importDetails += `• ${item.name} x${item.quantity}\n`;
+                    importDetails += `• ${item.name} x${item.quantity}${item.mrp ? ` (MRP: ₹${item.mrp})` : ' (No price)'}\n`;
                   }
 
                   await db.run(
@@ -506,13 +541,16 @@ class TelegramBotService {
                     timestamp: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
                   });
 
-                  this.bot?.sendMessage(chatId, 
-                    `✅ *Invoice Manually Imported!*\n` +
+                  let botMsg = `✅ *Invoice Manually Imported!*\n` +
                     `📦 Distributor: ${distributorName}\n` +
                     `📄 Invoice No: ${invoiceNo}\n\n` +
-                    `*Added to Inventory:*\n${importDetails}`,
-                    { parse_mode: 'Markdown' }
-                  );
+                    `*Added to Inventory:*\n${importDetails}`;
+                    
+                  if (hasUnparseablePrices) {
+                    botMsg += `\n⚠️ *Warning:* Some item prices could not be parsed and were set to 0. Please review them in the settings/inventory panel.`;
+                  }
+
+                  this.bot?.sendMessage(chatId, botMsg, { parse_mode: 'Markdown' });
                 } else {
                   await telegramPrescriptionService.handlePrescriptionResult(
                     chatId,

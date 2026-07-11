@@ -8,9 +8,11 @@ import fs from 'fs';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
+import { config } from '../config/index.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+const DB_PATH = config.dbPath;
 
 class DatabaseManager {
   private static instance: DatabaseManager;
@@ -27,7 +29,7 @@ class DatabaseManager {
   }
 
   public async getConnection(): Promise<Database> {
-    const dbPath = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+    const dbPath = config.dbPath;
     if (!this.connection || this.currentDbPath !== dbPath) {
       if (this.connection) {
         try {
@@ -281,7 +283,7 @@ class DatabaseManager {
   public async transaction<T>(callback: (db: Database) => Promise<T>): Promise<T> {
     const db = await this.getConnection();
     try {
-      await db.run('BEGIN TRANSACTION');
+      await db.run('BEGIN IMMEDIATE TRANSACTION');
       const result = await callback(db);
       await db.run('COMMIT');
       return result;

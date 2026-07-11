@@ -66,7 +66,11 @@ export default function DrawerMenu({ isOpen, onClose }: DrawerMenuProps) {
     onClose();
     await adminLogout();
     await clearServerUrl();
-    DevSettings.reload();
+    if (__DEV__ && DevSettings && typeof DevSettings.reload === 'function') {
+      DevSettings.reload();
+    } else {
+      router.replace('/(tabs)');
+    }
   };
 
   return (

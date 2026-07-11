@@ -237,7 +237,7 @@ const Sells = () => {
       setEditCustomerName(full.customer_name || '');
       setEditCustomerPhone(full.customer_phone || '');
       setEditPaymentMedium(full.payment_medium || 'CASH');
-      setEditDiscount(0);
+      setEditDiscount(full.discount ?? 0);
     } catch (err) {
       toastEvent.trigger('Failed to load invoice details', 'error');
     }

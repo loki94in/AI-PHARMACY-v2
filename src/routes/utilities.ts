@@ -510,6 +510,25 @@ router.get('/test-connection', async (req, res) => {
     res.status(500).json({ error: 'Connection test failed' });
   }
 });
+// GET /api/utilities/data-counts — returns live record counts for reset confirmation dialog
+router.get('/data-counts', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const safe = async (sql: string) => {
+      try { return (await db.get(sql) as any)?.c ?? 0; } catch { return 0; }
+    };
+    const [medicines, inventory, bills, purchases, customers] = await Promise.all([
+      safe('SELECT COUNT(*) as c FROM medicines'),
+      safe('SELECT COUNT(*) as c FROM inventory_master'),
+      safe('SELECT COUNT(*) as c FROM bills'),
+      safe('SELECT COUNT(*) as c FROM purchase_bills'),
+      safe('SELECT COUNT(*) as c FROM customers'),
+    ]);
+    res.json({ medicines, inventory, bills, purchases, customers });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch data counts' });
+  }
+});
 
 // POST /api/utilities/reset-data
 router.post('/reset-data', async (req, res) => {

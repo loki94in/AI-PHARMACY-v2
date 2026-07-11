@@ -66,7 +66,10 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
     let nextNum = 1;
     if (row && row.return_no) {
       const parts = row.return_no.split('-');
-      nextNum = parseInt(parts[2], 10) + 1;
+      const lastPart = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastPart)) {
+        nextNum = lastPart + 1;
+      }
     }
     const returnNo = `${prefix}${String(nextNum).padStart(4, '0')}`;
 
@@ -91,6 +94,9 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
 
       // We need medicine_id and batch_no for return_items table
       const invInfo = await db.get('SELECT medicine_id, batch_no FROM inventory_master WHERE id = ?', [item.inventory_id]);
+      if (!invInfo) {
+        throw new Error(`Inventory item not found for ID ${item.inventory_id}`);
+      }
       
       // Get originally sold qty
       const saleItem = await db.get(

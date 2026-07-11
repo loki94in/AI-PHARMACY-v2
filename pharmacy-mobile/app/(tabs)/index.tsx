@@ -601,7 +601,7 @@ export default function AssistantScreen() {
         {/* ABC Checklist - Only shown in Distributor Mode */}
         {userRole === 'distributor' && !hideHeader && (
           <View style={styles.checklistCard}>
-            <View className="flex-row items-center justify-between mb-3 border-b border-zinc-700/50 pb-2">
+            <View style={styles.checklistHeader}>
               <Text style={styles.checklistTitle}>📋 Distributor ABC Shortage Checklist</Text>
               <Text style={styles.checklistSub}>Active Stock Needs</Text>
             </View>
@@ -1546,6 +1546,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+  },
+  checklistHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+    paddingBottom: 8,
   },
   checklistTitle: {
     fontSize: 11,

@@ -250,14 +250,21 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'id is required' });
     }
     db = await dbManager.getConnection();
-    
-    // 1. Update inventory_master fields
-    await db.run(
-      `UPDATE inventory_master 
-       SET quantity = ?, rack_location = ?, batch_no = ?, expiry_date = ?, reorder_level = ?, mrp = ?, loose_quantity = ? 
-       WHERE id = ?`,
-      [qtyVal, rack_location, batchNoVal, expiry_date, reorder_level, mrp, loose_quantity, id]
-    );
+    // 1. Update inventory_master fields dynamically
+    const updates = [];
+    const params = [];
+    if (qtyVal !== undefined) { updates.push('quantity = ?'); params.push(qtyVal); }
+    if (rack_location !== undefined) { updates.push('rack_location = ?'); params.push(rack_location); }
+    if (batchNoVal !== undefined) { updates.push('batch_no = ?'); params.push(batchNoVal); }
+    if (expiry_date !== undefined) { updates.push('expiry_date = ?'); params.push(expiry_date); }
+    if (reorder_level !== undefined) { updates.push('reorder_level = ?'); params.push(reorder_level); }
+    if (mrp !== undefined) { updates.push('mrp = ?'); params.push(mrp); }
+    if (loose_quantity !== undefined) { updates.push('loose_quantity = ?'); params.push(loose_quantity); }
+
+    if (updates.length > 0) {
+      params.push(id);
+      await db.run(`UPDATE inventory_master SET ${updates.join(', ')} WHERE id = ?`, params);
+    }
 
     // 2. Fetch the medicine_id associated with this inventory record
     const invItem = await db.get('SELECT medicine_id FROM inventory_master WHERE id = ?', [id]);
@@ -600,7 +607,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
   const { 
     name, generic_name, manufacturer, marketed_by, 
     packaging, pack_unit, item_code, category, api_reference,
-    inventory_id, quantity, rack_location 
+    inventory_id, quantity, rack_location, hsn_code
   } = req.body;
   
   try {
@@ -609,7 +616,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     }
     db = await dbManager.getConnection();
     await db.run('BEGIN TRANSACTION');
-
+ 
     // 1. Update medicines table
     const updates = [];
     const params = [];
@@ -631,7 +638,8 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (item_code !== undefined) { updates.push('item_code = ?'); params.push(item_code); }
     if (category !== undefined) { updates.push('category = ?'); params.push(category); }
     if (api_reference !== undefined) { updates.push('api_reference = ?'); params.push(api_reference); }
-
+    if (hsn_code !== undefined) { updates.push('hsn_code = ?'); params.push(hsn_code); }
+ 
     if (updates.length > 0) {
       params.push(id);
       await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);

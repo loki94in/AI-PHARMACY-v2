@@ -139,6 +139,7 @@ const Settings = () => {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetDataCounts, setResetDataCounts] = useState<{medicines:number;inventory:number;bills:number;customers:number;purchases:number} | null>(null);
   const [clearCacheLoading, setClearCacheLoading] = useState(false);
   const [desktopNotifEnabled, setDesktopNotifEnabled] = useState(() => {
     return 'Notification' in window && Notification.permission === 'granted';
@@ -643,8 +644,16 @@ const Settings = () => {
 
   const handleResetData = async () => {
     if (!resetConfirm) {
+      // Fetch live counts to show the user exactly what they're about to wipe
       setResetConfirm(true);
       setResetConfirmText('');
+      setResetDataCounts(null);
+      try {
+        const res = await apiClient.get('/utilities/data-counts');
+        setResetDataCounts(res.data);
+      } catch (_) {
+        // Non-critical — show the dialog anyway without counts
+      }
       return;
     }
     if (resetConfirmText.trim().toUpperCase() !== 'RESET') {
@@ -1402,35 +1411,62 @@ const Settings = () => {
 
       {/* ─── Factory Reset Confirmation Modal ─── */}
       {resetConfirm && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
-          <div className="glass-panel w-full max-w-md p-8 flex flex-col gap-6 border border-red-500/40 shadow-[0_0_60px_rgba(239,68,68,0.3)]">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass-panel w-full max-w-lg p-8 flex flex-col gap-5 border border-red-500/50 shadow-[0_0_80px_rgba(239,68,68,0.35)]">
+
             {/* Icon + Title */}
             <div className="flex flex-col items-center gap-3 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-center animate-pulse">
                 <AlertTriangle size={32} className="text-red-400" />
               </div>
-              <h2 className="text-xl font-black text-text tracking-tight">Factory Reset</h2>
+              <h2 className="text-xl font-black text-text tracking-tight">⚠️ Permanent Factory Reset</h2>
               <p className="text-sm text-muted leading-relaxed">
-                This will <strong className="text-red-400">permanently delete</strong> all inventory, bills, purchases, customers,
-                settings, and every other record. The app will restart as if newly installed.
+                This will <strong className="text-red-400">permanently and irreversibly delete</strong> every record
+                in this pharmacy system. The app will restart as a fresh installation.
               </p>
-              <p className="text-xs text-red-400/80 font-semibold uppercase tracking-wider">
-                This action cannot be undone.
+            </div>
+
+            {/* Live data counts of what will be deleted */}
+            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-3">The following data will be permanently erased:</p>
+              {resetDataCounts === null ? (
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  <RefreshCw size={12} className="animate-spin" />
+                  Calculating records...
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Medicines', count: resetDataCounts.medicines, icon: '💊' },
+                    { label: 'Inventory Batches', count: resetDataCounts.inventory, icon: '📦' },
+                    { label: 'Bills / Sales', count: resetDataCounts.bills, icon: '🧾' },
+                    { label: 'Purchases', count: resetDataCounts.purchases, icon: '🛒' },
+                    { label: 'Customers', count: resetDataCounts.customers, icon: '👤' },
+                  ].map(({ label, count, icon }) => (
+                    <div key={label} className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                      <span className="text-xs text-muted">{icon} {label}</span>
+                      <span className="text-sm font-black text-red-400 tabular-nums">{count.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[10px] text-red-400/70 font-semibold uppercase tracking-wider mt-3 text-center">
+                🔒 This action CANNOT be undone. No recovery is possible.
               </p>
             </div>
 
             {/* Typed confirmation */}
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold text-muted uppercase tracking-wider">
-                Type <span className="text-red-400 font-black">RESET</span> to confirm
+                Type <span className="text-red-400 font-black">RESET</span> to confirm permanent deletion
               </label>
               <input
                 id="resetConfirmInput"
                 type="text"
-                className="premium-input w-full text-center font-mono font-bold tracking-widest"
+                className="premium-input w-full text-center font-mono font-bold tracking-widest text-red-400"
                 placeholder="RESET"
                 value={resetConfirmText}
-                onChange={(e) => setResetConfirmText(e.target.value)}
+                onChange={(e) => setResetConfirmText(e.target.value.toUpperCase())}
                 autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter') handleResetData(); }}
               />
@@ -1439,7 +1475,7 @@ const Settings = () => {
             {/* Actions */}
             <div className="flex gap-3">
               <button
-                onClick={() => { setResetConfirm(false); setResetConfirmText(''); }}
+                onClick={() => { setResetConfirm(false); setResetConfirmText(''); setResetDataCounts(null); }}
                 disabled={resetLoading}
                 className="premium-btn bg-bg3/60 text-muted hover:text-text hover:bg-bg3 flex-1"
               >
@@ -1456,7 +1492,7 @@ const Settings = () => {
                 }}
               >
                 {resetLoading ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                {resetLoading ? 'Resetting...' : 'Erase Everything'}
+                {resetLoading ? 'Erasing Everything...' : 'Erase Everything Now'}
               </button>
             </div>
           </div>

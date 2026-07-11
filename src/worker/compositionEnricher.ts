@@ -148,6 +148,51 @@ export async function loadReferenceData({ force }: { force?: boolean } = {}): Pr
   return { loaded, skipped: 0 };
 }
 
+// ─── Bundled API seed (offline fallback) ──────────────────────────────
+// When the full reference CSV is absent (the usual case on a fresh install),
+// seed a small curated set of real drug APIs into medicine_reference so the
+// API-identity matching + scan gate have a working dictionary. Safe to call
+// at boot; no-ops when medicine_reference already has rows.
+
+const BUNDLED_SEED = path.join(DATA_DIR, 'medicine_reference_seed.json');
+
+export async function seedBundledReference(force = false): Promise<{ loaded: number }> {
+  const db = await dbManager.getConnection();
+  try {
+    if (!force) {
+      const count = await db.get('SELECT COUNT(*) as c FROM medicine_reference');
+      if (count && count.c > 0) return { loaded: 0 };
+    }
+    if (!fs.existsSync(BUNDLED_SEED)) {
+      console.warn('[Seed] Bundled reference seed not found at:', BUNDLED_SEED);
+      return { loaded: 0 };
+    }
+    const rows = JSON.parse(fs.readFileSync(BUNDLED_SEED, 'utf8')) as Array<{
+      name: string; composition1: string; composition2?: string; manufacturer?: string;
+    }>;
+    let loaded = 0;
+    await db.run('BEGIN TRANSACTION');
+    try {
+      for (const r of rows) {
+        if (!r.name || !r.composition1) continue;
+        await db.run(
+          'INSERT OR IGNORE INTO medicine_reference (name, composition1, composition2, manufacturer) VALUES (?, ?, ?, ?)',
+          r.name, r.composition1 || null, r.composition2 || null, r.manufacturer || null
+        );
+        loaded++;
+      }
+      await db.run('COMMIT');
+    } catch (e) {
+      await db.run('ROLLBACK');
+      throw e;
+    }
+    console.log(`[Seed] Bundled reference seeded: ${loaded} APIs`);
+    return { loaded };
+  } finally {
+    await dbManager.close();
+  }
+}
+
 // ─── Enrichment Engine ─────────────────────────────────────────────────
 
 export interface EnrichmentStatus {

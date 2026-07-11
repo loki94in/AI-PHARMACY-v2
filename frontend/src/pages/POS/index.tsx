@@ -19,6 +19,19 @@ const getLocalDateString = (d: Date = new Date()) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const parsePackSizeFromPackaging = (packaging: string | null | undefined): number | null => {
+  if (!packaging) return null;
+  const trimmed = packaging.trim();
+  if (/\b\d+\s*x\s*\d+\b/i.test(trimmed)) {
+    const parts = trimmed.split(/x/i);
+    return (parseInt(parts[0], 10) || 1) * (parseInt(parts[1], 10) || 1);
+  }
+  const match = trimmed.match(/^(\d+)/);
+  if (!match) return null;
+  const size = parseInt(match[1], 10);
+  return size > 0 ? size : null;
+};
+
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
 
 const ModalSkeleton = () => (
@@ -216,7 +229,7 @@ const POS = () => {
               unitPrice: matched.unit_price || matched.mrp || 100,
               looseQty: 0,
               discount: 0,
-              packSize: matched.pack_size || 10
+              packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10
             };
             setCart([cartItem]);
           } else {
@@ -801,7 +814,7 @@ const POS = () => {
         unitPrice: matched ? (matched.unit_price || matched.mrp || 100) : 100,
         looseQty: 0,
         discount: 0,
-        packSize: matched ? (matched.pack_size || 10) : 10
+        packSize: matched ? (parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10) : 10
       };
 
       setCart(prev => {
@@ -1293,7 +1306,7 @@ const POS = () => {
         mrp: details.mrp || 0,
         costPrice: details.mrp ? details.mrp * 0.7 : 0,
         salts: details.api_reference || 'Generic',
-        packSize: 10,
+        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10,
         quantity: 0,
         recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1
       });
@@ -1314,7 +1327,7 @@ const POS = () => {
         mrp: item.mrp,
         costPrice: item.cost_price,
         salts: details.api_reference || details.hsn_code || 'Generic',
-        packSize: item.pack_size || 10,
+        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
         quantity: item.quantity,
         batch_quantity: item.batch_quantity,
         loose_quantity: item.loose_quantity,
@@ -1332,7 +1345,7 @@ const POS = () => {
         mrp: item.mrp,
         costPrice: item.cost_price,
         salts: item.salts || item.hsn_code || 'Generic',
-        packSize: item.pack_size || 10,
+        packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
         quantity: item.quantity,
         batch_quantity: item.batch_quantity,
         loose_quantity: item.loose_quantity,
@@ -3438,8 +3451,36 @@ const POS = () => {
           <UniversalMedicineEditModal 
             medicineId={editMedicineId} 
             onClose={() => setEditMedicineId(null)} 
-            onSave={() => {
-              // Optional: Re-fetch or update local search results state if needed
+            onSave={async () => {
+              const currentMedId = editMedicineId;
+              if (!currentMedId) return;
+              try {
+                const details = await api.getMedicineQuickDetails(currentMedId);
+                const newPackSize = parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10;
+                
+                updateCart(prevCart => {
+                  const updatedCart = prevCart.map(item => {
+                    if (!item.isEmptyRow && item.medicine_id === currentMedId) {
+                      return {
+                        ...item,
+                        name: details.name,
+                        packSize: newPackSize,
+                        mrp: details.mrp || item.mrp,
+                        salts: details.api_reference || details.hsn_code || item.salts,
+                      };
+                    }
+                    return item;
+                  });
+
+                  const targetItem = updatedCart.find(item => !item.isEmptyRow && item.medicine_id === currentMedId);
+                  if (targetItem) {
+                    return rebalanceCartMedicine(updatedCart, currentMedId, targetItem.id, {});
+                  }
+                  return updatedCart;
+                });
+              } catch (err) {
+                console.error('Failed to update cart items after quick edit save:', err);
+              }
             }} 
           />
         </Suspense>

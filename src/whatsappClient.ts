@@ -248,6 +248,16 @@ export async function initClient(): Promise<WAClient> {
         return row.reason !== 'unignored';
       }
       const isGroupOrBroadcast = chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+      if (isGroupOrBroadcast) {
+        try {
+          await db.run(
+            `INSERT OR IGNORE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)`,
+            [chatId, chatId.endsWith('@g.us') ? 'group' : 'broadcast']
+          );
+        } catch (e) {
+          console.warn('[WhatsApp] Failed to auto-insert ignored chat:', e);
+        }
+      }
       return isGroupOrBroadcast;
     };
     
@@ -562,18 +572,30 @@ async function syncWhatsappData(client: WAClient) {
       ignoreMap.set(r.phone, r.reason);
     }
 
-    const isIgnored = (chatId: string) => {
+    const isIgnored = async (chatId: string) => {
       const phone = chatId.split('@')[0];
       const explicit = ignoreMap.get(chatId) || ignoreMap.get(phone);
       if (explicit !== undefined) {
         return explicit !== 'unignored';
       }
-      return chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+      const isGroupOrBroadcast = chatId.endsWith('@g.us') || chatId.endsWith('@broadcast') || chatId.includes('broadcast') || chatId === 'status@broadcast' || chatId.includes('-');
+      if (isGroupOrBroadcast) {
+        try {
+          await db.run(
+            `INSERT OR IGNORE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)`,
+            [chatId, chatId.endsWith('@g.us') ? 'group' : 'broadcast']
+          );
+          ignoreMap.set(chatId, chatId.endsWith('@g.us') ? 'group' : 'broadcast');
+        } catch (e) {
+          console.warn('[WhatsApp] Failed to auto-insert ignored chat in sync:', e);
+        }
+      }
+      return isGroupOrBroadcast;
     };
     
     for (const chat of chats) {
       const chatId = chat.id._serialized;
-      if (isIgnored(chatId)) {
+      if (await isIgnored(chatId)) {
         continue; // Completely skip synchronization for ignored chats
       }
       const lastMsg = chat.lastMessage ? chat.lastMessage.body : null;
@@ -683,6 +705,15 @@ export async function forceReconnect(): Promise<void> {
     }
   } catch (err) {
     console.error('[WhatsApp] Failed to clear session folder (non-fatal):', err);
+  }
+
+  // 3b. Delete auto-ignored groups and broadcasts from the database
+  try {
+    const db = await dbManager.getConnection();
+    await db.run("DELETE FROM ignored_whatsapp_numbers WHERE reason IN ('group', 'broadcast')");
+    console.log('[WhatsApp] Cleared auto-ignored group and broadcast chats from database.');
+  } catch (err) {
+    console.error('[WhatsApp] Failed to clear auto-ignored chats from database (non-fatal):', err);
   }
 
   // 4. Wait a moment then reinitialize — a fresh QR will be emitted

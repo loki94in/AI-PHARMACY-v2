@@ -258,6 +258,19 @@ app.listen(PORT, async () => {
             console.log('[Boot] Unified Engine background workers started');
           })(),
 
+          // Step2b: Seed a small bundled API dictionary into medicine_reference
+          // (offline fallback when the full reference CSV is absent) so API-identity
+          // matching + the scan gate have a working dictionary from first boot.
+          (async () => {
+            try {
+              const { seedBundledReference } = await import('./worker/compositionEnricher.js');
+              const res = await seedBundledReference();
+              if (res.loaded > 0) console.log(`[Boot] Seeded ${res.loaded} reference APIs.`);
+            } catch (seedErr) {
+              console.warn('[Boot] Bundled reference seed failed:', seedErr);
+            }
+          })(),
+
           // Step 3: Startup catch-up check & cron schedules (Refills, overdue credit notes, return processing)
           (async () => {
             if (isAutoEnabled) {

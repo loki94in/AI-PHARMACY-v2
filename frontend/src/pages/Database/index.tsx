@@ -997,7 +997,7 @@ const DatabasePage = () => {
                           setSingleForm(prev => ({
                             ...prev,
                             packaging: val,
-                            name: prev.name ? updateMedicineNameWithPackSize(prev.name, val) : prev.name
+                            name: prev.name ? updateMedicineNameWithPackSize(prev.name, val, prev.packaging) : prev.name
                           }));
                         }}
                         placeholder="e.g. 10x10 Tab"

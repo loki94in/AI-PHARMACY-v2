@@ -76,8 +76,10 @@ const generateInvoiceNo = async (db: Database) => {
   let nextNum = 1;
   if (row && row.invoice_no) {
     const parts = row.invoice_no.split('-');
-    const numPart = parts[2];
-    nextNum = parseInt(numPart, 10) + 1;
+    const lastPart = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastPart)) {
+      nextNum = lastPart + 1;
+    }
   }
   const padded = String(nextNum).padStart(4, '0');
   return `${prefix}${padded}`;
@@ -136,7 +138,7 @@ router.post('/', async (req, res) => {
     db = await dbManager.getConnection();
     
     // Start transaction to enforce atomicity
-    await db.run('BEGIN TRANSACTION');
+    await db.run('BEGIN IMMEDIATE TRANSACTION');
 
     // Resolve or auto-create customer/patient
     let customerId = patient_id || null;
@@ -386,6 +388,15 @@ router.post('/hold', async (req, res) => {
     const finalDoctor = doctor_name || doctor || '';
     const finalDiscount = discount || 0;
     const finalCartData = cart_data || items || [];
+    let parsedItems: any[];
+    try {
+      parsedItems = typeof finalCartData === 'string' ? JSON.parse(finalCartData) : finalCartData;
+      if (!Array.isArray(parsedItems)) {
+        parsedItems = [];
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid cart payload JSON' });
+    }
     
     // Create serialized data blob for compatibility with legacy HTML restoration
     const serializedData = data || JSON.stringify({
@@ -397,11 +408,9 @@ router.post('/hold', async (req, res) => {
       remarks: remarks || ''
     });
 
+    await db.run('BEGIN IMMEDIATE TRANSACTION');
     const holdInvoiceNo = await generateInvoiceNo(db);
-    
-    await db.run('BEGIN TRANSACTION');
 
-    const parsedItems = typeof finalCartData === 'string' ? JSON.parse(finalCartData) : finalCartData;
     for (const item of parsedItems) {
       if (item.id && typeof item.id === 'number' && item.id < 1000000) {
         const inventory_id = item.id;

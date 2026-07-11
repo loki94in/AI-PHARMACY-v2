@@ -201,6 +201,37 @@ export function parseMessage(text: string): ParsedMessage {
 }
 
 /**
+ * Detect dosage form (Tablet / Capsule / Syrup / Suspension / Drops / Injection…)
+ * from free text — used for text-only WhatsApp messages (the image path already
+ * detects form via aiCameraService.detectDosageForm). Keeps the same pattern set
+ * so text and OCR agree on the form label.
+ */
+export function detectDosageForm(text: string): string | null {
+  if (!text) return null;
+  const patterns: [RegExp, string][] = [
+    [/\b(?:tab(?:let)?s?)\b/i, 'Tablet'],
+    [/\b(?:cap(?:sule)?s?)\b/i, 'Capsule'],
+    [/\b(?:syp|syrup)\b/i, 'Syrup'],
+    [/\b(?:susp(?:ension)?)\b/i, 'Suspension'],
+    [/\b(?:inj(?:ection)?)\b/i, 'Injection'],
+    [/\b(?:gel)\b/i, 'Gel'],
+    [/\b(?:cream)\b/i, 'Cream'],
+    [/\b(?:drops?|eye\s*drops?|ear\s*drops?)\b/i, 'Drops'],
+    [/\b(?:oint(?:ment)?)\b/i, 'Ointment'],
+    [/\b(?:lotion)\b/i, 'Lotion'],
+    [/\b(?:powder)\b/i, 'Powder'],
+    [/\b(?:spray)\b/i, 'Spray'],
+    [/\b(?:inh(?:aler)?)\b/i, 'Inhaler'],
+    [/\b(?:sachet)\b/i, 'Sachet'],
+    [/\b(?:solution)\b/i, 'Solution'],
+  ];
+  for (const [regex, form] of patterns) {
+    if (regex.test(text)) return form;
+  }
+  return null;
+}
+
+/**
  * Quick check if text looks like "same" / "repeat" / "wahi" — meaning repeat last order.
  */
 export function isRepeatRequest(text: string): boolean {
@@ -208,4 +239,49 @@ export function isRepeatRequest(text: string): boolean {
   const lower = text.toLowerCase().trim();
   const repeatWords = ['same', 'wahi', 'wohi', 'repeat', 'fir se', 'phir se', 'same order', 'last wala'];
   return repeatWords.some(w => lower.includes(w));
+}
+
+// ─── Scan Gate: is an OCR'd image actually a medicine? ──────────────────
+// Runs on EVERY OCR result BEFORE any search/escalation, so booking
+// screenshots, tickets, bank/finance docs, food packets and random photos
+// are skipped instead of triggering pointless scans + admin escalations.
+// Pure + offline (no DB/network) so it is cheap to call per image.
+
+const NON_MEDIA_DOC_SIGNS = [
+  // Travel / tickets
+  'invoice', 'bill no', 'booking', 'ticket', 'train', 'flight', 'pnr',
+  'rail', 'journey', 'boarding', 'passenger', 'fare', 'seat', 'berth', 'airline',
+  // Finance / documents
+  'bank', 'payment', 'receipt', 'statement', 'aadhaar', 'aadhar', 'pan card',
+  'gst', 'tax invoice', 'salary', 'payslip', 'order id', 'tracking', 'courier',
+  'transaction', 'upi', 'neft', 'imps', 'shipment', 'waybill', 'consignment',
+  // Food / non-pharma retail
+  'biscuit', 'chocolate', 'snack', 'shampoo', 'soap', 'detergent',
+  'namkeen', 'chips', 'restaurant', 'menu', 'hotel',
+];
+
+/**
+ * Decide whether an OCR'd image is plausibly a medicine (strip/pack/label)
+ * rather than a non-medicine document or random photo.
+ *
+ * Logic: a plausible Latin medicine name must already have been extracted
+ * (isPlausibleMedicineName). Then we only BLOCK when the OCR text carries
+ * >= 2 non-medicine document signatures (booking/ticket/bill/food). This is
+ * conservative: real medicine strips rarely contain those words, so they pass;
+ * train tickets / invoices / biscuits get skipped. A single stray word never
+ * blocks a real medicine.
+ */
+export function isMedicineLikely(ocrText: string, potentialName?: string): boolean {
+  const name = (potentialName || '').trim();
+  if (!name || !isPlausibleMedicineName(name)) return false;
+
+  const text = (ocrText || '').toLowerCase();
+  let docHits = 0;
+  for (const sign of NON_MEDIA_DOC_SIGNS) {
+    if (text.includes(sign)) {
+      docHits++;
+      if (docHits >= 2) return false;
+    }
+  }
+  return true;
 }

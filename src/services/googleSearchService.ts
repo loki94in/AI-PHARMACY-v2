@@ -54,7 +54,6 @@ class GoogleSearchService {
   private async logSearch(query: string) {
     const db = await dbManager.getConnection();
     await db.run('INSERT INTO google_search_logs (query) VALUES (?)', [query]);
-    await dbManager.close();
   }
 
   /**
@@ -72,7 +71,6 @@ class GoogleSearchService {
     );
     const todayCount = countRow ? countRow.count : 0;
     
-    await dbManager.close();
     return todayCount >= limit;
   }
 

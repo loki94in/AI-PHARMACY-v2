@@ -2,7 +2,7 @@
   "name": "ai-pharmacy",
   "version": "0.1.0",
   "type": "module",
-  "bin": "src/server.ts",
+  "bin": "dist/src/server.js",
   "scripts": {
     "start": "tsx src/server.ts",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
@@ -12,7 +12,8 @@
     "enqueue-catalog": "tsx ./src/cli/enqueueCatalog.ts",
     "worker": "tsx ./src/worker/catalogWorker.ts",
     "watch-catalog": "tsx ./src/cli/watchCatalog.ts",
-    "build:exe": "pkg . --targets node18-win-x64 --output dist/PharmacyOS.exe"
+    "build": "tsc -p tsconfig.json",
+    "build:exe": "npm run build && pkg . --targets node18-win-x64 --output dist/PharmacyOS.exe"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
@@ -77,10 +78,7 @@
     "typescript": "^6.0.3"
   },
   "pkg": {
-    "assets": [
-      "data/**",
-      "backup/**"
-    ]
+    "assets": []
   },
   "overrides": {
     "qs": "^6.15.2",

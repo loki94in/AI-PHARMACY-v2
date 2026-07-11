@@ -61,6 +61,18 @@ export function registerProcessGuardian(): void {
   process.on('unhandledRejection', async (reason: unknown) => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? (reason.stack || '') : '';
+
+    // Suppress benign Puppeteer/whatsapp-web.js internal rejections from crashing the process
+    if (
+      message.includes('detached Frame') ||
+      message.includes('Execution context was destroyed') ||
+      message.includes('Session closed. Most likely the page has been closed') ||
+      message.includes('Target closed')
+    ) {
+      console.warn('[ProcessGuardian] Suppressed benign Puppeteer/WA rejection:', message);
+      return;
+    }
+
     console.error('[ProcessGuardian] CRITICAL — Unhandled Rejection:', reason);
     await writeCrashLog(message, stack);
     process.exit(1);

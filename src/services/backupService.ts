@@ -7,10 +7,12 @@ import Database from 'better-sqlite3';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
+import { config } from '../config/index.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
+const DB_PATH = config.dbPath;
+const BACKUP_DIR = config.backupDir;
 
 const MAX_BACKUPS = 20;
 

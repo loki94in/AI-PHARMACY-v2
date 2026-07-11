@@ -7,6 +7,7 @@ interface EscalationPayload {
   medicineName: string;
   quantity: number;
   unit: string;
+  dosageForm?: string;
   localMatches: string[];
   catalogResults: { mapped: any[]; nonMapped: any[] } | null;
   confidence: number;
@@ -158,11 +159,11 @@ export async function maybeEscalate(payload: EscalationPayload): Promise<void> {
 
     if (outcome === 'pharmarack' && bestMatch) {
       // Find existing pending WhatsApp review or create a new one
-      const existingReview = await db.get(
-        `SELECT id FROM staged_medicine_reviews
-         WHERE lower(medicine_name) = ? AND status = 'pending' AND source = 'whatsapp'`,
-        [bestMatch.name?.toLowerCase().trim() || bestMatch.productName?.toLowerCase().trim() || '']
-      );
+        const existingReview = await db.get(
+          `SELECT id FROM staged_medicine_reviews
+           WHERE lower(medicine_name) = ? AND status = 'pending' AND source = 'whatsapp'`,
+          [payload.medicineName?.toLowerCase().trim() || bestMatch.name?.toLowerCase().trim() || bestMatch.productName?.toLowerCase().trim() || '']
+        );
 
       if (existingReview) {
         reviewId = existingReview.id;
@@ -189,7 +190,7 @@ export async function maybeEscalate(payload: EscalationPayload): Promise<void> {
           `INSERT INTO staged_medicine_reviews (job_id, medicine_name, status, source, search_query, original_row_data)
            VALUES (NULL, ?, 'pending', 'whatsapp', ?, ?)`,
           [
-            bestMatch.name || bestMatch.productName || payload.medicineName,
+            payload.medicineName || bestMatch.name || bestMatch.productName,
             payload.medicineName,
             JSON.stringify(original_row_data)
           ]
@@ -238,15 +239,16 @@ ${phoneLine}
       }
     }
     const contextBlock = contextLines.length > 0 ? `\n\n${contextLines.join('\n')}` : '';
+    const formLine = payload.dosageForm ? `\n🩹 *Form*: ${payload.dosageForm}` : '';
 
     if (outcome === 'found_local') {
       messageText = `🔔 *Prescription Medicine Extracted*
 
 ${customerBlock}
 
-💊 *Extracted Medicine*: ${payload.medicineName}
-📦 *Quantity*: ${payload.quantity} ${payload.unit}
-⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
+ 💊 *Extracted Medicine*: ${payload.medicineName}
+ 📦 *Quantity*: ${payload.quantity} ${payload.unit}${formLine}
+ ⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
 ✅ *In Stock (local)*: ${payload.localMatches.slice(0, 3).join(', ')}${contextBlock}`;
     } else {
       // PharmaRack outcome — mapped distributors first, then non-mapped,
@@ -276,7 +278,7 @@ ${customerBlock}
       messageText = `⚠️ *Medicine NOT in Local Stock — PharmaRack Matches*
 
 ${customerBlock}
-🔍 *Searched*: ${payload.medicineName}${payload.confidence ? ` — best match ${Math.round(payload.confidence)}%` : ''}
+ 🔍 *Searched*: ${payload.medicineName}${payload.dosageForm ? ` (${payload.dosageForm})` : ''}${payload.confidence ? ` — best match ${Math.round(payload.confidence)}%` : ''}
 
 ${matchBlock}${contextBlock}
 

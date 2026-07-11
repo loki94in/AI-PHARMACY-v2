@@ -35,7 +35,7 @@ export async function clearServerUrl(): Promise<void> {
 
 // ─── Generic Fetch Wrapper ──────────────────────────────────────────────────
 
-async function request<T = any>(
+export async function request<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
