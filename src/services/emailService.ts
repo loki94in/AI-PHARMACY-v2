@@ -2774,57 +2774,39 @@ export class EmailService {
    * Helper to build IMAP config object (avoids code duplication).
    */
   private async buildImapConfig(): Promise<{ imapConfig: any; isConfigured: boolean }> {
-    let user = this.imapConfig.user;
-    let password = this.imapConfig.password;
+    let user = this.imapConfig.user ? this.imapConfig.user.trim() : '';
     let xoauth2: string | undefined = undefined;
 
     try {
       const db = await dbManager.getConnection();
       const userRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
-      const passRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
-      if (userRow && userRow.value) user = userRow.value;
-      if (passRow && passRow.value) password = passRow.value;
+      if (userRow && userRow.value) user = userRow.value.trim();
     } catch (_) {}
 
+    // OAuth is the only supported auth method — App Password is not accepted.
     const accessToken = await this.getGmailAccessToken();
-    if (accessToken && user) {
-      const authData = [`user=${user}`, `auth=Bearer ${accessToken}`, '', ''].join('\x01');
-      xoauth2 = Buffer.from(authData, 'utf-8').toString('base64');
+    if (!accessToken || !user) {
+      console.log('[Sync] Gmail OAuth token not configured. Connect Gmail via Settings → Google Sign-In.');
+      return { imapConfig: null, isConfigured: false };
     }
 
-    let host = this.imapConfig.host;
-    let port = this.imapConfig.port;
-    let tls = this.imapConfig.tls;
+    const authData = [`user=${user}`, `auth=Bearer ${accessToken}`, '', ''].join('\x01');
+    xoauth2 = Buffer.from(authData, 'utf-8').toString('base64');
+
+    // Auto-detect host from email domain; fall back to imap_host setting if set.
+    let host = 'imap.gmail.com';
+    let port = 993;
+    let tls = true;
 
     try {
       const db = await dbManager.getConnection();
       const hostRow = await db.get("SELECT value FROM app_settings WHERE key = 'imap_host'");
       const portRow = await db.get("SELECT value FROM app_settings WHERE key = 'imap_port'");
       const tlsRow = await db.get("SELECT value FROM app_settings WHERE key = 'imap_tls'");
-      if (hostRow && hostRow.value) host = hostRow.value;
+      if (hostRow && hostRow.value) host = hostRow.value.trim();
       if (portRow && portRow.value) port = Number(portRow.value) || 993;
       if (tlsRow && tlsRow.value) tls = tlsRow.value === 'true';
     } catch (_) {}
-
-    if (!host && user) {
-      if (user.includes('@gmail.com') || xoauth2) {
-        host = 'imap.gmail.com';
-        port = 993;
-        tls = true;
-      } else if (user.includes('@outlook.com') || user.includes('@hotmail.com') || user.includes('@live.com')) {
-        host = 'outlook.office365.com';
-        port = 993;
-        tls = true;
-      } else if (user.includes('@yahoo.com')) {
-        host = 'imap.mail.yahoo.com';
-        port = 993;
-        tls = true;
-      }
-    }
-
-    if ((!user || !password || !host) && !xoauth2) {
-      return { imapConfig: null, isConfigured: false };
-    }
 
     const imapConfig: any = {
       ...this.imapConfig,
@@ -2833,15 +2815,10 @@ export class EmailService {
       port,
       tls,
       authTimeout: 5000,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: { rejectUnauthorized: false },
+      xoauth2,
     };
-
-    if (xoauth2) {
-      imapConfig.xoauth2 = xoauth2;
-      delete imapConfig.password;
-    } else {
-      imapConfig.password = password;
-    }
+    delete imapConfig.password;
 
     return { imapConfig, isConfigured: true };
   }
@@ -3197,8 +3174,13 @@ export class EmailService {
       connection = await imap.connect(config);
       await connection.openBox('INBOX');
 
-      // Mark as seen
-      await connection.addFlags(uid, '\\Seen');
+      // Mark as seen via underlying node-imap connection
+      await new Promise<void>((resolve, reject) => {
+        connection.imap.addFlags(uid, '\\Seen', (err: any) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
       return true;
     } catch (err) {
       console.error('markAsSeen error:', err);

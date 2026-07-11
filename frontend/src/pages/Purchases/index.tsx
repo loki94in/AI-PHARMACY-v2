@@ -12,6 +12,8 @@ import { HoverPriceIntelTable } from '../../components/HoverPriceIntelTable';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { calculateSimilarity } from '../../utils/fuzzy';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { getLocalDateString, getTodayString, getNDaysAgoString } from '../../utils/date';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -102,7 +104,7 @@ const getInitialPurchasesTabs = () => {
       distributorSearch: '',
       invoiceNo: '',
       grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
-      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceDate: getTodayString(),
       globalCdPer: '',
       extraCredit: '',
       cnAmount: '',
@@ -388,7 +390,7 @@ const Purchases: React.FC = () => {
       distributorSearch: '',
       invoiceNo: '',
       grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
-      invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceDate: getTodayString(),
       globalCdPer: '',
       extraCredit: '',
       cnAmount: '',
@@ -443,7 +445,7 @@ const Purchases: React.FC = () => {
         distributorSearch: '',
         invoiceNo: '',
         grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
-        invoiceDate: new Date().toISOString().split('T')[0],
+        invoiceDate: getTodayString(),
         globalCdPer: '',
         extraCredit: '',
         cnAmount: '',
@@ -586,16 +588,14 @@ const Purchases: React.FC = () => {
 
   // Helper to get date N days ago in YYYY-MM-DD format
   const getNDaysAgo = (n: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() - n);
-    return d.toISOString().split('T')[0];
+    return getNDaysAgoString(n);
   };
 
   // History list filter states
   const [filterDistributor, setFilterDistributor] = useState('');
   const [filterInvoice, setFilterInvoice] = useState('');
   const [filterStartDate, setFilterStartDate] = useState(getNDaysAgo(13));
-  const [filterEndDate, setFilterEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [filterEndDate, setFilterEndDate] = useState(getTodayString());
   const [filterMinAmount, setFilterMinAmount] = useState('');
   const [filterMaxAmount, setFilterMaxAmount] = useState('');
 
@@ -1327,13 +1327,11 @@ const Purchases: React.FC = () => {
       setSourceFileHeaders([]);
       setMappingConfig({});
       setEditPurchaseId(null);
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['purchase-history'] });
-      queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.message || 'Failed to save purchase';

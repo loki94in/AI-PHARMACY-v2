@@ -4,6 +4,7 @@ import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
 import { applyStockDelta } from '../utils/stockRebuild.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { verificationService } from '../services/verificationService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -105,6 +106,12 @@ router.get('/next-invoice', async (req, res) => {
 router.post('/', async (req, res) => {
   let db;
   try {
+    // Non-destructively invoke the global Verification Layer pre-save checks
+    const verification = await verificationService.verifyPOSBill(req.body);
+    if (!verification.success) {
+      return res.status(400).json({ error: verification.message, layer: verification.layer });
+    }
+
     const { items = [], patient_id, doctor_id, doctor_name, discount = 0, patient_name, patient_phone, patient_address, paymentMedium = 'CASH', paymentStatus = 'PAID', sendWhatsApp = false, sale_date, refillEnabled = false, refillDays = 30, refillId } = req.body;
 
     // Strict validation: check items parameters to prevent null values
@@ -843,7 +850,14 @@ router.get('/search-medicine', async (req, res) => {
              OR im.mrp = ?
              OR im.batch_no LIKE ?)
             AND im.quantity > 0
-            AND im.expiry_date >= date('now')
+            AND (im.expiry_date IS NULL OR 
+              CASE 
+                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+                ELSE im.expiry_date
+              END >= strftime('%Y-%m', 'now')
+            )
           ORDER BY m.name ASC, im.expiry_date ASC
           LIMIT 30
         `;
@@ -878,7 +892,14 @@ router.get('/search-medicine', async (req, res) => {
              OR m.name LIKE ?
              OR im.batch_no LIKE ?)
             AND im.quantity > 0
-            AND im.expiry_date >= date('now')
+            AND (im.expiry_date IS NULL OR 
+              CASE 
+                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+                ELSE im.expiry_date
+              END >= strftime('%Y-%m', 'now')
+            )
           ORDER BY m.name ASC, im.expiry_date ASC
           LIMIT 30
         `;
@@ -911,7 +932,14 @@ router.get('/search-medicine', async (req, res) => {
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.name LIKE ?
           AND im.quantity > 0
-          AND im.expiry_date >= date('now')
+          AND (im.expiry_date IS NULL OR 
+            CASE 
+              WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+              ELSE im.expiry_date
+            END >= strftime('%Y-%m', 'now')
+          )
         ORDER BY m.name ASC, im.expiry_date ASC
         LIMIT 30
       `;
@@ -944,7 +972,14 @@ router.get('/search-medicine', async (req, res) => {
           JOIN medicines m ON im.medicine_id = m.id
           WHERE (m.name LIKE ? OR m.item_code LIKE ?)
             AND im.quantity > 0
-            AND im.expiry_date >= date('now')
+            AND (im.expiry_date IS NULL OR 
+              CASE 
+                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+                ELSE im.expiry_date
+              END >= strftime('%Y-%m', 'now')
+            )
           ORDER BY m.name ASC, im.expiry_date ASC
           LIMIT 30
         `;

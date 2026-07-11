@@ -10,6 +10,8 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import Expiry from '../Expiry';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { getTodayString, getNDaysAgoString } from '../../utils/date';
 import CustomerReturn from '../CustomerReturn';
 import CustomerReturnHistory from '../CustomerReturnHistory';
 import { CalendarDays, Users, History } from 'lucide-react';
@@ -114,22 +116,7 @@ const formatExpiryToMMYY = (val: string): string => {
   return val;
 };
 
-const getTodayString = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 let cachedReturnHistory: any[] | null = null;
 
@@ -205,12 +192,11 @@ const Returns: React.FC = () => {
     try {
       await api.deleteReturn(ret.id);
       if (selectedHistoryReturn?.id === ret.id) handleClearHistorySelection();
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['return-history'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
     } catch (err) {
       console.error('Failed to delete return:', err);
       alert('Failed to delete return');
@@ -232,12 +218,11 @@ const Returns: React.FC = () => {
       await api.updateReturn(selectedHistoryReturn.id, { items: validItems, total_amount: total });
       setIsEditingHistory(false);
       await handleSelectHistoryReturn(selectedHistoryReturn);
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['return-history'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
     } catch (err) {
       console.error('Failed to save return:', err);
       alert('Failed to save changes');
@@ -708,12 +693,11 @@ const Returns: React.FC = () => {
       alert(`Successfully processed ${grouped.length} return(s)!`);
       setItems([createEmptyItem()]);
       setShowGroupedPreview(false);
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['return-history'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
     } catch (error) {
       console.error('Error processing return:', error);
       alert('Failed to process return');

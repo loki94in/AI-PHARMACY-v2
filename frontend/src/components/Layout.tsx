@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { 
   LayoutDashboard, 
   PackageSearch, 
@@ -102,6 +103,7 @@ const Sidebar = ({
   onClose?: () => void;
 }) => {
   const location = useLocation();
+  const queryClient = useQueryClient();
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
     { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
@@ -236,6 +238,49 @@ const Sidebar = ({
                 onMouseEnter={() => {
                   const basePath = item.path.split('?')[0];
                   pageImports[basePath]?.();
+                  
+                  // Prefetch API data for primary queries on hover (improved page switch response time)
+                  try {
+                    if (basePath === '/dashboard') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['dashboard'],
+                        queryFn: () => api.getDashboard(),
+                        staleTime: 5 * 60_000,
+                      });
+                    } else if (basePath === '/orders') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['orders'],
+                        queryFn: () => api.getOrders(),
+                        staleTime: 5 * 60_000,
+                      });
+                    } else if (basePath === '/crm') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['crm-patients'],
+                        queryFn: () => api.getPatients(),
+                        staleTime: 5 * 60_000,
+                      });
+                    } else if (basePath === '/pos') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['pos-common-combinations'],
+                        queryFn: () => api.getDoctors(),
+                        staleTime: 5 * 60_000,
+                      });
+                    } else if (basePath === '/mail') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['email-inbox'],
+                        queryFn: () => api.getEmailInbox(50),
+                        staleTime: 5 * 60_000,
+                      });
+                    } else if (basePath === '/pharmarack-cart') {
+                      queryClient.prefetchQuery({
+                        queryKey: ['pharmarack-cart'],
+                        queryFn: () => api.getPharmarackCart(),
+                        staleTime: 5 * 60_000,
+                      });
+                    }
+                  } catch (err) {
+                    console.warn('Prefetch error:', err);
+                  }
                 }}
                 onClick={onClose}
                 className={`

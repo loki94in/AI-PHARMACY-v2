@@ -10,12 +10,30 @@ import {
   Loader2,
   Columns3,
   X,
-  Download
+  Download,
+  Calendar,
+  Sliders,
+  ArrowUpRight,
+  ArrowDownLeft,
+  RotateCcw,
+  ShoppingCart,
+  Plus,
+  Minus,
+  History,
+  FileText,
+  AlertCircle,
+  TrendingUp,
+  TrendingDown,
+  ChevronRight,
+  Info,
+  PackageSearch
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
@@ -84,23 +102,6 @@ interface SelectedDetails {
     mrp?: number;
   }>;
 }
-
-const getTodayString = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 const InvestigationCenter = () => {
   const queryClient = useQueryClient();
@@ -281,7 +282,7 @@ const InvestigationCenter = () => {
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 36,
+    estimateSize: () => 48,
     overscan: 10,
   });
 
@@ -375,13 +376,11 @@ const InvestigationCenter = () => {
           setEditingType(null);
           setConfirmModal(null);
           runSearch(1, false);
-          // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-          queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-          queryClient.invalidateQueries({ queryKey: ['sells-list'] });
-          queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
-          queryClient.invalidateQueries({ queryKey: ['reports'] });
-          queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+          // Centralized cache invalidation for frontend lists and local infinite scroll caches
+          invalidateAfterStockWrite(queryClient);
+
+          // Refresh local POS inventory search cache
+          api.getCompactInventory().catch(() => {});
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to update inventory', 'error');
         }
@@ -563,13 +562,11 @@ const InvestigationCenter = () => {
           setEditingType(null);
           setConfirmModal(null);
           runSearch(1, false);
-          // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-          queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-          queryClient.invalidateQueries({ queryKey: ['sells-list'] });
-          queryClient.invalidateQueries({ queryKey: ['purchase-history-list'] });
-          queryClient.invalidateQueries({ queryKey: ['reports'] });
-          queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+          // Centralized cache invalidation for frontend lists and local infinite scroll caches
+          invalidateAfterStockWrite(queryClient);
+
+          // Refresh local POS inventory search cache
+          api.getCompactInventory().catch(() => {});
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to save correction.', 'error');
         }
@@ -579,23 +576,7 @@ const InvestigationCenter = () => {
 
   // Helper date formatter matching user's spreadsheet style: DD/MM/YYYY hh:mm AM/PM
   const formatDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    
-    const pad = (num: number) => String(num).padStart(2, '0');
-    const day = pad(d.getDate());
-    const month = pad(d.getMonth() + 1);
-    const year = d.getFullYear();
-    
-    let hours = d.getHours();
-    const minutes = pad(d.getMinutes());
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; // 0 hour should be 12
-    const formattedHours = pad(hours);
-    
-    return `${day}/${month}/${year} ${formattedHours}:${minutes} ${ampm}`;
+    return formatDisplayDate(dateStr, true);
   };
 
   // Formatting helpers for stock quantities
@@ -605,12 +586,33 @@ const InvestigationCenter = () => {
     return String(qty || 0);
   };
 
+  // Type helper for row icons
+  const getTypeIcon = (type: string, returnType?: string) => {
+    switch (type) {
+      case 'Sale':
+        return <ShoppingCart size={12} className="text-accent" />;
+      case 'Purchase':
+        return <Package size={12} className="text-primary" />;
+      case 'Return':
+        return <RotateCcw size={12} className={returnType === 'purchase' ? 'text-orange-400' : 'text-purple-400'} />;
+      case 'Adjustment':
+        return <Sliders size={12} className="text-amber-500" />;
+      default:
+        return <Clock size={12} className="text-muted" />;
+    }
+  };
+
+  // Calculate summary stats from current loaded items
+  const salesCount = items.filter(i => i.type === 'Sale').length;
+  const purchasesCount = items.filter(i => i.type === 'Purchase').length;
+  const adjustmentsCount = items.filter(i => i.type === 'Adjustment').length;
+
   return (
     <div className="h-full flex flex-col gap-4 overflow-hidden relative">
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-[99999] flex items-center gap-2 px-4 py-3 rounded-xl border backdrop-blur-xl shadow-2xl text-xs font-semibold animate-in slide-in-from-top-4
-          ${toast.type === 'success' ? 'bg-green/15 border-green/30 text-green-200' : 'bg-red/15 border-red/30 text-red-200'}`}>
+        <div className={`fixed top-4 right-4 z-[99999] flex items-center gap-2 px-4 py-3 rounded-xl border backdrop-blur-xl shadow-2xl text-xs font-semibold animate-in slide-in-from-top-4 duration-300
+          ${toast.type === 'success' ? 'bg-green/10 border-green/30 text-green' : 'bg-red/10 border-red/30 text-red'}`}>
           <Check size={14} />
           {toast.message}
         </div>
@@ -618,8 +620,8 @@ const InvestigationCenter = () => {
 
       {/* Confirmation Modal */}
       {confirmModal && confirmModal.show && (
-        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-bg2 border border-glass-border max-w-md w-full rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4">
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border max-w-md w-full rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-amber-500">
               <AlertTriangle size={24} />
               <h3 className="font-bold text-base text-text">{confirmModal.title}</h3>
@@ -628,13 +630,13 @@ const InvestigationCenter = () => {
             <div className="flex justify-end gap-3 mt-2">
               <button 
                 onClick={() => setConfirmModal(null)} 
-                className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
               <button 
                 onClick={confirmModal.onConfirm} 
-                className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(59,130,246,0.2)]"
+                className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer"
               >
                 Confirm Adjustment
               </button>
@@ -646,8 +648,65 @@ const InvestigationCenter = () => {
       {detailsLoading && (
         <div className="absolute inset-0 z-[80] bg-black/40 backdrop-blur-xs flex items-center justify-center">
           <div className="flex flex-col items-center gap-2 animate-pulse text-muted">
-            <Clock size={32} className="animate-spin text-primary" />
+            <Loader2 size={32} className="animate-spin text-primary" />
             <span className="text-xs font-bold uppercase tracking-wider">Fetching details...</span>
+          </div>
+        </div>
+      )}
+
+      {/* KPI Cards (Dashboard Summary View) - Only visible when not editing */}
+      {!editingType && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0 animate-in fade-in duration-300">
+          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total Ledgers</span>
+              <span className="text-2xl font-black text-text font-mono">
+                {totalItems.toLocaleString()}
+              </span>
+              <span className="text-[9px] text-muted">Across selected dates</span>
+            </div>
+            <div className="p-3 rounded-xl bg-accent/10 border border-accent/25 text-accent shadow-sm">
+              <FileText size={18} />
+            </div>
+          </div>
+
+          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Sales Events</span>
+              <span className="text-2xl font-black text-sky-400 font-mono">
+                {salesCount.toLocaleString()}
+              </span>
+              <span className="text-[9px] text-muted">Currently loaded</span>
+            </div>
+            <div className="p-3 rounded-xl bg-sky-400/10 border border-sky-400/25 text-sky-400 shadow-sm">
+              <ShoppingCart size={18} />
+            </div>
+          </div>
+
+          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Purchases</span>
+              <span className="text-2xl font-black text-green-400 font-mono">
+                {purchasesCount.toLocaleString()}
+              </span>
+              <span className="text-[9px] text-muted">Currently loaded</span>
+            </div>
+            <div className="p-3 rounded-xl bg-green-400/10 border border-green-400/25 text-green-400 shadow-sm">
+              <Package size={18} />
+            </div>
+          </div>
+
+          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Stock Adjustments</span>
+              <span className="text-2xl font-black text-amber-500 font-mono">
+                {adjustmentsCount.toLocaleString()}
+              </span>
+              <span className="text-[9px] text-muted">Manually corrected</span>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-500 shadow-sm">
+              <Sliders size={18} />
+            </div>
           </div>
         </div>
       )}
@@ -658,7 +717,7 @@ const InvestigationCenter = () => {
           <div className="p-4 border-b border-glass-border/30 bg-bg2/40 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-2">
               <Edit size={16} className="text-primary" />
-              <h2 className="text-base font-black text-text uppercase">
+              <h2 className="text-sm font-black text-text uppercase tracking-wider">
                 {editingType === 'inventory' ? 'Inventory Direct Correction' : 
                  editingType === 'sale' ? `Correcting Sales Invoice #${editingBillNo}` : 
                  `Correcting Purchase Bill #${editingBillNo}`}
@@ -666,209 +725,452 @@ const InvestigationCenter = () => {
             </div>
             <button 
               onClick={() => setEditingType(null)} 
-              className="text-xs text-muted hover:text-text font-bold bg-bg3 border border-glass-border px-3 py-1.5 rounded-xl transition-all"
+              className="text-xs text-muted hover:text-text font-bold bg-bg3 border border-glass-border px-3 py-1.5 rounded-xl transition-all cursor-pointer"
             >
               Discard Workspace
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-bg2/10">
             {editingType === 'inventory' && (
-              <div className="bg-bg2 border border-glass-border p-6 rounded-2xl flex flex-col gap-6 max-w-4xl mx-auto">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">Stock Quantity</label>
-                    <input 
-                      type="number"
-                      value={editInventoryForm.quantity}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, quantity: Math.max(0, Number(e.target.value)) }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">Loose Quantity</label>
-                    <input 
-                      type="number"
-                      value={editInventoryForm.loose_quantity}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, loose_quantity: Math.max(0, Number(e.target.value)) }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">Batch Number</label>
-                    <input 
-                      type="text"
-                      value={editInventoryForm.batch_no}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, batch_no: e.target.value }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">Expiry Date</label>
-                    <input 
-                      type="text"
-                      placeholder="MM/YY"
-                      value={editInventoryForm.expiry_date}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, expiry_date: e.target.value }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">MRP (₹)</label>
-                    <input 
-                      type="number"
-                      value={editInventoryForm.mrp}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, mrp: Math.max(0, Number(e.target.value)) }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-muted uppercase">Cost Price (₹)</label>
-                    <input 
-                      type="number"
-                      value={editInventoryForm.cost_price}
-                      onChange={e => setEditInventoryForm(prev => ({ ...prev, cost_price: Math.max(0, Number(e.target.value)) }))}
-                      className="bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none"
-                    />
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full items-start">
+                
+                {/* Left Panel: Form & Preview (Col span 8) */}
+                <div className="lg:col-span-8 flex flex-col gap-6 w-full animate-in fade-in slide-in-from-left-4 duration-300">
+                  
+                  {/* Before vs After Preview Card */}
+                  {details && details.inventory && (
+                    <div className="bg-bg2 border border-glass-border p-5 rounded-2xl flex flex-col gap-4 shadow-xl">
+                      <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3">
+                        <Info size={14} className="text-primary" />
+                        <h3 className="text-xs font-bold text-text uppercase tracking-wider">Adjustment Preview</h3>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {/* Compare Box Qty */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">Box Quantity</span>
+                          <div className="flex items-center gap-2 font-mono text-xs">
+                            <span className="text-red/85 line-through">{details.inventory.quantity}</span>
+                            <ChevronRight size={12} className="text-muted" />
+                            <span className={`font-bold ${editInventoryForm.quantity !== details.inventory.quantity ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              {editInventoryForm.quantity}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Compare Loose Qty */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">Loose Qty</span>
+                          <div className="flex items-center gap-2 font-mono text-xs">
+                            <span className="text-red/85 line-through">{details.inventory.loose_quantity}</span>
+                            <ChevronRight size={12} className="text-muted" />
+                            <span className={`font-bold ${editInventoryForm.loose_quantity !== details.inventory.loose_quantity ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              {editInventoryForm.loose_quantity}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Compare Batch */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">Batch Number</span>
+                          <div className="flex items-center gap-2 font-mono text-xs truncate">
+                            <span className="text-red/85 line-through truncate max-w-[60px]">{details.inventory.batch_no}</span>
+                            <ChevronRight size={12} className="text-muted shrink-0" />
+                            <span className={`font-bold truncate max-w-[90px] ${editInventoryForm.batch_no !== details.inventory.batch_no ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              {editInventoryForm.batch_no}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Compare Expiry */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">Expiry Date</span>
+                          <div className="flex items-center gap-2 font-mono text-xs">
+                            <span className="text-red/85 line-through">{details.inventory.expiry_date}</span>
+                            <ChevronRight size={12} className="text-muted" />
+                            <span className={`font-bold ${editInventoryForm.expiry_date !== details.inventory.expiry_date ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              {editInventoryForm.expiry_date}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Compare MRP */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">MRP (₹)</span>
+                          <div className="flex items-center gap-2 font-mono text-xs">
+                            <span className="text-red/85 line-through">₹{details.inventory.mrp}</span>
+                            <ChevronRight size={12} className="text-muted" />
+                            <span className={`font-bold ${editInventoryForm.mrp !== details.inventory.mrp ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              ₹{editInventoryForm.mrp}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Compare Cost Price */}
+                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <span className="text-[10px] text-muted font-bold uppercase">Cost Price (₹)</span>
+                          <div className="flex items-center gap-2 font-mono text-xs">
+                            <span className="text-red/85 line-through">₹{details.inventory.cost_price}</span>
+                            <ChevronRight size={12} className="text-muted" />
+                            <span className={`font-bold ${editInventoryForm.cost_price !== details.inventory.cost_price ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
+                              ₹{editInventoryForm.cost_price}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Input Form Card */}
+                  <div className="bg-bg2 border border-glass-border p-6 rounded-2xl flex flex-col gap-6 shadow-xl">
+                    <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3">
+                      <Sliders size={14} className="text-primary" />
+                      <h3 className="text-xs font-bold text-text uppercase tracking-wider">Adjustment Parameters</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">Stock Quantity</label>
+                        <input 
+                          type="number"
+                          value={editInventoryForm.quantity}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, quantity: Math.max(0, Number(e.target.value)) }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">Loose Quantity</label>
+                        <input 
+                          type="number"
+                          value={editInventoryForm.loose_quantity}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, loose_quantity: Math.max(0, Number(e.target.value)) }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">Batch Number</label>
+                        <input 
+                          type="text"
+                          value={editInventoryForm.batch_no}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, batch_no: e.target.value }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">Expiry Date</label>
+                        <input 
+                          type="text"
+                          placeholder="MM/YY"
+                          value={editInventoryForm.expiry_date}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, expiry_date: e.target.value }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">MRP (₹)</label>
+                        <input 
+                          type="number"
+                          value={editInventoryForm.mrp}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, mrp: Math.max(0, Number(e.target.value)) }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-muted uppercase">Cost Price (₹)</label>
+                        <input 
+                          type="number"
+                          value={editInventoryForm.cost_price}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, cost_price: Math.max(0, Number(e.target.value)) }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5 sm:col-span-2 md:col-span-3">
+                        <label className="text-[10px] font-bold text-muted uppercase">Rack Location</label>
+                        <input 
+                          type="text"
+                          placeholder="e.g. Rack A1, Shelf 2"
+                          value={editInventoryForm.rack_location}
+                          onChange={e => setEditInventoryForm(prev => ({ ...prev, rack_location: e.target.value }))}
+                          className="bg-bg3 border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 border-t border-glass-border/30 pt-4">
+                      <button 
+                        onClick={() => setEditingType(null)} 
+                        className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
+                      >
+                        Discard
+                      </button>
+                      <button 
+                        onClick={saveInventoryAdjustment} 
+                        className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer"
+                      >
+                        Save Stock Adjustments
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 border-t border-glass-border/30 pt-4">
-                  <button 
-                    onClick={() => setEditingType(null)} 
-                    className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold"
-                  >
-                    Discard
-                  </button>
-                  <button 
-                    onClick={saveInventoryAdjustment} 
-                    className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(59,130,246,0.2)]"
-                  >
-                    Save Stock Adjustments
-                  </button>
+                {/* Right Panel: Audit Logs Timeline (Col span 4) */}
+                <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl self-stretch min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300">
+                  <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
+                    <History size={14} className="text-primary" />
+                    <h3 className="text-xs font-bold text-text uppercase tracking-wider">Audit Trail / History</h3>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-3.5 max-h-[500px]">
+                    {auditLogs.length === 0 ? (
+                      <div className="flex-1 flex flex-col items-center justify-center text-center text-muted py-8">
+                        <Clock size={28} className="opacity-20 mb-2" />
+                        <p className="text-[10px] leading-relaxed">No prior audit logs found for this item.</p>
+                      </div>
+                    ) : (
+                      <div className="relative pl-4 border-l border-glass-border/40 ml-1.5 flex flex-col gap-4">
+                        {auditLogs.map((log, idx) => (
+                          <div key={log.id || idx} className="relative flex flex-col gap-1 text-[11px] animate-in fade-in duration-300">
+                            {/* Dot on line */}
+                            <span className="absolute -left-[20.5px] top-1 w-2 h-2 rounded-full bg-primary/80 ring-4 ring-bg2" />
+                            
+                            <div className="flex justify-between items-center text-[9px] font-semibold text-muted">
+                              <span className="uppercase text-primary">{log.action_type?.replace(/_/g, ' ')}</span>
+                              <span>{formatDate(log.created_at)}</span>
+                            </div>
+                            <p className="text-text font-medium leading-relaxed bg-bg3/20 border border-glass-border/20 rounded-lg p-2 mt-0.5">
+                              {log.description}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
             {(editingType === 'sale' || editingType === 'purchase') && (
-              <div className="bg-bg2 border border-glass-border p-6 rounded-2xl flex flex-col gap-4 max-w-5xl mx-auto">
-                {/* Search to add medicine item */}
-                <div className="relative" ref={medicineSearchRef}>
-                  <Search className="absolute left-2.5 top-2.5 text-muted" size={13} />
-                  <input 
-                    type="text"
-                    placeholder="Search medicine to add to this transaction..."
-                    value={searchMedicineQuery}
-                    onChange={e => handleSearchMedicineForAdd(e.target.value)}
-                    className="w-full bg-bg3 border border-glass-border rounded-lg pl-8 pr-3 py-2 text-xs text-text placeholder-muted focus:outline-none"
-                  />
-                  {searchMedicineResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 z-[100] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto p-1.5 flex flex-col gap-1">
-                      {searchMedicineResults.map((med, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => handleAddMedicineToBill(med)}
-                          className="w-full text-left p-2 hover:bg-primary/10 rounded-lg text-xs text-text flex items-center justify-between border border-transparent hover:border-primary/20"
-                        >
-                          <span>{med.medicine_name} (Batch: {med.batch_no || 'N/A'})</span>
-                          <span className="font-mono text-muted text-[10px]">Stock: {med.quantity}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Invoice lines */}
-                <div className="border border-glass-border/30 rounded-xl divide-y divide-glass-border/30 max-h-80 overflow-y-auto">
-                  {billItems.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-muted">No items in the list. Please search and add a medicine.</div>
-                  ) : (
-                    billItems.map((item, index) => (
-                      <div key={index} className="p-3.5 bg-bg3/10 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-text truncate">{item.medicine_name}</p>
-                          <p className="text-[10px] text-muted">Batch: {item.batch_no}</p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-4 shrink-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-muted uppercase">Qty</span>
-                            <input 
-                              type="number"
-                              value={item.quantity}
-                              onChange={e => handleItemQtyChange(index, Math.max(0, Number(e.target.value)))}
-                              className="w-16 bg-bg3 border border-glass-border rounded-lg px-2 py-1 text-xs text-text focus:outline-none"
-                            />
-                          </div>
-                          {editingType === 'sale' && (
-                            <>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-muted uppercase">Loose</span>
-                                <input 
-                                  type="number"
-                                  value={item.loose_qty}
-                                  onChange={e => handleItemLooseQtyChange(index, Math.max(0, Number(e.target.value)))}
-                                  className="w-14 bg-bg3 border border-glass-border rounded-lg px-2 py-1 text-xs text-text focus:outline-none"
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-muted uppercase">Price</span>
-                                <span className="font-mono font-bold text-text">₹{item.unit_price}</span>
-                              </div>
-                            </>
-                          )}
-                          {editingType === 'purchase' && (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-muted uppercase">Cost</span>
-                              <span className="font-mono font-bold text-text">₹{item.cost_price}</span>
-                            </div>
-                          )}
-                          <button
-                            onClick={() => handleRemoveBillItem(index)}
-                            className="p-1.5 rounded hover:bg-red/10 text-red-400 transition-colors"
-                            title="Remove item"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* Recalculated values strip */}
-                <div className="p-4 bg-bg3/30 border border-glass-border/20 rounded-xl flex items-center justify-between text-xs font-bold">
-                  {editingType === 'sale' && (
-                    <div className="flex items-center gap-3">
-                      <span className="text-muted">Discount Override:</span>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full items-start">
+                
+                {/* Left Panel: Autocomplete and Item List (Col span 8) */}
+                <div className="lg:col-span-8 flex flex-col gap-4 w-full animate-in fade-in slide-in-from-left-4 duration-300">
+                  
+                  {/* Medicine Search Card */}
+                  <div className="bg-bg2 border border-glass-border p-4 rounded-2xl shadow-xl flex flex-col gap-3">
+                    <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Search & Add Medicines</label>
+                    <div className="relative" ref={medicineSearchRef}>
+                      <Search className="absolute left-3 top-3.5 text-muted" size={14} />
                       <input 
-                        type="number"
-                        value={billDiscount}
-                        onChange={e => setBillDiscount(Math.max(0, Number(e.target.value)))}
-                        className="w-16 bg-bg3 border border-glass-border rounded-lg px-2 py-0.5 font-mono text-text focus:outline-none"
+                        type="text"
+                        placeholder="Search medicine to add to this transaction..."
+                        value={searchMedicineQuery}
+                        onChange={e => handleSearchMedicineForAdd(e.target.value)}
+                        className="w-full bg-bg3 border border-glass-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-text placeholder-muted focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                       />
+                      {searchMedicineResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 z-[100] mt-2 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto p-1.5 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                          {searchMedicineResults.map((med, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleAddMedicineToBill(med)}
+                              className="w-full text-left p-2.5 hover:bg-primary/10 rounded-lg text-xs text-text flex items-center justify-between border border-transparent hover:border-primary/20 transition-all cursor-pointer"
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-semibold text-text">{med.medicine_name}</span>
+                                <span className="text-[10px] text-muted">Batch: {med.batch_no || 'N/A'}</span>
+                              </div>
+                              <span className="font-mono text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded text-[10px] font-bold">
+                                Stock: {med.quantity}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  <div className="ml-auto text-right">
-                    <span className="text-muted mr-1.5">Recalculated Total:</span>
-                    <span className="text-primary text-sm font-black font-mono">₹{calculateRecalculatedTotal()}</span>
+                  </div>
+
+                  {/* Bill Items List */}
+                  <div className="bg-bg2 border border-glass-border rounded-2xl shadow-xl flex flex-col min-h-[300px] overflow-hidden">
+                    <div className="px-5 py-4 border-b border-glass-border/30 bg-bg2/40 flex justify-between items-center">
+                      <span className="text-xs font-bold text-text uppercase tracking-wider">Transaction Workspace Items</span>
+                      <span className="text-[10px] text-muted font-bold font-mono bg-bg3 px-2 py-0.5 rounded-lg">
+                        {billItems.length} {billItems.length === 1 ? 'item' : 'items'}
+                      </span>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-[450px] custom-scrollbar bg-bg2/10">
+                      {billItems.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center text-muted py-12">
+                          <Package size={36} className="opacity-20 mb-2" />
+                          <p className="text-xs font-semibold">No items in this transaction workspace.</p>
+                          <p className="text-[10px] mt-0.5">Search and select a medicine above to add it.</p>
+                        </div>
+                      ) : (
+                        billItems.map((item, index) => (
+                          <div key={index} className="p-4 bg-bg2 border border-glass-border/35 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs hover:border-glass-border/60 transition-all shadow-sm">
+                            <div className="min-w-0 flex-1 flex flex-col gap-1">
+                              <p className="font-black text-text truncate text-sm">{item.medicine_name}</p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] bg-bg3 border border-glass-border/40 px-2 py-0.5 rounded text-muted font-semibold">
+                                  Batch: {item.batch_no}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-4 shrink-0 justify-between sm:justify-end">
+                              {/* Quantity Stepper */}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Qty</span>
+                                <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleItemQtyChange(index, Math.max(0, item.quantity - 1))}
+                                    className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                  >
+                                    <Minus size={11} />
+                                  </button>
+                                  <input 
+                                    type="number"
+                                    value={item.quantity}
+                                    onChange={e => handleItemQtyChange(index, Math.max(0, Number(e.target.value)))}
+                                    className="w-12 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleItemQtyChange(index, item.quantity + 1)}
+                                    className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                  >
+                                    <Plus size={11} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Loose Quantity Stepper (Sales only) */}
+                              {editingType === 'sale' && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Loose</span>
+                                  <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleItemLooseQtyChange(index, Math.max(0, item.loose_qty - 1))}
+                                      className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                    >
+                                      <Minus size={11} />
+                                    </button>
+                                    <input 
+                                      type="number"
+                                      value={item.loose_qty}
+                                      onChange={e => handleItemLooseQtyChange(index, Math.max(0, Number(e.target.value)))}
+                                      className="w-10 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleItemLooseQtyChange(index, item.loose_qty + 1)}
+                                      className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                    >
+                                      <Plus size={11} />
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Price Monospace */}
+                              <div className="flex flex-col text-right">
+                                <span className="text-[9px] text-muted uppercase font-bold tracking-wider">
+                                  {editingType === 'sale' ? 'Unit Price' : 'Unit Cost'}
+                                </span>
+                                <span className="font-mono font-bold text-text text-xs mt-0.5">
+                                  ₹{editingType === 'sale' ? item.unit_price : item.cost_price}
+                                </span>
+                              </div>
+
+                              {/* Remove Button */}
+                              <button
+                                onClick={() => handleRemoveBillItem(index)}
+                                className="p-2 rounded-xl hover:bg-red/10 border border-transparent hover:border-red/20 text-red transition-all cursor-pointer"
+                                title="Remove item"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 border-t border-glass-border/30 pt-4 mt-2">
-                  <button 
-                    onClick={() => setEditingType(null)} 
-                    className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold"
-                  >
-                    Discard
-                  </button>
-                  <button 
-                    onClick={saveBillCorrections} 
-                    className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(59,130,246,0.2)]"
-                  >
-                    Save Bill Corrections
-                  </button>
+                {/* Right Panel: Invoice Summary / Checkout Receipt Card (Col span 4) */}
+                <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-5 shadow-xl sticky top-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                  <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
+                    <FileText size={14} className="text-primary" />
+                    <h3 className="text-xs font-bold text-text uppercase tracking-wider">Reconciliation Summary</h3>
+                  </div>
+
+                  <div className="flex flex-col gap-4 text-xs border-b border-glass-border/35 pb-4">
+                    {/* Subtotal */}
+                    <div className="flex justify-between items-center text-muted">
+                      <span>Subtotal</span>
+                      <span className="font-mono font-bold text-text">
+                        ₹{billItems.reduce((acc, it) => acc + (it.quantity * (editingType === 'sale' ? it.unit_price : it.cost_price)), 0).toFixed(2)}
+                      </span>
+                    </div>
+
+                    {/* Taxes */}
+                    {editingType === 'sale' && (
+                      <div className="flex justify-between items-center text-muted">
+                        <span>GST / Taxes (5%)</span>
+                        <span className="font-mono font-bold text-text">
+                          ₹{(billItems.reduce((acc, it) => acc + (it.quantity * it.unit_price), 0) * 0.05).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Discount Override Input */}
+                    {editingType === 'sale' && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted">Discount Override</span>
+                        <div className="relative w-24">
+                          <span className="absolute left-2.5 top-1.5 text-[10px] text-muted">₹</span>
+                          <input 
+                            type="number"
+                            value={billDiscount}
+                            onChange={e => setBillDiscount(Math.max(0, Number(e.target.value)))}
+                            className="w-full bg-bg3 border border-glass-border rounded-lg pl-5 pr-2 py-1 font-mono font-bold text-right text-text text-xs focus:outline-none focus:border-primary/50"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Net Amount Display */}
+                  <div className="p-4 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between shadow-inner">
+                    <span className="text-xs font-black text-primary uppercase tracking-wider">Net Amount</span>
+                    <span className="text-lg font-black font-mono text-primary">
+                      ₹{calculateRecalculatedTotal().toLocaleString()}
+                    </span>
+                  </div>
+
+                  {/* Actions Grid */}
+                  <div className="flex flex-col gap-2.5 pt-2">
+                    <button 
+                      onClick={saveBillCorrections} 
+                      className="w-full py-2.5 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.35)] cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Check size={14} />
+                      Save Corrections
+                    </button>
+                    <button 
+                      onClick={() => setEditingType(null)} 
+                      className="w-full py-2.5 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
+                    >
+                      Discard Workspace
+                    </button>
+                  </div>
                 </div>
+
               </div>
             )}
           </div>
@@ -877,42 +1179,44 @@ const InvestigationCenter = () => {
         /* UNIFIED LEDGER SPREADSHEET TIMELINE */
         <div className="flex-1 bg-glass-bg border border-glass-border rounded-2xl flex flex-col min-h-0 overflow-hidden animate-in fade-in duration-300">
           
-          {/* Count Header + Column Toggle */}
-          <div className="px-3 py-2 border-b border-glass-border/30 flex items-center justify-between bg-bg2/40 shrink-0 select-none text-xs">
-            <span className="text-muted">
-              Showing <strong className="text-text font-bold font-mono">{items.length.toLocaleString()}</strong>
-              {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} transaction entries
-            </span>
-            <div className="flex items-center gap-2">
-              {isFetching && !isFetchingNextPage && (
-                <Loader2 size={13} className="animate-spin text-primary" />
-              )}
-              {/* Date Filters */}
-              <div className="flex items-center gap-2 border-r border-glass-border/30 pr-2 mr-1">
+          {/* Controls Glass Card */}
+          <div className="p-4 border-b border-glass-border/30 bg-bg2/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 select-none">
+            <div className="flex flex-col gap-1">
+              <h1 className="text-sm font-black text-text uppercase tracking-wider flex items-center gap-2">
+                <PackageSearch size={18} className="text-primary animate-pulse" />
+                Investigation Center
+              </h1>
+              <p className="text-[10px] text-muted leading-relaxed">
+                Audit history, verify customer sales & distributor purchases, and correct stock.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Date Filters with Lucide Calendar icon */}
+              <div className="flex items-center gap-2 bg-bg2/40 border border-glass-border/30 px-3 py-1.5 rounded-xl text-xs">
+                <Calendar size={13} className="text-muted" />
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted font-black uppercase">From</span>
+                  <span className="text-[9px] text-muted font-bold uppercase">From</span>
                   <input
                     type="date"
                     value={dateRangeHelper.dateRange.from}
                     onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-                    className="px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-28 hover:border-glass-border/60 transition-colors"
+                    className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
                   />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted font-black uppercase">To</span>
+                <div className="flex items-center gap-1.5 border-l border-glass-border/30 pl-2">
+                  <span className="text-[9px] text-muted font-bold uppercase">To</span>
                   <input
                     type="date"
                     value={dateRangeHelper.dateRange.to}
                     onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-                    className="px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-28 hover:border-glass-border/60 transition-colors"
+                    className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
                   />
                 </div>
                 {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
                   <button
-                    onClick={() => {
-                      dateRangeHelper.clearFilters();
-                    }}
-                    className="px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all text-[9px] font-extrabold cursor-pointer"
+                    onClick={() => dateRangeHelper.clearFilters()}
+                    className="ml-1.5 text-[9px] font-extrabold text-red hover:underline cursor-pointer"
                     title="Clear dates"
                   >
                     Clear
@@ -920,101 +1224,103 @@ const InvestigationCenter = () => {
                 )}
               </div>
 
-              {/* Export Buttons */}
-              <button
-                onClick={() => handleExport('csv')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
-                title="Export to CSV"
-              >
-                <Download size={12} />
-                CSV
-              </button>
-              <button
-                onClick={() => handleExport('pdf')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
-                title="Export to PDF"
-              >
-                <Download size={12} />
-                PDF
-              </button>
-
-              {/* Column visibility toggle */}
-              <div className="relative" ref={colMenuRef}>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowColMenu(p => !p)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all ${
-                    showColMenu
-                      ? 'bg-primary/15 border-primary/40 text-primary'
-                      : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
-                  }`}
-                  title="Toggle column visibility"
+                  onClick={() => handleExport('csv')}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
+                  title="Export to CSV"
                 >
-                  <Columns3 size={12} />
-                  Columns
-                  {visibleCols.size < COL_KEYS.length && (
-                    <span className="px-1 py-0 rounded-full bg-primary/20 text-primary font-mono">
-                      {COL_KEYS.length - visibleCols.size} hidden
-                    </span>
-                  )}
+                  <Download size={13} />
+                  CSV
+                </button>
+                <button
+                  onClick={() => handleExport('pdf')}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
+                  title="Export to PDF"
+                >
+                  <Download size={13} />
+                  PDF
                 </button>
 
-                {showColMenu && (
-                  <div className="absolute right-0 top-full mt-1.5 z-[200] w-52 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-glass-border/30">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-muted">Visible Columns</span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => {
-                            setVisibleCols(defaultVisible);
-                            localStorage.setItem('inv-ledger-cols', JSON.stringify([...defaultVisible]));
-                          }}
-                          className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
-                        >
-                          All
-                        </button>
-                        <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors">
-                          <X size={12} />
-                        </button>
+                {/* Column Toggle */}
+                <div className="relative" ref={colMenuRef}>
+                  <button
+                    onClick={() => setShowColMenu(p => !p)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all hover:shadow-md ${
+                      showColMenu
+                        ? 'bg-primary/15 border-primary/40 text-primary'
+                        : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
+                    }`}
+                    title="Toggle columns"
+                  >
+                    <Columns3 size={13} />
+                    Columns
+                    {visibleCols.size < COL_KEYS.length && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-primary/20 text-primary text-[9px] font-mono">
+                        {COL_KEYS.length - visibleCols.size} hidden
+                      </span>
+                    )}
+                  </button>
+
+                  {showColMenu && (
+                    <div className="absolute right-0 top-full mt-2 z-[200] w-56 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="flex items-center justify-between px-4 py-2.5 border-b border-glass-border/30 bg-bg2/80">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-muted">Ledger Columns</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setVisibleCols(defaultVisible);
+                              localStorage.setItem('inv-ledger-cols', JSON.stringify([...defaultVisible]));
+                            }}
+                            className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
+                          >
+                            Reset
+                          </button>
+                          <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="py-1.5 max-h-72 overflow-y-auto custom-scrollbar bg-bg2/40">
+                        {COL_KEYS.map(({ key, label }) => (
+                          <button
+                            key={key}
+                            onClick={() => toggleCol(key)}
+                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-primary/10 transition-colors text-left"
+                          >
+                            <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
+                              visibleCols.has(key)
+                                ? 'bg-primary border-primary'
+                                : 'bg-transparent border-glass-border/60'
+                            }`}>
+                              {visibleCols.has(key) && <Check size={10} className="text-white" />}
+                            </span>
+                            <span className={`text-xs font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
+                              {label}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <div className="py-1 max-h-72 overflow-y-auto custom-scrollbar">
-                      {COL_KEYS.map(({ key, label }) => (
-                        <button
-                          key={key}
-                          onClick={() => toggleCol(key)}
-                          className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/5 transition-colors text-left"
-                        >
-                          <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            visibleCols.has(key)
-                              ? 'bg-primary border-primary'
-                              : 'bg-transparent border-glass-border/60'
-                          }`}>
-                            {visibleCols.has(key) && <Check size={9} className="text-white" />}
-                          </span>
-                          <span className={`text-[11px] font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
-                            {label}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>
           
           {/* LEDGER SPREADSHEET VIEW CONTAINER */}
-          <div className="flex-1 flex flex-col min-h-0 bg-bg2/15 p-4 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 bg-bg2/5 p-4 overflow-hidden">
             {isFetching && items.length === 0 ? (
               <div className="h-full flex items-center justify-center text-muted animate-pulse">
                 <div className="flex flex-col items-center gap-2">
-                  <Clock size={32} className="animate-spin text-primary" />
+                  <Loader2 size={32} className="animate-spin text-primary" />
                   <span className="text-xs font-bold uppercase tracking-wider">Loading Stock Ledger...</span>
                 </div>
               </div>
             ) : items.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-muted p-12">
-                <Package size={44} className="opacity-20 mb-3" />
+                <Package size={44} className="opacity-20 mb-3 animate-bounce" />
                 <h3 className="font-bold text-xs text-text">No ledger entries matches filters</h3>
                 <p className="text-[11px] max-w-sm mt-1 leading-relaxed">Try adjusting the calendar dates or column filters.</p>
               </div>
@@ -1027,29 +1333,29 @@ const InvestigationCenter = () => {
                   header={
                     <tr className="flex items-center min-w-[1750px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] align-top select-none">
                       {/* Medicine Header — always visible */}
-                      <th className="p-2 border-r border-glass-border/20 min-w-[150px] flex-1">
-                        <div className="flex flex-col gap-1">
-                          <span className="uppercase text-[10px] tracking-wider text-muted font-black">Medicine</span>
+                      <th className="p-2 border-r border-glass-border/20 min-w-[180px] flex-1">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="uppercase text-[9px] tracking-wider text-muted font-black">Medicine</span>
                           <input
                             type="text"
                             placeholder="Filter medicine..."
                             value={colFilterMedicine}
                             onChange={e => setColFilterMedicine(e.target.value)}
-                            className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
                       {/* Batch Header */}
                       {col('batch') && (
-                        <th className="p-2 border-r border-glass-border/20 w-24 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1">
-                            <span className="uppercase text-[10px] tracking-wider text-muted font-black">Batch</span>
+                        <th className="p-2 border-r border-glass-border/20 w-28 shrink-0 min-w-0">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Batch</span>
                             <input
                               type="text"
                               placeholder="Filter batch..."
                               value={colFilterBatch}
                               onChange={e => setColFilterBatch(e.target.value)}
-                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
@@ -1057,50 +1363,50 @@ const InvestigationCenter = () => {
                       {/* Date Header */}
                       {col('date') && (
                         <th className="p-2 border-r border-glass-border/20 w-44 shrink-0">
-                          <div className="flex flex-col gap-1">
-                            <span className="uppercase text-[10px] tracking-wider text-muted font-black">Date</span>
+                          <div className="flex flex-col gap-1.5">
+                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Date</span>
                           </div>
                         </th>
                       )}
                       {/* Invoice Header */}
                       {col('invoice') && (
-                        <th className="p-2 border-r border-glass-border/20 w-28 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1">
-                            <span className="uppercase text-[10px] tracking-wider text-muted font-black">Invoice</span>
+                        <th className="p-2 border-r border-glass-border/20 w-32 shrink-0 min-w-0">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Invoice</span>
                             <input
                               type="text"
                               placeholder="Filter invoice..."
                               value={colFilterInvoice}
                               onChange={e => setColFilterInvoice(e.target.value)}
-                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
                       )}
                       {/* Party Header */}
                       {col('party') && (
-                        <th className="p-2 border-r border-glass-border/20 w-36 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1">
-                            <span className="uppercase text-[10px] tracking-wider text-muted font-black">Party</span>
+                        <th className="p-2 border-r border-glass-border/20 w-40 shrink-0 min-w-0">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Party</span>
                             <input
                               type="text"
                               placeholder="Filter party..."
                               value={colFilterParty}
                               onChange={e => setColFilterParty(e.target.value)}
-                              className="w-full min-w-0 px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                             />
                           </div>
                         </th>
                       )}
                       {/* Opening Stock Header (with Type Selector) */}
                       {col('openingStock') && (
-                        <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1 items-center">
-                            <span className="uppercase text-[10px] tracking-wider text-muted font-black">Opening Stock</span>
+                        <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 min-w-0">
+                          <div className="flex flex-col gap-1.5 items-center">
+                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Opening Stock</span>
                             <select
                               value={colFilterType}
                               onChange={e => setColFilterType(e.target.value)}
-                              className="w-full min-w-0 px-1.5 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] text-text font-normal focus:outline-none focus:border-primary/50"
+                              className="w-full min-w-0 px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal focus:outline-none focus:border-primary/50 cursor-pointer"
                             >
                               <option value="All">All Types</option>
                               <option value="Purchase">Purchases</option>
@@ -1111,18 +1417,18 @@ const InvestigationCenter = () => {
                           </div>
                         </th>
                       )}
-                      {col('purchase') && <th className="p-2 border-r border-glass-border/20 text-center w-20 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Purchase</th>}
-                      {col('sales') && <th className="p-2 border-r border-glass-border/20 text-center w-20 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Sales</th>}
-                      {col('purchaseReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Purchase Return</th>}
-                      {col('salesReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Sales Return</th>}
-                      {col('adj') && <th className="p-2 border-r border-glass-border/20 text-center w-20 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Adj</th>}
-                      {col('stockAudit') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Stock Audit</th>}
-                      {col('b2bSales') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">B2B Sales</th>}
-                      {col('closingStock') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Closing Stock</th>}
-                      {col('medicineStock') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[10px] tracking-wider text-muted font-black">Medicine Stock</th>}
-                      <th className="p-2 text-center w-20 shrink-0">
+                      {col('purchase') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Purchase</th>}
+                      {col('sales') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Sales</th>}
+                      {col('purchaseReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Purchase Return</th>}
+                      {col('salesReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Sales Return</th>}
+                      {col('adj') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Adj</th>}
+                      {col('stockAudit') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Stock Audit</th>}
+                      {col('b2bSales') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">B2B Sales</th>}
+                      {col('closingStock') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Closing Stock</th>}
+                      {col('medicineStock') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Medicine Stock</th>}
+                      <th className="p-2 text-center w-24 shrink-0">
                         <div className="flex flex-col gap-1 items-center justify-center">
-                          <span className="uppercase text-[10px] tracking-wider text-muted font-black">Actions</span>
+                          <span className="uppercase text-[9px] tracking-wider text-muted font-black">Actions</span>
                           {(colFilterMedicine || colFilterBatch || dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to || colFilterInvoice || colFilterParty || colFilterType !== 'All') && (
                             <button
                               onClick={() => {
@@ -1133,7 +1439,7 @@ const InvestigationCenter = () => {
                                 setColFilterParty('');
                                 setColFilterType('All');
                               }}
-                              className="px-2 py-0.5 rounded bg-red/15 border border-red/30 text-red-400 hover:bg-red hover:text-white transition-all text-[9px] font-extrabold cursor-pointer"
+                              className="px-2.5 py-0.5 rounded-lg bg-red/15 border border-red/30 text-red-400 hover:bg-red hover:text-white transition-all text-[9px] font-extrabold cursor-pointer"
                               title="Clear Filters"
                             >
                               Reset
@@ -1153,17 +1459,28 @@ const InvestigationCenter = () => {
                           ref={rowVirtualizer.measureElement}
                           start={virtualRow.start}
                           size={virtualRow.size}
-                          className="min-w-[1750px] border-b border-glass-border/20"
+                          className="min-w-[1750px] border-b border-glass-border/20 hover:bg-bg2/40 transition-colors"
                         >
-                          <td className="p-2 border-r border-glass-border/20 flex-1 min-w-[150px] text-text truncate" title={item.medicine_name}>
-                            <div className="truncate">
-                              {item.medicine_name || 'System Activity'}
+                          {/* Medicine Cell with visual icons */}
+                          <td className="p-2 border-r border-glass-border/20 flex-1 min-w-[180px] text-text truncate" title={item.medicine_name}>
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="shrink-0 p-1.5 rounded-xl bg-bg3/60 border border-glass-border/40">
+                                {getTypeIcon(item.type, item.return_type)}
+                              </span>
+                              <div className="truncate flex flex-col gap-0.5">
+                                <span className="font-black text-text truncate text-xs">{item.medicine_name || 'System Activity'}</span>
+                                <span className="text-[9px] text-muted font-bold tracking-wider uppercase">
+                                  {item.type} {item.type === 'Return' && `(${item.return_type})`}
+                                </span>
+                              </div>
                             </div>
                           </td>
-                          {col('batch') && <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 font-mono font-bold text-muted truncate">{item.batch_no || 'N/A'}</td>}
-                          {col('date') && <td className="p-2 border-r border-glass-border/20 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
+                          {col('batch') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 font-mono font-bold text-muted truncate text-xs">{item.batch_no || 'N/A'}</td>}
+                          {col('date') && <td className="p-2 border-r border-glass-border/20 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate text-xs" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
+                          
+                          {/* Invoice cell */}
                           {col('invoice') && (
-                            <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 truncate">
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 truncate text-xs">
                               {item.invoice_id || item.purchase_id ? (
                                 <button 
                                   onClick={(e) => {
@@ -1171,38 +1488,127 @@ const InvestigationCenter = () => {
                                     if (item.type === 'Sale') handleStartSaleBillEdit(item);
                                     if (item.type === 'Purchase') handleStartPurchaseBillEdit(item);
                                   }}
-                                  className="text-primary hover:underline font-bold text-left cursor-pointer underline decoration-dotted truncate w-full block"
+                                  className="text-accent hover:text-accent/80 font-black text-left cursor-pointer underline decoration-dotted truncate w-full block"
                                 >
                                   {item.reference}
                                 </button>
                               ) : (
-                                <span className="text-muted">{item.reference}</span>
+                                <span className="text-muted font-medium">{item.reference}</span>
                               )}
                             </td>
                           )}
+
                           {col('party') && (
-                            <td className="p-2 border-r border-glass-border/20 w-36 shrink-0 truncate">
-                              <div className="truncate w-full">{item.party}</div>
+                            <td className="p-2 border-r border-glass-border/20 w-40 shrink-0 truncate text-xs">
+                              <div className="truncate w-full text-muted font-medium">{item.party}</div>
                             </td>
                           )}
-                          {col('openingStock') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-muted">{formatOpeningStock(item.opening_qty, item.opening_loose)}</td>}
-                          {col('purchase') && <td className="p-2 border-r border-glass-border/20 w-20 shrink-0 text-center font-mono text-green-400">{item.type === 'Purchase' ? formatTxQty(item.purchase_qty, item.free_qty || 0) : '0'}</td>}
-                          {col('sales') && <td className="p-2 border-r border-glass-border/20 w-20 shrink-0 text-center font-mono text-sky-400">{item.type === 'Sale' ? formatTxQty(item.sale_qty, item.sale_loose) : '0'}</td>}
-                          {col('purchaseReturn') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-orange-400">{(item.type === 'Return' && item.return_type === 'purchase') ? formatTxQty(item.purchase_return_qty, 0) : '0'}</td>}
-                          {col('salesReturn') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-purple-400">{(item.type === 'Return' && item.return_type === 'sale') ? formatTxQty(item.sales_return_qty, 0) : '0'}</td>}
-                          {col('adj') && <td className="p-2 border-r border-glass-border/20 w-20 shrink-0 text-center font-mono text-amber-500">{item.type === 'Adjustment' ? formatTxQty(item.adj_qty, item.adj_loose) : '0'}</td>}
-                          {col('stockAudit') && <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-muted/50">0</td>}
-                          {col('b2bSales') && <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-muted/50">0</td>}
-                          {col('closingStock') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono font-bold text-text">{formatTxQty(item.closing_qty, item.closing_loose)}</td>}
-                          {col('medicineStock') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono font-bold text-text/80">{formatTxQty(item.medicine_stock_qty, item.medicine_stock_loose)}</td>}
-                          <td className="p-2 w-20 shrink-0 text-center">
+
+                          {/* Quantities cells with beautiful typography */}
+                          {col('openingStock') && (
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-muted">
+                              <span className="text-text font-bold">{item.opening_qty || 0}</span>
+                              {item.opening_loose > 0 && (
+                                <span className="text-[10px] text-muted font-normal ml-0.5">::{item.opening_loose}</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('purchase') && (
+                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                              {item.type === 'Purchase' ? (
+                                <>
+                                  <span className="text-green font-bold">{item.purchase_qty || 0}</span>
+                                  {(item.free_qty || 0) > 0 && (
+                                    <span className="text-[10px] text-green/60 font-semibold ml-0.5">+{item.free_qty}</span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-muted/40">0</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('sales') && (
+                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                              {item.type === 'Sale' ? (
+                                <>
+                                  <span className="text-sky-400 font-bold">{item.sale_qty || 0}</span>
+                                  {(item.sale_loose || 0) > 0 && (
+                                    <span className="text-[10px] text-sky-400/60 font-semibold ml-0.5">::{item.sale_loose}</span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-muted/40">0</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('purchaseReturn') && (
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs">
+                              {item.type === 'Return' && item.return_type === 'purchase' ? (
+                                <span className="text-orange-400 font-bold">{item.purchase_return_qty || 0}</span>
+                              ) : (
+                                <span className="text-muted/40">0</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('salesReturn') && (
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs">
+                              {item.type === 'Return' && item.return_type === 'sale' ? (
+                                <span className="text-purple-400 font-bold">{item.sales_return_qty || 0}</span>
+                              ) : (
+                                <span className="text-muted/40">0</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('adj') && (
+                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                              {item.type === 'Adjustment' ? (
+                                <>
+                                  <span className="text-amber-500 font-bold">{item.adj_qty || 0}</span>
+                                  {(item.adj_loose || 0) > 0 && (
+                                    <span className="text-[10px] text-amber-500/60 font-semibold ml-0.5">::{item.adj_loose}</span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-muted/40">0</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('stockAudit') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
+                          {col('b2bSales') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
+                          
+                          {col('closingStock') && (
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-text">
+                              <span className="font-bold">{item.closing_qty || 0}</span>
+                              {item.closing_loose > 0 && (
+                                <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.closing_loose}</span>
+                              )}
+                            </td>
+                          )}
+
+                          {col('medicineStock') && (
+                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-text/80">
+                              <span className="font-bold">{item.medicine_stock_qty || 0}</span>
+                              {item.medicine_stock_loose > 0 && (
+                                <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.medicine_stock_loose}</span>
+                              )}
+                            </td>
+                          )}
+
+                          {/* Action Button Adjust */}
+                          <td className="p-2 w-24 shrink-0 text-center">
                             {item.inventory_id ? (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleAdjustStock(item.inventory_id);
                                 }}
-                                className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-white text-amber-500 transition-all text-[10px] font-extrabold cursor-pointer"
+                                className="px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-white hover:shadow-[0_0_10px_rgba(245,158,11,0.3)] text-amber-500 transition-all text-[10px] font-extrabold cursor-pointer"
                                 title="Direct Stock Master Adjustment"
                               >
                                 Adjust

@@ -14,8 +14,17 @@ router.get('/', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
     // Example: ensure no expired inventory items remain unsold
-    const expiredCount = await db.get(`SELECT COUNT(*) as cnt FROM inventory_master WHERE date(expiry_date) < date('now')`);
-        res.json({ expiredItems: expiredCount.cnt, status: expiredCount.cnt === 0 ? 'compliant' : 'non-compliant' });
+    const expiredCount = await db.get(`
+      SELECT COUNT(*) as cnt FROM inventory_master 
+      WHERE expiry_date IS NOT NULL AND 
+      CASE 
+        WHEN length(expiry_date) = 5 THEN ('20' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
+        WHEN length(expiry_date) = 7 THEN (substr(expiry_date, 4, 4) || '-' || substr(expiry_date, 1, 2))
+        WHEN expiry_date LIKE '____-__%' THEN substr(expiry_date, 1, 7)
+        ELSE expiry_date 
+      END < strftime('%Y-%m', 'now')
+    `);
+    res.json({ expiredItems: expiredCount.cnt, status: expiredCount.cnt === 0 ? 'compliant' : 'non-compliant' });
   } catch (err) {
     console.error('Compliance error:', err);
     res.status(500).json({ error: 'Internal server error' });

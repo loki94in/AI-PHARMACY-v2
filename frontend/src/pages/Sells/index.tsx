@@ -8,6 +8,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
@@ -50,22 +52,7 @@ interface SaleInvoice {
   items?: SaleItem[];
 }
 
-const getTodayString = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 // Module-level cache for instant re-mount
 let cachedInvoices: SaleInvoice[] | null = null;
@@ -121,7 +108,7 @@ const Sells = () => {
   // Date Filter Popover state
   const [showDatePopover, setShowDatePopover] = useState(false);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getTodayString();
   const isDateFilterExcludingToday = !!(
     (dateRangeHelper.dateRange.from && dateRangeHelper.dateRange.from > todayStr) ||
     (dateRangeHelper.dateRange.to && dateRangeHelper.dateRange.to < todayStr)
@@ -277,13 +264,8 @@ const Sells = () => {
       setEditInvoice(null);
       fetchInvoices(true);
       
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
 
       // Refresh the shared inventory cache so POS search reflects the adjusted stock
       api.getCompactInventory().catch(() => {});
@@ -302,13 +284,8 @@ const Sells = () => {
       setDeleteConfirm(null);
       fetchInvoices(true);
       
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['pos-common-combinations'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
 
       // Refresh the shared inventory cache so POS search reflects the restored stock
       api.getCompactInventory().catch(() => {});
@@ -346,11 +323,7 @@ const Sells = () => {
   };
 
   const formatDate = (d: string) => {
-    try {
-      return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return d;
-    }
+    return formatDisplayDate(d, true);
   };
 
   const parentRef = useRef<HTMLDivElement | null>(null);

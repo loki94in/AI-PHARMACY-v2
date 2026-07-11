@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api, apiClient } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { getLocalDateString, formatDisplayDate } from '../../utils/date';
 import { 
   Users, Phone, Calendar, Clock, CheckCircle2, AlertCircle, ShoppingCart, 
   Send, RefreshCw, Check, Search, ArrowRight, ShieldAlert, BadgeCheck
@@ -200,11 +202,11 @@ const RefillsPage = () => {
               // Check if any refill is due tomorrow
               const tomorrow = new Date();
               tomorrow.setDate(tomorrow.getDate() + 1);
-              const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
+              const tomorrowDateStr = getLocalDateString(tomorrow);
 
               const hasTomorrowRefill = patient.medicines.some(m => {
                 const due = new Date(patient.next_refill_date);
-                return due.toISOString().split('T')[0] === tomorrowDateStr && (m.is_ready === 1 || m.stock_verified_override === 1);
+                return getLocalDateString(due) === tomorrowDateStr && (m.is_ready === 1 || m.stock_verified_override === 1);
               });
 
               return (
@@ -221,7 +223,7 @@ const RefillsPage = () => {
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted">
                       <Calendar size={12} />
-                      <span>Next Due: <strong className="text-sky font-mono font-semibold">{new Date(patient.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</strong></span>
+                      <span>Next Due: <strong className="text-sky font-mono font-semibold">{formatDisplayDate(patient.next_refill_date)}</strong></span>
                     </div>
                   </div>
 

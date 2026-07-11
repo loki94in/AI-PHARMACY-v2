@@ -22,6 +22,7 @@ import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
+import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 
 const parseSqliteDate = (dateStr: string) => {
   if (!dateStr) return new Date();
@@ -33,22 +34,7 @@ const parseSqliteDate = (dateStr: string) => {
   return isNaN(d.getTime()) ? new Date(dateStr) : d;
 };
 
-const getTodayString = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 let cachedOrdersList: SpecialOrder[] | null = null;
 
@@ -900,7 +886,7 @@ const Orders = () => {
 
                       {/* Date */}
                       <td className="p-4 text-right text-muted font-mono select-none">
-                        {parseSqliteDate(order.date).toLocaleDateString('en-IN')}
+                        {formatDisplayDate(parseSqliteDate(order.date))}
                         <div className="text-[10px] mt-0.5">
                           {parseSqliteDate(order.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
                         </div>

@@ -3,6 +3,8 @@ import { api } from '../../services/api';
 import { CheckCircle, RotateCcw, AlertCircle, History } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { formatDisplayDate } from '../../utils/date';
 
 interface SaleItem {
   sale_item_id: number;
@@ -85,13 +87,11 @@ export default function CustomerReturn() {
         reason
       });
       alert('Return processed successfully!');
-      // Invalidate query caches so other pages update their stock/dashboard/timeline/reports immediately
-      queryClient.invalidateQueries({ queryKey: ['customer-returns-history-list'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
       setInvoice(null);
       setItems([]);
       setReturnQuantities({});
@@ -180,7 +180,7 @@ export default function CustomerReturn() {
                   <CheckCircle className="w-4 h-4 text-emerald" />
                   Invoice Details: {invoice.invoice_no}
                 </h2>
-                <p className="text-xs text-muted mt-1">Date: {new Date(invoice.date).toLocaleDateString()}</p>
+                <p className="text-xs text-muted mt-1">Date: {formatDisplayDate(invoice.date)}</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">

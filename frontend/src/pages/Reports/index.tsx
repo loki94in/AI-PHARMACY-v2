@@ -2,23 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { BarChart3, TrendingUp, Download, IndianRupee, ShoppingBag, Package, FileText, Info } from 'lucide-react';
 import { api } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
+import { getTodayString, getNDaysAgoString } from '../../utils/date';
 
-const getTodayString = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 const Reports = () => {
   const [fromDate, setFromDate] = useState(getNDaysAgoString(15));
@@ -62,7 +48,7 @@ const Reports = () => {
       ]);
       return { summary: summaryData, records: tableData };
     },
-    { enabled: false }
+    { enabled: hasGenerated }
   );
 
   const stats = reportData?.summary ?? { totalSales: 0, totalPurchases: 0, profitMargin: 0, itemsSold: 0 };

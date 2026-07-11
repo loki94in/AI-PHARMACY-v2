@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2 } from 'lucide-react';
+import { formatDisplayDate } from '../../utils/date';
 import { api, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useSearchParams } from 'react-router-dom';
@@ -534,7 +535,7 @@ export default function PharmarackCart() {
                               Customer: {order.requester} (Qty: {order.qty})
                             </span>
                             <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                              Date: {new Date(order.date).toLocaleDateString('en-IN')}
+                              Date: {formatDisplayDate(order.date)}
                             </span>
                           </div>
                           {inCart ? (
@@ -582,7 +583,7 @@ export default function PharmarackCart() {
                               Patient: {refill.patient_name}
                             </span>
                             <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                              Due Date: {new Date(refill.next_refill_date).toLocaleDateString('en-IN')}
+                              Due Date: {formatDisplayDate(refill.next_refill_date)}
                             </span>
                           </div>
                           {inCart ? (

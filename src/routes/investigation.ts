@@ -1,5 +1,6 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 
 const router = express.Router();
 
@@ -778,6 +779,7 @@ router.put('/inventory/:inventoryId', async (req, res) => {
     await logAction(db, 'INVENTORY_CORRECTION', desc);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
     res.json({ success: true, message: 'Inventory record corrected successfully' });
   } catch (error) {
     if (db) await db.run('ROLLBACK');
@@ -874,6 +876,7 @@ router.put('/sales/:invoiceId', async (req, res) => {
     await logAction(db, 'SALES_BILL_CORRECTION', desc);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
     res.json({ success: true, message: 'Sales invoice corrected and inventory reconciled successfully', total, tax });
   } catch (error) {
     if (db) {
@@ -964,6 +967,7 @@ router.put('/purchases/:purchaseId', async (req, res) => {
     await logAction(db, 'PURCHASE_BILL_CORRECTION', desc);
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
     res.json({ success: true, message: 'Purchase bill corrected and inventory reconciled successfully', totalAmount });
   } catch (error) {
     if (db) {

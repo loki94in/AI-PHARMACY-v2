@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { getTodayString } from '../../utils/date';
 import { useSearchParams } from 'react-router-dom';
 import Refills from '../Refills';
 import AutomationCenter from '../AutomationCenter';
@@ -119,13 +120,7 @@ const WhatsAppMedia = ({
   );
 };
 
-const getTodayString = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
+
 
 const formatDividerDate = (timestamp: number) => {
   const date = new Date(timestamp * 1000);

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { getLocalDateString, getTodayString } from '../utils/date';
 
 interface DateRange {
   from: string;
@@ -14,13 +15,6 @@ interface UsePersistedDateRangeOptions {
   futurePresets?: boolean;
 }
 
-const getLocalDateString = (d: Date = new Date()) => {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
 export function usePersistedDateRange({
   storageKey,
   defaultFrom,
@@ -30,41 +24,114 @@ export function usePersistedDateRange({
   futurePresets = false,
 }: UsePersistedDateRangeOptions) {
   const today = maxDate || getLocalDateString(new Date());
-  
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
+
+  // Pure helper to restore the range and manualTo state
+  const restored = useMemo(() => {
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored);
+        
+        // 1. futurePresets === true (Expiry page) -> restore verbatim, never roll.
+        if (futurePresets) {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo },
+            manualTo: !!parsed.manualTo,
+          };
+        }
+
+        // 2. parsed.to === '' (explicit All Dates — Sells/Inventory/CustomerReturnHistory) -> keep ''
+        if (parsed.to === '') {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: '' },
+            manualTo: !!parsed.manualTo,
+          };
+        }
+
+        // 3. parsed.isDefault === true -> discard stored values, return fresh defaults
+        if (parsed.isDefault === true) {
+          return {
+            dateRange: { from: defaultFrom, to: defaultTo },
+            manualTo: false,
+          };
+        }
+
+        // 4. parsed.manualTo === true -> restore verbatim (user pinned a historical upper bound)
+        if (parsed.manualTo === true) {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo },
+            manualTo: true,
+          };
+        }
+
+        // 5. Clock-skew guard: parsed.savedOn > today -> restore verbatim
+        if (parsed.savedOn && parsed.savedOn > today) {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo },
+            manualTo: !!parsed.manualTo,
+          };
+        }
+
+        // 6. If parsed.to >= parsed.savedOn (window reached "today" when saved) and parsed.to < today -> roll to = today
+        if (parsed.savedOn && parsed.to && parsed.to >= parsed.savedOn && parsed.to < today) {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: today },
+            manualTo: false,
+          };
+        }
+
+        // 7. Legacy migration (no savedOn field) -> roll if to < today
+        if (!parsed.savedOn && parsed.to && parsed.to < today) {
+          return {
+            dateRange: { from: parsed.from ?? defaultFrom, to: today },
+            manualTo: false,
+          };
+        }
+
         return {
-          from: parsed.from || defaultFrom,
-          to: parsed.to || defaultTo,
+          dateRange: { from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo },
+          manualTo: !!parsed.manualTo,
         };
       }
     } catch {}
-    return { from: defaultFrom, to: defaultTo };
-  });
+    return {
+      dateRange: { from: defaultFrom, to: defaultTo },
+      manualTo: false,
+    };
+  }, [storageKey, defaultFrom, defaultTo, futurePresets, today]);
 
-  const [manualToDate, setManualToDate] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange>(restored.dateRange);
+  const [manualToDate, setManualToDate] = useState<boolean>(restored.manualTo);
 
+  // Debounced save effect
   useEffect(() => {
     const timer = setTimeout(() => {
-      localStorage.setItem(storageKey, JSON.stringify(dateRange));
+      const payload = {
+        from: dateRange.from,
+        to: dateRange.to,
+        savedOn: getLocalDateString(new Date()),
+        manualTo: manualToDate,
+        isDefault: dateRange.from === defaultFrom && dateRange.to === defaultTo,
+      };
+      localStorage.setItem(storageKey, JSON.stringify(payload));
     }, 500);
     return () => clearTimeout(timer);
-  }, [dateRange, storageKey]);
+  }, [dateRange, manualToDate, storageKey, defaultFrom, defaultTo]);
 
+  // Sync state across multiple open tabs
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (e.key === storageKey && e.newValue) {
         try {
-          setDateRange(JSON.parse(e.newValue));
+          const parsed = JSON.parse(e.newValue);
+          setDateRange({ from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo });
+          setManualToDate(!!parsed.manualTo);
         } catch {}
       }
     };
     window.addEventListener('storage', handler);
     return () => window.removeEventListener('storage', handler);
-  }, [storageKey]);
+  }, [storageKey, defaultFrom, defaultTo]);
 
   const handleFromChange = (val: string) => {
     if (val && val < minDate) val = minDate;

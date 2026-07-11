@@ -729,6 +729,35 @@ router.post('/reset-data', async (req, res) => {
       const wwwebCacheDir = path.resolve(__dirname, '..', '..', '.wwebjs_cache');
       clearDir(wwwebAuthDir);
       clearDir(wwwebCacheDir);
+
+      // Wipe Pharmarack profile and temp cache directories
+      const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+      if (fs.existsSync(pharmarackProfilePath)) {
+        try {
+          fs.rmSync(pharmarackProfilePath, { recursive: true, force: true });
+        } catch (err) {
+          console.warn('[Reset] Failed to delete pharmarack_profile:', err);
+        }
+      }
+      const cachePath = path.resolve(__dirname, '..', '..', 'data', 'cache');
+      if (fs.existsSync(cachePath)) {
+        try {
+          fs.rmSync(cachePath, { recursive: true, force: true });
+        } catch (err) {
+          console.warn('[Reset] Failed to delete cache directory:', err);
+        }
+      }
+
+      // Wipe accidental space-split directories in the project root
+      const accidentalDirs = ['PHARMACY', 'WORKING', 'ON', 'PROJECT'];
+      for (const d of accidentalDirs) {
+        const fullPath = path.resolve(__dirname, '..', '..', d);
+        if (fs.existsSync(fullPath)) {
+          try {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          } catch (_) {}
+        }
+      }
     }
 
     res.json({ success: true, message: wipeAll ? 'Factory reset complete. App is now in fresh installation state.' : 'All stored data reset and database self-healed successfully' });
@@ -742,5 +771,45 @@ router.post('/reset-data', async (req, res) => {
   }
 });
 
+// POST /api/utilities/clear-cache
+router.post('/clear-cache', async (req, res) => {
+  try {
+    const dataDir = path.resolve(__dirname, '..', '..', 'data');
+    
+    // 1. Wipe cache directory
+    const cachePath = path.join(dataDir, 'cache');
+    if (fs.existsSync(cachePath)) {
+      try {
+        fs.rmSync(cachePath, { recursive: true, force: true });
+      } catch (err) {
+        console.warn('[Clear Cache] Failed to delete cache directory:', err);
+      }
+    }
+
+    // 2. Clear temp directories contents (without deleting the directories themselves)
+    const tempDirs = [
+      path.join(dataDir, 'temp_migration'),
+      path.join(dataDir, 'temp_ocr'),
+      path.join(dataDir, 'search_screenshots'),
+    ];
+    for (const d of tempDirs) {
+      if (fs.existsSync(d)) {
+        try {
+          const files = fs.readdirSync(d);
+          for (const file of files) {
+            try { fs.unlinkSync(path.join(d, file)); } catch (_) {}
+          }
+        } catch (err) {
+          console.warn(`[Clear Cache] Failed to clear directory ${d}:`, err);
+        }
+      }
+    }
+
+    res.json({ success: true, message: 'App cache cleared successfully.' });
+  } catch (error: any) {
+    console.error('Clear cache error:', error);
+    res.status(500).json({ error: 'Failed to clear cache: ' + error.message });
+  }
+});
 
 export default router;

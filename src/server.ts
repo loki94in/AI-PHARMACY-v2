@@ -143,6 +143,7 @@ app.use('/api/crm', lazyRoute('./routes/crm.js'));
 app.use('/api/utilities', lazyRoute('./routes/utilities.js'));
 app.use('/api/security', lazyRoute('./routes/security.js'));
 app.use('/api/email', lazyRoute('./routes/email.js'));
+app.use('/api/verification', lazyRoute('./routes/verification.js'));
 app.use('/api/migration', lazyRoute('./routes/migration.js'));
 app.use('/api/settings', lazyRoute('./routes/settings.js'));
 app.use('/api/pharmarack', lazyRoute('./routes/pharmarack.js'));

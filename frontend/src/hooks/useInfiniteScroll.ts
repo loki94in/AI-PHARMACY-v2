@@ -13,6 +13,21 @@ interface UseInfiniteScrollOptions<T> {
 const globalModuleCache: Record<string, any[]> = {};
 const globalTotalItems: Record<string, number> = {};
 
+export const clearInfiniteScrollCache = (cacheKey?: string) => {
+  if (cacheKey) {
+    globalModuleCache[cacheKey] = [];
+    globalTotalItems[cacheKey] = 0;
+  } else {
+    Object.keys(globalModuleCache).forEach(k => {
+      globalModuleCache[k] = [];
+      globalTotalItems[k] = 0;
+    });
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('clear-module-cache', { detail: { cacheKey } }));
+  }
+};
+
 export function useInfiniteScroll<T>({
   queryKey,
   cacheKey,
@@ -28,6 +43,20 @@ export function useInfiniteScroll<T>({
   const [totalItems, setTotalItems] = useState<number>(() => {
     return globalTotalItems[cacheKey] || 0;
   });
+
+  // Listen for global cache clear events to update mounted states immediately
+  useEffect(() => {
+    const handleClear = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const targetKey = customEvent.detail?.cacheKey;
+      if (!targetKey || targetKey === cacheKey) {
+        setItems([]);
+        setTotalItems(0);
+      }
+    };
+    window.addEventListener('clear-module-cache', handleClear);
+    return () => window.removeEventListener('clear-module-cache', handleClear);
+  }, [cacheKey]);
 
   const prevFiltersRef = useRef<any>(serverFilters);
 
@@ -79,7 +108,7 @@ export function useInfiniteScroll<T>({
   useEffect(() => {
     if (data && data.pages.length > 0) {
       const flat = data.pages.flatMap(page => page.data);
-      globalModuleCache[cacheKey] = flat;
+      globalModuleCache[cacheKey] = flat.slice(0, 200); // Cap in-memory module cache to 200 items
       
       const lastPage = data.pages[data.pages.length - 1];
       if (lastPage && typeof lastPage.totalItems === 'number') {

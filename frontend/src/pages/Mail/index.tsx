@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import { getLocalDateString, getTodayString } from '../../utils/date';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Mail as MailIcon,
@@ -428,7 +429,7 @@ const Mail = () => {
           prefilledPurchase: {
             distributorName: parsedDistributorName || selectedEmail.distributorName || '',
             invoiceNo: parsedInvoiceNo || (invoiceNoMatch ? invoiceNoMatch[0] : ''),
-            date: parsedInvoiceDate || (selectedEmail.date ? new Date(selectedEmail.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+            date: parsedInvoiceDate || (selectedEmail.date ? getLocalDateString(new Date(selectedEmail.date)) : getTodayString()),
             totalAmount: parsedTotalAmount || 0,
             globalCdPer: parsedGlobalCdPer || 0,
             source_filename: selectedFiles[0]?.filename || '',

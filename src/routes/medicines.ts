@@ -1,6 +1,7 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { parsePackSizeFromPackaging } from '../utils/packaging.js';
 
 const router = express.Router();
 
@@ -169,20 +170,35 @@ router.get('/medicines', async (req, res) => {
 });
 
 router.post('/medicines', async (req, res) => {
-  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category } = req.body;
+  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, packaging } = req.body;
   if (!name) return res.status(400).json({ error: 'Medicine name is required' });
   try {
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
     const adjustedName = normalizeMedicineName(name, manufacturer || '');
+    const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();
     const result = await db.run(
-      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [adjustedName, generic_name || '', manufacturer || '', marketed_by || '', pack_unit || '', parseInt(pack_size, 10) || null, strength || '', parseFloat(cgst_per) || 0, parseFloat(sgst_per) || 0, hsn_code || '', category || '']
+      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, packaging)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        adjustedName, 
+        generic_name || '', 
+        manufacturer || '', 
+        marketed_by || '', 
+        pack_unit || '', 
+        finalPackSize, 
+        strength || '', 
+        parseFloat(cgst_per) || 0, 
+        parseFloat(sgst_per) || 0, 
+        hsn_code || '', 
+        category || '',
+        packaging || ''
+      ]
     );
     const id = result.lastID;
     const savedMed = await db.get('SELECT * FROM medicines WHERE id = ?', [id]);
     await dbManager.close();
+    inventoryCache.invalidate();
     res.json({ success: true, data: savedMed });
   } catch (error) {
     await dbManager.close();
@@ -281,6 +297,7 @@ router.post('/medicines/bulk-delete', async (req, res) => {
     }
 
     await dbManager.close();
+    inventoryCache.invalidate();
     res.json({ success: true, successCount, failCount, failedNames });
   } catch (error) {
     await dbManager.close();
@@ -316,6 +333,7 @@ router.delete('/medicines/:id', async (req, res) => {
     await db.run('DELETE FROM medicines WHERE id = ?', [id]);
     
     await dbManager.close();
+    inventoryCache.invalidate();
     res.json({ success: true, message: 'Medicine deleted successfully' });
   } catch (error) {
     await dbManager.close();
@@ -375,6 +393,7 @@ router.post('/auto-enrich', async (req, res) => {
       );
       const updated = await db.get('SELECT * FROM medicines WHERE id = ?', [existing.id]);
       await dbManager.close();
+      inventoryCache.invalidate();
       return res.json({ success: true, data: updated, isNew: false });
     } else {
       const result = await db.run(
@@ -383,6 +402,7 @@ router.post('/auto-enrich', async (req, res) => {
       );
       const newMed = await db.get('SELECT * FROM medicines WHERE id = ?', [result.lastID]);
       await dbManager.close();
+      inventoryCache.invalidate();
       return res.json({ success: true, data: newMed, isNew: true });
     }
   } catch (error) {

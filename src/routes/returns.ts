@@ -5,6 +5,7 @@ import fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'url';
 import { aiCameraService } from '../services/aiCameraService.js';
+import { inventoryCache } from '../services/inventoryCache.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -365,7 +366,8 @@ router.post('/process-returns', async (req, res) => {
     }
 
     await db.run('COMMIT');
-        res.json({ success: true, message: 'Returns successfully processed', returnNo });
+    inventoryCache.invalidate();
+    res.json({ success: true, message: 'Returns successfully processed', returnNo });
   } catch (err: any) {
     if (db) {
       await db.run('ROLLBACK');

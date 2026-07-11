@@ -81,6 +81,36 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // Retry safe GET requests up to 3 times on transient network error/timeout
+    const isGet = config && config.method && config.method.toLowerCase() === 'get';
+    const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error';
+    if (isGet && isNetworkError) {
+      if (config && (!config._retryCount || config._retryCount < 3)) {
+        config._retryCount = (config._retryCount || 0) + 1;
+        console.warn(`[API] Transient network error on GET. Retrying ${config.url} (Attempt ${config._retryCount}/3)...`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return apiClient(config);
+      }
+    }
+
+    // Diagnostics check for false backend errors
+    if (isNetworkError && config && config.url !== '/verification/health' && config.url !== '/api/verification/health') {
+      console.warn(`[Verification Layer] Request to ${config.url} failed. Performing silent health check...`);
+      axios.get('/api/verification/health', {
+        headers: config.headers ? { 'x-session-token': config.headers['x-session-token'] } : {}
+      })
+      .then(res => {
+        if (res.data && res.data.success) {
+          console.error(`[Verification Layer] Diagnostics: Backend & DB are healthy. End-point specific issue or client timeout on: ${config.url}`);
+        } else {
+          console.error(`[Verification Layer] Diagnostics: Database or backend failure detected! Message: ${res.data?.message || 'Unknown backend error'}`);
+        }
+      })
+      .catch(healthErr => {
+        console.error(`[Verification Layer] Diagnostics: Backend is fully unreachable. Connection offline. Error: ${healthErr.message}`);
+      });
+    }
+
     // Basic global error handling
     if (error.response?.status === 401) {
       console.warn('Unauthorized request. Token might be missing or invalid.');
@@ -167,6 +197,11 @@ export const api = {
   getHeldBills: () => apiClient.get('/sales/hold').then(res => res.data),
   restoreHeldBill: (id: number) => apiClient.post(`/sales/hold/${id}/restore`).then(res => res.data),
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
+  
+  // Verification Layer APIs
+  verifyHealth: () => apiClient.get('/verification/health').then(res => res.data),
+  validateBill: (data: any) => apiClient.post('/verification/validate-bill', data).then(res => res.data),
+  verifySalesHistory: (invoiceNo: string) => apiClient.get(`/verification/verify-sales-history/${invoiceNo}`).then(res => res.data),
   
   // Sells (invoice list/edit)
   listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number; page?: number; include_items?: string }) =>

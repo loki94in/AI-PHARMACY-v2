@@ -9,6 +9,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
+import { formatDisplayDate } from '../../utils/date';
 
 export default function CustomerReturnHistory() {
   const [_, setSearchParams] = useSearchParams();
@@ -83,7 +84,7 @@ export default function CustomerReturnHistory() {
 
     const formattedData = items.map(row => ({
       ...row,
-      date_formatted: new Date(row.date).toLocaleString(),
+      date_formatted: formatDisplayDate(row.date, true),
       items_formatted: (row.items || []).map((i: any) => `${i.quantity}x ${i.medicine_name}`).join('; '),
       refund_formatted: `₹${(row.total_amount || 0).toFixed(2)}`,
     }));
@@ -221,7 +222,7 @@ export default function CustomerReturnHistory() {
                     >
                       <td className="w-32 shrink-0 p-4 font-medium text-text">{row.return_no}</td>
                       <td className="w-48 shrink-0 p-4 text-muted">
-                        {new Date(row.date).toLocaleDateString()}
+                        {formatDisplayDate(row.date)}
                         <div className="text-xs text-muted/50 mt-0.5">
                           {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>

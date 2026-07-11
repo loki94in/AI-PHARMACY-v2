@@ -1,4 +1,5 @@
 import { Database } from 'sqlite';
+import { dbManager } from '../database/connection.js';
 
 export interface CompactInventoryItem {
   medicine_id: number;
@@ -21,11 +22,9 @@ class InventoryCache {
   private cache: CompactInventoryItem[] | null = null;
   private lastUpdated = 0;
   private refreshInterval: NodeJS.Timeout | null = null;
-  private db: Database | null = null;
   private rebuildPromise: Promise<void> | null = null;
 
-  public initialize(db: Database) {
-    this.db = db;
+  public initialize(db?: Database) {
     // Set up periodic background refresh every 10 minutes
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
@@ -37,28 +36,19 @@ class InventoryCache {
 
   public async get(db?: Database): Promise<CompactInventoryItem[]> {
     if (!this.cache) {
-      const activeDb = db || this.db;
-      if (!activeDb) {
-        throw new Error('[InventoryCache] Not initialized and no database provided');
-      }
-      await this.rebuild(activeDb);
+      await this.rebuild(db);
     }
     return this.cache || [];
   }
 
   public rebuild(db?: Database): Promise<void> {
-    const activeDb = db || this.db;
-    if (!activeDb) {
-      console.warn('[InventoryCache] Cannot rebuild, no database reference');
-      return Promise.resolve();
-    }
-
     // Share the in-flight rebuild so concurrent get() calls wait for fresh data
     // instead of seeing a null cache and returning an empty list.
     if (this.rebuildPromise) return this.rebuildPromise;
 
     this.rebuildPromise = (async () => {
       try {
+        const activeDb = db || await dbManager.getConnection();
         // Query essential columns for active inventory items. Limit fields to optimize memory.
         const items = await activeDb.all<CompactInventoryItem[]>(
           `SELECT
@@ -78,7 +68,14 @@ class InventoryCache {
             m.pack_size
            FROM inventory_master im
            JOIN medicines m ON im.medicine_id = m.id
-           WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR im.expiry_date >= date('now'))
+           WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR 
+             CASE 
+               WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+               WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+               WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+               ELSE im.expiry_date
+             END >= strftime('%Y-%m', 'now')
+           )
            ORDER BY m.name ASC, im.expiry_date ASC`
         );
 
@@ -97,10 +94,9 @@ class InventoryCache {
     // Force rebuild next time get() is called
     this.cache = null;
     this.lastUpdated = 0;
-    if (this.db) {
-      this.rebuild().catch(err => console.error('[InventoryCache] On-demand rebuild failed:', err));
-    }
+    this.rebuild().catch(err => console.error('[InventoryCache] On-demand rebuild failed:', err));
   }
 }
 
 export const inventoryCache = new InventoryCache();
+

@@ -2,6 +2,40 @@ import React, { useState, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, RefreshCw, AlertTriangle, Pill, Package, Factory, LayoutGrid, Barcode, Tag, MapPin, Database, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
+
+export const updateMedicineNameWithPackSize = (currentName: string, newPackaging: string): string => {
+  if (!currentName) return '';
+  const trimmedName = currentName.trim();
+  const trimmedNewPkg = newPackaging.trim();
+
+  if (!trimmedNewPkg) return trimmedName;
+
+  const pkgParts = trimmedNewPkg.match(/^(\d+(?:x\d+)?)\s*(.*)$/i);
+  const newNum = pkgParts ? pkgParts[1] : trimmedNewPkg;
+  const newUnit = pkgParts ? pkgParts[2].trim() : '';
+
+  const packPatternRegex = /\b(\d+(?:x\d+)?)\s*(TAB|CAP|STRIP|NO['’]S|S|['’]S|AMP|VIAL|BOTTLE|BOX|tab|cap|strip|no['’]s|s|['’]s|amp|vial|bottle|box)?\s*$/;
+  const match = trimmedName.match(packPatternRegex);
+
+  if (match) {
+    const matchedStr = match[0];
+    const oldNumInName = match[1];
+    const oldUnitInName = match[2] || '';
+
+    const targetUnit = newUnit || oldUnitInName || 'TAB';
+    const replacement = `${newNum} ${targetUnit}`.trim();
+
+    const startIndex = trimmedName.lastIndexOf(matchedStr);
+    if (startIndex !== -1) {
+      return trimmedName.substring(0, startIndex) + replacement;
+    }
+  }
+
+  const suffix = newUnit ? `${newNum} ${newUnit}` : `${newNum} TAB`;
+  return `${trimmedName} ${suffix}`;
+};
 
 interface Props {
   medicineId: number;
@@ -10,6 +44,7 @@ interface Props {
 }
 
 const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose, onSave }) => {
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +133,13 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setForm((prev: any) => ({ ...prev, [name]: name === 'quantity' ? parseInt(value) || 0 : value }));
+    setForm((prev: any) => {
+      const updated = { ...prev, [name]: name === 'quantity' ? parseInt(value) || 0 : value };
+      if (name === 'packaging' && prev.name) {
+        updated.name = updateMedicineNameWithPackSize(prev.name, value);
+      }
+      return updated;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -109,6 +150,13 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
         ...form,
         inventory_id: inventoryId
       });
+
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
+
+      // Refresh local POS inventory search cache
+      api.getCompactInventory().catch(() => {});
+
       setSaving(false);
       onSave(); // Trigger parent refresh
       onClose(); // Close modal

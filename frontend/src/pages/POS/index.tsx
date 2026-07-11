@@ -10,6 +10,7 @@ import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady 
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -953,13 +954,16 @@ const POS = () => {
   const isSearchLoading = false;
 
   const [inventoryIndexReady, setInventoryIndexReady] = useState(() => isCompactInventoryCacheReady());
+  const [cacheVersion, setCacheVersion] = useState(0);
 
   useEffect(() => {
-    if (inventoryIndexReady) return;
-    const handler = () => setInventoryIndexReady(true);
+    const handler = () => {
+      setInventoryIndexReady(true);
+      setCacheVersion(prev => prev + 1);
+    };
     window.addEventListener('inventory-cache-ready', handler);
     return () => window.removeEventListener('inventory-cache-ready', handler);
-  }, [inventoryIndexReady]);
+  }, []);
 
   useEffect(() => {
     const term = searchTerm.trim();
@@ -997,7 +1001,7 @@ const POS = () => {
     setSearchHighlightIndex(-1);
     setOnlineResults([]);
     setSearchingOnline(false);
-  }, [searchTerm]);
+  }, [searchTerm, cacheVersion]);
 
   // Universal Edit state
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
@@ -1713,6 +1717,7 @@ const POS = () => {
         patient_name: patientName || 'Walk-in Customer',
         patient_phone: patientPhone,
         doctor_name: doctor || undefined,
+        total_amount: grandTotal,
         sale_date: (() => {
           const dateParts = date.split('-');
           const combinedDate = new Date();
@@ -1731,15 +1736,38 @@ const POS = () => {
         refillId: activeRefillId || undefined
       };
 
+      // Verification Layer Check: Pre-save validation
+      try {
+        const validation = await api.validateBill(payload);
+        if (!validation.success) {
+          alert(`❌ Save Blocked by Verification Layer:\n\nStep: ${validation.layer}\nReason: ${validation.message}`);
+          return;
+        }
+      } catch (err: any) {
+        const serverError = err.response?.data?.message || err.response?.data?.error || err.message;
+        const layer = err.response?.data?.layer || 'Validation';
+        alert(`❌ Verification Layer Pre-Save Failure:\n\nStep: ${layer}\nReason: ${serverError}`);
+        return;
+      }
+
+      // Proceed to save bill
       const result = await api.createSale(payload);
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
+
+      // Verification Layer Check: Post-save history validation
+      if (invoiceNo !== 'SAVED') {
+        try {
+          const syncVerify = await api.verifySalesHistory(invoiceNo);
+          if (!syncVerify.success) {
+            console.error(`[Verification Layer] Post-save sync check failed: ${syncVerify.message}`);
+          }
+        } catch (syncErr: any) {
+          console.error('[Verification Layer] Post-save verification API failed:', syncErr);
+        }
+      }
       
-      // Invalidate queries so that all pages (Sells, Inventory, Dashboard, Investigation, Reports) update immediately
-      queryClient.invalidateQueries({ queryKey: ['sells-list'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['investigation-list'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // Centralized cache invalidation for frontend lists and local infinite scroll caches
+      invalidateAfterStockWrite(queryClient);
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { apiClient, api } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -138,6 +139,7 @@ const Settings = () => {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
+  const [clearCacheLoading, setClearCacheLoading] = useState(false);
   const [desktopNotifEnabled, setDesktopNotifEnabled] = useState(() => {
     return 'Notification' in window && Notification.permission === 'granted';
   });
@@ -371,7 +373,6 @@ const Settings = () => {
       email: email,
       
       gmail_user: gmailUser,
-      gmail_pass: gmailPass,
       google_client_id: googleClientId,
       google_client_secret: googleClientSecret,
       google_search_daily_limit: googleSearchDailyLimit.toString(),
@@ -481,7 +482,6 @@ const Settings = () => {
       email: email,
       
       gmail_user: gmailUser,
-      gmail_pass: gmailPass,
       google_client_id: googleClientId,
       google_client_secret: googleClientSecret,
       gmail_auth_method: gmailAuthMethod,
@@ -673,6 +673,28 @@ const Settings = () => {
       setResetConfirmText('');
     } finally {
       setResetLoading(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    setClearCacheLoading(true);
+    try {
+      await apiClient.post('/utilities/clear-cache');
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (storageErr) {
+        console.warn('Failed to clear browser storage:', storageErr);
+      }
+      toastEvent.trigger('Cache cleared successfully. Reloading...', 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      console.error('Clear cache error:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to clear cache.', 'error');
+    } finally {
+      setClearCacheLoading(false);
     }
   };
 
@@ -1350,9 +1372,17 @@ const Settings = () => {
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
-          <button className="premium-btn bg-red text-white shadow-[0_4px_14px_rgba(239,68,68,0.4)] hover:bg-red-600 flex items-center gap-2 w-full justify-center">
-            <Trash2 size={16} />
-            Clear Cache
+          <button 
+            onClick={handleClearCache}
+            disabled={clearCacheLoading}
+            className="premium-btn bg-red text-white shadow-[0_4px_14px_rgba(239,68,68,0.4)] hover:bg-red-600 flex items-center gap-2 w-full justify-center disabled:opacity-50"
+          >
+            {clearCacheLoading ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Trash2 size={16} />
+            )}
+            {clearCacheLoading ? 'Clearing Cache...' : 'Clear Cache'}
           </button>
 
           <button
@@ -1371,7 +1401,7 @@ const Settings = () => {
       </div>
 
       {/* ─── Factory Reset Confirmation Modal ─── */}
-      {resetConfirm && (
+      {resetConfirm && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}>
           <div className="glass-panel w-full max-w-md p-8 flex flex-col gap-6 border border-red-500/40 shadow-[0_0_60px_rgba(239,68,68,0.3)]">
             {/* Icon + Title */}
@@ -1430,7 +1460,8 @@ const Settings = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {showConnectModal && <MobileConnectionModal onClose={() => setShowConnectModal(false)} />}

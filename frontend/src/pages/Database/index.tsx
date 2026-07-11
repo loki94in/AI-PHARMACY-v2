@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload } from 'lucide-react';
 import { api } from '../../services/api';
-import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
+import { UniversalMedicineEditModal, updateMedicineNameWithPackSize } from '../../components/UniversalMedicineEditModal';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import CatalogUpload from '../CatalogUpload';
+import { formatDisplayDate } from '../../utils/date';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 
 interface MedicineRow {
   id: number;
@@ -158,6 +160,8 @@ const DatabasePage = () => {
       await api.deleteMedicine(id);
       alert('Medicine deleted successfully');
       setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      invalidateAfterStockWrite(queryClient);
+      api.getCompactInventory().catch(() => {});
       setPage(1);
       loadDatabase();
     } catch (err: any) {
@@ -208,6 +212,8 @@ const DatabasePage = () => {
       setLoading(false);
       setSelectedIds(new Set());
       setAllSelectedAcrossPages(false);
+      invalidateAfterStockWrite(queryClient);
+      api.getCompactInventory().catch(() => {});
       setPage(1);
       loadDatabase();
 
@@ -243,6 +249,8 @@ const DatabasePage = () => {
     setAddMessage(null);
     try {
       await api.createMedicine(singleForm);
+      invalidateAfterStockWrite(queryClient);
+      api.getCompactInventory().catch(() => {});
       setAdding(false);
       setAddMessage('Medicine registered successfully!');
       setSingleForm({
@@ -298,6 +306,8 @@ const DatabasePage = () => {
     setAdding(false);
     setAddMessage(`Finished bulk add! Successfully registered ${count} medicines.`);
     setBulkText('');
+    invalidateAfterStockWrite(queryClient);
+    api.getCompactInventory().catch(() => {});
     setPage(1);
     loadDatabase();
     setTimeout(() => setAddMessage(null), 3000);
@@ -782,7 +792,7 @@ const DatabasePage = () => {
                     </thead>
                     <tbody>
                       {priceHistory.map((item, idx) => {
-                        const dateStr = item.date ? new Date(item.date).toLocaleDateString() : 'N/A';
+                        const dateStr = item.date ? formatDisplayDate(item.date) : 'N/A';
                         const gstPer = (item.cgst_per || 0) + (item.sgst_per || 0) + (item.igst_per || 0);
                         return (
                           <tr key={idx} className="border-b border-glass-border/30 hover:bg-bg3/30 transition-colors">
@@ -982,7 +992,14 @@ const DatabasePage = () => {
                         type="text" 
                         className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
                         value={singleForm.packaging}
-                        onChange={e => setSingleForm({...singleForm, packaging: e.target.value})}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSingleForm(prev => ({
+                            ...prev,
+                            packaging: val,
+                            name: prev.name ? updateMedicineNameWithPackSize(prev.name, val) : prev.name
+                          }));
+                        }}
                         placeholder="e.g. 10x10 Tab"
                       />
                     </div>

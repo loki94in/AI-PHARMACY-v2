@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Paperclip, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
+import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
@@ -26,22 +27,7 @@ interface PurchaseTransaction {
   original_amount?: number;
 }
 
-const getTodayString = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
-const getNDaysAgoString = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
 
 // Module-level cache for instant re-mount
 let cachedTransactions: PurchaseTransaction[] | null = null;
@@ -304,7 +290,7 @@ const PurchaseHistory = () => {
     const formattedData = items.map(t => ({
       ...t,
       id_formatted: `#${t.id.toString().padStart(6, '0')}`,
-      date_formatted: `${new Date(t.date).toLocaleDateString()} ${new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      date_formatted: formatDisplayDate(t.date, true),
       total_amount_formatted: `₹${(t.total_amount || 0).toFixed(2)}`,
     }));
 
@@ -518,7 +504,7 @@ const PurchaseHistory = () => {
                             {tx.invoice_no || '-'}
                           </td>
                           <td className="w-48 shrink-0 px-6 py-4 text-gray-400 whitespace-nowrap">
-                            {new Date(tx.date).toLocaleDateString()}
+                            {formatDisplayDate(tx.date)}
                             <div className="text-xs text-gray-500 mt-0.5">
                               {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
@@ -856,7 +842,7 @@ const PurchaseHistory = () => {
                   View Purchase Invoice: {viewPurchase.purchase.invoice_no || 'N/A'}
                 </h3>
                 <p className="text-xs text-gray-400 mt-1">
-                  Distributor: {viewPurchase.purchase.distributor_name} &middot; Date: {new Date(viewPurchase.purchase.date).toLocaleDateString()}
+                  Distributor: {viewPurchase.purchase.distributor_name} &middot; Date: {formatDisplayDate(viewPurchase.purchase.date)}
                 </p>
               </div>
               <button
@@ -875,7 +861,7 @@ const PurchaseHistory = () => {
                  </div>
                  <div>
                     <span className="text-xs text-gray-500 block mb-1">Date</span>
-                    <strong className="text-white text-sm">{new Date(viewPurchase.purchase.date).toLocaleDateString()}</strong>
+                    <strong className="text-white text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
                  </div>
                  <div>
                     <span className="text-xs text-gray-500 block mb-1">Distributor</span>

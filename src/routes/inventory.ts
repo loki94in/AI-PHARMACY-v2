@@ -2,6 +2,7 @@ import express from 'express';
 import { inventoryService } from '../services/inventoryService.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { dbManager } from '../database/connection.js';
+import { parsePackSizeFromPackaging } from '../utils/packaging.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -617,7 +618,15 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (generic_name !== undefined) { updates.push('generic_name = ?'); params.push(generic_name); }
     if (manufacturer !== undefined) { updates.push('manufacturer = ?'); params.push(manufacturer); }
     if (marketed_by !== undefined) { updates.push('marketed_by = ?'); params.push(marketed_by); }
-    if (packaging !== undefined) { updates.push('packaging = ?'); params.push(packaging); }
+    if (packaging !== undefined) { 
+      updates.push('packaging = ?'); 
+      params.push(packaging); 
+      const parsedSize = parsePackSizeFromPackaging(packaging);
+      if (parsedSize !== null) {
+        updates.push('pack_size = ?');
+        params.push(parsedSize);
+      }
+    }
     if (pack_unit !== undefined) { updates.push('pack_unit = ?'); params.push(pack_unit); }
     if (item_code !== undefined) { updates.push('item_code = ?'); params.push(item_code); }
     if (category !== undefined) { updates.push('category = ?'); params.push(category); }
@@ -642,6 +651,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     }
 
     await db.run('COMMIT');
+    inventoryCache.invalidate();
     
     res.json({ success: true, message: 'Medicine universally updated' });
   } catch (error: any) {
