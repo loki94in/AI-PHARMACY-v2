@@ -180,6 +180,57 @@ class AICameraService {
     return m ? m[0].trim() : null;
   }
 
+  // ─── API / stem → generic tablet-name resolver ───────────────────────
+  // Many OCR scans read only the API stem (e.g. "ithromycin") or a brand
+  // fragment, not the canonical generic tablet name (e.g. "Azithromycin").
+  // Backed by the medicine_reference table (composition1 → name).
+  private apiGenericMap: Map<string, string> | null = null;
+  private apiStemIndex: { api: string; name: string }[] = [];
+
+  private async ensureApiMap(): Promise<void> {
+    if (this.apiGenericMap) return;
+    const map = new Map<string, string>();
+    const stems: { api: string; name: string }[] = [];
+    try {
+      const db = await dbManager.getConnection();
+      const rows = await db.all(
+        'SELECT name, composition1 FROM medicine_reference WHERE name IS NOT NULL AND name <> ""'
+      );
+      for (const r of rows) {
+        const name = (r.name || '').toString().trim();
+        const api = (r.composition1 || '').toString().trim().toLowerCase();
+        if (!name) continue;
+        map.set(name.toLowerCase(), name);
+        if (api && api !== name.toLowerCase()) {
+          map.set(api, name);
+          if (api.length >= 5) stems.push({ api, name });
+        }
+      }
+    } catch {
+      /* DB unavailable — fall back to the raw OCR token */
+    }
+    this.apiGenericMap = map;
+    this.apiStemIndex = stems;
+  }
+
+  private resolveGenericName(candidate: string): string | null {
+    if (!candidate || !this.apiGenericMap) return null;
+    const stripped = candidate
+      .replace(/\s*\d+\s*(?:mg|g|ml|mcg|iu|%)/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const tries = [candidate.trim().toLowerCase(), stripped].filter(Boolean);
+    for (const t of tries) {
+      if (!t) continue;
+      if (this.apiGenericMap.has(t)) return this.apiGenericMap.get(t)!;
+      // stem match: OCR fragment is contained in a known API (e.g. "ithromycin" → Azithromycin)
+      const hits = this.apiStemIndex.filter((s) => s.api.includes(t) && t.length >= 5);
+      if (hits.length > 0) return hits[0].name;
+    }
+    return null;
+  }
+
   /**
    * Detect dosage form from OCR text (Tab/Cap/Syp/Drops/Inj/Gel/Cream/etc.)
    */
@@ -384,7 +435,15 @@ class AICameraService {
         brandName = cands[0].joined;
       }
     }
-    finalInfo.potentialName = matches.length > 0 ? matches[0] : brandName;
+    const rawName = matches.length > 0 ? matches[0] : brandName;
+    // Resolve the API/brand fragment to the canonical generic tablet name so the
+    // scan carries the proper medicine name (e.g. "ithromycin" → "Azithromycin"),
+    // not just the raw OCR token.
+    await this.ensureApiMap();
+    const resolvedGeneric = rawName ? this.resolveGenericName(rawName) : null;
+    finalInfo.apiName = rawName || undefined;
+    finalInfo.genericName = resolvedGeneric || undefined;
+    finalInfo.potentialName = resolvedGeneric || rawName;
 
     const strengthMatch = localOcrResult.text.match(/\d+\s*(?:mg|g|ml|μg|iu)/i);
     if (strengthMatch) finalInfo.strength = strengthMatch[0];

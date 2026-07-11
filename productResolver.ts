@@ -13,7 +13,6 @@
 // It can also be imported:  const { resolveProductByName } = await import('./productResolver.ts');
 
 import { dbManager } from './src/database/connection.js';
-import { isPlausibleMedicineName } from './src/services/intentKeywords.js';
 import { pathToFileURL } from 'url';
 
 export interface ResolvedProduct {
@@ -84,7 +83,6 @@ export async function resolveProductByName(rawName: string): Promise<ResolvedPro
   const db = await dbManager.getConnection();
   const q = normalize(rawName);
   if (!q) return [];
-  if (!isPlausibleMedicineName(rawName)) return [];
 
   const results: ResolvedProduct[] = [];
   const seen = new Set<number>();
