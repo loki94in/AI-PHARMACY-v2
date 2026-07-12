@@ -338,6 +338,61 @@ export class WhatsAppBusinessService {
     }
     return clean;
   }
+
+  /**
+   * Download a media file (e.g. image, PDF) from Meta's servers using its Media ID.
+   * Returns mimetype and base64-encoded string.
+   */
+  async downloadMedia(mediaId: string): Promise<{ mimetype: string; data: string } | null> {
+    const config = await this.getConfig();
+    if (!config.accessToken) {
+      console.error('[WA Business] Missing access token for media download.');
+      return null;
+    }
+
+    try {
+      // Step 1: Retrieve the media download URL from Meta Graph API
+      const url = `${GRAPH_API_BASE}/${mediaId}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        console.error('[WA Business] Failed to fetch media metadata:', (errBody as any)?.error?.message || `HTTP ${res.status}`);
+        return null;
+      }
+
+      const mediaMetadata = await res.json() as any;
+      const downloadUrl = mediaMetadata?.url;
+      if (!downloadUrl) {
+        console.error('[WA Business] Media metadata did not contain a download URL.');
+        return null;
+      }
+
+      // Step 2: Download the actual media binary from the retrieved URL
+      const downloadRes = await fetch(downloadUrl, {
+        headers: { Authorization: `Bearer ${config.accessToken}` },
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!downloadRes.ok) {
+        console.error('[WA Business] Failed to download media binary:', `HTTP ${downloadRes.status}`);
+        return null;
+      }
+
+      const arrayBuffer = await downloadRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      return {
+        mimetype: mediaMetadata.mime_type || 'image/jpeg',
+        data: buffer.toString('base64'),
+      };
+    } catch (err: any) {
+      console.error('[WA Business] Error downloading media:', err.message);
+      return null;
+    }
+  }
 }
 
 // Singleton

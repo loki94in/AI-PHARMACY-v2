@@ -382,6 +382,22 @@ export default function MessageListener() {
                   <RefreshCw className="w-4 h-4 animate-spin text-muted/60" />
                   <span>Loading messages...</span>
                 </div>
+              ) : chatMessages.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted h-full gap-3">
+                  <Clock className="w-10 h-10 text-muted/20 animate-pulse" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-text">No Message History Cached</p>
+                    <p className="text-[10px] text-muted max-w-[240px] leading-relaxed mx-auto">
+                      Only new incoming and outgoing messages are stored. Previous history is not synced.
+                    </p>
+                  </div>
+                  {activeChat?.lastMessage && (
+                    <div className="mt-2 p-3 bg-bg3 border border-glass-border rounded-xl text-left max-w-xs text-xs shadow-sm w-full">
+                      <span className="text-[9px] font-bold text-primary uppercase tracking-wider block mb-1">Last Received Message:</span>
+                      <p className="italic text-text font-medium">"{activeChat.lastMessage}"</p>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
                   <div ref={messagesEndRef} />

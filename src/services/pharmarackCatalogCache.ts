@@ -128,26 +128,34 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
         const catalogData: any = await catalogRes.json();
         if (!catalogData?.data || !Array.isArray(catalogData.data)) continue;
 
-        for (const p of catalogData.data) {
-          const productName = p.ProductName || p.ProductFullName || '';
-          if (!productName) continue;
+        await db.run('BEGIN TRANSACTION');
+        try {
+          for (const p of catalogData.data) {
+            const productName = p.ProductName || p.ProductFullName || '';
+            if (!productName) continue;
 
-          await db.run(
-            `INSERT INTO distributor_catalog (store_id, store_name, product_name, mrp, packaging, dosage_form, manufacturer, distributor_price, availability, is_mapped, last_synced)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(store_id, product_name) DO UPDATE SET
-               mrp=excluded.mrp, packaging=excluded.packaging, manufacturer=excluded.manufacturer,
-               distributor_price=excluded.distributor_price, availability=excluded.availability,
-               is_mapped=excluded.is_mapped, last_synced=excluded.last_synced`,
-            [
-              storeId, storeName, productName,
-              p.MRP ?? null, p.Packing || '', p.DosageForm || '',
-              p.Company || '', p.PTR ?? null,
-              p.Stock !== undefined ? String(p.Stock) : 'Unknown',
-              isMapped ? 1 : 0, new Date().toISOString()
-            ]
-          );
-          synced++;
+            await db.run(
+              `INSERT INTO distributor_catalog (store_id, store_name, product_name, mrp, packaging, dosage_form, manufacturer, distributor_price, availability, is_mapped, last_synced)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(store_id, product_name) DO UPDATE SET
+                 mrp=excluded.mrp, packaging=excluded.packaging, manufacturer=excluded.manufacturer,
+                 distributor_price=excluded.distributor_price, availability=excluded.availability,
+                 is_mapped=excluded.is_mapped, last_synced=excluded.last_synced`,
+              [
+                storeId, storeName, productName,
+                p.MRP ?? null, p.Packing || '', p.DosageForm || '',
+                p.Company || '', p.PTR ?? null,
+                p.Stock !== undefined ? String(p.Stock) : 'Unknown',
+                isMapped ? 1 : 0, new Date().toISOString()
+              ]
+            );
+            synced++;
+          }
+          await db.run('COMMIT');
+        } catch (dbErr) {
+          await db.run('ROLLBACK');
+          console.error(`[Catalog Cache] Database transaction failed for store ${storeName}:`, dbErr);
+          errors++;
         }
 
         console.log(`[Catalog Cache] Synced ${catalogData.data.length} products from ${storeName} (${isMapped ? 'mapped' : 'non-mapped'})`);

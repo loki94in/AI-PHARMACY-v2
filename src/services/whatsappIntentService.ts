@@ -186,6 +186,32 @@ export async function handleInbound(msg: any): Promise<void> {
     // 3. TEXT PARSE
     const parsed = parseMessage(body);
 
+    // 3b. SCISPACY NLP — run in parallel on the raw message body (fire-and-forget, 1.5s timeout)
+    // This catches medicine names that regex/keyword parsing misses (e.g. "do you have azithromycin?")
+    let scispacyMedicineName: string | null = null;
+    if (body.trim().length > 3) {
+      try {
+        const { queryScispacy } = await import('./scispacyClient.js');
+        const nlp = await queryScispacy(body);
+        if (nlp && nlp.entities) {
+          // Pick the first CHEMICAL entity as the drug name candidate
+          const chemEntity = nlp.entities.find((e: any) => e.label === 'CHEMICAL');
+          if (chemEntity && isPlausibleMedicineName(chemEntity.text)) {
+            scispacyMedicineName = chemEntity.text;
+          }
+          // Also check features.drug array
+          if (!scispacyMedicineName && nlp.features?.drug?.length) {
+            const candidate = nlp.features.drug[0];
+            if (isPlausibleMedicineName(candidate)) {
+              scispacyMedicineName = candidate;
+            }
+          }
+        }
+      } catch {
+        // fail silently — never block message handling
+      }
+    }
+
     // 4. REPEAT CHECK — "same", "wahi", etc.
     if (isRepeatRequest(body) && customer) {
       let history: any[] = [];
@@ -227,13 +253,21 @@ export async function handleInbound(msg: any): Promise<void> {
       }
     }
 
-    // 6. TEXT-BASED SEARCH — if we parsed a medicine name from text
-    if (parsed.isMedicineRequest && parsed.medicineName) {
-      // Detect dosage form from the text itself so the search and admin report
-      // know what presentation was requested (tab/cap/susp/drops/…).
+    // 6. TEXT-BASED SEARCH — regex parsed name OR scispaCy extracted name
+    // Use regex result first (it also has quantity/unit). If regex found nothing
+    // but scispaCy did, use scispaCy as fallback so the message is not silently dropped.
+    const effectiveMedicineName = (parsed.isMedicineRequest && parsed.medicineName)
+      ? parsed.medicineName
+      : scispacyMedicineName;
+
+    if (effectiveMedicineName) {
       const textForm = detectDosageForm(body);
+      const usedScispacy = !parsed.isMedicineRequest && !!scispacyMedicineName;
+      if (usedScispacy) {
+        console.log(`[Intent Service] scispaCy rescued medicine name: "${effectiveMedicineName}" (regex missed it)`);
+      }
       await searchAndBroadcast({
-        medicineName: parsed.medicineName,
+        medicineName: effectiveMedicineName,
         quantity: parsed.quantity,
         unit: parsed.unit,
         customer,
@@ -244,9 +278,10 @@ export async function handleInbound(msg: any): Promise<void> {
         msgId,
         phone,
         chatId,
-        hasIntentWords: parsed.rawIntentWords.length > 0
+        hasIntentWords: parsed.rawIntentWords.length > 0 || usedScispacy
       });
     }
+
   } catch (err) {
     console.error('[Intent Service] Error handling inbound message:', err);
   }

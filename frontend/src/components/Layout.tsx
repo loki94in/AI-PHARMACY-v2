@@ -122,6 +122,7 @@ const Sidebar = ({
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
+    { path: '/message-listener', label: 'Message Listener', icon: <MessageSquareIcon size={18} /> },
     { path: '/crm', label: 'CRM / Patients', icon: <Users size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },

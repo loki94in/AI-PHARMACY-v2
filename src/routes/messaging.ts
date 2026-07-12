@@ -285,14 +285,11 @@ router.post('/toggle-ignore', async (req, res) => {
     const isGroupOrBroadcast = phone.endsWith('@g.us') || phone.endsWith('@broadcast') || phone.includes('broadcast') || phone === 'status@broadcast' || phone.includes('-');
 
     if (ignore) {
-      if (isGroupOrBroadcast) {
-        await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
-      } else {
-        await db.run(
-          'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
-          [phone, reason || 'ignored']
-        );
-      }
+      // Always INSERT the ignore record (groups, broadcasts, and regular numbers)
+      await db.run(
+        'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
+        [phone, reason || 'ignored']
+      );
       // Delete all cached chats and messages for this number from DB to remove it from the UI immediately
       await db.run('DELETE FROM whatsapp_messages WHERE chat_id = ?', [phone]);
       await db.run('DELETE FROM whatsapp_chats WHERE id = ?', [phone]);
@@ -300,14 +297,8 @@ router.post('/toggle-ignore', async (req, res) => {
       await db.run('DELETE FROM whatsapp_messages WHERE chat_id = ?', [phoneDigits]);
       await db.run('DELETE FROM whatsapp_chats WHERE id = ?', [phoneDigits]);
     } else {
-      if (isGroupOrBroadcast) {
-        await db.run(
-          'INSERT OR REPLACE INTO ignored_whatsapp_numbers (phone, reason) VALUES (?, ?)',
-          [phone, 'unignored']
-        );
-      } else {
-        await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
-      }
+      // Always DELETE the ignore record to un-ignore (groups, broadcasts, and regular numbers)
+      await db.run('DELETE FROM ignored_whatsapp_numbers WHERE phone = ?', [phone]);
     }
 
     res.json({ success: true, ignore });
@@ -321,20 +312,39 @@ router.post('/toggle-ignore', async (req, res) => {
 router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
   const { chatId, messageId } = req.params;
   try {
-    const { initClient } = await import('../whatsappClient.js');
-    const client = await initClient();
-    if (!client) {
-      return res.status(503).json({ error: 'WhatsApp client not connected' });
-    }
-    const chat = await client.getChatById(chatId);
-    const messages = await chat.fetchMessages({ limit: 100 });
-    const msg = messages.find(m => m.id._serialized === messageId);
-    if (!msg) {
-      return res.status(404).json({ error: 'Message not found' });
+    const { dbManager } = await import('../database/connection.js');
+    const db = await dbManager.getConnection();
+    const row = await db.get('SELECT * FROM whatsapp_messages WHERE id = ?', [messageId]);
+    if (!row) {
+      return res.status(404).json({ error: 'Message not found in database cache' });
     }
 
+    const mockMsg = {
+      from: row.chat_id,
+      to: 'business@c.us',
+      body: row.body,
+      id: row.id,
+      hasMedia: !!row.has_media,
+      downloadMedia: async () => {
+        const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+        if (fs.existsSync(uploadsDir)) {
+          const files = fs.readdirSync(uploadsDir);
+          const matched = files.find(f => f.startsWith(messageId));
+          if (matched) {
+            const ext = path.extname(matched).toLowerCase();
+            const data = fs.readFileSync(path.join(uploadsDir, matched)).toString('base64');
+            let mimetype = 'image/jpeg';
+            if (ext === '.png') mimetype = 'image/png';
+            else if (ext === '.pdf') mimetype = 'application/pdf';
+            return { mimetype, data };
+          }
+        }
+        return null;
+      }
+    };
+
     const { whatsappIntentService } = await import('../services/whatsappIntentService.js');
-    await whatsappIntentService.handleInbound(msg);
+    await whatsappIntentService.handleInbound(mockMsg);
 
     res.json({ success: true, message: 'Message queued for manual scan' });
   } catch (err: any) {

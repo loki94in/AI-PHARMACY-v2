@@ -891,7 +891,18 @@ router.post('/cart/add', async (req, res) => {
               executablePath: chromePath,
               headless: true,
               userDataDir: pharmarackProfilePath,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--mute-audio',
+                '--window-position=-10000,-10000'
+              ]
             });
           } catch (launchErr: any) {
             console.log('[Pharmarack Fallback] Main profile is locked. Copying to temp profile...', launchErr.message);
@@ -903,7 +914,18 @@ router.post('/cart/add', async (req, res) => {
               executablePath: chromePath,
               headless: true,
               userDataDir: tempProfilePath,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--mute-audio',
+                '--window-position=-10000,-10000'
+              ]
             });
             tempProfilePathToDelete = tempProfilePath;
           }

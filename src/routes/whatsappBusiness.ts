@@ -6,6 +6,7 @@ import { eventService } from '../services/eventService.js';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { whatsappIntentService } from '../services/whatsappIntentService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,26 +96,87 @@ router.post('/webhook', async (req, res) => {
               messageBody = `[${msgType}] (unsupported type)`;
             }
 
-            console.log(`[WA Business] Incoming message from ${from}: ${messageBody.substring(0, 100)}`);
+            // Format phone number to standard JID
+            const chatId = `${from}@c.us`;
+            const hasMedia = msgType === 'image' || msgType === 'document' || msgType === 'audio' || msgType === 'video';
 
-            // Log to action_logs
+            // Log to database and handle intent if not ignored
             try {
               const db = await dbManager.getConnection();
-              await db.run(
-                `INSERT INTO action_logs (action_type, description) VALUES (?, ?)`,
-                ['WA_BUSINESS_INCOMING', `From: ${from} | Type: ${msgType} | Body: ${messageBody.substring(0, 500)}`]
-              );
-                          } catch (dbErr) {
-              console.error('[WA Business Webhook] DB log error:', dbErr);
-            }
 
-            // Broadcast via SSE for real-time UI
-            eventService.broadcast('wa_business_message', {
-              from,
-              type: msgType,
-              body: messageBody,
-              timestamp,
-            });
+              // Helper function to check ignore
+              const isIgnored = async (phone: string): Promise<boolean> => {
+                const row = await db.get('SELECT reason FROM ignored_whatsapp_numbers WHERE phone = ? LIMIT 1', [phone]);
+                return row && row.reason !== 'unignored';
+              };
+
+              if (await isIgnored(chatId)) {
+                console.log(`[WA Business] Message from ignored number ${from} skipped.`);
+                continue;
+              }
+
+              // 1. Save to whatsapp_messages table
+              await db.run(
+                `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO NOTHING`,
+                [msg.id, chatId, messageBody, 0, timestamp, msgType, hasMedia ? 1 : 0]
+              );
+
+              // 2. Fetch or create contact/chat
+              const existingChat = await db.get('SELECT name, unread_count FROM whatsapp_chats WHERE id = ?', [chatId]);
+              const currentUnread = (existingChat?.unread_count || 0) + 1;
+              const contactName = value.contacts?.find((c: any) => c.wa_id === from)?.profile?.name || from;
+              const chatName = existingChat?.name || contactName || from;
+
+              await db.run(
+                `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET
+                   unread_count = EXCLUDED.unread_count,
+                   timestamp = EXCLUDED.timestamp,
+                   last_message = EXCLUDED.last_message`,
+                [chatId, chatName, currentUnread, timestamp, messageBody, 0, from]
+              );
+
+              // 3. Broadcast real-time message event via SSE to update chats in UI
+              eventService.broadcast('wa_new_message', {
+                chat_id: chatId,
+                message: {
+                  id: msg.id,
+                  body: messageBody,
+                  fromMe: false,
+                  timestamp,
+                  type: msgType,
+                  hasMedia
+                }
+              });
+
+              // 4. Run intent analysis, OCR pipeline, and database matching
+              const mockMsg = {
+                from: chatId,
+                to: 'business@c.us',
+                body: messageBody,
+                id: msg.id,
+                hasMedia,
+                downloadMedia: async () => {
+                  if (msgType === 'image') {
+                    const mediaId = msg.image?.id;
+                    if (mediaId) {
+                      return await whatsappBusinessService.downloadMedia(mediaId);
+                    }
+                  }
+                  return null;
+                }
+              };
+
+              whatsappIntentService.handleInbound(mockMsg).catch(err => {
+                console.error('[WA Business] Intent service execution failed:', err);
+              });
+
+            } catch (dbErr) {
+              console.error('[WA Business Webhook] DB write error:', dbErr);
+            }
           }
         }
 

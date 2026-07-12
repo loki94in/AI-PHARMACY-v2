@@ -215,6 +215,7 @@ const CRM = () => {
   const [waStatus, setWaStatus] = useState(() => cachedWaStatus);
   const [isOpeningWaWindow, setIsOpeningWaWindow] = useState(false);
   const [ignoredPhones, setIgnoredPhones] = useState<Map<string, string>>(() => cachedIgnoredPhones);
+  const [waChatSearch, setWaChatSearch] = useState('');
 
   // Sync state changes back to the module-level cache
   useEffect(() => {
@@ -754,10 +755,17 @@ const CRM = () => {
 
   // Memoize chats list to prevent typing lag
   const chatListElement = useMemo(() => {
-    if (waChats.length === 0) {
-      return <div className="p-8 text-center text-muted text-xs">No active chats. Send a message to start.</div>;
+    const s = waChatSearch.trim().toLowerCase();
+    const filtered = s
+      ? waChats.filter(c =>
+          (c.name || '').toLowerCase().includes(s) ||
+          (c.id || '').includes(s)
+        )
+      : waChats;
+    if (filtered.length === 0) {
+      return <div className="p-8 text-center text-muted text-xs">{waChats.length === 0 ? 'No active chats. Send a message to start.' : 'No chats match your search.'}</div>;
     }
-    return waChats.map(chat => {
+    return filtered.map(chat => {
       const phone = (chat.id || '').replace(/@c\.us$/, '');
       const chatId = chat.id || '';
 
@@ -816,7 +824,7 @@ const CRM = () => {
         </div>
       );
     });
-  }, [waChats, activeWaChat, ignoredPhones, toggleIgnore]);
+  }, [waChats, waChatSearch, activeWaChat, ignoredPhones, toggleIgnore]);
 
   // Memoize interaction timeline
   const timelineElement = useMemo(() => {
@@ -1036,6 +1044,20 @@ const CRM = () => {
                   </button>
                 </div>
 
+                {/* Chat Search */}
+                <div className="px-3 py-2 border-b border-glass-border bg-bg2/60 shrink-0">
+                  <div className="relative">
+                    <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
+                    <input
+                      type="text"
+                      value={waChatSearch}
+                      onChange={e => setWaChatSearch(e.target.value)}
+                      placeholder="Search by name or number..."
+                      className="w-full pl-7 pr-3 py-1.5 rounded-lg bg-bg3 border border-glass-border text-text text-xs placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    />
+                  </div>
+                </div>
+
                 {/* Chats List */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                   {chatListElement}
@@ -1063,7 +1085,26 @@ const CRM = () => {
                     {/* Messages Scroll Panel */}
                     <div className="flex-1 flex flex-col-reverse overflow-y-auto p-4 gap-3 bg-bg2/30 custom-scrollbar">
                       {waLoading ? (
-                        <div className="text-center text-muted text-xs py-4">Loading messages...</div>
+                        <div className="text-center text-muted text-xs py-4 flex flex-col items-center justify-center h-full gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-muted/60" />
+                          <span>Loading messages...</span>
+                        </div>
+                      ) : waMessages.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted h-full gap-3">
+                          <Clock size={40} className="text-muted/20 animate-pulse" />
+                          <div className="space-y-1">
+                            <p className="text-xs font-semibold text-text">No Message History Cached</p>
+                            <p className="text-[10px] text-muted max-w-[240px] leading-relaxed mx-auto">
+                              Only new incoming and outgoing messages are stored. Previous history is not synced.
+                            </p>
+                          </div>
+                          {activeWaChat?.lastMessage && (
+                            <div className="mt-2 p-3 bg-bg3 border border-glass-border rounded-xl text-left max-w-xs text-xs shadow-sm w-full">
+                              <span className="text-[9px] font-bold text-primary uppercase tracking-wider block mb-1">Last Received Message:</span>
+                              <p className="italic text-text font-medium">"{activeWaChat.lastMessage}"</p>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <>
                           <div ref={messagesEndRef} />
