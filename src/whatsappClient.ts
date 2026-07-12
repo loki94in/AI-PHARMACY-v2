@@ -61,6 +61,7 @@ export async function shouldRouteToBusiness(): Promise<boolean> {
 }
 let activeClient: WAClient | null = null; // Track currently initializing or active client
 let initializing = false;
+let isSyncing = false;
 
 export let currentQr: string | null = null;
 export let isReady: boolean = false;
@@ -460,6 +461,12 @@ export async function sendMessage(
 /** Get all chats from the local SQLite cache */
 export async function getChats(): Promise<any[]> {
   try {
+    if (clientInstance) {
+      // Trigger background synchronization asynchronously so the SQLite cache stays fresh
+      syncWhatsappData(clientInstance).catch(err => {
+        console.error('[WhatsApp] Background getChats sync failed:', err);
+      });
+    }
     const db = await dbManager.getConnection();
     const rows = await db.all(
       `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage, resolved_number as resolvedNumber 
@@ -475,6 +482,7 @@ export async function getChats(): Promise<any[]> {
     return [];
   }
 }
+
 
 /** Get messages for a specific chat from local SQLite cache */
 export async function getChatMessages(chatId: string, limit: number = 50): Promise<any[]> {
@@ -557,6 +565,11 @@ export async function getChatMessages(chatId: string, limit: number = 50): Promi
 
 /** Asynchronously sync chats and recent messages from WhatsApp to SQLite */
 async function syncWhatsappData(client: WAClient) {
+  if (isSyncing) {
+    console.log('[WhatsApp] Synchronization already in progress, skipping duplicate request.');
+    return;
+  }
+  isSyncing = true;
   try {
     console.log('[WhatsApp] Starting background synchronization of chats and messages...');
     const chats = await client.getChats();
@@ -640,6 +653,8 @@ async function syncWhatsappData(client: WAClient) {
     eventService.broadcast('wa_chats_updated', { success: true });
   } catch (err) {
     console.error('[WhatsApp] Error during synchronization:', err);
+  } finally {
+    isSyncing = false;
   }
 }
 

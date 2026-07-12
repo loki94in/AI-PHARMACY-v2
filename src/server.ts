@@ -495,24 +495,24 @@ async function setupCrons(db: any) {
     }
   });
 
-  // Daily Pharmarack catalog sync at 3 AM (WhatsApp OCR Pipeline)
-  cron.schedule('0 3 * * *', async () => {
+  // Periodic Pharmarack catalog sync every 15 minutes (WhatsApp OCR Pipeline)
+  cron.schedule('*/15 * * * *', async () => {
     try {
-      const mode = await getBackendFetchMode('bg.catalogSync', 'off');
+      const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
       if (mode === 'off') {
-        console.log('[Catalog Cache] Daily sync is disabled (mode=off)');
+        console.log('[Catalog Cache] Periodic sync is disabled (mode=off)');
         return;
       }
       if (mode === 'manual' && activityTracker.isIdle()) {
-        console.log('[Catalog Cache] Daily sync skipped (mode=manual, system is idle)');
+        console.log('[Catalog Cache] Periodic sync skipped (mode=manual, system is idle)');
         return;
       }
 
       const { pharmarackCatalogCache } = await import('./services/pharmarackCatalogCache.js');
       const result = await pharmarackCatalogCache.syncCatalog();
-      console.log(`[Catalog Cache] Daily sync complete: ${result.synced} products, ${result.errors} errors`);
+      console.log(`[Catalog Cache] Periodic sync complete: ${result.synced} products, ${result.errors} errors`);
     } catch (err) {
-      console.error('[Catalog Cache] Daily sync cron failed:', err);
+      console.error('[Catalog Cache] Periodic sync cron failed:', err);
     }
   });
 

@@ -436,7 +436,7 @@ const Settings = () => {
     }
   };
 
-  const handleDataFetchModeChange = (key: string, mode: FetchMode) => {
+  const handleDataFetchModeChange = async (key: string, mode: FetchMode) => {
     let currentModes: Record<string, FetchMode> = {};
     try {
       currentModes = JSON.parse(settings.dataFetchControl || '{}');
@@ -451,6 +451,17 @@ const Settings = () => {
     }));
 
     localStorage.setItem('data_fetch_control', modesString);
+
+    try {
+      await apiClient.post('/settings/save', {
+        data_fetch_control: modesString
+      });
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      toastEvent.trigger('Fetch mode updated successfully', 'success');
+    } catch (error) {
+      console.error('Failed to save fetch mode', error);
+      toastEvent.trigger('Failed to save fetch mode', 'error');
+    }
   };
 
   const handleOpenLoginWindow = async () => {
@@ -1248,16 +1259,6 @@ const Settings = () => {
               </div>
             </div>
           ))}
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button 
-            onClick={handleSaveSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
-          >
-            <Save size={16} />
-            Save Fetch Modes
-          </button>
         </div>
       </div>
 
