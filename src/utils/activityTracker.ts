@@ -16,6 +16,10 @@ class ActivityTracker {
     return (Date.now() - this.lastActivity) < this.idleThresholdMs;
   }
 
+  public isIdle(thresholdMs: number = 30 * 60 * 1000): boolean {
+    return (Date.now() - this.lastActivity) > thresholdMs;
+  }
+
   /**
    * Blocks execution by sleeping in intervals if the app is currently in use.
    * Resumes automatically once the user has been idle for the threshold duration.

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Beaker, Play, Square, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles, Upload, Download, Search, RotateCcw, ChevronUp } from 'lucide-react';
 import { api } from '../../services/api';
+import { useFetchMode } from '../../hooks/useFetchMode';
 
 interface EnrichmentStatus {
   total: number;
@@ -181,6 +182,8 @@ export default function CompositionQueue() {
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight') ? parseInt(searchParams.get('highlight')!) : null;
 
+  const statusPollControl = useFetchMode('composition.statusPoll');
+
   const [status, setStatus] = useState<EnrichmentStatus | null>(cachedStatus);
   const [queue, setQueue] = useState<QueueItem[]>(cachedQueue);
   const [page, setPage] = useState(1);
@@ -235,10 +238,10 @@ export default function CompositionQueue() {
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
   useEffect(() => {
-    if (!status?.isRunning) return;
+    if (!status?.isRunning || !statusPollControl.shouldFetch) return;
     const timer = setInterval(loadStatus, 3000);
     return () => clearInterval(timer);
-  }, [status?.isRunning, loadStatus]);
+  }, [status?.isRunning, loadStatus, statusPollControl.shouldFetch]);
 
   useEffect(() => {
     if (!highlightId || loading) return;

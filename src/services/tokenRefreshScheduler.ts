@@ -128,6 +128,19 @@ export class TokenRefreshScheduler {
     this.isRefreshing = true;
 
     try {
+      const { getBackendFetchMode } = await import('./dataFetchControl.js');
+      const mode = await getBackendFetchMode('bg.pharmarackTokenRefresh', 'auto');
+      if (mode === 'off') {
+        this.isRefreshing = false;
+        return;
+      }
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[TokenRefreshScheduler] Skipped background token refresh (mode=manual, system is idle)');
+        this.isRefreshing = false;
+        return;
+      }
+
       const db = await dbManager.getConnection();
       const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
       const token = tokenRow ? tokenRow.value : '';

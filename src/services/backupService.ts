@@ -217,6 +217,22 @@ export function startScheduler(frequency?: string): void {
   }
 
   scheduledTask = cron.schedule(cronExpr, async () => {
+    try {
+      const { getBackendFetchMode } = await import('./dataFetchControl.js');
+      const mode = await getBackendFetchMode('settings.backupSchedule', 'manual');
+      if (mode === 'off') {
+        console.log('[Backup] Scheduled backup is disabled (mode=off)');
+        return;
+      }
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[Backup] Scheduled backup skipped (mode=manual, system is idle)');
+        return;
+      }
+    } catch (err) {
+      console.error('[Backup] Failed to check fetch control in scheduler:', err);
+    }
+
     console.log(`[Backup] Running scheduled backup (${frequency})...`);
     try {
       const result = await createBackup(`Scheduled ${frequency}`);

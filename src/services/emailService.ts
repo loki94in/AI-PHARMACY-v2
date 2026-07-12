@@ -1093,6 +1093,20 @@ export class EmailService {
    * Polls the IMAP inbox for unseen emails and processes them
    */
   public async pollInbox(): Promise<void> {
+    try {
+      const { getBackendFetchMode } = await import('./dataFetchControl.js');
+      const mode = await getBackendFetchMode('bg.emailImapPoll', 'off');
+      if (mode === 'off') {
+        return;
+      }
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        return;
+      }
+    } catch (importErr) {
+      console.error('Failed to import fetch control in pollInbox:', importErr);
+    }
+
     if (this.isPolling) {
       console.log('Email polling already in progress, skipping...');
       return;

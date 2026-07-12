@@ -779,7 +779,7 @@ const DatabasePage = () => {
 
       {/* Price History Modal */}
       {showPriceHistoryModal && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-md">
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md">
           <div className="bg-bg border border-glass-border rounded-2xl w-11/12 max-w-4xl shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-glass-border bg-bg3/50">
@@ -870,7 +870,7 @@ const DatabasePage = () => {
       
       {/* Add Medicine Modal */}
       {showAddModal && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Header */}
             <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">

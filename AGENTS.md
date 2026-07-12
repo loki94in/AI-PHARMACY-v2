@@ -275,3 +275,12 @@ To prevent sluggish page switching, high network/CPU utilization, and laggy auto
    * If a prefix match yields sufficient results (e.g., $\ge 15$), the endpoint should return immediately. Fall back to middle-word matches (`LIKE '%term%'`) only if necessary.
    * Avoid casting numeric columns (like MRP) to text dynamically in SQL clauses unless the query contains numeric characters. Doing so forces SQLite to run full table scans on every keystroke, causing severe UI lag.
 
+---
+
+## Data Fetch Control & Idle Gating Contract
+
+To prevent excessive network traffic, database load, and background resource usage:
+1. **Unified Configuration Registry**: Frontend and backend settings must load dynamically via `dataFetchControl`. Interactive pages must support `auto`, `manual`, and `off` modes.
+2. **Idle-Gating**: Background sync tasks, backups, near-expiry scans, catalog updates, and periodic polling jobs must query `activityTracker.isIdle()`. If the user is inactive for >30 minutes, execution must be paused/skipped under `manual` or gated configurations.
+3. **No Mount Saturation**: Avoid launching large fetch operations synchronously on page component mount. Utilize local caching, hover-prefetch gating, and on-focus lazily loaded inputs (e.g. Doctor select).
+4. **Silent Refresh on Write**: Mutations from sales (POS), purchases, customer returns, or inventory edits must trigger background updates to the client-side cache without blocking user interaction.

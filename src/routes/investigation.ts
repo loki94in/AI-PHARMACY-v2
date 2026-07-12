@@ -810,27 +810,89 @@ router.put('/sales/:invoiceId', async (req, res) => {
       return res.status(404).json({ error: 'Sales invoice not found' });
     }
 
-    // Step 1: Revert old quantities in inventory_master
-    const oldItems = await db.all('SELECT inventory_id, quantity FROM sale_items WHERE invoice_id = ?', [invoiceId]);
+    // Step 1: Fetch old items to calculate deltas
+    const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [invoiceId]);
+
+    // Group items by inventory_id to calculate net changes
+    const deltaMap = new Map<number, {
+      inventory_id: number;
+      oldQty: number;
+      oldLoose: number;
+      newQty: number;
+      newLoose: number;
+    }>();
+
     for (const oi of oldItems) {
-      await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [oi.quantity, oi.inventory_id]);
+      deltaMap.set(oi.inventory_id, {
+        inventory_id: oi.inventory_id,
+        oldQty: oi.quantity || 0,
+        oldLoose: oi.loose_qty || 0,
+        newQty: 0,
+        newLoose: 0
+      });
     }
 
-    // Step 2: Validate and deduct new quantities
-    for (const item of items) {
-      const { inventory_id, quantity } = item;
-      if (quantity < 0) {
-        throw new Error('Quantity cannot be negative');
+    for (const ni of items) {
+      const invId = ni.inventory_id;
+      if (deltaMap.has(invId)) {
+        const entry = deltaMap.get(invId)!;
+        entry.newQty = ni.quantity || 0;
+        entry.newLoose = ni.loose_qty || 0;
+      } else {
+        deltaMap.set(invId, {
+          inventory_id: invId,
+          oldQty: 0,
+          oldLoose: 0,
+          newQty: ni.quantity || 0,
+          newLoose: ni.loose_qty || 0
+        });
+      }
+    }
+
+    // Step 2: Validate and apply net changes in inventory_master
+    const { applyStockDelta } = await import('../utils/stockRebuild.js');
+    for (const [invId, entry] of deltaMap.entries()) {
+      const netQty = entry.newQty - entry.oldQty;
+      const netLoose = entry.newLoose - entry.oldLoose;
+      if (netQty === 0 && netLoose === 0) continue;
+
+      const currentStock = await db.get(
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as medicine_name
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [invId]
+      );
+
+      if (!currentStock) {
+        throw new Error(`Inventory item ID ${invId} does not exist.`);
       }
 
-      // Check remaining stock
-      const stock = await db.get('SELECT quantity, batch_no FROM inventory_master WHERE id = ?', [inventory_id]);
-      if (!stock || stock.quantity < quantity) {
-        throw new Error(`Insufficient stock for Batch ${stock ? stock.batch_no : inventory_id}. Available: ${stock ? stock.quantity : 0}, Requested: ${quantity}`);
+      const packSize = currentStock.pack_size;
+      const currentTotalUnits = currentStock.quantity * packSize + currentStock.loose_quantity;
+      const netUnitsSold = netQty * packSize + netLoose;
+
+      if (netUnitsSold > 0 && currentTotalUnits < netUnitsSold) {
+        throw new Error(
+          `Insufficient stock for "${currentStock.medicine_name}". ` +
+          `Available: ${currentStock.quantity} strips & ${currentStock.loose_quantity} loose. ` +
+          `Requested net addition of ${netQty} strips & ${netLoose} loose.`
+        );
       }
 
-      // Deduct quantity
-      await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [quantity, inventory_id]);
+      const newStock = applyStockDelta(
+        { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
+        -netQty,
+        -netLoose,
+        packSize
+      );
+
+      if (newStock.quantity < 0 || newStock.loose_quantity < 0) {
+        throw new Error(`Reconciliation resulted in negative stock for "${currentStock.medicine_name}".`);
+      }
+
+      await db.run(
+        'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+        [newStock.quantity, newStock.loose_quantity, invId]
+      );
     }
 
     // Step 3: Remove old items and insert corrected items
@@ -842,7 +904,13 @@ router.put('/sales/:invoiceId', async (req, res) => {
         'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty) VALUES (?, ?, ?, ?, ?)',
         [invoiceId, inventory_id, quantity, unit_price, loose_qty]
       );
-      subtotal += quantity * unit_price;
+      
+      const currentStock = await db.get(
+        'SELECT COALESCE(m.pack_size, 10) as pack_size FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?',
+        [inventory_id]
+      );
+      const pSize = currentStock ? currentStock.pack_size : 10;
+      subtotal += (quantity * unit_price) + (loose_qty * (unit_price / pSize));
     }
 
     // Recalculate totals
@@ -912,37 +980,94 @@ router.put('/purchases/:purchaseId', async (req, res) => {
       return res.status(404).json({ error: 'Purchase bill not found' });
     }
 
-    // Step 1: Revert old quantities from inventory_master (must match medicine_id and batch_no)
-    const oldItems = await db.all('SELECT medicine_id, batch_no, quantity FROM purchase_items WHERE purchase_id = ?', [purchaseId]);
+    // Step 1: Fetch old items to calculate deltas
+    const oldItems = await db.all(
+      'SELECT medicine_id, batch_no, quantity, expiry_date, cost_price, mrp FROM purchase_items WHERE purchase_id = ?',
+      [purchaseId]
+    );
+
+    // Group items by medicine_id and batch_no to calculate net changes
+    const deltaMap = new Map<string, {
+      medicine_id: number;
+      batch_no: string;
+      oldQty: number;
+      newQty: number;
+      expiry_date: string;
+      mrp: number;
+      cost_price: number;
+    }>();
+
     for (const oi of oldItems) {
-      // Find matching inventory record
-      const invRecord = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [oi.medicine_id, oi.batch_no]);
-      if (invRecord) {
-        // Enforce stock cannot go below zero
-        if (invRecord.quantity < oi.quantity) {
-          throw new Error(`Cannot revert purchase stock because inventory stock has already been sold. Current stock: ${invRecord.quantity}, trying to deduct: ${oi.quantity}`);
-        }
-        await db.run('UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?', [oi.quantity, invRecord.id]);
+      const key = `${oi.medicine_id}_${oi.batch_no}`;
+      deltaMap.set(key, {
+        medicine_id: oi.medicine_id,
+        batch_no: oi.batch_no,
+        oldQty: oi.quantity || 0,
+        newQty: 0,
+        expiry_date: oi.expiry_date || '12/28',
+        mrp: oi.mrp || 0,
+        cost_price: oi.cost_price || 0
+      });
+    }
+
+    for (const ni of items) {
+      const key = `${ni.medicine_id}_${ni.batch_no}`;
+      if (deltaMap.has(key)) {
+        const entry = deltaMap.get(key)!;
+        entry.newQty = ni.quantity || 0;
+        entry.expiry_date = ni.expiry_date || entry.expiry_date;
+        entry.mrp = ni.mrp || entry.mrp;
+        entry.cost_price = ni.cost_price || entry.cost_price;
+      } else {
+        deltaMap.set(key, {
+          medicine_id: ni.medicine_id,
+          batch_no: ni.batch_no,
+          oldQty: 0,
+          newQty: ni.quantity || 0,
+          expiry_date: ni.expiry_date || '12/28',
+          mrp: ni.mrp || 0,
+          cost_price: ni.cost_price || 0
+        });
       }
     }
 
-    // Step 2: Validate and update with new quantities
-    for (const item of items) {
-      const { medicine_id, batch_no, quantity, expiry_date = '12/28', mrp = 0, cost_price = 0 } = item;
-      if (quantity < 0) {
-        throw new Error('Quantity cannot be negative');
-      }
+    // Step 2: Validate and apply net changes in inventory_master
+    for (const [_, entry] of deltaMap.entries()) {
+      const netChange = entry.newQty - entry.oldQty;
+      if (netChange === 0) continue;
 
-      // Check if inventory record exists, else create it
-      const invRecord = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medicine_id, batch_no]);
-      if (invRecord) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [quantity, invRecord.id]);
-      } else {
+      const invRecord = await db.get(
+        'SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?',
+        [entry.medicine_id, entry.batch_no]
+      );
+
+      if (netChange < 0) {
+        // We are reducing the purchased quantity. This means we must deduct stock from inventory.
+        const deductQty = Math.abs(netChange);
+        if (!invRecord || invRecord.quantity < deductQty) {
+          throw new Error(
+            `Cannot reduce purchase quantity for "${entry.batch_no}". ` +
+            `Available stock is ${invRecord ? invRecord.quantity : 0}, but trying to reduce purchase by ${deductQty}.`
+          );
+        }
         await db.run(
-          `INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp, cost_price, loose_quantity)
-           VALUES (?, ?, ?, ?, ?, ?, 0)`,
-          [medicine_id, quantity, batch_no, expiry_date, mrp, cost_price]
+          'UPDATE inventory_master SET quantity = quantity - ? WHERE id = ?',
+          [deductQty, invRecord.id]
         );
+      } else {
+        // We are increasing the purchased quantity. This means we add stock to inventory.
+        if (invRecord) {
+          await db.run(
+            'UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?',
+            [netChange, invRecord.id]
+          );
+        } else {
+          await db.run(
+            `INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp, cost_price, loose_quantity)
+             VALUES (?, ?, ?, ?, ?, ?, 0)`,
+            [entry.medicine_id, netChange, entry.batch_no, entry.expiry_date, entry.mrp, entry.cost_price]
+          );
+        }
       }
     }
 

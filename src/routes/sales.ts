@@ -122,8 +122,11 @@ router.post('/', async (req, res) => {
     }
 
     for (const item of items) {
-      const { inventory_id, quantity = 0, unit_price = 0, medicine_name } = item;
-      if (Number(quantity) <= 0 || Number(unit_price) <= 0 || isNaN(Number(quantity)) || isNaN(Number(unit_price))) {
+      const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, medicine_name } = item;
+      const q = Number(quantity);
+      const l = Number(loose_qty);
+      const uPrice = Number(unit_price);
+      if ((q <= 0 && l <= 0) || uPrice <= 0 || isNaN(q) || isNaN(l) || isNaN(uPrice)) {
         return res.status(400).json({ error: 'Invalid items data. Quantity and unit price must be valid positive numbers.' });
       }
       if (!inventory_id && !medicine_name) {

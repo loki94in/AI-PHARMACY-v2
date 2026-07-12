@@ -35,6 +35,7 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { getNDaysAgoString } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
+import { useFetchMode } from '../../hooks/useFetchMode';
 import Dispatch from '../Dispatch';
 
 interface LearningProfileSummary {
@@ -70,6 +71,8 @@ const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'clinical';
   const [activeTab, setActiveTab] = useState<any>(currentTab);
+
+  const qrPollControl = useFetchMode('learning.qrPoll');
 
   useEffect(() => {
     if (searchParams.get('tab')) {
@@ -286,7 +289,7 @@ const Learning: React.FC = () => {
 
   useEffect(() => {
     let timer: any;
-    if (settingsData?.whatsapp_enabled === 'true' && !waStatus.isReady) {
+    if (settingsData?.whatsapp_enabled === 'true' && !waStatus.isReady && qrPollControl.shouldFetch) {
       const fetchQR = async () => {
         try {
           const { data } = await apiClient.get('/messaging/qr');
@@ -299,7 +302,7 @@ const Learning: React.FC = () => {
       timer = setInterval(fetchQR, 5000);
     }
     return () => clearInterval(timer);
-  }, [settingsData?.whatsapp_enabled, waStatus.isReady]);
+  }, [settingsData?.whatsapp_enabled, waStatus.isReady, qrPollControl.shouldFetch]);
 
   const handleReconnect = async () => {
     try {
@@ -1338,6 +1341,16 @@ const Learning: React.FC = () => {
                                 </div>
                               ) : waStatus.qrUrl ? (
                                 <img src={waStatus.qrUrl} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                              ) : qrPollControl.mode === 'manual' && !qrPollControl.loaded ? (
+                                <div className="flex flex-col items-center justify-center h-full">
+                                  <button
+                                    type="button"
+                                    onClick={() => qrPollControl.requestLoad()}
+                                    className="text-[9px] font-extrabold bg-primary/20 text-primary px-3 py-1.5 rounded-lg hover:bg-primary/30 transition-all cursor-pointer"
+                                  >
+                                    Load QR Code
+                                  </button>
+                                </div>
                               ) : (
                                 <div className="flex flex-col items-center text-muted">
                                   <RefreshCw className="animate-spin text-sky mb-2" size={16} />

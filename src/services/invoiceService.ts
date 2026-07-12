@@ -90,7 +90,10 @@ export class InvoiceService {
       throw new Error('Cart items required');
     }
     for (const item of data.items) {
-      if (Number(item.quantity || 0) <= 0 || Number(item.unitPrice || 0) <= 0) {
+      const q = Number(item.quantity || 0);
+      const l = Number(item.loose_qty || 0);
+      const uPrice = Number(item.unitPrice || 0);
+      if ((q <= 0 && l <= 0) || uPrice <= 0 || isNaN(q) || isNaN(l) || isNaN(uPrice)) {
         throw new Error('Invalid items data. Quantity and unit price must be valid positive numbers.');
       }
     }

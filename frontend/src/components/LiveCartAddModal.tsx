@@ -1199,7 +1199,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-[999999] left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-2xl rounded-xl shadow-2xl divide-y divide-border/30 py-1 scrollbar-thin">
+                    <ul className="absolute z-dropdown left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-2xl rounded-xl shadow-2xl divide-y divide-border/30 py-1 scrollbar-thin">
                       {suggestions.map((med, index) => (
                         <li
                           key={index}

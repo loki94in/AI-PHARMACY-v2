@@ -777,7 +777,7 @@ if (ignoreNextSearchRef.current) {
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-[999999] left-0 right-0 mt-1 max-h-96 overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-xl rounded-xl shadow-2xl divide-y divide-glass-border/30 py-2">
+                    <ul className="absolute z-dropdown left-0 right-0 mt-1 max-h-96 overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-xl rounded-xl shadow-2xl divide-y divide-glass-border/30 py-2">
                       {suggestions.map((med, index) => {
                         const isPr = med.isPharmarack;
                         return (
@@ -1163,7 +1163,7 @@ if (ignoreNextSearchRef.current) {
 
         {/* Duplicate Item Resolution Overlay */}
         {duplicateMatch && pendingItemToAdd && (
-          <div className="absolute inset-0 z-[99999] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md rounded-3xl transition-all duration-300 animate-in fade-in">
+          <div className="absolute inset-0 z-modal flex items-center justify-center p-6 bg-black/80 backdrop-blur-md rounded-3xl transition-all duration-300 animate-in fade-in">
             <div className="bg-bg2 border border-glass-border p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl">
               <div className="flex items-center gap-2 text-amber-400">
                 <AlertTriangle size={20} />

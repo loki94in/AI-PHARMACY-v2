@@ -11,6 +11,7 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { useFetchMode } from '../../hooks/useFetchMode';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -147,6 +148,10 @@ const groupBatches = (items: any[]): any[] => {
   }
   return grouped;
 };
+
+// Stable empty array reference to prevent reference-mismatch state updates
+const EMPTY_ARRAY: any[] = [];
+
 
 const filterLocalInventory = (query: string, inventory: any[]): any[] => {
   if (!query || query.trim().length < 2) return [];
@@ -322,9 +327,14 @@ const POS = () => {
   const [paymentMedium, setPaymentMedium] = useState<string>(initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
   const queryClient = useQueryClient();
 
+  const specialOrdersControl = useFetchMode('pos.specialOrders');
+  const combinationsControl = useFetchMode('pos.combinations');
+  const doctorsControl = useFetchMode('pos.doctors');
+
   const { data: specialOrders = [] } = useApiQuery<any[]>(
     'pos-special-orders',
-    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : [])
+    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
+    { enabled: specialOrdersControl.shouldFetch }
   );
 
   const { data: commonCombinations = [] } = useApiQuery<any[]>(
@@ -368,7 +378,8 @@ const POS = () => {
         console.error('Batch quantity enrichment failed:', err);
         return topItems;
       }
-    }
+    },
+    { enabled: combinationsControl.shouldFetch }
   );
 
   const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
@@ -601,9 +612,10 @@ const POS = () => {
     setPatientName(name);
   };
   
-  const { data: doctorsList = [] } = useApiQuery<any[]>(
+  const { data: doctorsList } = useApiQuery<any[]>(
     'crm-doctors',
-    () => api.getDoctors()
+    () => api.getDoctors(),
+    { enabled: doctorsControl.shouldFetch }
   );
 
   const defaultDoctors = useMemo(() => [
@@ -614,7 +626,7 @@ const POS = () => {
 
   const allDoctors = useMemo(() => [
     ...defaultDoctors,
-    ...doctorsList.filter(d => !defaultDoctors.some(dd => dd.name === d.name))
+    ...(doctorsList || EMPTY_ARRAY).filter(d => !defaultDoctors.some(dd => dd.name === d.name))
   ], [doctorsList, defaultDoctors]);
 
   const filteredDoctors = useMemo(() => allDoctors.filter(doc => 
@@ -625,8 +637,8 @@ const POS = () => {
   useEffect(() => {
     if (doctor.trim() === '') {
       setSelectedDoctorId(null);
-      setDoctorSuggestions([]);
-      setDoctorComboSuggestions([]);
+      setDoctorSuggestions(EMPTY_ARRAY);
+      setDoctorComboSuggestions(EMPTY_ARRAY);
       return;
     }
     const match = allDoctors.find(d => d.name.toLowerCase().trim() === doctor.toLowerCase().trim());
@@ -634,8 +646,8 @@ const POS = () => {
       setSelectedDoctorId(match.id);
     } else {
       setSelectedDoctorId(null);
-      setDoctorSuggestions([]);
-      setDoctorComboSuggestions([]);
+      setDoctorSuggestions(EMPTY_ARRAY);
+      setDoctorComboSuggestions(EMPTY_ARRAY);
     }
   }, [doctor, allDoctors]);
 
@@ -650,10 +662,10 @@ const POS = () => {
         })
         .catch(err => {
           console.error('Failed to fetch doctor suggestions:', err);
-          setDoctorSuggestions([]);
+          setDoctorSuggestions(EMPTY_ARRAY);
         });
     } else {
-      setDoctorSuggestions([]);
+      setDoctorSuggestions(EMPTY_ARRAY);
     }
   }, [selectedDoctorId]);
 
@@ -2011,7 +2023,10 @@ const POS = () => {
                     placeholder="Type or Select Doctor..."
                     value={doctor}
                     onChange={e => { setDoctor(e.target.value); setDoctorHighlightIndex(-1); }}
-                    onFocus={() => setIsDoctorDropdownOpen(true)}
+                    onFocus={() => {
+                      setIsDoctorDropdownOpen(true);
+                      doctorsControl.requestLoad();
+                    }}
                     onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)}
                     onKeyDown={e => {
                       if (!isDoctorDropdownOpen || filteredDoctors.length === 0) return;
@@ -2481,31 +2496,44 @@ const POS = () => {
                 </div>
               </div>
             ) : (
-              commonCombinations.length > 0 && (
-                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
-                    ⚡ Quick Add (Frequently Sold):
-                  </span>
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
-                    {commonCombinations.map(med => (
-                      <button
-                        key={med.id}
-                        onClick={() => addToCart(med)}
-                        className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
-                      >
-                        <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
-                          {med.name}
-                          {med.recommendationMsg && (
-                            <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
-                              ({med.recommendedQty > 0 ? `${med.recommendedQty} Str` : `${med.recommendedLooseQty} Tab`})
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-[10px] text-primary font-bold">+</span>
-                      </button>
-                    ))}
-                  </div>
+              combinationsControl.mode === 'manual' && !combinationsControl.loaded ? (
+                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden items-center justify-center py-2.5">
+                  <span className="text-xs text-muted mb-1.5">Quick Add suggestions are deferred.</span>
+                  <button
+                    type="button"
+                    onClick={() => combinationsControl.requestLoad()}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-all cursor-pointer"
+                  >
+                    Load Suggestions
+                  </button>
                 </div>
+              ) : (
+                commonCombinations.length > 0 && (
+                  <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
+                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
+                      ⚡ Quick Add (Frequently Sold):
+                    </span>
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
+                      {commonCombinations.map(med => (
+                        <button
+                          key={med.id}
+                          onClick={() => addToCart(med)}
+                          className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
+                        >
+                          <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
+                            {med.name}
+                            {med.recommendationMsg && (
+                              <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
+                                ({med.recommendedQty > 0 ? `${med.recommendedQty} Str` : `${med.recommendedLooseQty} Tab`})
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[10px] text-primary font-bold">+</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
               )
             )}
           </div>
@@ -2552,12 +2580,23 @@ const POS = () => {
                 </button>
               </div>
               
-              <button 
-                onClick={clearCart}
-                className="premium-btn bg-red/10 border border-red/20 text-red text-xs py-1.5 px-3 hover:bg-red/20 transition-all flex items-center gap-1.5 ml-auto rounded-xl"
-              >
-                <Trash2 size={12} /> Clear Cart
-              </button>
+              <div className="flex items-center gap-2 ml-auto">
+                {specialOrdersControl.mode === 'manual' && !specialOrdersControl.loaded && (
+                  <button
+                    type="button"
+                    onClick={() => specialOrdersControl.requestLoad()}
+                    className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all cursor-pointer mr-1"
+                  >
+                    Load Special Orders
+                  </button>
+                )}
+                <button 
+                  onClick={clearCart}
+                  className="premium-btn bg-red/10 border border-red/20 text-red text-xs py-1.5 px-3 hover:bg-red/20 transition-all flex items-center gap-1.5 rounded-xl"
+                >
+                  <Trash2 size={12} /> Clear Cart
+                </button>
+              </div>
             </div>
 
             {/* Cart Table Container */}

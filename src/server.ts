@@ -13,6 +13,7 @@ import { dbManager } from './database/connection.js';
 import { ensureSchema } from './database.js';
 import { registerProcessGuardian } from './process/processGuardian.js';
 import { activityTracker } from './utils/activityTracker.js';
+import { getBackendFetchMode } from './services/dataFetchControl.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -115,7 +116,7 @@ app.use(rateLimit({
   max: 300, // limit each IP to 300 requests per window
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path.startsWith('/api/migration') || req.path.startsWith('/api/notifications'),
+  skip: (req) => process.env.NODE_ENV !== 'production' || req.path.startsWith('/api/migration') || req.path.startsWith('/api/notifications'),
   message: { error: 'Too many requests, please try again later' }
 }));
 app.use(express.json({ limit: '15mb' }));
@@ -410,6 +411,16 @@ async function setupCrons(db: any) {
   // Daily check at 9:00 AM
   cron.schedule('0 9 * * *', async () => {
     try {
+      const mode = await getBackendFetchMode('bg.dailyScans', 'off');
+      if (mode === 'off') {
+        console.log('[Cron] Daily checks cron is disabled (mode=off)');
+        return;
+      }
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[Cron] Daily checks cron skipped (mode=manual, system is idle)');
+        return;
+      }
+
       const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
       if (!autoRow || autoRow.value !== 'true') return;
       console.log('Running daily patient refill, bounced products & overdue credit notes check...');
@@ -442,6 +453,16 @@ async function setupCrons(db: any) {
   // Automatic near-expiry scan & alerts (Every 15 days at 9:00 AM)
   cron.schedule('0 9 1,16 * *', async () => {
     try {
+      const mode = await getBackendFetchMode('bg.dailyScans', 'off');
+      if (mode === 'off') {
+        console.log('[Cron] Near-expiry scan cron is disabled (mode=off)');
+        return;
+      }
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[Cron] Near-expiry scan cron skipped (mode=manual, system is idle)');
+        return;
+      }
+
       const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
       if (!autoRow || autoRow.value !== 'true') return;
       const { runExpiryScanAndAlert } = await import('./services/expiryAlertService.js');
@@ -454,6 +475,16 @@ async function setupCrons(db: any) {
   // Nightly 9:30 PM backup
   cron.schedule('30 21 * * *', async () => {
     try {
+      const mode = await getBackendFetchMode('bg.nightlyBackup', 'off');
+      if (mode === 'off') {
+        console.log('[Backup] Nightly backup is disabled (mode=off)');
+        return;
+      }
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[Backup] Nightly backup skipped (mode=manual, system is idle)');
+        return;
+      }
+
       const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
       if (!autoRow || autoRow.value !== 'true') return;
       const { createBackup } = await import('./services/backupService.js');
@@ -467,6 +498,16 @@ async function setupCrons(db: any) {
   // Daily Pharmarack catalog sync at 3 AM (WhatsApp OCR Pipeline)
   cron.schedule('0 3 * * *', async () => {
     try {
+      const mode = await getBackendFetchMode('bg.catalogSync', 'off');
+      if (mode === 'off') {
+        console.log('[Catalog Cache] Daily sync is disabled (mode=off)');
+        return;
+      }
+      if (mode === 'manual' && activityTracker.isIdle()) {
+        console.log('[Catalog Cache] Daily sync skipped (mode=manual, system is idle)');
+        return;
+      }
+
       const { pharmarackCatalogCache } = await import('./services/pharmarackCatalogCache.js');
       const result = await pharmarackCatalogCache.syncCatalog();
       console.log(`[Catalog Cache] Daily sync complete: ${result.synced} products, ${result.errors} errors`);

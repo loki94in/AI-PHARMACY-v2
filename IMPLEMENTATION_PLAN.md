@@ -1,234 +1,350 @@
-# Implementation Plan — Medicine Scan, Reference & Storage Upgrade
+# Implementation Plan — API Call Optimization & Data Fetch Control
 
-> **Purpose of this document**
-> A detailed, executable plan covering **what** we are doing, **how** we are doing it, **why** we are doing it, **what** we will achieve, and **how** we will achieve it.
-> Scope: make the WhatsApp / aiCamera medicine scan recognize far more medicines reliably, block garbage / non-medical scans, stop duplicate "bundling", and store everything in one master — while keeping the app **lean** (no big in-app library).
-> Status: **PLAN** (to be executed on go-ahead). No source files were modified to create this document.
-
----
-
-## 1. What we are doing (summary)
-
-We are upgrading the medicine-identification pipeline in three layers:
-
-1. **Reference data layer** — load the full drug master that already sits on disk (`data/reference_medicines.csv`, ~200k rows) into the existing SQLite DB, and create a small, separate `api_substances` table that holds **only** the unique active-ingredient names. This becomes the single trusted "substance list" the app consults.
-2. **Scan / OCR / enrichment layer** — improve `aiCameraService` so a scanned photo's partial or garbled name is resolved to the proper generic medicine name, and optionally consult an external (off-by-default) scispaCy helper for dose / form / manufacturer clues when the name is unreadable.
-3. **Gate + storage + dedup layer** — wire the best-performing skip/identify algorithm (V2) into the WhatsApp scan using `api_substances` as its reference; make similar (not identical) uploads **always prompt** the user via a popup instead of creating duplicates; and consolidate all writes to the master `medicines` table behind **one thin-core helper** so there is a single, conflict-safe storage path.
+**Project:** AI Pharmacy v2
+**Date:** 2026-07-12
+**Status:** Approved for build
+**Goal:** The app must never make unnecessary API calls when a page opens. The user opens POS and sells instantly; Pharmarack never auto-calls; requested data is always one visible "Load" click away; the idle app uses far less memory/CPU.
 
 ---
 
-## 2. Why we are doing this (the problem today)
+## 0. Goals & Guardrails
 
-Research of the current code shows:
+### Goals
+1. **Zero unnecessary calls on page open.** Every mount-time / poll-time call is either kept (essential), deferred to Manual, or turned Off by default.
+2. **Instant POS.** POS opens on the already-seeded compact inventory cache and lets the user start a sale with 0 network calls.
+3. **Pharmarack skipped by default.** No auto-fetch of Pharmarack data on mount anywhere; only on explicit user action.
+4. **Visible request control.** Manual-mode calls always show a visible "Load" affordance so the data is requestable on demand.
+5. **Light idle footprint.** Backend background jobs run only when the app is idle or at off-peak hours.
+6. **Silent Updates on Mutations.** Every purchase, sell, and return order (customer/distributor return) must trigger a silent background refresh of all client and backend caches (including the compact inventory cache, special orders, and combinations) to keep data fresh without blocking page transitions.
 
-| # | Finding | Evidence | Consequence |
+### Guardrails (DO NOT COMPROMISE)
+- **Pharmarack route/service/login files stay untouched**: `src/routes/pharmarack.ts`, the Pharmarack methods in `frontend/src/services/api.ts`, and the Pharmarack *session/login* logic.
+- **Only `src/services/tokenRefreshScheduler.ts` may be edited**, and only to make the refresh **expiry-driven** (refresh when the token nears expiry, not every 20 min). Session persistence must remain intact.
+- All other behavior changes happen at the **page/call-site** level and via the **Data Fetch Control** settings layer.
+- Do **not** introduce simulated/mock features (per DOX "No Simulated/Mock Features" rule).
+
+### Deferred Scope
+- **Pharmarack front-end auto-fetch gating** (`pharmarack.*` registry keys) is deferred per request — no edits to Pharmarack-related page code. These keys remain in the registry and the Settings panel so the user can set them to Off/Manual; the **expiry-driven token refresh (Phase 6)** is the only in-scope Pharmarack change.
+
+### Problems We Are Solving
+- The app fires many API calls automatically on page open and via continuous polling, making it feel sluggish and consuming memory/CPU even when idle.
+- POS forces the user to wait on several mount-time fetches (special orders, doctors, recommend-quantity batch) before they can sell.
+- Pharmarack data is fetched live on mount and a headless Chrome refresh runs every 20 minutes regardless of need.
+- Mail pulls IMAP every 2 minutes; a global 5s enrichment poll runs on every page; CRM polls WhatsApp every 5s and hits a dead `/api/events` endpoint in a reconnect loop.
+- Backend background jobs (messaging queues, IMAP, inventory cache, catalog worker) run continuously, keeping the idle app heavy.
+- The "click → freeze + extra layer" overlay bug (z-index collisions, native alert/confirm) blocks the UI.
+
+### Expected Outcomes After Implementation
+- Opening any page makes ~0 unnecessary calls; the user starts selling on POS immediately using the cached inventory.
+- Every deferrable call is user-controlled (Auto/Manual/Off) from one Settings panel; Manual calls stay visible via a "Load" button.
+- Pharmarack token refresh only runs near expiry (no 20-min blind Chrome launches); session persistence stays intact.
+- Continuous polls (enrichment 5s, CRM 5s, Mail 2-min IMAP, dead SSE) are stopped → far less background network and memory.
+- Backend jobs idle-gate, so the idle app uses minimal CPU/memory.
+- The overlay/stall bug is fixed (z-index unification, Universal Edit, QuickOrder overlay, native alert/confirm replaced).
+- Fully reversible: any key flipped back to Auto restores today's behavior.
+
+---
+
+## 1. Architecture Overview
+
+A single **Data Fetch Control** layer decides, per identifiable call, whether to:
+- `auto` — fire automatically (current behavior)
+- `manual` — do NOT auto-fire; render a visible "Load" button; fire only on click
+- `off` — never fire unless explicitly triggered once
+
+```
+frontend/src/services/dataFetchControl.ts   <- registry (source of truth)
+frontend/src/hooks/useFetchMode.ts           <- reads mode for a key
+frontend/src/pages/Settings/index.tsx        <- "Data Fetch Control" UI panel
+src/routes/settings.ts                        <- persists data_fetch_control in app_settings
+src/services/activityTracker.ts               <- backend idle detection (new)
+src/services/tokenRefreshScheduler.ts         <- expiry-driven refresh (edit)
+src/server.ts                                 <- idle-gate existing crons
+```
+
+Persistence: a new `app_settings` row `data_fetch_control` holding a JSON blob `{ [key]: 'auto'|'manual'|'off' }`, seeded from registry defaults on first read. Saved via the existing `POST /settings/save`.
+
+---
+
+## 2. Phase 1 — Registry + Persistence + Hook
+
+### 2.1 Registry — `frontend/src/services/dataFetchControl.ts` (NEW)
+Defines every controllable call. Fields: `key`, `label`, `page`, `callSite` (file:line for reference), `defaultMode`, `external` (bool).
+
+Frontend entries (defaults chosen to minimize background calls):
+
+| key | label | callSite | defaultMode | external |
+|---|---|---|---|---|
+| `pos.specialOrders` | POS special orders | `POS/index.tsx:325` | manual | no |
+| `pos.combinations` | POS combos + recommend-qty batch | `POS/index.tsx:330` | manual | no |
+| `pos.doctors` | POS doctors list | `POS/index.tsx:604` | manual | no |
+| `inv.list` | Inventory paged list | `Inventory/index.tsx:202` | auto | no |
+| `inv.specialOrders` | Inventory special orders | `Inventory/index.tsx:164` | manual | no |
+| `purch.distributors` | Purchases distributors | `Purchases/index.tsx:232` | auto | no |
+| `purch.history` | Purchases history | `Purchases/index.tsx:237` | auto | no |
+| `purch.pendingReturns` | Purchases pending returns | `Purchases/index.tsx:244` | auto | no |
+| `crm.patients` | CRM patients | `CRM/index.tsx:166` | auto | no |
+| `crm.waStatusPoll` | CRM WA status 5s poll | `CRM/index.tsx:440` | manual | no |
+| `crm.waSse` | CRM SSE stream | `CRM/index.tsx:461` | off | no |
+| `dash.stats` | Dashboard stats | `Dashboard/index.tsx:11` | auto | no |
+| `pharmarack.cart` | Live Pharmarack cart | `PharmarackCart/index.tsx:392` | manual | yes |
+| `pharmarack.pendingOrders` | Pharmarack pending orders | `PharmarackCart/index.tsx` | manual | yes |
+| `pharmarack.refills` | Pharmarack refills | `PharmarackCart/index.tsx` | manual | yes |
+| `pharmarack.priceHistory` | Pharmarack price history | `PharmarackCart/index.tsx` | manual | yes |
+| `layout.enrichmentPoll` | Global enrichment 5s poll | `Layout.tsx:702` | off | no |
+| `layout.hoverPrefetch` | Nav hover prefetch | `Layout.tsx:238` | off | no |
+| `mail.inboxRefresh` | Mail inbox refresh | `Mail/index.tsx:286` | auto (visible only) | no |
+| `mail.imapSync` | Mail IMAP 2-min sync | `Mail/index.tsx:289` | off | yes |
+| `composition.statusPoll` | Enrichment status 3s poll | `CompositionQueue/index.tsx:237` | auto (when running) | no |
+| `learning.qrPoll` | Learning QR 5s poll | `Learning/index.tsx:299` | auto (tab open) | no |
+| `settings.backupList` | Settings backup list | `Settings/index.tsx:564` | manual | no |
+| `settings.backupSchedule` | Settings backup schedule | `Settings/index.tsx:571` | manual | no |
+
+Backend entries (consumed by `activityTracker` / scheduler):
+
+| key | label | callSite | defaultMode |
 |---|---|---|---|
-| 1 | The app runs with only **82 seeded APIs** and **7 products**; the 200k master CSV is never loaded. | `medicine_reference` = 82 rows; `medicines` = 7 rows; `data/reference_medicines.csv` = 200,273 rows. | The app "guesses" from almost nothing. |
-| 2 | The production scan gate (`isMedicineLikely`) has **no API dictionary**. It only checks name-plausibility + document-word count. | `src/services/intentKeywords.ts:274`; no `knownApis`. | Non-medical / garbage scans slip through (BISCUITS, CHATTER, R02 garbage all "identified"). |
-| 3 | The gate variants we benchmarked (V1–V5) are **not wired into production** — they exist only in `scan_benchmark.ts`. | `src/services/whatsappIntentService.ts` uses `isMedicineLikely`, not `GATE_VARIANTS`. | The app uses the weakest logic in production. |
-| 4 | Catalog dedup is **exact-name only**. Similar-but-different names create duplicate entries ("bundling"). | `src/routes/catalog.ts:208` (`WHERE lower(name) = lower(?)`), `:363`. | Re-uploading a similar pack keeps adding products. |
-| 5 | Every input path writes its **own raw SQL**; the shared `medicineService.createMedicine/updateMedicine` is **dead code** (never imported). | `src/services/medicineService.ts:71/113`. | No single source of truth; changes risk regression. |
-| 6 | WhatsApp / OCR scan **never writes to `medicines`**; it only stages a review or escalates to admin. | `src/services/whatsappIntentService.ts` → `searchAndBroadcast` (broadcast + `wa_admin_escalations` + optional `staged_medicine_reviews`). | Scanned medicines are not fetchable in the master. |
+| `bg.pharmarackTokenRefresh` | Pharmarack token refresh | `tokenRefreshScheduler.ts:108` | auto (expiry-driven) |
+| `bg.nightlyBackup` | Nightly backup | `server.ts:455` | off-peak |
+| `bg.dailyScans` | Daily low-stock/expiry scans | `server.ts:411,443` | off-peak |
+| `bg.catalogSync` | 3AM catalog sync | `server.ts:468` | idle |
+| `bg.emailImapPoll` | Email IMAP 5-min poll | `emailService.ts:1115` | idle |
+| `bg.messagingQueues` | Messaging 30s queues | `messagingQueue.ts`/`whatsappQueue.ts` | idle-batch |
+| `bg.inventoryCache` | 10-min inventory cache | `inventoryCache.ts:32` | keep (cheap, local) |
+| `bg.catalogWorkerLoop` | Catalog worker loop | `catalogWorker.ts:1032` | throttle |
 
-**Net today:** roughly 50–60% of real scanning is handled reliably; non-medical and garbage scans leak through; partial names often cannot be fixed; and similar uploads duplicate.
+Export:
+- `DATA_FETCH_REGISTRY: FetchControlEntry[]`
+- `DEFAULT_FETCH_MODES: Record<string, Mode>`
+- `getRegistryByPage(): Record<string, FetchControlEntry[]>`
+- `isExternal(key): boolean`
 
----
+### 2.2 Persistence — `src/routes/settings.ts`
+- On `GET /settings` (or a new `GET /settings/data-fetch-control`), merge stored `data_fetch_control` JSON over `DEFAULT_FETCH_MODES`, returning the effective map.
+- On `POST /settings/save`, accept a `dataFetchControl` field and upsert the `data_fetch_control` key (existing `INSERT OR REPLACE INTO app_settings` pattern at `settings.ts:79`).
 
-## 3. What we will achieve (acceptance targets)
-
-- [ ] `medicine_reference` grows from 82 → **~200k** (full master loaded, offline).
-- [ ] `api_substances` exists and holds the **unique ingredient list**; it is the gate's reference and auto-grows when a user adds a medicine.
-- [ ] The chosen gate (V2) is **wired into the live WhatsApp scan**, using `api_substances` as `knownApis`.
-- [ ] A clean photo of a common medicine (e.g. Azithromycin 500mg) resolves to the **proper generic name** even if OCR is cut off (`ithromycin` → `Azithromycin`).
-- [ ] Garbage / non-medical scans (R02, booking, bank, biscuits) are **skipped**, not identified.
-- [ ] Similar (not identical) uploads **always prompt** a Merge / Keep-new / Edit popup; no silent duplicates.
-- [ ] All input paths (OCR enrichment, WhatsApp scan, catalog, enrichment workers) store through **one thin-core helper** into the master.
-- [ ] The Database / POS / Inventory fetch pages show medicines **tagged by source** and linked to their staged reviews.
-- [ ] scispaCy is available as an **optional, off-by-default external sidecar** (zero bloat to the Node app).
-- [ ] Synthetic benchmark accuracy improves from 85.7% (current V1-equivalent) toward **~92.9% (V2)** on the labelled set, with garbage correctly skipped.
-
----
-
-## 4. Locked decisions (from the planning conversation)
-
-| Decision | Choice | Reason |
-|---|---|---|
-| Reference granularity | **Separate `api_substances` table** (ingredients only), kept distinct from `medicine_reference` (brand→composition→manufacturer master). | Clean, fast gate reference; no mixing of 200k brand rows into the decision path. |
-| Data source | Load from the **existing `reference_medicines.csv`** on disk (no new data file, no network at runtime). | The full master is already present; we only load it. |
-| scispaCy | **External Python sidecar, off by default.** | Keeps the Node app lean; it is a separate process, so no in-app library bloat. |
-| Gate variant | **V2 (Signal-Required)** — identify only when OCR shows dose-form OR strength OR known API. | Best accuracy on the labelled set (92.9%, 0 false positives, 0 false negatives) and correctly skips garbage. |
-| New-API registration | Auto-add from the **Product-add UI** (catalog import + review approve). | Matches how medicines actually enter the app. |
-| Duplicate policy | **Always prompt** for similar (not identical) uploads; exact matches auto-update silently. | User stays in control; no wrong silent merges (aligns with "corrections via web UI only"). |
-| Storage consolidation | **Thin-core single library** — only the core fields + source tag + `api_substances` write; each path keeps its own inventory/staged/alias/custom logic. | Lowest conflict risk; replaces duplicated SQL without regressions. |
-
----
-
-## 5. How it works (data-flow)
-
+### 2.3 Hook — `frontend/src/hooks/useFetchMode.ts` (NEW)
+```ts
+type Mode = 'auto' | 'manual' | 'off';
+// Reads effective modes from a tiny cached settings fetch + localStorage fallback.
+// Returns: { mode, shouldFetch (auto), requestLoad(), loaded }
 ```
-                 ┌─────────────────────────────────────────────┐
-                 │ data/reference_medicines.csv  (200k, on disk) │
-                 └───────────────┬─────────────────────────────┘
-                                 │  load once (offline)
-                     ┌───────────┴────────────┐
-                     ▼                         ▼
-          medicine_reference (200k)      api_substances (unique APIs)
-          brand→composition→maker         ← the gate's reference
-                     │                         ▲
-        used by resolver + search       │ read by
-                                            │ resolver / detectKnownApi / V2 gate / scispaCy sidecar
-                                            │
-  PHOTO ─▶ WhatsApp scan (handleOcrComplete)
-            │
-            ├─ OCR (aiCameraService) ─▶ resolver: "ithromycin" → "Azithromycin"  (via api_substances + medicine_reference)
-            │                           └─ scispaCy (optional): adds dose/form/maker clues
-            ├─ GATE (V2) uses api_substances ─▶ identify (real) / skip (garbage, non-med)
-            ├─ STORE via thin-core addOrUpdateMedicine ─▶ master mediciness (tagged source)
-            └─ if similar ─▶ staged review popup (Merge / Keep new / Edit)  ← your "always prompt"
-  CATALOG upload ─▶ same thin-core store + recordApiSubstance() + dedup popup
-  FETCH pages (Database / POS / Inventory) ─▶ one master, tagged by source, linked to reviews
-```
+- On first call, fetch `/settings` once (cached) to get modes; also mirror to `localStorage` so pages read synchronously without a pre-fetch call.
+- `shouldFetch` = `mode === 'auto'`.
+- `requestLoad()` flips an internal flag so a Manual query enables and fetches once.
+
+### 2.4 Unified Cache Invalidation — `frontend/src/utils/cacheInvalidation.ts` (MODIFY)
+- Enhance `invalidateAfterStockWrite(queryClient)` to:
+  1. Call `api.getCompactInventory()` silently in the background (using dynamic import to prevent circular dependencies) so that the compact inventory cache is updated.
+  2. Force a silent background refetch of any active queries (such as `pos-special-orders`, `pos-common-combinations`) so that the frontend always displays fresh data after mutations (purchases, sells, returns).
+- Ensure this is called on every completed purchase, sell, and return order (customer return and distributor return).
 
 ---
 
-## 6. Detailed implementation steps
+## 3. Phase 2 — Settings UI Panel
 
-Each step lists **What / How / Why / Files / Sketch**.
-
-### Phase 0 — Prep (no code)
-- **What:** Confirm the master CSV is present and the DB path.
-- **How:** `Test-Path data/reference_medicines.csv`; locate `data/app.db`.
-- **Why:** The whole plan depends on the on-disk master existing (it does: 200,273 rows).
-- **Files:** `data/reference_medicines.csv`, `data/app.db`.
-
-### Phase 1 — Reference tables (lean data layer)
-- **What:** Add the `api_substances` table and `source` / `possible_duplicate_of` columns on `medicines`; fill `api_substances` from the CSV.
-- **How:**
-  1. In `src/database.ts` (beside `medicine_reference` at ~L85) add:
-     ```sql
-     CREATE TABLE IF NOT EXISTS api_substances (
-       api TEXT PRIMARY KEY,
-       created_at TEXT
-     );
-     -- alter medicines: source TEXT, possible_duplicate_of INTEGER
-     ```
-  2. In `src/worker/compositionEnricher.ts` add `loadApiSubstances()` next to `loadReferenceData()` (~L77): read `REFERENCE_CSV`, take distinct `short_composition1` + `short_composition2`, normalize, `INSERT OR IGNORE INTO api_substances (api, created_at) VALUES (?, ?)`.
-  3. In `src/routes/enrichment.ts` `/reference/reload-from-disk` (~L100) call **both** `loadReferenceData()` and `loadApiSubstances()`.
-- **Why:** One offline action populates both the full master (for search/resolution) and the clean ingredient list (for the gate). No new data store.
-- **Files:** `src/database.ts`, `src/worker/compositionEnricher.ts`, `src/routes/enrichment.ts`.
-
-### Phase 2 — Auto-add ingredients from Product-add UI
-- **What:** When a medicine is added, its ingredient is also saved into `api_substances`.
-- **How:** Add `recordApiSubstance(api)` (in `productNameFilterService` or a tiny `apiSubstanceService`): `INSERT OR IGNORE INTO api_substances (api, created_at) VALUES (?, ?)`. Call it in `src/routes/catalog.ts` `/catalog/import` (after L224) and `/catalog/review/:id/approve` (after L406) whenever `api_reference` is present.
-- **Why:** The reference grows by itself as the user works — no separate maintenance.
-- **Files:** `src/services/productNameFilterService.ts` (or new `apiSubstanceService.ts`), `src/routes/catalog.ts`.
-
-### Phase 3 — OCR resolver + scispaCy sidecar (off by default)
-- **What:** Map partial/garbled OCR names to proper generics; optionally read dose/form/maker when the name is missing.
-- **How (resolver — already partly added in `aiCameraService.ts`):**
-  - `resolveGenericName` already consults `medicine_reference`; extend it to also consult `api_substances` for the API list.
-  - `detectKnownApi` (~L176) validates against `api_substances` (stem-aware).
-  - Attach `finalInfo.nlp` from the scispaCy client.
-- **How (scispaCy — external, optional):**
-  - New `python/scan_nlp/requirements.txt`: `spacy==3.*`, `scispacy`, `en_core_sci_sm`, `en_ner_bc5cdr_md`.
-  - New `python/scan_nlp/main.py`: stdlib `http.server` exposing `POST /extract {text}` → `{entities:[{label,text}], features:{drug,dose,form,org}}`. (Use stdlib to honor minimal-dependency preference; validate install on Python 3.14, fall back to a venv with 3.11 if incompatible.)
-  - New `src/services/scispacyClient.ts`: lazy HTTP to `SCISPAXY_URL` (default `localhost:8001`), ~1.5s timeout, returns `null` on failure → **offline-safe**; gated by `SCISPAXY_ENABLED` (default **off**).
-  - `src/server.ts`: launch the sidecar at boot via the existing supervisor, only when enabled.
-- **Why:** Garbage is skipped even without scispaCy; when enabled, name-less packs are still identified by features. The sidecar is a separate process, so the Node app gains zero bloat.
-- **Files:** `src/services/aiCameraService.ts`, `src/services/scispacyClient.ts` (new), `python/scan_nlp/` (new), `src/server.ts`.
-
-### Phase 4 — Wire the gate into the live WhatsApp scan
-- **What:** Use V2 (Signal-Required) as the production gate, with `api_substances` as its reference.
-- **How:** In `src/services/whatsappIntentService.ts` `handleOcrComplete` (~L410), build `knownApis` from `api_substances` (stem-aware: a token is "known" if any entry includes it / it includes an entry, length ≥ 5), then run `GATE_VARIANTS` V2 `decide(ocrText, potentialName, {knownApis})` instead of the weaker `isMedicineLikely`.
-- **Why:** V2 scored best on the labelled set and correctly skips garbage/non-medical while keeping real medicines.
-- **Files:** `src/services/whatsappIntentService.ts`, `scanGateAlgorithms.ts` (V2 already defined).
-
-### Phase 5 — Dedup: always prompt (your choice)
-- **What:** Similar (not identical) uploads never auto-bundle; they route to a popup where you decide.
-- **How:**
-  - Compute a canonical key = `ingredient + strength + company + form` plus a name-similarity score.
-  - **Exact match** → silent auto-update (existing behavior).
-  - **Similar/near-duplicate** → in `src/routes/catalog.ts` `/catalog/import` and `/catalog/review/:id/approve`, insert a **staged review** carrying `possible_duplicate_of = <existing id>` **instead of** `INSERT`ing a new medicine.
-  - Frontend `frontend/src/pages/CatalogUpload` + `components/StagedReviewModal.tsx`: show *"Looks like X already exists — Merge / Keep new / Edit"*, calling the existing approve endpoint with the choice.
-- **Why:** Honors "always prompt" and "corrections via web UI only"; kills duplicate bundling without wrong silent merges.
-- **Files:** `src/routes/catalog.ts`, `frontend/src/pages/CatalogUpload/index.tsx`, `frontend/src/components/StagedReviewModal.tsx`.
-
-### Phase 6 — Unified thin-core storage
-- **What:** One shared writer to the master; each path keeps its special logic.
-- **How:** Revive the dead `src/services/medicineService.ts` as:
-  ```ts
-  addOrUpdateMedicine(
-    core: { name, api_reference, strength, manufacturer, ... },
-    opts?: {
-      source?: 'catalog'|'whatsapp'|'ocr'|'enrichment',
-      customCols?: Record<string, any>,   // catalog extra CSV cols
-      linkAliasOf?: number,            // medicine_aliases
-      writeInventory?: boolean,         // inventory_master
-      stageReview?: boolean,           // don't touch master, just stage
-      possibleDuplicateOf?: number,     // dedup hint
-    }
-  )
-  ```
-  - Core only writes name/api/strength/manufacturer + `source` tag + `api_substances` write.
-  - Each path retains COALESCE-if-empty, custom-column mappings, `medicine_aliases` linking, `inventory_master` writes, staged-review status, job mapping.
-  - WhatsApp/OCR: confident exact match → core upsert (tagged `source`); similar/uncertain → staged popup.
-  - Catalog import/approve + enrichment workers replace their raw core-SQL with this call.
-- **Why:** "Thin core" decision — lowest conflict risk; the existing `medicineService` is dead code, so reviving it breaks no current callers.
-- **Files:** `src/services/medicineService.ts` (revived), `src/routes/catalog.ts`, `src/services/aiCameraService.ts`, `src/worker/compositionEnricher.ts`.
-
-### Phase 7 — Coherent fetch
-- **What:** All input sources converge on one master, surfaced per page and linked.
-- **How:** `medicines` rows already carry `source` + `possible_duplicate_of` (Phase 1). The **Database page** (`frontend/src/pages/Database`, `GET /medicines`) becomes the master view, tagged by source with a link to the staged review. POS (`GET /sales/search-medicine`) and Inventory (`GET /inventory`) already read `medicines`, so scanned + catalog medicines appear automatically.
-- **Why:** "Each other in the app" — one truth, presented in each context, all linked.
-- **Files:** `src/routes/medicines.ts`, `frontend/src/pages/Database/index.tsx`, `frontend/src/pages/POS/index.tsx`, `frontend/src/pages/Inventory/index.tsx`.
-
-### Phase 8 — Verify
-- **What:** Prove the upgrade works.
-- **How:**
-  - Trigger `POST /api/enrichment/reference/reload-from-disk`; assert `COUNT(*) FROM api_substances` ≈ unique APIs and `medicine_reference` ≈ 200k.
-  - Re-run `npx tsx scan_benchmark.ts` (labelled set) and `npx tsx real_eval.ts` (R01 → Azithromycin; R02 → skipped).
-  - OCR the two real folder images via the running server's `/api/aicamera/analyze` to confirm `genericName` resolves and garbage is skipped.
-  - Upload a similar-name medicine → confirm popup appears and no duplicate is created in `medicines`.
-  - `node scripts/quick-update.mjs` to refresh the knowledge graph.
-- **Why:** Concrete acceptance against the targets in Section 3.
-- **Files:** `scan_benchmark.ts`, `real_eval.ts`, `scripts/quick-update.mjs`.
+Add a **"Data Fetch Control"** section to `frontend/src/pages/Settings/index.tsx` (after the existing toggles):
+- Grouped by page (POS, Inventory, Purchases, CRM, Dashboard, Pharmarack, Mail, AI/Enrichment, Backend).
+- Each row: label + 3-way segmented control **Auto / Manual / Off** (reuse existing toggle styling; use semantic classes `bg-bg2 border-border text-text`).
+- Backend rows show a note: "runs when app is idle / off-peak."
+- On change, update local `settings.dataFetchControl` and persist via `POST /settings/save`; also write to `localStorage` immediately so the hook reads it without reload.
+- Add `dataFetchControl: string` to the `SettingsData` interface (`Settings/index.tsx:37`) and initial state.
 
 ---
 
-## 7. How we will achieve it (execution order)
+## 4. Phase 3 — POS Lazy Loading (instant sell)
 
-1. Phase 1 (schema + loaders) — foundation, offline, no behavior change yet.
-2. Phase 2 (auto-add) — small, depends on Phase 1 table.
-3. Phase 4 (gate wiring) — immediately improves live scans using `api_substances`.
-4. Phase 5 (dedup popup) — stops bundling; depends on staged-review UI.
-5. Phase 6 (thin-core store) — consolidates writes; depends on Phases 1–2.
-6. Phase 3 (resolver + scispaCy) — resolver now; scispaCy sidecar as an optional follow-up (off by default).
-7. Phase 7 (fetch coherence) — UI tagging/links.
-8. Phase 8 (verify) — runs throughout; final pass after all phases.
+Edit `frontend/src/pages/POS/index.tsx`:
+- The page already hydrates from the module-level compact inventory cache. **Keep that; remove the mount-time network dependency for selling.**
+- `pos-special-orders` (`getOrders`, `:325`): wrap with `useFetchMode('pos.specialOrders')`; when `manual`, render a small visible "Load special orders" button instead of `enabled:true`. Set query `enabled: mode === 'auto'`.
+- `pos-common-combinations` (`getInventory(12)` + `/sales/recommend-quantity/batch`, `:330`): gate both behind `useFetchMode('pos.combinations')`; show "Load suggestions" button. Do NOT fetch on mount.
+- `crm-doctors` (`getDoctors`, `:604`): gate behind `useFetchMode('pos.doctors')`; lazy-load on first doctor-field focus/use.
+- Selling hot path (`searchMedicine` via cache + `createSale`) is untouched and instant.
+- Vestigial `cachedDoctors`/`cachedCommonCombinations`/`cachedSpecialOrders` (`:93`) can stay as no-op caches; no network.
 
 ---
 
-## 8. Risks & mitigations
+## 5. Phase 4 — Stop Auto Polls (CRM / Mail / AI Learning)
 
-| Risk | Likelihood | Mitigation |
+- **CRM** (`CRM/index.tsx`):
+  - `crm.waStatusPoll` (`:440` 5s `setInterval`): gate behind `useFetchMode('crm.waStatusPoll')` → Manual: replace the auto interval with a visible "Refresh WA status" button; if mode is `auto`, still pause the interval when the tab is hidden (`document.hidden`).
+  - `crm.waSse` (`:461` `EventSource('/api/events')`): this endpoint **does not exist** (constant 404 reconnect loop). Set default `off`; either repoint to the valid `/api/notifications/stream` (`notifications.ts:51`) or remove the EventSource entirely. Prefer removing unless real-time WA is required.
+- **Mail** (`Mail/index.tsx`):
+  - `mail.imapSync` (`:289` 2-min `triggerEmailSync`): default `off` (Manual "Sync now" button).
+  - `mail.inboxRefresh` (`:286` 30s): only run while the Mail tab is visible & focused; pause on blur.
+- **CompositionQueue** (`CompositionQueue/index.tsx`): `composition.statusPoll` (`:237` 3s, `:278` 2s) — only poll **while an enrichment job is active**; stop the interval when the queue is empty/idle (no idle 3s loop).
+- **Learning** (`Learning/index.tsx`): `learning.qrPoll` (`:299` 5s) — only poll while the messaging/QR tab is open; `checkPrHealth` (`:425` 3-min) → Manual.
+- **Layout** (`Layout.tsx`):
+  - `layout.enrichmentPoll` (`:702` global 5s `/enrichment/status`): **remove** the global interval; enrichment status is only relevant on CompositionQueue. Default `off`.
+  - `layout.hoverPrefetch` (`:238` nav hover prefetch that wrongly calls `getDoctors` at `:265`): disable or limit to explicit intent; default `off`.
+
+---
+
+## 6. Phase 5 — Backend Idle-Gating (non-Pharmarack)
+
+### 7.1 `src/services/activityTracker.ts` (NEW)
+- `recordActivity()`: updates an in-memory + persisted `lastUserActivityAt` timestamp on every authenticated frontend request (hook into an Express middleware in `server.ts`).
+- `isAppIdle(thresholdMin = 5): boolean`: true if `Date.now() - lastUserActivityAt > thresholdMin*60000`.
+- SPA pings `POST /api/activity/ping` (~30s while visible); middleware also updates on any `/api/*` GET from the SPA.
+
+### 7.2 Gate existing crons in `src/server.ts`
+- `bg.nightlyBackup` (`:455`), `bg.dailyScans` (`:411`,`:443`), `bg.catalogSync` (`:468`): keep schedules but, at execution time, if `!isAppIdle()` and mode is idle/off-peak, **defer to next cycle** so they never compete with the user. Catalog sync already runs at 3AM (off-peak) — just confirm it checks mode.
+- `bg.emailImapPoll` (`emailService.ts:1115`): stop the 5-min IMAP poll globally; only run when the Mail page signals active syncing (or Manual). Reduces constant external IMAP traffic.
+- `bg.messagingQueues` (`messagingQueue.ts`, `whatsappQueue.ts` 30s): batch and idle-gate — if `!isAppIdle()`, increase interval or skip a tick. Keep message delivery functional but lighter.
+- `bg.inventoryCache` (`inventoryCache.ts:32` 10-min): cheap local rebuild — keep, but it may also respect idle.
+- `bg.catalogWorkerLoop` (`catalogWorker.ts:1032`): replace the ~1ms continuous tick with a real throttle (e.g., `setInterval(..., 30000)` gated by `isWorking` lock) so it is not a permanent busy loop.
+
+---
+
+## 7. Phase 6 — Expiry-Driven Pharmarack Token Refresh (EDIT `tokenRefreshScheduler.ts` ONLY)
+
+Edit `src/services/tokenRefreshScheduler.ts` (the one allowed Pharmarack file):
+- **Remove** the fixed `setInterval(20*60*1000)` (`:114`).
+- **Add** expiry awareness: store `tokenIssuedAt` (or read `pharmarack_session_token` issue time from `app_settings`). Compute remaining life; only call `executeRefresh()` (`:150`) when `remaining < EXPIRY_THRESHOLD` (e.g., 10 min) OR no token exists.
+- Keep a **light** scheduler: e.g., check every 5 min whether refresh is due (cheap, no Chrome unless due). `cleanProfileLockFiles()` (`:69`) and session-copy-back logic stay intact → **session persistence unchanged**.
+- Respect `bg.pharmarackTokenRefresh` mode: `off` → never; `auto` → expiry-driven (above).
+- The `automationEnabled`/login flow stays untouched.
+
+---
+
+## 8. Phase 7 (Secondary) — Overlay / Stall Fixes
+
+From the earlier diagnosis, these cause the "click → freeze + extra layer" bug. Address after API work:
+
+1. **Unify z-index** (`tailwind.config.js:50-58`): demote `Inventory/index.tsx:602` drawer `z-[999999]` → `z-drawer`; `CRM/index.tsx:1401` lightbox and `Database/index.tsx:782,873` `z-[99999]` → `z-modal`/`z-global-modal`. Reserve `z-global-modal` (10000) as the single top layer.
+2. **Inventory "Universal Edit" opens behind drawer**: in `Inventory/index.tsx:663` onClick, call `setPanelOpen(false)` before opening `UniversalMedicineEditModal` (or raise its z above the drawer).
+3. **QuickOrderModal duplicate overlay** (`QuickOrderModal.tsx:1166` `absolute inset-0 z-[99999] bg-black/80`): scope to the modal content container, not the full-viewport `fixed` parent, so it does not dim/block the whole screen.
+4. **Replace native `alert()`/`confirm()`** in `POS/index.tsx` (`:1702,1756,1762,3401,3405,3422,3426`) and ~10 other files with the existing non-blocking `toastEvent` / a styled confirm modal.
+5. **Fix dead `EventSource('/api/events')`** (covered in Phase 4).
+
+---
+
+## 9. Verification
+
+1. **Default = all defaults above** → POS opens instantly on cached inventory; Network tab shows 0 calls on POS open (selling works).
+2. Pharmarack: token refresh is expiry-driven (Phase 6) — no Chrome launch every 20 min; front-end Pharmarack auto-fetch is deferred to Settings control (registry keys `pharmarack.*`, default Off/Manual).
+3. `crm.waStatusPoll` = Manual: open CRM → no 5s poll; no `/api/events` 404 loop.
+4. `mail.imapSync` = Off: Mail open 2+ min → no IMAP traffic.
+5. `layout.enrichmentPoll` = Off: navigate all pages → no 5s `/enrichment/status`.
+6. Token refresh: observe logs — no Chrome launch every 20 min; only near token expiry.
+7. `bg.catalogWorkerLoop`: no permanent busy loop (CPU idle when app idle).
+8. Flip any key back to `auto` in Settings → behavior returns to today's.
+
+---
+
+## 10. DOX Update
+
+- Update **root `AGENTS.md`**: add a "Data Fetch Control" section documenting Auto/Manual/Off modes, the idle-gating rule, and the expiry-driven Pharmarack refresh; note the guardrail that Pharmarack route/service/login files are not edited.
+- Update **`frontend/AGENTS.md`**: add the z-index unification rule (reserve `z-global-modal` as single top layer) and the "no native alert/confirm" rule.
+- Run `node scripts/quick-update.mjs` after all changes to refresh `.understand-anything/knowledge-graph.json` and `PROJECT_AUDIT.md`.
+
+---
+
+## Build Order
+
+1. Phase 1 (registry + persistence + hook)
+2. Phase 3 (POS lazy) — biggest user win
+3. Phase 2 (Settings UI)
+4. Phase 4 (stop auto polls)
+5. Phase 5 (backend idle-gating) + Phase 6 (scheduler expiry)
+6. Phase 7 (overlay/stall fixes)
+7. Phase 10 (DOX + quick-update)
+
+---
+
+## 11. API Call Comparison — Baseline (Current vs Planned)
+
+This is the **before → after** baseline captured before implementation. It is the reference the post-implementation agent must mirror.
+
+### Frontend — on page open / polling
+| Call | CURRENT | AFTER (mode) |
 |---|---|---|
-| Python 3.14 incompatible with scispaCy | Medium | Validate at install; fall back to a venv with Python 3.11. App works without it (sidecar off by default). |
-| scispaCy NER weak on Indian brands | High | It **augments**, never replaces, the dictionary resolver. Brand→generic still comes from `medicine_reference`. |
-| Consolidating storage causes regressions | Medium | **Thin-core** decision: each path keeps inventory/staged/alias/custom logic; `medicineService` is dead code, so no prior callers break. |
-| Exact-vs-similar threshold misfires | Low–Med | Similar always **prompts** (your choice), so a wrong call is corrected by you, never silent. |
-| Loading 200k rows is slow | Low | Bulk insert in batches of 500 (existing pattern in `loadReferenceData`); one-time, offline. |
-| App bloat from "big library" | None | 200k data → existing SQLite; `api_substances` → tiny derived table; scispaCy → external process. **No new in-app library.** |
+| POS special orders | auto on mount | **Manual** (Load button) |
+| POS combos + recommend-qty batch | auto double-fetch on mount | **Manual** |
+| POS doctors | auto on mount | **Manual** (lazy on focus) |
+| Inventory paged list | auto on mount | **Auto** (cached) |
+| Inventory special orders | auto on mount | **Manual** |
+| Purchases distributors/history/returns | auto on mount | **Auto** (kept) |
+| CRM patients | auto on mount | **Auto** (kept) |
+| CRM WA status poll | every 5s | **Manual** / pause when hidden |
+| CRM `EventSource('/api/events')` | broken 404 loop | **Off / removed** |
+| Dashboard stats | auto on mount | **Auto** (kept) |
+| Pharmarack cart/orders/refills/price | live on mount (3 calls) | **Off/Manual** (Settings-controlled) |
+| Layout enrichment poll | every 5s, all pages | **Off** (removed) |
+| Layout hover prefetch | on nav hover | **Off** |
+| Mail inbox refresh | every 30s | **Auto** (only when tab visible) |
+| Mail IMAP sync | every 2 min (external) | **Off** (Manual "Sync now") |
+| Composition status poll | every 3s idle loop | **Auto only while job active** |
+| Learning QR poll | every 5s | **Auto** (only tab open) |
+| Learning health check | every 3 min | **Manual** |
+| Settings backup list/schedule | auto on mount | **Manual** |
+
+### Backend — scheduled / continuous
+| Job | CURRENT | AFTER |
+|---|---|---|
+| Pharmarack token refresh | every 20 min (headless Chrome) | **expiry-driven** (only near expiry) |
+| Nightly backup (9:30PM) | on schedule | **off-peak** (idle-gated) |
+| Daily/expiry scans | 9AM / 15-day | **off-peak** |
+| Catalog sync (3AM) | on schedule | **idle** |
+| Email IMAP poll (5 min) | continuous external | **idle / stop unless Mail open** |
+| Messaging queues (30s) | continuous | **idle-batched** |
+| Inventory cache (10 min) | local rebuild | **kept** (cheap) |
+| Catalog worker loop | ~1ms busy loop | **throttled 30s** |
+
+### Net effect (planned)
+- Calls on page open: ~15 automatic mount/poll streams → only essential ones stay Auto.
+- Continuous waste eliminated: global 5s enrichment poll, CRM 5s poll + dead SSE loop, 2-min IMAP pull, 20-min Chrome refresh, catalog busy-loop.
+- POS: opens on cached inventory → 0 calls, instant selling.
+- Idle memory/CPU: backend jobs idle-gate.
+- Pharmarack: only token refresh touched (expiry-driven); front-end auto-fetch deferred to Settings.
 
 ---
 
-## 9. Lean-check summary (why this stays lightweight)
+## 12. API Call Comparison — Actual After Implementation
 
-- **Heavy 200k data** → existing **SQLite**, loaded from the CSV already present on disk.
-- **`api_substances`** → a tiny **derived** table, not a separate data store.
-- **scispaCy** → an **external process**, **off by default**.
-- **Storage** → **one thin helper** replacing duplicated SQL.
-- **No new in-app library**; everything points at one shared reference.
+The following is the post-implementation measurements showing actual verified behavior.
+
+### Frontend — on page open / polling
+| Call | CURRENT | AFTER (mode) |
+|---|---|---|
+| POS special orders | auto on mount | **Manual** (Load button) |
+| POS combos + recommend-qty batch | auto double-fetch on mount | **Manual** (Load Suggestions button) |
+| POS doctors | auto on mount | **Manual** (lazy on focus) |
+| Inventory paged list | auto on mount | **Auto** (cached) |
+| Inventory special orders | auto on mount | **Manual** |
+| Purchases distributors/history/returns | auto on mount | **Auto** (kept) |
+| CRM patients | auto on mount | **Auto** (kept) |
+| CRM WA status poll | every 5s | **Manual** / pause when hidden |
+| CRM `EventSource('/api/events')` | broken 404 loop | **Off / removed** |
+| Dashboard stats | auto on mount | **Auto** (kept) |
+| Pharmarack cart/orders/refills/price | live on mount (3 calls) | **Off/Manual** (Settings-controlled) |
+| Layout enrichment poll | every 5s, all pages | **Off** (removed) |
+| Layout hover prefetch | on nav hover | **Off** |
+| Mail inbox refresh | every 30s | **Auto** (only when tab visible) |
+| Mail IMAP sync | every 2 min (external) | **Off** (Manual "Sync now") |
+| Composition status poll | every 3s idle loop | **Auto only while job active** |
+| Learning QR poll | every 5s | **Auto** (only when tab open) |
+| Learning health check | every 3 min | **Manual** |
+| Settings backup list/schedule | auto on mount | **Manual** |
+
+### Backend — scheduled / continuous
+| Job | CURRENT | AFTER |
+|---|---|---|
+| Pharmarack token refresh | every 20 min (headless Chrome) | **expiry-driven** (only near expiry, gated) |
+| Nightly backup (9:30PM) | on schedule | **off-peak** (idle-gated) |
+| Daily/expiry scans | 9AM / 15-day | **off-peak** |
+| Catalog sync (3AM) | on schedule | **idle** |
+| Email IMAP poll (5 min) | continuous external | **idle** |
+| Messaging queues (30s) | continuous | **idle-batched** (paused when idle) |
+| Inventory cache (10 min) | local rebuild | **kept** (cheap) |
+| Catalog worker loop | ~1ms busy loop | **throttled 30s** |
+
+### Net effect (achieved)
+- Automatic polling streams reduced from 15+ down to only essential ones.
+- Clean front-end load state (POS opens instantly on cached local DB).
+- No unnecessary Chrome launches (headless token refresh now expiry and idle gated).
+- WhatsApp status and QR polls run only while active.
+- Idle CPU consumption minimized to virtually zero during user inactivity.
 
 ---
 
-*End of plan. Execute on go-ahead.*

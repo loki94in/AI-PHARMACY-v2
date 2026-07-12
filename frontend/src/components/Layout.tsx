@@ -61,6 +61,7 @@ import { MobileConnectionModal } from './MobileConnectionModal';
 import { api, apiClient } from '../services/api';
 import { pageImports } from '../lib/pageImports';
 import BackupCenterModal from './BackupCenterModal';
+import { useFetchMode } from '../hooks/useFetchMode';
 
 // ──────────────────────────────────────────────
 // Notification Types
@@ -104,6 +105,7 @@ const Sidebar = ({
 }) => {
   const location = useLocation();
   const queryClient = useQueryClient();
+  const hoverPrefetchControl = useFetchMode('layout.hoverPrefetch');
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
     { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
@@ -238,6 +240,8 @@ const Sidebar = ({
                 onMouseEnter={() => {
                   const basePath = item.path.split('?')[0];
                   pageImports[basePath]?.();
+                  
+                  if (!hoverPrefetchControl.shouldFetch) return;
                   
                   // Prefetch API data for primary queries on hover (improved page switch response time)
                   try {
@@ -631,6 +635,8 @@ const Topbar = ({
 
   const [orderAlertCount, setOrderAlertCount] = useState(0);
 
+  const enrichmentPollControl = useFetchMode('layout.enrichmentPoll');
+
   const fetchAlertCount = useCallback(async () => {
     try {
       const [orders, refills] = await Promise.all([
@@ -698,10 +704,12 @@ const Topbar = ({
         // silently ignore — don't surface a UI error just for the header pill
       }
     };
-    pollEnrichment();
-    const enrichmentPollInterval = setInterval(pollEnrichment, 5000);
-    return () => clearInterval(enrichmentPollInterval);
-  }, []);
+    if (enrichmentPollControl.shouldFetch) {
+      pollEnrichment();
+      const enrichmentPollInterval = setInterval(pollEnrichment, 5000);
+      return () => clearInterval(enrichmentPollInterval);
+    }
+  }, [enrichmentPollControl.shouldFetch]);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [connectedDevices, setConnectedDevices] = useState<{ token: string; device_name: string; os: string; is_online: number; last_seen: string; offline_seconds?: number }[]>([]);

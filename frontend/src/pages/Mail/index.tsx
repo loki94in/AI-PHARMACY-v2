@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { useFetchMode } from '../../hooks/useFetchMode';
 
 interface EmailRecord {
   id?: number;
@@ -130,6 +131,9 @@ const Mail = () => {
     searchProduct?: string;
     orderId?: number;
   } | null;
+
+  const imapSyncControl = useFetchMode('mail.imapSync');
+  const inboxRefreshControl = useFetchMode('mail.inboxRefresh');
 
   const [emails, setEmails] = useState<EmailRecord[]>(() => cachedEmails);
   const [loading, setLoading] = useState(() => cachedEmails.length === 0);
@@ -278,22 +282,28 @@ const Mail = () => {
     // Only do an immediate IMAP sync on first visit (cold cache).
     // On subsequent visits the page shows cached data instantly with no flicker.
     let syncDelay: ReturnType<typeof setTimeout> | undefined;
-    if (cachedEmails.length === 0) {
+    if (cachedEmails.length === 0 && imapSyncControl.shouldFetch) {
       syncDelay = setTimeout(() => triggerSync(), 1500);
     }
 
     // Periodic background refresh: re-read local DB every 30s (silent, no loading indicator).
-    const refreshInterval = setInterval(() => silentRefreshLocal(), 30000);
+    let refreshInterval: ReturnType<typeof setInterval> | undefined;
+    if (inboxRefreshControl.shouldFetch) {
+      refreshInterval = setInterval(() => silentRefreshLocal(), 30000);
+    }
 
     // Periodic IMAP sync every 2 minutes.
-    const syncInterval = setInterval(() => triggerSync(), 120000);
+    let syncInterval: ReturnType<typeof setInterval> | undefined;
+    if (imapSyncControl.shouldFetch) {
+      syncInterval = setInterval(() => triggerSync(), 120000);
+    }
 
     return () => {
       if (syncDelay) clearTimeout(syncDelay);
-      clearInterval(refreshInterval);
-      clearInterval(syncInterval);
+      if (refreshInterval) clearInterval(refreshInterval);
+      if (syncInterval) clearInterval(syncInterval);
     };
-  }, [triggerSync, silentRefreshLocal]);
+  }, [triggerSync, silentRefreshLocal, imapSyncControl.shouldFetch, inboxRefreshControl.shouldFetch]);
 
   const handleManualRefresh = () => {
     loadLocalInbox();
@@ -582,7 +592,20 @@ const Mail = () => {
                 <MailIcon size={28} className="opacity-50" />
                 {isOffline
                   ? 'No emails stored locally. Connect to internet and refresh to sync.'
+                  : imapSyncControl.mode === 'manual' && !imapSyncControl.loaded
+                  ? 'Auto-sync from Gmail is deferred.'
                   : 'No emails yet. Syncing from Gmail...'}
+                {imapSyncControl.mode === 'manual' && !imapSyncControl.loaded && !isOffline && (
+                  <button
+                    onClick={() => {
+                      imapSyncControl.requestLoad();
+                      triggerSync();
+                    }}
+                    className="mt-3 px-4 py-1.5 rounded-xl bg-primary/20 text-primary border border-primary/20 hover:bg-primary/30 hover:text-text transition-all font-bold not-italic"
+                  >
+                    Sync Gmail Now
+                  </button>
+                )}
                 {syncing && <Loader size={16} className="animate-spin text-primary mt-2" />}
               </div>
             ) : filteredEmails.length === 0 ? (

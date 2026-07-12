@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { MobileConnectionModal } from '../../components/MobileConnectionModal';
+import { DATA_FETCH_REGISTRY, getRegistryByPage, type FetchMode } from '../../services/dataFetchControl';
 
 interface DeliveryBoy {
   id: number;
@@ -80,6 +81,7 @@ interface SettingsData {
   waBusinessWebhookVerifyToken: string;
   whatsappPreferredSystem: string;
   backupFrequency: string;
+  dataFetchControl: string;
 }
 
 const Settings = () => {
@@ -130,6 +132,7 @@ const Settings = () => {
     waBusinessWebhookVerifyToken: '',
     whatsappPreferredSystem: 'automated',
     backupFrequency: 'off',
+    dataFetchControl: '{}',
   });
 
   // Transient UI states
@@ -330,6 +333,7 @@ const Settings = () => {
         waBusinessWebhookVerifyToken: serverSettings.wa_business_webhook_verify_token || '',
         whatsappPreferredSystem: serverSettings.whatsapp_preferred_system || 'automated',
         backupFrequency: serverSettings.backup_frequency || 'off',
+        dataFetchControl: serverSettings.data_fetch_control || '{}',
       }));
     }
   }, [serverSettings]);
@@ -419,6 +423,7 @@ const Settings = () => {
       pharmarack_password: prPassword,
       pharmarack_session_token: prToken,
       pharmarack_mode: prMode,
+      data_fetch_control: settings.dataFetchControl,
     };
 
     try {
@@ -429,6 +434,23 @@ const Settings = () => {
       console.error('Failed to save settings', error);
       toastEvent.trigger('Failed to save settings', 'error');
     }
+  };
+
+  const handleDataFetchModeChange = (key: string, mode: FetchMode) => {
+    let currentModes: Record<string, FetchMode> = {};
+    try {
+      currentModes = JSON.parse(settings.dataFetchControl || '{}');
+    } catch (e) {}
+
+    const newModes = { ...currentModes, [key]: mode };
+    const modesString = JSON.stringify(newModes);
+
+    setSettings(prev => ({
+      ...prev,
+      dataFetchControl: modesString
+    }));
+
+    localStorage.setItem('data_fetch_control', modesString);
   };
 
   const handleOpenLoginWindow = async () => {
@@ -522,7 +544,8 @@ const Settings = () => {
       pharmarack_username: '',
       pharmarack_password: '',
       pharmarack_session_token: '',
-      pharmarack_mode: 'Live'
+      pharmarack_mode: 'Live',
+      data_fetch_control: settings.dataFetchControl
     };
 
     try {
@@ -1162,6 +1185,78 @@ const Settings = () => {
           >
             <Save size={16} />
             Save Automations
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Data Fetch Control ─── */}
+      <div className="glass-panel p-6">
+        <h3 className="font-bold flex items-center gap-2 mb-6">
+          <Zap size={18} className="text-sky" />
+          Data Fetch Control
+        </h3>
+        <p className="text-xs text-muted mb-6 leading-relaxed">
+          Configure API requests and background processes. <strong>Auto</strong> enables normal loading; <strong>Manual</strong> defers loading until you click a "Load" button; <strong>Off</strong> completely disables the fetch.
+        </p>
+
+        <div className="space-y-6">
+          {Object.entries(getRegistryByPage()).map(([page, entries]) => (
+            <div key={page} className="border-b border-glass-border/20 pb-4 last:border-b-0 last:pb-0">
+              <h4 className="text-xs font-bold text-sky uppercase tracking-wider mb-3">
+                {page} Page / Component
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {entries.map(entry => {
+                  let currentModes: Record<string, FetchMode> = {};
+                  try {
+                    currentModes = JSON.parse(settings.dataFetchControl || '{}');
+                  } catch (e) {}
+                  const mode = currentModes[entry.key] || entry.defaultMode;
+
+                  return (
+                    <div key={entry.key} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-zinc-900/10 border border-glass-border/30 gap-3">
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-semibold text-text block">
+                          {entry.label}
+                        </span>
+                        {entry.callSite && (
+                          <span className="text-[10px] text-muted font-mono block">
+                            Key: {entry.key}
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="flex bg-bg2 p-1 rounded-xl border border-glass-border/40 gap-1 shrink-0 w-full sm:w-auto">
+                        {(['auto', 'manual', 'off'] as FetchMode[]).map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => handleDataFetchModeChange(entry.key, m)}
+                            className={`flex-1 sm:flex-none py-1.5 px-3 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${
+                              mode === m
+                                ? 'bg-primary text-white shadow-[0_2px_8px_rgba(59,130,246,0.3)]'
+                                : 'text-muted hover:text-text'
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button 
+            onClick={handleSaveSettings}
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
+          >
+            <Save size={16} />
+            Save Fetch Modes
           </button>
         </div>
       </div>

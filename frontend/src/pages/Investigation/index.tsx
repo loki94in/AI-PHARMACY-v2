@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Search, 
   Edit, 
@@ -187,8 +188,11 @@ const InvestigationCenter = () => {
     show: boolean;
     title: string;
     message: string;
-    onConfirm: () => void;
+    confirmText?: string;
+    onConfirm: () => void | Promise<void>;
   } | null>(null);
+
+  const [isSaving, setIsSaving] = useState(false);
 
   // Edit / Adjustment States
   const [editingType, setEditingType] = useState<'inventory' | 'sale' | 'purchase' | null>(null);
@@ -369,6 +373,7 @@ const InvestigationCenter = () => {
       show: true,
       title: 'Confirm Inventory Adjustments',
       message: `Adjusting stock for ${details.inventory.medicine_name}. Quantity: ${details.inventory.quantity} -> ${editInventoryForm.quantity}. Expiry: "${details.inventory.expiry_date}" -> "${editInventoryForm.expiry_date}". Are you sure?`,
+      confirmText: 'Confirm Adjustment',
       onConfirm: async () => {
         try {
           await api.updateInvestigationInventory(selectedId, editInventoryForm);
@@ -476,6 +481,7 @@ const InvestigationCenter = () => {
       show: true,
       title: 'Confirm Item Removal',
       message: `Are you sure you want to remove "${billItems[index].medicine_name}" from this transaction? Stock reconciliation will occur automatically.`,
+      confirmText: 'Remove Item',
       onConfirm: () => {
         setBillItems(prev => prev.filter((_, idx) => idx !== index));
         setConfirmModal(null);
@@ -546,6 +552,7 @@ const InvestigationCenter = () => {
       show: true,
       title: `Confirm ${actionText} Correction`,
       message: `This will update Invoice #${editingBillNo} with corrected items and prices, then adjust inventory stock balances automatically. Proceed?`,
+      confirmText: 'Confirm Correction',
       onConfirm: async () => {
         try {
           if (editingType === 'sale') {
@@ -618,8 +625,8 @@ const InvestigationCenter = () => {
         </div>
       )}
 
-      {/* Confirmation Modal */}
-      {confirmModal && confirmModal.show && (
+      {/* Confirmation Modal — portalled to document.body to escape overflow-hidden stacking context */}
+      {confirmModal && confirmModal.show && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-bg2 border border-glass-border max-w-md w-full rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-amber-500">
@@ -630,28 +637,44 @@ const InvestigationCenter = () => {
             <div className="flex justify-end gap-3 mt-2">
               <button 
                 onClick={() => setConfirmModal(null)} 
-                className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
+                disabled={isSaving}
+                className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button 
-                onClick={confirmModal.onConfirm} 
-                className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer"
+                onClick={async () => {
+                  if (isSaving) return;
+                  try {
+                    setIsSaving(true);
+                    await confirmModal.onConfirm();
+                  } catch (err) {
+                    console.error('Confirmation action failed:', err);
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }} 
+                disabled={isSaving}
+                className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
-                Confirm Adjustment
+                {isSaving && <Loader2 size={12} className="animate-spin" />}
+                {confirmModal.confirmText || 'Confirm'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {detailsLoading && (
-        <div className="absolute inset-0 z-[80] bg-black/40 backdrop-blur-xs flex items-center justify-center">
+      {/* Loading overlay — also portalled to escape overflow-hidden */}
+      {detailsLoading && createPortal(
+        <div className="fixed inset-0 z-[8000] bg-black/40 backdrop-blur-sm flex items-center justify-center">
           <div className="flex flex-col items-center gap-2 animate-pulse text-muted">
             <Loader2 size={32} className="animate-spin text-primary" />
             <span className="text-xs font-bold uppercase tracking-wider">Fetching details...</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* KPI Cards (Dashboard Summary View) - Only visible when not editing */}

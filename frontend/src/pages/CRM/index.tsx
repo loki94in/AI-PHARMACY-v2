@@ -4,6 +4,7 @@ import { Sparkles, Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
+import { useFetchMode } from '../../hooks/useFetchMode';
 import { useQueryClient } from '@tanstack/react-query';
 import { getTodayString } from '../../utils/date';
 import { useSearchParams } from 'react-router-dom';
@@ -163,6 +164,10 @@ const CRM = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'crm';
   const queryClient = useQueryClient();
+
+  const waStatusPollControl = useFetchMode('crm.waStatusPoll');
+  const waSseControl = useFetchMode('crm.waSse');
+
   const { data: patients = [], isLoading: loading } = useApiQuery<Patient[]>(
     'patients',
     () => api.getPatients({ limit: 20 })
@@ -438,50 +443,57 @@ const CRM = () => {
   };
 
   useDeferredEffect(() => { 
-    fetchWaStatus();
-    fetchIgnoredPhones();
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        if (!waStatus.isReady) {
-          fetchWaStatus();
-        } else {
-          const now = Date.now();
-          if (now - lastWaHeartbeat.current >= 30000) {
-            lastWaHeartbeat.current = now;
+    if (waStatusPollControl.shouldFetch) {
+      fetchWaStatus();
+      fetchIgnoredPhones();
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          if (!waStatus.isReady) {
             fetchWaStatus();
+          } else {
+            const now = Date.now();
+            if (now - lastWaHeartbeat.current >= 30000) {
+              lastWaHeartbeat.current = now;
+              fetchWaStatus();
+            }
           }
         }
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [fetchWaStatus, waStatus.isReady]);
+      }, 5000);
+      return () => clearInterval(interval);
+    } else {
+      fetchIgnoredPhones();
+    }
+  }, [fetchWaStatus, waStatus.isReady, waStatusPollControl.shouldFetch]);
 
   // Listen for real-time WhatsApp events pushed via SSE
   useEffect(() => {
-    const evtSource = new EventSource('/api/events');
+    let evtSource: EventSource | null = null;
+    if (waSseControl.shouldFetch) {
+      evtSource = new EventSource('/api/events');
 
-    evtSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'wa_new_message' && data.payload) {
-          const { chat_id, message } = data.payload;
-          
-          if (activeWaChat && activeWaChat.id === chat_id) {
-            setWaMessages(prev => {
-              if (prev.some(m => m.id === message.id)) return prev;
-              const updated = [...prev, message];
-              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-              return updated;
-            });
+      evtSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'wa_new_message' && data.payload) {
+            const { chat_id, message } = data.payload;
+            
+            if (activeWaChat && activeWaChat.id === chat_id) {
+              setWaMessages(prev => {
+                if (prev.some(m => m.id === message.id)) return prev;
+                const updated = [...prev, message];
+                setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+                return updated;
+              });
+            }
+            fetchWaChats();
+          } else if (data.type === 'wa_chats_updated') {
+            fetchWaChats();
           }
-          fetchWaChats();
-        } else if (data.type === 'wa_chats_updated') {
-          fetchWaChats();
+        } catch (err) {
+          console.error('Failed to parse SSE event in CRM:', err);
         }
-      } catch (err) {
-        console.error('Failed to parse SSE event in CRM:', err);
-      }
-    };
+      };
+    }
 
     const handleWaEvent = (e: Event) => {
       const eventData = (e as CustomEvent).detail;
@@ -512,10 +524,12 @@ const CRM = () => {
 
     window.addEventListener('whatsapp_event', handleWaEvent);
     return () => {
-      evtSource.close();
+      if (evtSource) {
+        evtSource.close();
+      }
       window.removeEventListener('whatsapp_event', handleWaEvent);
     };
-  }, [activeWaChat, fetchWaChats]);
+  }, [activeWaChat, fetchWaChats, waSseControl.shouldFetch]);
 
   const loadWaMessages = async (chat: any) => {
     setActiveWaChat(chat);
@@ -980,7 +994,28 @@ const CRM = () => {
 
         {/* ═══════ LEFT SIDE (70%): WhatsApp Interface ═══════ */}
         <div className="lg:col-span-7 bg-glass-bg border border-glass-border flex flex-col overflow-hidden min-h-0 rounded-2xl">
-          {waStatus.isReady ? (
+          {waStatusPollControl.mode === 'manual' && !waStatusPollControl.loaded ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
+              <MessageCircle size={48} className="text-green/40 animate-pulse" />
+              <div className="space-y-1">
+                <h3 className="font-bold text-text">WhatsApp Integration</h3>
+                <p className="text-xs text-muted max-w-sm">
+                  Auto-checking status is deferred to save API calls. Click below to load your active WhatsApp connection.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  waStatusPollControl.requestLoad();
+                  fetchWaStatus();
+                  fetchWaChats();
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-green text-text hover:bg-emerald-600 transition-all shadow-[0_4px_12px_rgba(16,185,129,0.2)]"
+              >
+                Load WhatsApp Chats & Status
+              </button>
+            </div>
+          ) : waStatus.isReady ? (
             /* Connected Dual-Pane Layout */
             <div className="flex-1 flex min-h-0 divide-x divide-glass-border/30">
               
@@ -1398,7 +1433,7 @@ const CRM = () => {
 
       {/* Lightbox Modal */}
       {lightbox.isOpen && (
-        <div className="fixed inset-0 z-[999999] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}>
+        <div className="fixed inset-0 z-global-modal bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}>
           <button 
             onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}
             className="absolute top-4 right-4 p-2 bg-bg3 hover:bg-bg2 border border-glass-border rounded-full text-text transition-colors shadow-lg"
