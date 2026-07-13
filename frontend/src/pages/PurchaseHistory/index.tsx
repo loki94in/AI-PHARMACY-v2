@@ -275,7 +275,7 @@ const PurchaseHistory = () => {
   };
 
   // Purchase Analytics
-  const totalPurchases = totalItems;
+  const totalPurchases = items.length;
   const totalAmount = items.reduce((sum, t) => sum + (t.total_amount || 0), 0);
   const paidAmount = totalAmount; // Cash workflow, all are paid
 
