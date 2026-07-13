@@ -677,60 +677,147 @@ const InvestigationCenter = () => {
         document.body
       )}
 
+      {/* Page Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between shrink-0 select-none bg-glass-bg border border-glass-border rounded-2xl p-4 gap-4 shadow-lg backdrop-blur-xl relative overflow-hidden">
+        {/* Subtle background glow */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-primary/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
+        
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20 text-primary shadow-inner shrink-0">
+            <PackageSearch size={22} className="animate-pulse" />
+          </div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <h1 className="text-sm font-black text-text uppercase tracking-widest flex items-center gap-2">
+              Investigation Center
+            </h1>
+            <p className="text-[10px] text-muted leading-relaxed truncate">
+              Audit stock ledger timeline, correct transaction histories, and adjust inventory balances.
+            </p>
+          </div>
+        </div>
+
+        {/* Date Filter & Control bar right in the header for cleanliness! */}
+        {!editingType && (
+          <div className="flex flex-wrap items-center gap-3 z-10">
+            {/* Date Filters */}
+            <div className="flex items-center gap-2 bg-bg2/40 border border-glass-border/30 px-3 py-1.5 rounded-xl text-xs">
+              <Calendar size={13} className="text-muted shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-muted font-bold uppercase shrink-0">From</span>
+                <input
+                  type="date"
+                  value={dateRangeHelper.dateRange.from}
+                  onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
+                  className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 border-l border-glass-border/30 pl-2">
+                <span className="text-[9px] text-muted font-bold uppercase shrink-0">To</span>
+                <input
+                  type="date"
+                  value={dateRangeHelper.dateRange.to}
+                  onChange={e => dateRangeHelper.handleToChange(e.target.value)}
+                  className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
+                />
+              </div>
+              {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
+                <button
+                  onClick={() => dateRangeHelper.clearFilters()}
+                  className="ml-1.5 text-[9px] font-extrabold text-red hover:underline cursor-pointer shrink-0"
+                  title="Clear dates"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Export Buttons */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => handleExport('csv')}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
+                title="Export to CSV"
+              >
+                <Download size={13} />
+                CSV
+              </button>
+              <button
+                onClick={() => handleExport('pdf')}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
+                title="Export to PDF"
+              >
+                <Download size={13} />
+                PDF
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* KPI Cards (Dashboard Summary View) - Only visible when not editing */}
       {!editingType && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0 animate-in fade-in duration-300">
-          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Total Ledgers</span>
-              <span className="text-2xl font-black text-text font-mono">
+          
+          {/* Card 1: Total Ledgers */}
+          <div className="bg-glass-bg border border-glass-border/40 hover:border-primary/45 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-primary/60 to-primary/20" />
+            <div className="flex flex-col gap-1 z-10">
+              <span className="text-[9px] font-black text-muted uppercase tracking-widest">Total Ledgers</span>
+              <span className="text-2xl font-black text-text font-mono tracking-tight group-hover:text-primary transition-colors">
                 {totalItems.toLocaleString()}
               </span>
-              <span className="text-[9px] text-muted">Across selected dates</span>
+              <span className="text-[9px] text-muted/80">Across selected dates</span>
             </div>
-            <div className="p-3 rounded-xl bg-accent/10 border border-accent/25 text-accent shadow-sm">
+            <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20 text-primary shadow-inner group-hover:scale-110 transition-transform duration-300 shrink-0">
               <FileText size={18} />
             </div>
           </div>
 
-          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Sales Events</span>
-              <span className="text-2xl font-black text-sky-400 font-mono">
+          {/* Card 2: Sales Events */}
+          <div className="bg-glass-bg border border-glass-border/40 hover:border-sky-400/45 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-sky-400/60 to-sky-400/20" />
+            <div className="flex flex-col gap-1 z-10">
+              <span className="text-[9px] font-black text-muted uppercase tracking-widest">Sales Events</span>
+              <span className="text-2xl font-black text-sky-400 font-mono tracking-tight group-hover:scale-105 transition-transform origin-left">
                 {salesCount.toLocaleString()}
               </span>
-              <span className="text-[9px] text-muted">Currently loaded</span>
+              <span className="text-[9px] text-muted/80">Currently loaded</span>
             </div>
-            <div className="p-3 rounded-xl bg-sky-400/10 border border-sky-400/25 text-sky-400 shadow-sm">
+            <div className="p-3 rounded-2xl bg-sky-400/10 border border-sky-400/20 text-sky-400 shadow-inner group-hover:scale-110 transition-transform duration-300 shrink-0">
               <ShoppingCart size={18} />
             </div>
           </div>
 
-          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Purchases</span>
-              <span className="text-2xl font-black text-green-400 font-mono">
+          {/* Card 3: Purchases */}
+          <div className="bg-glass-bg border border-glass-border/40 hover:border-green/45 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-green/60 to-green/20" />
+            <div className="flex flex-col gap-1 z-10">
+              <span className="text-[9px] font-black text-muted uppercase tracking-widest">Purchases</span>
+              <span className="text-2xl font-black text-green font-mono tracking-tight group-hover:scale-105 transition-transform origin-left">
                 {purchasesCount.toLocaleString()}
               </span>
-              <span className="text-[9px] text-muted">Currently loaded</span>
+              <span className="text-[9px] text-muted/80">Currently loaded</span>
             </div>
-            <div className="p-3 rounded-xl bg-green-400/10 border border-green-400/25 text-green-400 shadow-sm">
+            <div className="p-3 rounded-2xl bg-green/10 border border-green/20 text-green shadow-inner group-hover:scale-110 transition-transform duration-300 shrink-0">
               <Package size={18} />
             </div>
           </div>
 
-          <div className="bg-glass-bg border border-glass-border/65 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:-translate-y-0.5 transition-all">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Stock Adjustments</span>
-              <span className="text-2xl font-black text-amber-500 font-mono">
+          {/* Card 4: Stock Adjustments */}
+          <div className="bg-glass-bg border border-glass-border/40 hover:border-amber-500/45 rounded-2xl p-4 flex items-center justify-between shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-amber-500/60 to-amber-500/20" />
+            <div className="flex flex-col gap-1 z-10">
+              <span className="text-[9px] font-black text-muted uppercase tracking-widest">Stock Adjustments</span>
+              <span className="text-2xl font-black text-amber-500 font-mono tracking-tight group-hover:scale-105 transition-transform origin-left">
                 {adjustmentsCount.toLocaleString()}
               </span>
-              <span className="text-[9px] text-muted">Manually corrected</span>
+              <span className="text-[9px] text-muted/80">Manually corrected</span>
             </div>
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-500 shadow-sm">
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 shadow-inner group-hover:scale-110 transition-transform duration-300 shrink-0">
               <Sliders size={18} />
             </div>
           </div>
+
         </div>
       )}
 
@@ -761,89 +848,141 @@ const InvestigationCenter = () => {
                 {/* Left Panel: Form & Preview (Col span 8) */}
                 <div className="lg:col-span-8 flex flex-col gap-6 w-full animate-in fade-in slide-in-from-left-4 duration-300">
                   
-                  {/* Before vs After Preview Card */}
-                  {details && details.inventory && (
-                    <div className="bg-bg2 border border-glass-border p-5 rounded-2xl flex flex-col gap-4 shadow-xl">
-                      <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3">
-                        <Info size={14} className="text-primary" />
-                        <h3 className="text-xs font-bold text-text uppercase tracking-wider">Adjustment Preview</h3>
+                  {/* Before vs After Preview Card with Diff Badges */}
+                  {details && details.inventory && (() => {
+                    const qtyDiff = editInventoryForm.quantity - details.inventory.quantity;
+                    const looseDiff = editInventoryForm.loose_quantity - details.inventory.loose_quantity;
+                    const mrpDiff = editInventoryForm.mrp - details.inventory.mrp;
+                    const costDiff = editInventoryForm.cost_price - details.inventory.cost_price;
+
+                    return (
+                      <div className="bg-bg2 border border-glass-border p-5 rounded-2xl flex flex-col gap-4 shadow-xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+                        
+                        <div className="flex items-center justify-between border-b border-glass-border/30 pb-3">
+                          <div className="flex items-center gap-2">
+                            <Info size={14} className="text-amber-500" />
+                            <h3 className="text-xs font-bold text-text uppercase tracking-wider">Adjustment Preview</h3>
+                          </div>
+                          <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded-lg font-black uppercase">
+                            Draft Mode
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {/* Compare Box Qty */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">Box Quantity</span>
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-red/70 line-through">{details.inventory.quantity}</span>
+                              <ChevronRight size={12} className="text-muted/60" />
+                              <span className={`font-black text-sm ${qtyDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                {editInventoryForm.quantity}
+                              </span>
+                            </div>
+                            {qtyDiff !== 0 && (
+                              <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
+                                qtyDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                              }`}>
+                                {qtyDiff > 0 ? `+${qtyDiff}` : qtyDiff}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Compare Loose Qty */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">Loose Quantity</span>
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-red/70 line-through">{details.inventory.loose_quantity}</span>
+                              <ChevronRight size={12} className="text-muted/60" />
+                              <span className={`font-black text-sm ${looseDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                {editInventoryForm.loose_quantity}
+                              </span>
+                            </div>
+                            {looseDiff !== 0 && (
+                              <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
+                                looseDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                              }`}>
+                                {looseDiff > 0 ? `+${looseDiff}` : looseDiff}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Compare Batch */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">Batch Number</span>
+                            <div className="flex items-center gap-1.5 font-mono text-xs min-w-0">
+                              <span className="text-red/70 line-through truncate max-w-[60px]">{details.inventory.batch_no}</span>
+                              <ChevronRight size={12} className="text-muted/60 shrink-0" />
+                              <span className={`font-bold truncate max-w-[90px] ${editInventoryForm.batch_no !== details.inventory.batch_no ? 'text-amber-500 font-black' : 'text-text'}`}>
+                                {editInventoryForm.batch_no}
+                              </span>
+                            </div>
+                            {editInventoryForm.batch_no !== details.inventory.batch_no && (
+                              <span className="absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                Changed
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Compare Expiry */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">Expiry Date</span>
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-red/70 line-through">{details.inventory.expiry_date}</span>
+                              <ChevronRight size={12} className="text-muted/60" />
+                              <span className={`font-bold ${editInventoryForm.expiry_date !== details.inventory.expiry_date ? 'text-amber-500 font-black' : 'text-text'}`}>
+                                {editInventoryForm.expiry_date}
+                              </span>
+                            </div>
+                            {editInventoryForm.expiry_date !== details.inventory.expiry_date && (
+                              <span className="absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                Changed
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Compare MRP */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">MRP</span>
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-red/70 line-through">₹{details.inventory.mrp}</span>
+                              <ChevronRight size={12} className="text-muted/60" />
+                              <span className={`font-black text-sm ${mrpDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                ₹{editInventoryForm.mrp}
+                              </span>
+                            </div>
+                            {mrpDiff !== 0 && (
+                              <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
+                                mrpDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                              }`}>
+                                {mrpDiff > 0 ? `+₹${mrpDiff}` : `-₹${Math.abs(mrpDiff)}`}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Compare Cost Price */}
+                          <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <span className="text-[9px] text-muted font-black uppercase tracking-wider">Cost Price</span>
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-red/70 line-through">₹{details.inventory.cost_price}</span>
+                              <ChevronRight size={12} className="text-muted/60" />
+                              <span className={`font-black text-sm ${costDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                ₹{editInventoryForm.cost_price}
+                              </span>
+                            </div>
+                            {costDiff !== 0 && (
+                              <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
+                                costDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                              }`}>
+                                {costDiff > 0 ? `+₹${costDiff}` : `-₹${Math.abs(costDiff)}`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {/* Compare Box Qty */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">Box Quantity</span>
-                          <div className="flex items-center gap-2 font-mono text-xs">
-                            <span className="text-red/85 line-through">{details.inventory.quantity}</span>
-                            <ChevronRight size={12} className="text-muted" />
-                            <span className={`font-bold ${editInventoryForm.quantity !== details.inventory.quantity ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              {editInventoryForm.quantity}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Compare Loose Qty */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">Loose Qty</span>
-                          <div className="flex items-center gap-2 font-mono text-xs">
-                            <span className="text-red/85 line-through">{details.inventory.loose_quantity}</span>
-                            <ChevronRight size={12} className="text-muted" />
-                            <span className={`font-bold ${editInventoryForm.loose_quantity !== details.inventory.loose_quantity ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              {editInventoryForm.loose_quantity}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Compare Batch */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">Batch Number</span>
-                          <div className="flex items-center gap-2 font-mono text-xs truncate">
-                            <span className="text-red/85 line-through truncate max-w-[60px]">{details.inventory.batch_no}</span>
-                            <ChevronRight size={12} className="text-muted shrink-0" />
-                            <span className={`font-bold truncate max-w-[90px] ${editInventoryForm.batch_no !== details.inventory.batch_no ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              {editInventoryForm.batch_no}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Compare Expiry */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">Expiry Date</span>
-                          <div className="flex items-center gap-2 font-mono text-xs">
-                            <span className="text-red/85 line-through">{details.inventory.expiry_date}</span>
-                            <ChevronRight size={12} className="text-muted" />
-                            <span className={`font-bold ${editInventoryForm.expiry_date !== details.inventory.expiry_date ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              {editInventoryForm.expiry_date}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Compare MRP */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">MRP (₹)</span>
-                          <div className="flex items-center gap-2 font-mono text-xs">
-                            <span className="text-red/85 line-through">₹{details.inventory.mrp}</span>
-                            <ChevronRight size={12} className="text-muted" />
-                            <span className={`font-bold ${editInventoryForm.mrp !== details.inventory.mrp ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              ₹{editInventoryForm.mrp}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Compare Cost Price */}
-                        <div className="bg-bg3/30 border border-glass-border/30 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                          <span className="text-[10px] text-muted font-bold uppercase">Cost Price (₹)</span>
-                          <div className="flex items-center gap-2 font-mono text-xs">
-                            <span className="text-red/85 line-through">₹{details.inventory.cost_price}</span>
-                            <ChevronRight size={12} className="text-muted" />
-                            <span className={`font-bold ${editInventoryForm.cost_price !== details.inventory.cost_price ? 'text-green font-extrabold text-sm' : 'text-text'}`}>
-                              ₹{editInventoryForm.cost_price}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Input Form Card */}
                   <div className="bg-bg2 border border-glass-border p-6 rounded-2xl flex flex-col gap-6 shadow-xl">
@@ -938,34 +1077,56 @@ const InvestigationCenter = () => {
                 </div>
 
                 {/* Right Panel: Audit Logs Timeline (Col span 4) */}
-                <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl self-stretch min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300">
+                <div className="lg:col-span-4 bg-glass-bg border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl self-stretch min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
+                  
                   <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
-                    <History size={14} className="text-primary" />
+                    <History size={14} className="text-primary animate-pulse" />
                     <h3 className="text-xs font-bold text-text uppercase tracking-wider">Audit Trail / History</h3>
                   </div>
 
                   <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-3.5 max-h-[500px]">
                     {auditLogs.length === 0 ? (
-                      <div className="flex-1 flex flex-col items-center justify-center text-center text-muted py-8">
+                      <div className="flex-1 flex flex-col items-center justify-center text-center text-muted py-12">
                         <Clock size={28} className="opacity-20 mb-2" />
-                        <p className="text-[10px] leading-relaxed">No prior audit logs found for this item.</p>
+                        <p className="text-xs font-bold">No prior audit logs</p>
+                        <p className="text-[10px] mt-0.5 max-w-[180px]">No historical ledger corrections found for this item.</p>
                       </div>
                     ) : (
-                      <div className="relative pl-4 border-l border-glass-border/40 ml-1.5 flex flex-col gap-4">
-                        {auditLogs.map((log, idx) => (
-                          <div key={log.id || idx} className="relative flex flex-col gap-1 text-[11px] animate-in fade-in duration-300">
-                            {/* Dot on line */}
-                            <span className="absolute -left-[20.5px] top-1 w-2 h-2 rounded-full bg-primary/80 ring-4 ring-bg2" />
-                            
-                            <div className="flex justify-between items-center text-[9px] font-semibold text-muted">
-                              <span className="uppercase text-primary">{log.action_type?.replace(/_/g, ' ')}</span>
-                              <span>{formatDate(log.created_at)}</span>
+                      <div className="relative pl-5 border-l-2 border-dashed border-glass-border/50 ml-2.5 flex flex-col gap-5 py-1">
+                        {auditLogs.map((log, idx) => {
+                          const action = log.action_type || '';
+                          const isCorrection = action.includes('CORRECTION') || action.includes('ADJUST');
+                          const isPositive = action.includes('IN') || action.includes('RETURN');
+                          const isNegative = action.includes('OUT') || action.includes('SALE') || action.includes('DELETE');
+
+                          return (
+                            <div key={log.id || idx} className="relative flex flex-col gap-1 text-[11px] animate-in fade-in duration-300">
+                              {/* Glowing Dot on line */}
+                              <span className={`absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-bg2 ${
+                                isCorrection ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' :
+                                isPositive ? 'bg-green shadow-[0_0_8px_rgba(34,197,150,0.5)]' :
+                                isNegative ? 'bg-red shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
+                                'bg-primary shadow-[0_0_8px_rgba(34,197,150,0.5)]'
+                              }`} />
+                              
+                              <div className="flex justify-between items-center text-[9px] font-bold text-muted uppercase tracking-wider">
+                                <span className={
+                                  isCorrection ? 'text-amber-500' :
+                                  isPositive ? 'text-green' :
+                                  isNegative ? 'text-red' :
+                                  'text-primary'
+                                }>
+                                  {action.replace(/_/g, ' ')}
+                                </span>
+                                <span className="font-mono text-muted/60">{formatDate(log.created_at)}</span>
+                              </div>
+                              <p className="text-text font-medium leading-relaxed bg-bg3/40 border border-glass-border/30 rounded-xl p-2.5 mt-0.5 shadow-sm hover:border-glass-border/60 transition-colors">
+                                {log.description}
+                              </p>
                             </div>
-                            <p className="text-text font-medium leading-relaxed bg-bg3/20 border border-glass-border/20 rounded-lg p-2 mt-0.5">
-                              {log.description}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1031,95 +1192,113 @@ const InvestigationCenter = () => {
                           <p className="text-[10px] mt-0.5">Search and select a medicine above to add it.</p>
                         </div>
                       ) : (
-                        billItems.map((item, index) => (
-                          <div key={index} className="p-4 bg-bg2 border border-glass-border/35 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs hover:border-glass-border/60 transition-all shadow-sm">
-                            <div className="min-w-0 flex-1 flex flex-col gap-1">
-                              <p className="font-black text-text truncate text-sm">{item.medicine_name}</p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] bg-bg3 border border-glass-border/40 px-2 py-0.5 rounded text-muted font-semibold">
-                                  Batch: {item.batch_no}
-                                </span>
-                              </div>
-                            </div>
-                            
-                            <div className="flex flex-wrap items-center gap-4 shrink-0 justify-between sm:justify-end">
-                              {/* Quantity Stepper */}
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Qty</span>
-                                <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleItemQtyChange(index, Math.max(0, item.quantity - 1))}
-                                    className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
-                                  >
-                                    <Minus size={11} />
-                                  </button>
-                                  <input 
-                                    type="number"
-                                    value={item.quantity}
-                                    onChange={e => handleItemQtyChange(index, Math.max(0, Number(e.target.value)))}
-                                    className="w-12 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleItemQtyChange(index, item.quantity + 1)}
-                                    className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
-                                  >
-                                    <Plus size={11} />
-                                  </button>
+                        billItems.map((item, index) => {
+                          const originalQty = item.original_qty || 0;
+                          const qtyDiff = item.quantity - originalQty;
+
+                          return (
+                            <div key={index} className="p-4 bg-bg2 border border-glass-border/35 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs hover:border-glass-border/60 transition-all shadow-sm relative overflow-hidden group">
+                              <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-bold text-text truncate text-sm">{item.medicine_name}</p>
+                                  {originalQty === 0 ? (
+                                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-green/10 text-green border border-green/20 uppercase shrink-0">
+                                      New Item
+                                    </span>
+                                  ) : qtyDiff !== 0 ? (
+                                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md border uppercase shrink-0 ${
+                                      qtyDiff > 0 ? 'bg-green/10 text-green border-green/20' : 'bg-red/10 text-red border-red/20'
+                                    }`}>
+                                      {qtyDiff > 0 ? `+${qtyDiff} Added` : `${qtyDiff} Reduced`}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] bg-bg3 border border-glass-border/40 px-2 py-0.5 rounded text-muted font-semibold">
+                                    Batch: {item.batch_no}
+                                  </span>
                                 </div>
                               </div>
-
-                              {/* Loose Quantity Stepper (Sales only) */}
-                              {editingType === 'sale' && (
+                              
+                              <div className="flex flex-wrap items-center gap-4 shrink-0 justify-between sm:justify-end">
+                                {/* Quantity Stepper */}
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Loose</span>
+                                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Qty</span>
                                   <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
                                     <button
                                       type="button"
-                                      onClick={() => handleItemLooseQtyChange(index, Math.max(0, item.loose_qty - 1))}
-                                      className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                      onClick={() => handleItemQtyChange(index, Math.max(0, item.quantity - 1))}
+                                      className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
                                     >
                                       <Minus size={11} />
                                     </button>
                                     <input 
                                       type="number"
-                                      value={item.loose_qty}
-                                      onChange={e => handleItemLooseQtyChange(index, Math.max(0, Number(e.target.value)))}
-                                      className="w-10 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
+                                      value={item.quantity}
+                                      onChange={e => handleItemQtyChange(index, Math.max(0, Number(e.target.value)))}
+                                      className="w-12 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
                                     />
                                     <button
                                       type="button"
-                                      onClick={() => handleItemLooseQtyChange(index, item.loose_qty + 1)}
-                                      className="px-2 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                      onClick={() => handleItemQtyChange(index, item.quantity + 1)}
+                                      className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
                                     >
                                       <Plus size={11} />
                                     </button>
                                   </div>
                                 </div>
-                              )}
 
-                              {/* Price Monospace */}
-                              <div className="flex flex-col text-right">
-                                <span className="text-[9px] text-muted uppercase font-bold tracking-wider">
-                                  {editingType === 'sale' ? 'Unit Price' : 'Unit Cost'}
-                                </span>
-                                <span className="font-mono font-bold text-text text-xs mt-0.5">
-                                  ₹{editingType === 'sale' ? item.unit_price : item.cost_price}
-                                </span>
+                                {/* Loose Quantity Stepper (Sales only) */}
+                                {editingType === 'sale' && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Loose</span>
+                                    <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleItemLooseQtyChange(index, Math.max(0, item.loose_qty - 1))}
+                                        className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                      >
+                                        <Minus size={11} />
+                                      </button>
+                                      <input 
+                                        type="number"
+                                        value={item.loose_qty}
+                                        onChange={e => handleItemLooseQtyChange(index, Math.max(0, Number(e.target.value)))}
+                                        className="w-10 text-center bg-transparent font-mono font-bold text-text text-xs focus:outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleItemLooseQtyChange(index, item.loose_qty + 1)}
+                                        className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                      >
+                                        <Plus size={11} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Price Monospace */}
+                                <div className="flex flex-col text-right">
+                                  <span className="text-[9px] text-muted uppercase font-bold tracking-wider">
+                                    {editingType === 'sale' ? 'Unit Price' : 'Unit Cost'}
+                                  </span>
+                                  <span className="font-mono font-bold text-text text-xs mt-0.5">
+                                    ₹{editingType === 'sale' ? item.unit_price : item.cost_price}
+                                  </span>
+                                </div>
+
+                                {/* Remove Button */}
+                                <button
+                                  onClick={() => handleRemoveBillItem(index)}
+                                  className="p-2 rounded-xl hover:bg-red/10 border border-transparent hover:border-red/20 text-red transition-all cursor-pointer"
+                                  title="Remove item"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-
-                              {/* Remove Button */}
-                              <button
-                                onClick={() => handleRemoveBillItem(index)}
-                                className="p-2 rounded-xl hover:bg-red/10 border border-transparent hover:border-red/20 text-red transition-all cursor-pointer"
-                                title="Remove item"
-                              >
-                                <Trash2 size={14} />
-                              </button>
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -1202,132 +1381,178 @@ const InvestigationCenter = () => {
         /* UNIFIED LEDGER SPREADSHEET TIMELINE */
         <div className="flex-1 bg-glass-bg border border-glass-border rounded-2xl flex flex-col min-h-0 overflow-hidden animate-in fade-in duration-300">
           
-          {/* Controls Glass Card */}
-          <div className="p-4 border-b border-glass-border/30 bg-bg2/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 select-none">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-sm font-black text-text uppercase tracking-wider flex items-center gap-2">
-                <PackageSearch size={18} className="text-primary animate-pulse" />
-                Investigation Center
-              </h1>
-              <p className="text-[10px] text-muted leading-relaxed">
-                Audit history, verify customer sales & distributor purchases, and correct stock.
-              </p>
+          {/* Quick Filters Row */}
+          <div className="p-3 bg-bg2/25 border-b border-glass-border/30 flex flex-wrap items-center gap-3 shrink-0 select-none">
+            <div className="flex items-center gap-1.5 text-xs text-muted font-bold uppercase shrink-0">
+              <Sliders size={13} className="text-primary animate-pulse" />
+              Quick Filters:
+            </div>
+            
+            {/* Medicine Filter */}
+            <div className="relative w-44">
+              <Search className="absolute left-2.5 top-2.5 text-muted/50" size={12} />
+              <input
+                type="text"
+                placeholder="Medicine..."
+                value={colFilterMedicine}
+                onChange={e => setColFilterMedicine(e.target.value)}
+                className="w-full bg-bg3 border border-glass-border/50 rounded-xl pl-8 pr-7 py-1.5 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+              />
+              {colFilterMedicine && (
+                <button onClick={() => setColFilterMedicine('')} className="absolute right-2.5 top-2.5 text-muted hover:text-text cursor-pointer">
+                  <X size={11} />
+                </button>
+              )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Date Filters with Lucide Calendar icon */}
-              <div className="flex items-center gap-2 bg-bg2/40 border border-glass-border/30 px-3 py-1.5 rounded-xl text-xs">
-                <Calendar size={13} className="text-muted" />
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] text-muted font-bold uppercase">From</span>
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.from}
-                    onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-                    className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
-                  />
-                </div>
-                <div className="flex items-center gap-1.5 border-l border-glass-border/30 pl-2">
-                  <span className="text-[9px] text-muted font-bold uppercase">To</span>
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.to}
-                    onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-                    className="px-2 py-0.5 bg-bg3 border border-glass-border rounded text-[10px] font-bold text-text focus:outline-none focus:border-primary/50 w-24 hover:border-glass-border/60 transition-colors"
-                  />
-                </div>
-                {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
-                  <button
-                    onClick={() => dateRangeHelper.clearFilters()}
-                    className="ml-1.5 text-[9px] font-extrabold text-red hover:underline cursor-pointer"
-                    title="Clear dates"
-                  >
-                    Clear
+            {/* Batch Filter */}
+            {col('batch') && (
+              <div className="relative w-32">
+                <input
+                  type="text"
+                  placeholder="Batch..."
+                  value={colFilterBatch}
+                  onChange={e => setColFilterBatch(e.target.value)}
+                  className="w-full bg-bg3 border border-glass-border/50 rounded-xl px-2.5 py-1.5 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+                {colFilterBatch && (
+                  <button onClick={() => setColFilterBatch('')} className="absolute right-2.5 top-2.5 text-muted hover:text-text cursor-pointer">
+                    <X size={11} />
                   </button>
                 )}
               </div>
+            )}
 
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleExport('csv')}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
-                  title="Export to CSV"
-                >
-                  <Download size={13} />
-                  CSV
-                </button>
-                <button
-                  onClick={() => handleExport('pdf')}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer hover:shadow-md"
-                  title="Export to PDF"
-                >
-                  <Download size={13} />
-                  PDF
-                </button>
-
-                {/* Column Toggle */}
-                <div className="relative" ref={colMenuRef}>
-                  <button
-                    onClick={() => setShowColMenu(p => !p)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all hover:shadow-md ${
-                      showColMenu
-                        ? 'bg-primary/15 border-primary/40 text-primary'
-                        : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
-                    }`}
-                    title="Toggle columns"
-                  >
-                    <Columns3 size={13} />
-                    Columns
-                    {visibleCols.size < COL_KEYS.length && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-primary/20 text-primary text-[9px] font-mono">
-                        {COL_KEYS.length - visibleCols.size} hidden
-                      </span>
-                    )}
+            {/* Invoice Filter */}
+            {col('invoice') && (
+              <div className="relative w-32">
+                <input
+                  type="text"
+                  placeholder="Invoice / Ref..."
+                  value={colFilterInvoice}
+                  onChange={e => setColFilterInvoice(e.target.value)}
+                  className="w-full bg-bg3 border border-glass-border/50 rounded-xl px-2.5 py-1.5 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+                {colFilterInvoice && (
+                  <button onClick={() => setColFilterInvoice('')} className="absolute right-2.5 top-2.5 text-muted hover:text-text cursor-pointer">
+                    <X size={11} />
                   </button>
+                )}
+              </div>
+            )}
 
-                  {showColMenu && (
-                    <div className="absolute right-0 top-full mt-2 z-[200] w-56 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                      <div className="flex items-center justify-between px-4 py-2.5 border-b border-glass-border/30 bg-bg2/80">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-muted">Ledger Columns</span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setVisibleCols(defaultVisible);
-                              localStorage.setItem('inv-ledger-cols', JSON.stringify([...defaultVisible]));
-                            }}
-                            className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
-                          >
-                            Reset
-                          </button>
-                          <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors">
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="py-1.5 max-h-72 overflow-y-auto custom-scrollbar bg-bg2/40">
-                        {COL_KEYS.map(({ key, label }) => (
-                          <button
-                            key={key}
-                            onClick={() => toggleCol(key)}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-primary/10 transition-colors text-left"
-                          >
-                            <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
-                              visibleCols.has(key)
-                                ? 'bg-primary border-primary'
-                                : 'bg-transparent border-glass-border/60'
-                            }`}>
-                              {visibleCols.has(key) && <Check size={10} className="text-white" />}
-                            </span>
-                            <span className={`text-xs font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
-                              {label}
-                            </span>
-                          </button>
-                        ))}
+            {/* Party Filter */}
+            {col('party') && (
+              <div className="relative w-40">
+                <input
+                  type="text"
+                  placeholder="Party / Client..."
+                  value={colFilterParty}
+                  onChange={e => setColFilterParty(e.target.value)}
+                  className="w-full bg-bg3 border border-glass-border/50 rounded-xl px-2.5 py-1.5 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+                {colFilterParty && (
+                  <button onClick={() => setColFilterParty('')} className="absolute right-2.5 top-2.5 text-muted hover:text-text cursor-pointer">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Type Dropdown */}
+            <div className="w-36">
+              <select
+                value={colFilterType}
+                onChange={e => setColFilterType(e.target.value)}
+                className="w-full bg-bg3 border border-glass-border/50 rounded-xl px-2.5 py-1.5 text-xs text-text focus:outline-none focus:border-primary/50 cursor-pointer"
+              >
+                <option value="All">All Types</option>
+                <option value="Purchase">Purchases</option>
+                <option value="Sale">Sales</option>
+                <option value="Return">Returns</option>
+                <option value="Adjustment">Adjustments</option>
+              </select>
+            </div>
+
+            {/* Columns selector and Reset */}
+            <div className="ml-auto flex items-center gap-2">
+              {(colFilterMedicine || colFilterBatch || colFilterInvoice || colFilterParty || colFilterType !== 'All') && (
+                <button
+                  onClick={() => {
+                    setColFilterMedicine('');
+                    setColFilterBatch('');
+                    setColFilterInvoice('');
+                    setColFilterParty('');
+                    setColFilterType('All');
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red/10 border border-red/20 text-red hover:bg-red hover:text-white transition-all text-xs font-bold cursor-pointer"
+                >
+                  <RotateCcw size={12} />
+                  Reset
+                </button>
+              )}
+
+              {/* Column toggle */}
+              <div className="relative" ref={colMenuRef}>
+                <button
+                  onClick={() => setShowColMenu(p => !p)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all hover:shadow-md cursor-pointer ${
+                    showColMenu
+                      ? 'bg-primary/15 border-primary/45 text-primary'
+                      : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
+                  }`}
+                  title="Toggle columns"
+                >
+                  <Columns3 size={13} />
+                  Columns
+                  {visibleCols.size < COL_KEYS.length && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-primary/20 text-primary text-[9px] font-mono shrink-0">
+                      {COL_KEYS.length - visibleCols.size} hidden
+                    </span>
+                  )}
+                </button>
+
+                {showColMenu && (
+                  <div className="absolute right-0 top-full mt-2 z-[200] w-56 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-glass-border/30 bg-bg2/80">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-muted">Ledger Columns</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setVisibleCols(defaultVisible);
+                            localStorage.setItem('inv-ledger-cols', JSON.stringify([...defaultVisible]));
+                          }}
+                          className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                        <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text transition-colors cursor-pointer">
+                          <X size={13} />
+                        </button>
                       </div>
                     </div>
-                  )}
-                </div>
+                    <div className="py-1.5 max-h-72 overflow-y-auto custom-scrollbar bg-bg2/40">
+                      {COL_KEYS.map(({ key, label }) => (
+                        <button
+                          key={key}
+                          onClick={() => toggleCol(key)}
+                          className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-primary/10 transition-colors text-left cursor-pointer"
+                        >
+                          <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
+                            visibleCols.has(key)
+                              ? 'bg-primary border-primary'
+                              : 'bg-transparent border-glass-border/60'
+                          }`}>
+                            {visibleCols.has(key) && <Check size={10} className="text-white" />}
+                          </span>
+                          <span className={`text-xs font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
+                            {label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1354,121 +1579,52 @@ const InvestigationCenter = () => {
                   containerRef={parentRef}
                   className="border border-glass-border/30 rounded-xl bg-glass-bg"
                   header={
-                    <tr className="flex items-center min-w-[1750px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] align-top select-none">
+                    <tr className="flex items-center min-w-[1750px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] select-none py-3">
                       {/* Medicine Header — always visible */}
-                      <th className="p-2 border-r border-glass-border/20 min-w-[180px] flex-1">
-                        <div className="flex flex-col gap-1.5">
-                          <span className="uppercase text-[9px] tracking-wider text-muted font-black">Medicine</span>
-                          <input
-                            type="text"
-                            placeholder="Filter medicine..."
-                            value={colFilterMedicine}
-                            onChange={e => setColFilterMedicine(e.target.value)}
-                            className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                          />
-                        </div>
+                      <th className="px-4 text-left min-w-[180px] flex-1 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                        Medicine
                       </th>
                       {/* Batch Header */}
                       {col('batch') && (
-                        <th className="p-2 border-r border-glass-border/20 w-28 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Batch</span>
-                            <input
-                              type="text"
-                              placeholder="Filter batch..."
-                              value={colFilterBatch}
-                              onChange={e => setColFilterBatch(e.target.value)}
-                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                            />
-                          </div>
+                        <th className="px-3 text-left w-28 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                          Batch
                         </th>
                       )}
                       {/* Date Header */}
                       {col('date') && (
-                        <th className="p-2 border-r border-glass-border/20 w-44 shrink-0">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Date</span>
-                          </div>
+                        <th className="px-3 text-left w-44 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                          Date
                         </th>
                       )}
                       {/* Invoice Header */}
                       {col('invoice') && (
-                        <th className="p-2 border-r border-glass-border/20 w-32 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Invoice</span>
-                            <input
-                              type="text"
-                              placeholder="Filter invoice..."
-                              value={colFilterInvoice}
-                              onChange={e => setColFilterInvoice(e.target.value)}
-                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                            />
-                          </div>
+                        <th className="px-3 text-left w-32 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                          Invoice
                         </th>
                       )}
                       {/* Party Header */}
                       {col('party') && (
-                        <th className="p-2 border-r border-glass-border/20 w-40 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1.5">
-                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Party</span>
-                            <input
-                              type="text"
-                              placeholder="Filter party..."
-                              value={colFilterParty}
-                              onChange={e => setColFilterParty(e.target.value)}
-                              className="w-full min-w-0 px-2.5 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                            />
-                          </div>
+                        <th className="px-3 text-left w-40 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                          Party
                         </th>
                       )}
-                      {/* Opening Stock Header (with Type Selector) */}
+                      {/* Opening Stock Header */}
                       {col('openingStock') && (
-                        <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 min-w-0">
-                          <div className="flex flex-col gap-1.5 items-center">
-                            <span className="uppercase text-[9px] tracking-wider text-muted font-black">Opening Stock</span>
-                            <select
-                              value={colFilterType}
-                              onChange={e => setColFilterType(e.target.value)}
-                              className="w-full min-w-0 px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal focus:outline-none focus:border-primary/50 cursor-pointer"
-                            >
-                              <option value="All">All Types</option>
-                              <option value="Purchase">Purchases</option>
-                              <option value="Sale">Sales</option>
-                              <option value="Return">Returns</option>
-                              <option value="Adjustment">Adjustments</option>
-                            </select>
-                          </div>
+                        <th className="px-3 text-center w-32 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                          Opening Stock
                         </th>
                       )}
-                      {col('purchase') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Purchase</th>}
-                      {col('sales') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Sales</th>}
-                      {col('purchaseReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Purchase Return</th>}
-                      {col('salesReturn') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Sales Return</th>}
-                      {col('adj') && <th className="p-2 border-r border-glass-border/20 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Adj</th>}
-                      {col('stockAudit') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Stock Audit</th>}
-                      {col('b2bSales') && <th className="p-2 border-r border-glass-border/20 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">B2B Sales</th>}
-                      {col('closingStock') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Closing Stock</th>}
-                      {col('medicineStock') && <th className="p-2 border-r border-glass-border/20 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">Medicine Stock</th>}
-                      <th className="p-2 text-center w-24 shrink-0">
-                        <div className="flex flex-col gap-1 items-center justify-center">
-                          <span className="uppercase text-[9px] tracking-wider text-muted font-black">Actions</span>
-                          {(colFilterMedicine || colFilterBatch || dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to || colFilterInvoice || colFilterParty || colFilterType !== 'All') && (
-                            <button
-                              onClick={() => {
-                                setColFilterMedicine('');
-                                setColFilterBatch('');
-                                dateRangeHelper.clearFilters();
-                                setColFilterInvoice('');
-                                setColFilterParty('');
-                                setColFilterType('All');
-                              }}
-                              className="px-2.5 py-0.5 rounded-lg bg-red/15 border border-red/30 text-red-400 hover:bg-red hover:text-white transition-all text-[9px] font-extrabold cursor-pointer"
-                              title="Clear Filters"
-                            >
-                              Reset
-                            </button>
-                          )}
-                        </div>
+                      {col('purchase') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Purchase</th>}
+                      {col('sales') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Sales</th>}
+                      {col('purchaseReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Purchase Return</th>}
+                      {col('salesReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Sales Return</th>}
+                      {col('adj') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Adj</th>}
+                      {col('stockAudit') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Stock Audit</th>}
+                      {col('b2bSales') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">B2B Sales</th>}
+                      {col('closingStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Closing Stock</th>}
+                      {col('medicineStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Medicine Stock</th>}
+                      <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">
+                        Actions
                       </th>
                     </tr>
                   }
@@ -1484,18 +1640,27 @@ const InvestigationCenter = () => {
                           size={virtualRow.size}
                           className="min-w-[1750px] border-b border-glass-border/20 hover:bg-bg2/40 transition-colors"
                         >
-                          {/* Medicine Cell with visual icons */}
+                          {/* Medicine Cell with visual icons & modern badges */}
                           <td className="p-2 border-r border-glass-border/20 flex-1 min-w-[180px] text-text truncate" title={item.medicine_name}>
-                            <div className="flex items-center gap-2 truncate">
-                              <span className="shrink-0 p-1.5 rounded-xl bg-bg3/60 border border-glass-border/40">
+                            <div className="flex items-center gap-2.5 truncate">
+                              <span className="shrink-0 p-1.5 rounded-xl bg-bg3/70 border border-glass-border/30 shadow-inner">
                                 {getTypeIcon(item.type, item.return_type)}
                               </span>
-                              <div className="truncate flex flex-col gap-0.5">
-                                <span className="font-black text-text truncate text-xs">{item.medicine_name || 'System Activity'}</span>
-                                <span className="text-[9px] text-muted font-bold tracking-wider uppercase">
-                                  {item.type} {item.type === 'Return' && `(${item.return_type})`}
+                              <div className="truncate flex flex-col gap-0.5 min-w-0">
+                                <span className="font-bold text-text truncate text-xs">{item.medicine_name || 'System Activity'}</span>
+                                <span className="text-[9px] text-muted/80 font-black tracking-widest uppercase">
+                                  {item.type === 'Return' ? `${item.return_type} return` : item.type}
                                 </span>
                               </div>
+                              <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md border shrink-0 ${
+                                item.type === 'Sale' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' :
+                                item.type === 'Purchase' ? 'bg-green/10 border-green/20 text-green' :
+                                item.type === 'Adjustment' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
+                                item.return_type === 'purchase' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
+                                'bg-purple-500/10 border-purple-500/20 text-purple-400'
+                              }`}>
+                                {item.type}
+                              </span>
                             </div>
                           </td>
                           {col('batch') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 font-mono font-bold text-muted truncate text-xs">{item.batch_no || 'N/A'}</td>}
