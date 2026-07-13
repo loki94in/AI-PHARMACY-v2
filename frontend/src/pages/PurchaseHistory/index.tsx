@@ -74,6 +74,8 @@ const PurchaseHistory = () => {
     return true;
   }, [colFilterId, colFilterDistributor, colFilterInvoiceNo, colFilterDate, colFilterMinAmount, colFilterMaxAmount]);
 
+  const isDateFiltered = !!(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to);
+
   // Infinite Scroll setup
   const {
     items,
@@ -96,8 +98,8 @@ const PurchaseHistory = () => {
     clientFilterFn,
     fetchPage: async (pageParam, filters) => {
       const response = await api.getPurchases({
-        page: pageParam,
-        limit: 50,
+        page: isDateFiltered ? undefined : pageParam,
+        limit: isDateFiltered ? 10000 : 50,
         search: filters.search || undefined,
         start: filters.start || undefined,
         end: filters.end || undefined,
@@ -563,16 +565,18 @@ const PurchaseHistory = () => {
                     })
                   }
                 />
-                <InfiniteScrollStatus
-                  totalItems={totalItems}
-                  loadedCount={items.length}
-                  isFetching={isFetching}
-                  isFetchingNextPage={isFetchingNextPage}
-                  hasNextPage={hasNextPage}
-                  onLoadMore={fetchNextPage}
-                  sentinelRef={sentinelRef}
-                  itemName="transactions"
-                />
+                {!isDateFiltered && (
+                  <InfiniteScrollStatus
+                    totalItems={totalItems}
+                    loadedCount={items.length}
+                    isFetching={isFetching}
+                    isFetchingNextPage={isFetchingNextPage}
+                    hasNextPage={hasNextPage}
+                    onLoadMore={fetchNextPage}
+                    sentinelRef={sentinelRef}
+                    itemName="transactions"
+                  />
+                )}
               </div>
             )}
           </div>
