@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 /**
  * Ensure required SQLite tables exist.
@@ -1141,6 +1141,43 @@ export async function ensureSchema(dbPath: string) {
     } catch (err) {
       console.warn('[Database Migration] Failed to initialize background runner:', err);
     }
+  }
+
+  // Healing database for sales_invoices with missing subtotal/discount values (e.g. legacy/imported sales)
+  try {
+    console.log('[Database Healing] Checking sales_invoices subtotals and discounts...');
+    const subtotalResult = await db.run(`
+      UPDATE sales_invoices
+      SET subtotal = COALESCE(NULLIF(
+        (
+          SELECT COALESCE(SUM(
+            (si.quantity * (si.unit_price * (1 - COALESCE(si.discount_per, 0) / 100))) +
+            (si.loose_qty * ((si.unit_price * (1 - COALESCE(si.discount_per, 0) / 100)) / COALESCE(m.pack_size, 10)))
+          ), 0)
+          FROM sale_items si
+          JOIN inventory_master im ON si.inventory_id = im.id
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE si.invoice_id = sales_invoices.id
+        ), 0), total_amount)
+      WHERE subtotal IS NULL OR subtotal = 0;
+    `);
+    if (subtotalResult.changes > 0) {
+      console.log(`[Database Healing] Backfilled subtotals for ${subtotalResult.changes} invoices.`);
+    }
+
+    const discountResult = await db.run(`
+      UPDATE sales_invoices
+      SET discount = CASE 
+        WHEN subtotal > total_amount THEN ROUND(subtotal - total_amount) 
+        ELSE 0 
+      END
+      WHERE discount IS NULL OR discount = 0;
+    `);
+    if (discountResult.changes > 0) {
+      console.log(`[Database Healing] Backfilled discounts for ${discountResult.changes} invoices.`);
+    }
+  } catch (healErr) {
+    console.warn('[Database Healing] Non-critical warning, failed to run database healing checks:', healErr);
   }
 
   // Stamp schema version so subsequent boots skip all DDL

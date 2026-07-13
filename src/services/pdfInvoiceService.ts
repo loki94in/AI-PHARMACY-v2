@@ -34,7 +34,7 @@ export class PdfInvoiceService {
 
     // Fetch line items
     const items = await db.all(
-      `SELECT si.quantity, si.unit_price, m.name as medicine_name
+      `SELECT si.quantity, si.unit_price, si.loose_qty, si.discount_per, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size
        FROM sale_items si
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
@@ -102,31 +102,61 @@ export class PdfInvoiceService {
         items.forEach(item => {
           const itemY = doc.y;
           doc.fontSize(9).fillColor('#0f172a');
-          doc.text(item.medicine_name, 40, itemY, { width: 250 });
-          doc.text(String(item.quantity), 300, itemY, { width: 50, align: 'right' });
-          doc.text(`₹${(item.unit_price || 0).toFixed(2)}`, 380, itemY, { width: 80, align: 'right' });
-          doc.text(`₹${(item.quantity * item.unit_price).toFixed(2)}`, 480, itemY, { width: 70, align: 'right' });
+          
+          const discPer = item.discount_per || 0;
+          const discountedPrice = item.unit_price * (1 - discPer / 100);
+          const packSize = item.pack_size || 10;
+          const looseQty = item.loose_qty || 0;
+          const itemTotal = (discountedPrice * item.quantity) + ((discountedPrice / packSize) * looseQty);
+          
+          const nameText = discPer > 0 
+            ? `${item.medicine_name} (${discPer}% Off)` 
+            : item.medicine_name;
+            
+          doc.text(nameText, 40, itemY, { width: 250 });
+          
+          const qtyText = looseQty > 0 
+            ? `${item.quantity} S + ${looseQty} L` 
+            : String(item.quantity);
+          doc.text(qtyText, 300, itemY, { width: 50, align: 'right' });
+          
+          doc.text(`₹${discountedPrice.toFixed(2)}`, 380, itemY, { width: 80, align: 'right' });
+          doc.text(`₹${itemTotal.toFixed(2)}`, 480, itemY, { width: 70, align: 'right' });
           doc.moveDown(1.2);
         });
 
         // Totals Section
         doc.moveDown(1);
         
-        let subtotal = invoice.total_amount - invoice.tax_amount;
+        let discount = invoice.discount || 0;
         let tax = invoice.tax_amount || 0;
         let total = invoice.total_amount;
+        let subtotal = total - tax;
 
         // Credit Bill Sharing: If payment_medium is CREDIT, share without discount amount
-        if (invoice.payment_medium === 'CREDIT' && (invoice.discount || 0) > 0) {
-          subtotal = invoice.subtotal || (invoice.total_amount + invoice.discount - invoice.tax_amount);
+        if (invoice.payment_medium === 'CREDIT' && discount > 0) {
+          subtotal = invoice.subtotal || (invoice.total_amount + discount - invoice.tax_amount);
           tax = invoice.tax_amount || 0;
           total = subtotal + tax;
+          discount = 0; // hide discount for CREDIT
+        } else if (discount > 0) {
+          const subtotalInclusive = invoice.subtotal || (invoice.total_amount + discount);
+          subtotal = subtotalInclusive / 1.05;
+          tax = invoice.tax_amount || 0;
+          total = invoice.total_amount;
         }
 
         doc.fontSize(9).fillColor('#64748b');
         doc.text('Subtotal:', 380, doc.y, { width: 80, align: 'right' });
         doc.fillColor('#0f172a').text(`₹${subtotal.toFixed(2)}`, 480, doc.y - 9, { width: 70, align: 'right' });
         
+        if (discount > 0 && invoice.payment_medium !== 'CREDIT') {
+          const discountExclusive = discount / 1.05;
+          doc.moveDown(0.5);
+          doc.fillColor('#64748b').text('Discount:', 380, doc.y, { width: 80, align: 'right' });
+          doc.fillColor('#e11d48').text(`-₹${discountExclusive.toFixed(2)}`, 480, doc.y - 9, { width: 70, align: 'right' });
+        }
+
         doc.moveDown(0.5);
         doc.fillColor('#64748b').text('Tax (5%):', 380, doc.y, { width: 80, align: 'right' });
         doc.fillColor('#0f172a').text(`₹${tax.toFixed(2)}`, 480, doc.y - 9, { width: 70, align: 'right' });
