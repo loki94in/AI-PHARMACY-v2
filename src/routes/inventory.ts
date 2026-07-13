@@ -42,10 +42,9 @@ router.get('/', async (req, res) => {
   const loose = (req.query.loose as string || '').trim();
   const mrp = (req.query.mrp as string || '').trim();
   const rack = (req.query.rack as string || '').trim();
-  const date_from = (req.query.date_from as string || '').trim();
-  const date_to = (req.query.date_to as string || '').trim();
+  const stock_filter = (req.query.stock_filter as string || '').trim();
 
-  const hasFilters = !!(search || medicine || id || batch || expiry || packs || loose || mrp || rack || date_from || date_to);
+  const hasFilters = !!(search || medicine || id || batch || expiry || packs || loose || mrp || rack || stock_filter);
   const limit = req.query.limit !== undefined 
     ? parseInt(req.query.limit as string) 
     : (hasFilters ? 200 : 100);
@@ -108,13 +107,13 @@ router.get('/', async (req, res) => {
         params.push(numVal);
       }
     }
-    if (date_from) {
-      baseQuery += ` AND date(im.created_at) >= date(?)`;
-      params.push(date_from);
-    }
-    if (date_to) {
-      baseQuery += ` AND date(im.created_at) <= date(?)`;
-      params.push(date_to);
+
+    if (stock_filter === 'zero') {
+      baseQuery += ` AND im.quantity = 0 AND im.loose_quantity = 0`;
+    } else if (stock_filter === 'negative') {
+      baseQuery += ` AND (im.quantity < 0 OR im.loose_quantity < 0)`;
+    } else if (stock_filter === 'positive') {
+      baseQuery += ` AND (im.quantity > 0 OR im.loose_quantity > 0)`;
     }
     
     // If limit is 0, fetch all (warning: can cause frontend lag)

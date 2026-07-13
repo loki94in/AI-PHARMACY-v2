@@ -158,13 +158,13 @@ router.get('/history', asyncHandler(async (req: express.Request, res: express.Re
   const conditions: string[] = ["r.type = 'sale'"];
 
   if (start && end) {
-    conditions.push('date(r.date) BETWEEN date(?) AND date(?)');
+    conditions.push("date(r.date, 'localtime') BETWEEN date(?) AND date(?)");
     params.push(start, end);
   } else if (start) {
-    conditions.push('date(r.date) >= date(?)');
+    conditions.push("date(r.date, 'localtime') >= date(?)");
     params.push(start);
   } else if (end) {
-    conditions.push('date(r.date) <= date(?)');
+    conditions.push("date(r.date, 'localtime') <= date(?)");
     params.push(end);
   }
 

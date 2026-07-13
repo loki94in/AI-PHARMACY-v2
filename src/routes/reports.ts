@@ -16,13 +16,13 @@ router.get('/', async (req, res) => {
     
     // 1. Total sales revenue
     const salesRow = await db.get(
-      'SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE date(date) BETWEEN date(?) AND date(?)',
+      "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?)",
       [from, to]
     );
     
     // 2. Total purchases amount
     const purchasesRow = await db.get(
-      'SELECT IFNULL(SUM(total_amount), 0) as total FROM purchases WHERE date(date) BETWEEN date(?) AND date(?)',
+      "SELECT IFNULL(SUM(total_amount), 0) as total FROM purchases WHERE date(date, 'localtime') BETWEEN date(?) AND date(?)",
       [from, to]
     );
 
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
       FROM sale_items si
       JOIN sales_invoices sinv ON si.invoice_id = sinv.id
       JOIN inventory_master im ON si.inventory_id = im.id
-      WHERE date(sinv.date) BETWEEN date(?) AND date(?)
+      WHERE date(sinv.date, 'localtime') BETWEEN date(?) AND date(?)
     `, [from, to]);
 
     const revenue = marginRow.revenue || 0;
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
       SELECT IFNULL(SUM(quantity), 0) as count
       FROM sale_items si
       JOIN sales_invoices sinv ON si.invoice_id = sinv.id
-      WHERE date(sinv.date) BETWEEN date(?) AND date(?)
+      WHERE date(sinv.date, 'localtime') BETWEEN date(?) AND date(?)
     `, [from, to]);
 
     res.json({
@@ -72,12 +72,12 @@ router.get('/data', async (req, res) => {
 
     if (type === 'sales') {
       data = await db.all(
-        'SELECT invoice_no, total_amount, date FROM sales_invoices WHERE date(date) BETWEEN date(?) AND date(?) ORDER BY date DESC LIMIT 100',
+        "SELECT invoice_no, total_amount, date FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC LIMIT 100",
         [from, to]
       );
     } else if (type === 'purchases') {
       data = await db.all(
-        'SELECT p.invoice_no, p.total_amount, d.name as distributor, p.date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date) BETWEEN date(?) AND date(?) ORDER BY p.date DESC LIMIT 100',
+        "SELECT p.invoice_no, p.total_amount, d.name as distributor, p.date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC LIMIT 100",
         [from, to]
       );
     } else if (type === 'inventory') {
@@ -134,7 +134,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = 'SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date) BETWEEN date(?) AND date(?) ORDER BY date DESC';
+      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC";
       params = [from, to];
       alignMap = { invoice_no: 'left', date: 'center', total_amount: 'right' };
       colWidths = [180, 180, 152];
@@ -142,7 +142,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = 'SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date) BETWEEN date(?) AND date(?) ORDER BY p.date DESC';
+      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
       params = [from, to];
       alignMap = { invoice_no: 'left', distributor_name: 'left', date: 'center', total_amount: 'right' };
       colWidths = [120, 180, 112, 100];
@@ -201,13 +201,13 @@ router.get('/export-excel', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = 'SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date) BETWEEN date(?) AND date(?) ORDER BY date DESC';
+      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC";
       params = [from, to];
     } else if (type === 'purchases') {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = 'SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date) BETWEEN date(?) AND date(?) ORDER BY p.date DESC';
+      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
       params = [from, to];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';

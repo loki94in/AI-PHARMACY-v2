@@ -33,11 +33,11 @@ router.get('/', async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
     if (date_from) {
-      query += ` AND DATE(r.date) >= DATE(?)`;
+      query += ` AND DATE(r.date, 'localtime') >= DATE(?)`;
       params.push(date_from);
     }
     if (date_to) {
-      query += ` AND DATE(r.date) <= DATE(?)`;
+      query += ` AND DATE(r.date, 'localtime') <= DATE(?)`;
       params.push(date_to);
     }
     if (min_amount) {

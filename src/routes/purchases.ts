@@ -570,13 +570,13 @@ router.get('/', async (req, res) => {
     const conditions: string[] = [];
     
     if (start && end) {
-      conditions.push('date(p.date) BETWEEN date(?) AND date(?)');
+      conditions.push("date(p.date, 'localtime') BETWEEN date(?) AND date(?)");
       params.push(start, end);
     } else if (start) {
-      conditions.push('date(p.date) >= date(?)');
+      conditions.push("date(p.date, 'localtime') >= date(?)");
       params.push(start);
     } else if (end) {
-      conditions.push('date(p.date) <= date(?)');
+      conditions.push("date(p.date, 'localtime') <= date(?)");
       params.push(end);
     } else if (months > 0) {
       conditions.push(`p.date >= datetime('now', '-${months} months')`);

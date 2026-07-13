@@ -706,11 +706,11 @@ router.get('/list', async (req, res) => {
       params.push(s, s, s, s);
     }
     if (date_from) {
-      whereClauses.push('DATE(si.date) >= DATE(?)');
+      whereClauses.push("DATE(si.date, 'localtime') >= DATE(?)");
       params.push(date_from);
     }
     if (date_to) {
-      whereClauses.push('DATE(si.date) <= DATE(?)');
+      whereClauses.push("DATE(si.date, 'localtime') <= DATE(?)");
       params.push(date_to);
     }
     if (batch) {

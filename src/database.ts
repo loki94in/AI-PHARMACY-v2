@@ -1161,7 +1161,7 @@ export async function ensureSchema(dbPath: string) {
         ), 0), total_amount)
       WHERE subtotal IS NULL OR subtotal = 0;
     `);
-    if (subtotalResult.changes > 0) {
+    if (subtotalResult && subtotalResult.changes !== undefined && subtotalResult.changes > 0) {
       console.log(`[Database Healing] Backfilled subtotals for ${subtotalResult.changes} invoices.`);
     }
 
@@ -1173,7 +1173,7 @@ export async function ensureSchema(dbPath: string) {
       END
       WHERE discount IS NULL OR discount = 0;
     `);
-    if (discountResult.changes > 0) {
+    if (discountResult && discountResult.changes !== undefined && discountResult.changes > 0) {
       console.log(`[Database Healing] Backfilled discounts for ${discountResult.changes} invoices.`);
     }
   } catch (healErr) {

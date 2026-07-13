@@ -71,14 +71,10 @@ let cachedSpecialOrders: any[] | null = null;
 
 const Inventory = () => {
   const queryClient = useQueryClient();
-  const dateRangeHelper = usePersistedDateRange({
-    storageKey: 'inventory-date-range',
-    defaultFrom: '',
-    defaultTo: '',
-  });
   const [colFilters, setColFilters] = useState({
     medicine: '', id: '', batch: '', expiry: '', packs: '', loose: '', mrp: '', rack: ''
   });
+  const [stockFilter, setStockFilter] = useState<string>('all');
 
   // Column Visibility — persisted in localStorage
   const COL_KEYS = [
@@ -211,8 +207,7 @@ const Inventory = () => {
       loose: debouncedFilters.loose,
       mrp: debouncedFilters.mrp,
       rack: debouncedFilters.rack,
-      date_from: dateRangeHelper.dateRange.from,
-      date_to: dateRangeHelper.dateRange.to,
+      stock_filter: stockFilter,
     },
     fetchPage: async (pageParam, filters) => {
       const res = await api.getInventory({
@@ -226,8 +221,7 @@ const Inventory = () => {
         loose: filters.loose,
         mrp: filters.mrp,
         rack: filters.rack,
-        date_from: filters.date_from,
-        date_to: filters.date_to,
+        stock_filter: filters.stock_filter,
       });
       const data = res && res.data ? res.data : res;
       const totalPages = res && res.totalPages ? res.totalPages : 1;
@@ -320,6 +314,21 @@ const Inventory = () => {
             {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} medicines
           </span>
           <div className="flex items-center gap-2">
+            {/* Stock Filter Toggle */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Stock:</span>
+              <select
+                value={stockFilter}
+                onChange={(e) => setStockFilter(e.target.value)}
+                className="px-2 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer focus:outline-none focus:border-primary/50"
+              >
+                <option value="all">All</option>
+                <option value="positive">In Stock (&gt;0)</option>
+                <option value="zero">Zero Stock (=0)</option>
+                <option value="negative">Negative Stock (&lt;0)</option>
+              </select>
+            </div>
+
             <button
               onClick={() => handleExport('csv')}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"

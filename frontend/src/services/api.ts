@@ -183,6 +183,7 @@ export const api = {
     id?: string;
     date_from?: string;
     date_to?: string;
+    stock_filter?: string;
   }) => apiClient.get<any>('/inventory', { params }).then(res => res.data),
   addMedicine: (data: Partial<InventoryItem>) => apiClient.post('/inventory', data).then(res => res.data),
   updateMedicine: (id: number, data: Partial<InventoryItem>) => apiClient.put(`/inventory/${id}`, data).then(res => res.data),
