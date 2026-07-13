@@ -19,6 +19,8 @@ export interface NonMovingItem {
   daysSinceLastTransaction: number;
   mrp: number | null;
   totalValue: number;
+  costPrice?: number | null;
+  totalCostValue?: number;
 }
 
 export interface NonMovingReport {
@@ -53,7 +55,8 @@ export class NonMovingReportService {
           (SELECT MAX(sl.business_date)
            FROM stock_ledger sl
            WHERE sl.medicine_id = im.medicine_id) as last_transaction_date,
-          im.mrp
+          im.mrp,
+          im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE im.quantity > 0
@@ -101,6 +104,7 @@ export class NonMovingReportService {
         }
 
         const totalValue = row.quantity * (row.mrp || 0);
+        const totalCostValue = row.quantity * (row.cost_price || 0);
 
         nonMovingItems.push({
           id: row.id,
@@ -111,7 +115,9 @@ export class NonMovingReportService {
           lastTransactionDate: lastTransactionDate || null,
           daysSinceLastTransaction: daysSinceLastTransaction,
           mrp: row.mrp || null,
-          totalValue: totalValue
+          totalValue: totalValue,
+          costPrice: row.cost_price || null,
+          totalCostValue: totalCostValue
         });
       }
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { Sparkles, Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download, Activity, Eye, EyeOff } from 'lucide-react';
+import { Sparkles, Users, UserPlus, Search, Trash2, Edit, X, Clock, ChevronRight, CheckCircle, MessageCircle, Send, RefreshCw, Mail, Smartphone, LogIn, LogOut, Paperclip, Smile, FileText, Download, Activity, Eye, EyeOff, Pill, AlertTriangle, XCircle, MessageSquare } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import AdminMatchPanel from '../../components/AdminMatchPanel';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { useQueryClient } from '@tanstack/react-query';
@@ -121,8 +122,6 @@ const WhatsAppMedia = ({
   );
 };
 
-
-
 const formatDividerDate = (timestamp: number) => {
   const date = new Date(timestamp * 1000);
   const today = new Date();
@@ -150,7 +149,6 @@ const getNDaysAgoString = (n: number) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-// Module-level caching variables for state preservation across page navigation
 // Module-level caching variables for state preservation across page navigation
 let cachedWaChats: any[] = [];
 let cachedWaMessages: any[] = [];
@@ -205,7 +203,6 @@ const CRM = () => {
     }
   };
 
-
   // WhatsApp states
   const [waChats, setWaChats] = useState<any[]>(() => cachedWaChats);
   const [waMessages, setWaMessages] = useState<any[]>(() => cachedWaMessages);
@@ -213,7 +210,7 @@ const CRM = () => {
   const [waInput, setWaInput] = useState('');
   const [waLoading, setWaLoading] = useState(false);
   const [waStatus, setWaStatus] = useState(() => cachedWaStatus);
-  const [isOpeningWaWindow, setIsOpeningWaWindow] = useState(false);
+
   const [ignoredPhones, setIgnoredPhones] = useState<Map<string, string>>(() => cachedIgnoredPhones);
   const [waChatSearch, setWaChatSearch] = useState('');
 
@@ -295,6 +292,7 @@ const CRM = () => {
       };
       refreshHistory();
     }
+    fetchPendingReviews();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -317,6 +315,9 @@ const CRM = () => {
   const [lightbox, setLightbox] = useState<{ isOpen: boolean; src: string; name: string }>({ isOpen: false, src: '', name: '' });
   const [showIgnoreModal, setShowIgnoreModal] = useState(false);
   const [newIgnorePhone, setNewIgnorePhone] = useState('');
+  const [selectedMatch, setSelectedMatch] = useState<any>(null);
+  const [pendingReviews, setPendingReviews] = useState<any[]>([]);
+  const [activeRightTab, setActiveRightTab] = useState<'directory' | 'approvals'>('directory');
 
   const handleAddIgnore = async () => {
     let clean = newIgnorePhone.trim();
@@ -384,6 +385,17 @@ const CRM = () => {
     }
   }, []);
 
+  const fetchPendingReviews = useCallback(async () => {
+    try {
+      const data = await api.getPendingWhatsappReviews();
+      if (data && data.success && Array.isArray(data.reviews)) {
+        setPendingReviews(data.reviews);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pending WhatsApp reviews:', err);
+    }
+  }, []);
+
   const toggleIgnore = useCallback(async (phone: string, currentIgnored: boolean) => {
     try {
       await api.toggleIgnore(phone, !currentIgnored);
@@ -430,18 +442,7 @@ const CRM = () => {
     }
   };
 
-  const handleOpenWaLoginWindow = async () => {
-    setIsOpeningWaWindow(true);
-    try {
-      showNotif('Launching Chrome login window for WhatsApp...');
-      await api.launchWhatsappLoginWindow();
-    } catch (err: any) {
-      console.error('Failed to open WhatsApp login window:', err);
-      showNotif(err?.response?.data?.error || 'Failed to open Chrome login window. Ensure Chrome is installed.', 'error');
-    } finally {
-      setIsOpeningWaWindow(false);
-    }
-  };
+
 
   useDeferredEffect(() => { 
     if (waStatusPollControl.shouldFetch) {
@@ -489,6 +490,11 @@ const CRM = () => {
             fetchWaChats();
           } else if (data.type === 'wa_chats_updated') {
             fetchWaChats();
+          } else if (data.type === 'wa_medicine_match') {
+            setSelectedMatch(data.payload);
+            fetchPendingReviews();
+          } else if (data.type === 'catalog_review_updated') {
+            fetchPendingReviews();
           }
         } catch (err) {
           console.error('Failed to parse SSE event in CRM:', err);
@@ -520,6 +526,11 @@ const CRM = () => {
         fetchWaChats();
       } else if (type === 'wa_chats_updated') {
         fetchWaChats();
+      } else if (type === 'wa_medicine_match') {
+        setSelectedMatch(payload);
+        fetchPendingReviews();
+      } else if (type === 'catalog_review_updated') {
+        fetchPendingReviews();
       }
     };
 
@@ -530,7 +541,7 @@ const CRM = () => {
       }
       window.removeEventListener('whatsapp_event', handleWaEvent);
     };
-  }, [activeWaChat, fetchWaChats, waSseControl.shouldFetch]);
+  }, [activeWaChat, fetchWaChats, waSseControl.shouldFetch, fetchPendingReviews]);
 
   const loadWaMessages = async (chat: any) => {
     setActiveWaChat(chat);
@@ -738,7 +749,7 @@ const CRM = () => {
         <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
           <button onClick={() => handlePatientWaClick(p.phone, p.name)}
             className="p-1.5 rounded hover:bg-green-500/20 text-green-500 transition-colors" title="Open WhatsApp Chat">
-            <MessageCircle size={13} />
+            <MessageSquare size={13} />
           </button>
           <button onClick={() => handleEdit(p)}
             className="p-1.5 rounded hover:bg-primary/20 text-primary transition-colors" title="Edit">
@@ -857,21 +868,16 @@ const CRM = () => {
 
   const handlePatientWaClick = (phone?: string, name?: string) => {
     if (!phone) return showNotif('No phone number available', 'error');
-    // Sanitize phone
     const clean = phone.replace(/\D/g, '');
-    const searchId = clean.length === 10 ? `91${clean}@c.us` : `${clean}@c.us`;
-    const existing = Array.isArray(waChats) ? waChats.find(c => c.id === searchId) : null;
-    if (existing) {
-      loadWaMessages(existing);
+    const formattedPhone = clean.length === 10 ? `91${clean}` : clean;
+    const chatId = `${formattedPhone}@c.us`;
+    // Navigate to in-app WhatsApp chat
+    const existingChat = waChats.find(c => c.id === chatId);
+    if (existingChat) {
+      loadWaMessages(existingChat);
     } else {
-      // Create a temporary chat object so they can message this patient!
-      const tempChat = {
-        id: searchId,
-        name: name || phone,
-        unreadCount: 0,
-        timestamp: Math.floor(Date.now() / 1000),
-        lastMessage: ''
-      };
+      // Create a temporary chat entry and open it
+      const tempChat = { id: chatId, name: name || formattedPhone, unreadCount: 0, timestamp: Math.floor(Date.now() / 1000), isGroup: false, lastMessage: '', resolvedNumber: formattedPhone };
       setActiveWaChat(tempChat);
       setWaMessages([]);
     }
@@ -947,15 +953,15 @@ const CRM = () => {
   };
 
   return (
-    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3">
+    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-4">
       {/* Page Tabs */}
-      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+      <div className="flex border border-glass-border/30 bg-bg2/60 backdrop-blur-md shrink-0 rounded-2xl overflow-hidden p-1.5 gap-1.5 shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
         <button
           onClick={() => setSearchParams({ tab: 'crm' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] duration-150 ${
             currentTab === 'crm'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+              ? 'bg-primary/10 border border-primary/25 text-primary shadow-[0_0_12px_rgba(34,197,94,0.12)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
           }`}
         >
           <Users size={14} />
@@ -963,10 +969,10 @@ const CRM = () => {
         </button>
         <button
           onClick={() => setSearchParams({ tab: 'refills' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] duration-150 ${
             currentTab === 'refills'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+              ? 'bg-primary/10 border border-primary/25 text-primary shadow-[0_0_12px_rgba(34,197,94,0.12)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
           }`}
         >
           <Clock size={14} />
@@ -974,10 +980,10 @@ const CRM = () => {
         </button>
         <button
           onClick={() => setSearchParams({ tab: 'automation' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98] duration-150 ${
             currentTab === 'automation'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+              ? 'bg-primary/10 border border-primary/25 text-primary shadow-[0_0_12px_rgba(34,197,94,0.12)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
           }`}
         >
           <Activity size={14} />
@@ -995,129 +1001,344 @@ const CRM = () => {
         </div>
       ) : (
         <>
+          {/* Redesigned 2-Column CRM Directory Layout */}
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-10 gap-5 min-h-0 overflow-hidden">
 
-
-      {/* 2-Column Split Layout (70/30 using grid grid-cols-10) */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-10 gap-5 min-h-0 overflow-hidden">
-
-        {/* ═══════ LEFT SIDE (70%): WhatsApp Interface ═══════ */}
-        <div className="lg:col-span-7 bg-glass-bg border border-glass-border flex flex-col overflow-hidden min-h-0 rounded-2xl">
-          {waStatusPollControl.mode === 'manual' && !waStatusPollControl.loaded ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
-              <MessageCircle size={48} className="text-green/40 animate-pulse" />
-              <div className="space-y-1">
-                <h3 className="font-bold text-text">WhatsApp Integration</h3>
-                <p className="text-xs text-muted max-w-sm">
-                  Auto-checking status is deferred to save API calls. Click below to load your active WhatsApp connection.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  waStatusPollControl.requestLoad();
-                  fetchWaStatus();
-                  fetchWaChats();
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-green text-text hover:bg-emerald-600 transition-all shadow-[0_4px_12px_rgba(16,185,129,0.2)]"
-              >
-                Load WhatsApp Chats & Status
-              </button>
-            </div>
-          ) : waStatus.isReady ? (
-            /* Connected Dual-Pane Layout */
-            <div className="flex-1 flex min-h-0 divide-x divide-glass-border/30">
-              
-              {/* Left Sub-pane: Chat List */}
-              <div className="w-[280px] lg:w-[320px] flex flex-col min-h-0 bg-bg2/40 shrink-0">
-                {/* Chats Header */}
-                <div className="p-3 border-b border-glass-border bg-bg3 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <MessageCircle size={16} className="text-green" />
-                    <span className="font-bold text-xs text-text">WhatsApp Chats</span>
-                  </div>
+            {/* ═══════ LEFT COLUMN (60%): Patient Directory & Pending Approvals ═══════ */}
+            <div className="lg:col-span-6 bg-bg2/40 border border-glass-border/40 backdrop-blur-md flex flex-col overflow-hidden min-h-0 rounded-2xl shadow-xl shadow-black/5">
+              {/* Inner Tab Toggles */}
+              <div className="flex bg-bg3/40 border-b border-glass-border/30 p-2 shrink-0 justify-between items-center gap-4">
+                <div className="flex bg-bg3/60 rounded-xl p-0.5 border border-glass-border/20">
                   <button
-                    onClick={() => setShowIgnoreModal(true)}
-                    className="p-1 rounded bg-bg2 text-muted hover:text-text hover:bg-bg3 transition-colors flex items-center justify-center shrink-0"
-                    title="Manage Ignore List"
+                    type="button"
+                    onClick={() => setActiveRightTab('directory')}
+                    className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                      activeRightTab === 'directory'
+                        ? 'bg-primary/10 border border-primary/20 text-primary shadow-[inset_0_0_12px_rgba(34,197,94,0.1)]'
+                        : 'text-muted hover:text-text border border-transparent'
+                    }`}
                   >
-                    <EyeOff size={13} />
+                    <Users size={12} />
+                    Patient Directory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveRightTab('approvals')}
+                    className={`flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+                      activeRightTab === 'approvals'
+                        ? 'bg-primary/10 border border-primary/20 text-primary shadow-[inset_0_0_12px_rgba(34,197,94,0.1)]'
+                        : 'text-muted hover:text-text border border-transparent'
+                    }`}
+                  >
+                    <Pill size={12} />
+                    Approvals
+                    {pendingReviews.length > 0 && (
+                      <span className="bg-primary text-bg text-[8px] px-1.5 py-0.2 rounded-full font-bold ml-1 animate-pulse">
+                        {pendingReviews.length}
+                      </span>
+                    )}
                   </button>
                 </div>
+                {activeRightTab === 'directory' && (
+                  <div className="text-[10px] text-muted font-bold mr-2">
+                    Total Registered: <span className="text-text font-mono bg-bg3/80 px-1.5 py-0.5 rounded">{filtered.length}</span>
+                  </div>
+                )}
+              </div>
 
-                {/* Chat Search */}
-                <div className="px-3 py-2 border-b border-glass-border bg-bg2/60 shrink-0">
-                  <div className="relative">
-                    <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
-                    <input
-                      type="text"
-                      value={waChatSearch}
-                      onChange={e => setWaChatSearch(e.target.value)}
-                      placeholder="Search by name or number..."
-                      className="w-full pl-7 pr-3 py-1.5 rounded-lg bg-bg3 border border-glass-border text-text text-xs placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/50"
-                    />
+              {activeRightTab === 'directory' ? (
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                  {/* Filters Panel */}
+                  <div className="p-4 border-b border-glass-border/30 bg-bg3/20 flex flex-col gap-3 shrink-0">
+                    <div className="relative w-full">
+                      <Search className="absolute left-3 top-3 text-muted" size={13} />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder="Search patient name or phone number..."
+                        className="premium-input pl-9 pr-3 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 text-[10px] text-muted font-medium bg-bg2/40 border border-glass-border/30 rounded-xl p-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span>Created From:</span>
+                          <input
+                            type="date"
+                            value={dateFrom}
+                            min="2020-01-01"
+                            max={getTodayString()}
+                            onChange={e => handleDateFromChange(e.target.value)}
+                            className="px-2 py-1 bg-bg border border-glass-border/50 rounded-lg text-[10px] text-text focus:outline-none focus:border-primary/40 transition-colors"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span>Created To:</span>
+                          <input
+                            type="date"
+                            value={dateTo}
+                            min="2020-01-01"
+                            max={getTodayString()}
+                            disabled={!manualToDate}
+                            onChange={e => handleDateToChange(e.target.value)}
+                            className="px-2 py-1 bg-bg border border-glass-border/50 rounded-lg text-[10px] text-text focus:outline-none disabled:opacity-40 focus:border-primary/40 transition-colors"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end pr-1 pt-0.5">
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-[9px] hover:text-text transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={manualToDate}
+                            onChange={e => setManualToDate(e.target.checked)}
+                            className="rounded border-glass-border text-primary focus:ring-primary/20 bg-bg w-3 h-3 cursor-pointer"
+                          />
+                          <span>Edit To Date</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Patient List */}
+                  <div className="flex-1 overflow-auto bg-bg2/10 divide-y divide-glass-border/10 custom-scrollbar p-2.5">
+                    {patientListElement}
+                  </div>
+                </div>
+              ) : (
+                /* Pending Approvals List */
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                    {pendingReviews.length === 0 ? (
+                      <div className="text-center text-muted text-xs py-16 flex flex-col items-center justify-center gap-2 font-medium">
+                        <CheckCircle size={24} className="text-muted/30" />
+                        No pending approvals found
+                      </div>
+                    ) : (
+                      pendingReviews.map((review) => {
+                        const data = review.original_row_data || {};
+                        const topMatches = data.topMatches || [];
+
+                        return (
+                          <div key={review.id} className="bg-bg3/50 border border-glass-border/30 rounded-2xl p-4 space-y-3.5 hover:border-glass-border/50 hover:shadow-md transition-all duration-200">
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="min-w-0">
+                                <h4 className="text-xs font-bold text-text truncate leading-snug">{review.medicine_name}</h4>
+                                <p className="text-[9px] text-muted truncate mt-1">
+                                  Query: <span className="font-mono text-accent">"{review.search_query}"</span>
+                                </p>
+                                <p className="text-[9px] text-muted truncate mt-0.5">
+                                  Customer: <span className="font-semibold text-text">{data.customerName || 'New'}</span> ({data.customerPhone?.replace('@c.us', '') || 'Unknown'})
+                                </p>
+                              </div>
+                              <span className="text-[8px] bg-purple/10 text-purple border border-purple/20 px-2 py-0.5 rounded-full font-black uppercase select-none shrink-0 font-mono">
+                                #{review.id}
+                              </span>
+                            </div>
+
+                            {topMatches.length > 0 ? (
+                              <div className="space-y-2">
+                                <span className="text-[8px] font-black text-muted uppercase tracking-wider block">PharmaRack Matches</span>
+                                {topMatches.slice(0, 3).map((match: any, mIdx: number) => (
+                                  <div key={mIdx} className="flex justify-between items-center bg-bg/40 border border-glass-border/20 rounded-xl p-2.5 text-[10px] hover:border-primary/30 hover:bg-bg3/30 transition-all duration-150">
+                                    <div className="min-w-0 pr-2">
+                                      <span className="font-bold text-text truncate block">{match.name}</span>
+                                      <span className="text-[8px] text-muted truncate block">{match.distributor} • {match.packaging}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className="text-text font-bold font-mono">₹{match.mrp}</span>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          try {
+                                            await api.approveCatalogReview(review.id, {
+                                              name: match.name,
+                                              packaging: match.packaging,
+                                              manufacturer: match.manufacturer || '',
+                                              mrp: match.mrp
+                                            });
+                                            showNotif('Approved medicine and added to database');
+                                            fetchPendingReviews();
+                                          } catch (err) {
+                                            console.error('Approve failed:', err);
+                                            showNotif('Failed to approve review', 'error');
+                                          }
+                                        }}
+                                        className="px-2.5 py-1 bg-green hover:bg-emerald-600 text-white font-extrabold rounded-lg text-[9px] uppercase tracking-wider transition-all hover:scale-105 active:scale-95 shadow-sm"
+                                      >
+                                        Approve
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-muted italic bg-bg/25 border border-glass-border/10 p-2.5 rounded-xl text-center">
+                                No matches returned from PharmaRack.
+                              </div>
+                            )}
+
+                            <div className="flex justify-end gap-2 pt-2 border-t border-glass-border/20">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await api.rejectCatalogReview(review.id);
+                                    showNotif('Rejected and removed from queue');
+                                    fetchPendingReviews();
+                                  } catch (err) {
+                                    console.error('Reject failed:', err);
+                                    showNotif('Failed to reject review', 'error');
+                                  }
+                                }}
+                                className="px-3 py-1 hover:bg-red/10 border border-transparent hover:border-red/20 text-muted hover:text-red font-bold rounded-lg text-[10px] transition-colors"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ═══════ RIGHT COLUMN (40%): WhatsApp Launcher & Register Patient Form ═══════ */}
+            <div className="lg:col-span-4 flex flex-col min-h-0 min-w-0 gap-4 overflow-y-auto pr-1 custom-scrollbar">
+              {/* ═══ In-App WhatsApp Panel ═══ */}
+              <div className="bg-bg2/60 border border-glass-border rounded-2xl backdrop-blur-md relative overflow-hidden shadow-lg shadow-black/5 flex flex-col" style={{ minHeight: '420px', maxHeight: '65vh' }}>
+                <div className="absolute top-0 right-0 w-24 h-24 bg-green-500/10 rounded-full blur-2xl -mr-6 -mt-6 pointer-events-none"></div>
+
+                {/* Header */}
+                <div className="flex items-center justify-between gap-3 p-3.5 border-b border-glass-border/30 shrink-0 bg-bg3/20">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center text-green-500">
+                      <MessageSquare size={16} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-[11px] text-text uppercase tracking-wider">WhatsApp</h3>
+                      <p className="text-[9px] text-muted font-bold">
+                        {waStatus.isReady
+                          ? <span className="text-green-500">● Connected</span>
+                          : waStatus.qrUrl
+                            ? 'Scan QR to connect'
+                            : (waStatus.message || 'Connecting...')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {activeWaChat && (
+                      <button
+                        onClick={() => { setActiveWaChat(null); setWaMessages([]); }}
+                        className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-colors" title="Back to chat list"
+                      >
+                        <ChevronRight size={14} className="rotate-180" />
+                      </button>
+                    )}
+                    {waStatus.isReady && (
+                      <button onClick={() => setShowIgnoreModal(true)} className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-colors" title="Manage ignore list">
+                        <EyeOff size={13} />
+                      </button>
+                    )}
+                    <button onClick={handleWaReconnect} className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-colors" title="Reconnect">
+                      <RefreshCw size={13} />
+                    </button>
                   </div>
                 </div>
 
-                {/* Chats List */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {chatListElement}
-                </div>
-              </div>
+                {/* Body — switches between QR / Chat List / Chat Thread */}
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-              {/* Right Sub-pane: Message Thread */}
-              <div className="flex-1 flex flex-col min-h-0 bg-bg2">
-                {activeWaChat ? (
-                  <>
-                    {/* Header */}
-                    <div className="p-3 border-b border-glass-border bg-bg3 flex items-center gap-3 shrink-0">
-                      <div className="w-8 h-8 rounded-full bg-bg2 flex items-center justify-center">
-                        <Users size={16} className="text-muted" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-xs text-text truncate">{activeWaChat.name}</h3>
-                        <p className="text-[9px] text-muted truncate">{activeWaChat.id}</p>
-                      </div>
-                      <button onClick={() => setActiveWaChat(null)} className="p-1.5 hover:bg-bg2 rounded-full text-muted">
-                        <X size={14} />
-                      </button>
-                    </div>
-
-                    {/* Messages Scroll Panel */}
-                    <div className="flex-1 flex flex-col-reverse overflow-y-auto p-4 gap-3 bg-bg2/30 custom-scrollbar">
-                      {waLoading ? (
-                        <div className="text-center text-muted text-xs py-4 flex flex-col items-center justify-center h-full gap-2">
-                          <RefreshCw className="w-4 h-4 animate-spin text-muted/60" />
-                          <span>Loading messages...</span>
-                        </div>
-                      ) : waMessages.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted h-full gap-3">
-                          <Clock size={40} className="text-muted/20 animate-pulse" />
-                          <div className="space-y-1">
-                            <p className="text-xs font-semibold text-text">No Message History Cached</p>
-                            <p className="text-[10px] text-muted max-w-[240px] leading-relaxed mx-auto">
-                              Only new incoming and outgoing messages are stored. Previous history is not synced.
-                            </p>
+                  {/* ── State 1 & 2: Not Ready (QR or Initializing) ── */}
+                  {!waStatus.isReady && (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 gap-4 text-center">
+                      {waStatus.qrUrl ? (
+                        <>
+                          <div className="p-3 bg-white rounded-2xl shadow-lg border border-glass-border/20">
+                            <img src={waStatus.qrUrl} alt="WhatsApp QR Code" className="w-48 h-48 object-contain" />
                           </div>
-                          {activeWaChat?.lastMessage && (
-                            <div className="mt-2 p-3 bg-bg3 border border-glass-border rounded-xl text-left max-w-xs text-xs shadow-sm w-full">
-                              <span className="text-[9px] font-bold text-primary uppercase tracking-wider block mb-1">Last Received Message:</span>
-                              <p className="italic text-text font-medium">"{activeWaChat.lastMessage}"</p>
-                            </div>
-                          )}
-                        </div>
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-text">Scan with WhatsApp</p>
+                            <p className="text-[10px] text-muted leading-relaxed max-w-[220px]">Open WhatsApp on your phone → Settings → Linked Devices → Scan this QR code</p>
+                          </div>
+                        </>
                       ) : (
                         <>
-                          <div ref={messagesEndRef} />
-                          {[...waMessages].reverse().map((msg, idx, arr) => {
-                            const prevMsg = arr[idx + 1];
-                            const showDateDivider = !prevMsg || 
-                              new Date(msg.timestamp * 1000).toDateString() !== new Date(prevMsg.timestamp * 1000).toDateString();
+                          <div className="w-10 h-10 rounded-full border-2 border-green-500/30 border-t-green-500 animate-spin"></div>
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-text">Initializing WhatsApp</p>
+                            <p className="text-[10px] text-muted max-w-[220px]">{waStatus.message || 'Waiting for QR code from server...'}</p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
+                  {/* ── State 3: Connected ── */}
+                  {waStatus.isReady && !activeWaChat && (
+                    /* ── Chat List ── */
+                    <div className="flex-1 flex flex-col min-h-0">
+                      <div className="p-2.5 border-b border-glass-border/20 shrink-0">
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-2 text-muted" size={12} />
+                          <input
+                            type="text"
+                            value={waChatSearch}
+                            onChange={e => setWaChatSearch(e.target.value)}
+                            placeholder="Search chats..."
+                            className="w-full pl-8 pr-3 py-1.5 text-[11px] bg-bg3/50 border border-glass-border/30 rounded-xl text-text placeholder-muted focus:outline-none focus:border-primary/40 transition-colors"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-glass-border/10">
+                        {chatListElement}
+                      </div>
+                    </div>
+                  )}
+
+                  {waStatus.isReady && activeWaChat && (
+                    /* ── Active Chat Thread ── */
+                    <div className="flex-1 flex flex-col min-h-0">
+                      {/* Chat header */}
+                      <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-glass-border/20 bg-bg3/15 shrink-0">
+                        <div className="w-7 h-7 rounded-full bg-bg3 flex items-center justify-center shrink-0">
+                          <Users size={13} className="text-muted" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold text-text truncate">{activeWaChat.name}</p>
+                          <p className="text-[9px] text-muted font-mono truncate">{(activeWaChat.id || '').replace('@c.us', '')}</p>
+                        </div>
+                      </div>
+
+                      {/* Messages */}
+                      <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar bg-bg/30">
+                        {waLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <RefreshCw size={16} className="animate-spin text-muted" />
+                          </div>
+                        ) : waMessages.length === 0 ? (
+                          <div className="text-center text-muted text-[10px] py-12">No messages yet. Send one below.</div>
+                        ) : (
+                          waMessages.map((msg, idx) => {
+                            const prevMsg = waMessages[idx - 1];
+                            const showDateDivider = !prevMsg || formatDividerDate(msg.timestamp) !== formatDividerDate(prevMsg.timestamp);
                             return (
                               <React.Fragment key={msg.id || idx}>
+                                {showDateDivider && (
+                                  <div className="flex justify-center py-2">
+                                    <span className="text-[8px] font-bold text-muted bg-bg3/60 px-3 py-1 rounded-full border border-glass-border/20 uppercase tracking-wider">
+                                      {formatDividerDate(msg.timestamp)}
+                                    </span>
+                                  </div>
+                                )}
                                 <div className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`max-w-[75%] rounded-xl p-2.5 text-xs shadow-sm relative border ${msg.fromMe ? 'bg-primary/10 text-text border-primary/20 rounded-tr-none' : 'bg-bg3 text-text border-glass-border rounded-tl-none'}`}>
-                                    {msg.hasMedia ? (
+                                  <div className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-[11px] leading-relaxed shadow-sm ${
+                                    msg.fromMe
+                                      ? 'bg-green-500/15 border border-green-500/20 text-text rounded-br-md'
+                                      : 'bg-bg3/60 border border-glass-border/25 text-text rounded-bl-md'
+                                  }`}>
+                                    {msg.hasMedia && (
                                       <WhatsAppMedia
                                         msg={msg}
                                         chatId={activeWaChat.id}
@@ -1125,83 +1346,39 @@ const CRM = () => {
                                         loading={loadingMedia[msg.id]}
                                         onLoad={() => fetchMedia(msg.id)}
                                         onImageClick={(src, name) => setLightbox({ isOpen: true, src, name })}
-                                        onScan={() => handleManualScan(activeWaChat.id, msg.id)}
+                                        onScan={!msg.fromMe ? () => handleManualScan(activeWaChat.id, msg.id) : undefined}
                                       />
-                                    ) : (
-                                      <span className="whitespace-pre-wrap">{msg.body}</span>
                                     )}
-                                    <div className="text-[8px] text-muted mt-1 text-right float-right ml-3 pt-0.5 select-none">
-                                      {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </div>
+                                    {!msg.hasMedia && msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
+                                    <p className={`text-[8px] mt-1 ${msg.fromMe ? 'text-green-500/60 text-right' : 'text-muted'}`}>
+                                      {new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
                                   </div>
                                 </div>
-                                {showDateDivider && (
-                                  <div className="flex justify-center my-2">
-                                    <span className="bg-bg3 border border-glass-border px-3 py-1 rounded-full text-[9px] font-bold text-muted uppercase tracking-wider select-none shadow-sm">
-                                      {formatDividerDate(msg.timestamp)}
-                                    </span>
-                                  </div>
-                                )}
                               </React.Fragment>
                             );
-                          })}
-                        </>
-                      )}
-                    </div>
-
-                    {/* Attachment Preview Strip */}
-                    {attachedFile && (
-                      <div className="px-4 py-2 border-t border-glass-border/30 bg-bg3/60 flex items-center justify-between gap-3 animate-fade-in shrink-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {attachedFile.type.startsWith('image/') ? (
-                            <img 
-                              src={`data:${attachedFile.type};base64,${attachedFile.data}`} 
-                              alt="Preview" 
-                              className="w-8 h-8 rounded object-cover border border-glass-border/20 shrink-0" 
-                            />
-                          ) : (
-                            <span className="text-lg shrink-0">📄</span>
-                          )}
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-text truncate">{attachedFile.name}</p>
-                            <p className="text-[9px] text-muted">{(attachedFile.size / 1024).toFixed(1)} KB</p>
-                          </div>
-                        </div>
-                        <button 
-                          type="button" 
-                          onClick={clearAttachedFile}
-                          className="p-1 hover:bg-bg2 rounded text-muted hover:text-red transition-colors"
-                        >
-                          <X size={12} />
-                        </button>
+                          })
+                        )}
+                        <div ref={messagesEndRef} />
                       </div>
-                    )}
 
-                    {/* Input Field Section */}
-                    <div className="relative p-3 bg-bg3 border-t border-glass-border shrink-0">
-                      {/* Emoji Picker Overlay */}
+                      {/* Emoji Picker */}
                       {showEmojiPicker && (
-                        <div className="absolute bottom-16 left-3 z-[100] w-64 bg-glass-bg border border-glass-border rounded-2xl shadow-2xl backdrop-blur-2xl p-3 flex flex-col gap-2">
-                          <div className="flex gap-1 border-b border-glass-border/30 pb-1.5 overflow-x-auto shrink-0 custom-scrollbar">
+                        <div className="border-t border-glass-border/20 bg-bg2/80 p-2 shrink-0">
+                          <div className="flex gap-1 mb-1.5 flex-wrap">
                             {Object.keys(EMOJI_CATEGORIES).map(cat => (
-                              <button 
-                                key={cat} 
-                                type="button" 
-                                onClick={() => setActiveEmojiCat(cat)}
-                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-all shrink-0 ${activeEmojiCat === cat ? 'bg-primary text-white' : 'text-muted hover:text-text hover:bg-bg3'}`}
-                              >
+                              <button key={cat} type="button" onClick={() => setActiveEmojiCat(cat)}
+                                className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-colors ${
+                                  activeEmojiCat === cat ? 'bg-primary/15 text-primary border border-primary/20' : 'text-muted hover:text-text hover:bg-bg3'
+                                }`}>
                                 {cat}
                               </button>
                             ))}
                           </div>
-                          <div className="grid grid-cols-6 gap-1 h-32 overflow-y-auto custom-scrollbar p-0.5">
-                            {EMOJI_CATEGORIES[activeEmojiCat].map(emoji => (
-                              <button 
-                                key={emoji} 
-                                type="button" 
-                                onClick={() => insertEmoji(emoji)} 
-                                className="text-base p-1 hover:bg-bg3 rounded transition-colors text-center"
-                              >
+                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto custom-scrollbar">
+                            {(EMOJI_CATEGORIES[activeEmojiCat] || []).map(emoji => (
+                              <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}
+                                className="text-base hover:scale-125 active:scale-95 transition-transform p-0.5 rounded hover:bg-bg3">
                                 {emoji}
                               </button>
                             ))}
@@ -1209,290 +1386,158 @@ const CRM = () => {
                         </div>
                       )}
 
-                      <form onSubmit={sendWaMessage} className="flex items-center gap-2">
-                        {/* Emoji Toggle Button */}
-                        <button 
-                          type="button" 
-                          onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
-                          className={`p-2 rounded-full transition-colors shrink-0 ${showEmojiPicker ? 'text-green bg-green/10' : 'text-muted hover:text-text hover:bg-bg2'}`}
-                          title="Choose Emoji"
-                        >
-                          <Smile size={16} />
-                        </button>
+                      {/* Attached file preview */}
+                      {attachedFile && (
+                        <div className="px-3 py-1.5 border-t border-glass-border/20 bg-bg2/60 flex items-center gap-2 shrink-0">
+                          <FileText size={12} className="text-primary shrink-0" />
+                          <span className="text-[10px] text-text truncate flex-1 font-medium">{attachedFile.name}</span>
+                          <span className="text-[8px] text-muted font-mono">{(attachedFile.size / 1024).toFixed(0)}KB</span>
+                          <button type="button" onClick={clearAttachedFile} className="text-muted hover:text-red-400 transition-colors">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
 
-                        {/* File Attachment Button */}
-                        <button 
-                          type="button" 
-                          onClick={() => fileInputRef.current?.click()} 
-                          className={`p-2 rounded-full transition-colors shrink-0 ${attachedFile ? 'text-primary bg-primary/10' : 'text-muted hover:text-text hover:bg-bg2'}`}
-                          title="Attach File"
-                        >
-                          <Paperclip size={16} />
+                      {/* Input bar */}
+                      <form onSubmit={sendWaMessage} className="flex items-center gap-1.5 p-2.5 border-t border-glass-border/30 bg-bg3/20 shrink-0">
+                        <button type="button" onClick={() => setShowEmojiPicker(p => !p)}
+                          className={`p-1.5 rounded-lg transition-colors ${showEmojiPicker ? 'bg-primary/15 text-primary' : 'text-muted hover:text-text hover:bg-bg3'}`} title="Emoji">
+                          <Smile size={14} />
                         </button>
-                        <input 
-                          type="file" 
-                          ref={fileInputRef} 
-                          onChange={handleFileChange} 
-                          className="hidden" 
-                        />
-
-                        {/* TextInput */}
+                        <button type="button" onClick={() => fileInputRef.current?.click()}
+                          className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors" title="Attach file">
+                          <Paperclip size={14} />
+                        </button>
+                        <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,.pdf,.doc,.docx,.xlsx,.csv" />
                         <input
                           ref={inputRef}
                           type="text"
                           value={waInput}
                           onChange={e => setWaInput(e.target.value)}
-                          placeholder="Type a message"
-                          className="flex-1 bg-bg2 border border-glass-border rounded-lg px-4 py-2 text-xs text-text focus:outline-none placeholder-muted"
+                          placeholder="Type a message..."
+                          className="flex-1 bg-bg/50 border border-glass-border/30 rounded-xl px-3 py-1.5 text-[11px] text-text placeholder-muted focus:outline-none focus:ring-1 focus:ring-green-500/30 focus:border-green-500/40 transition-all"
                         />
-
-                        {/* Send Button */}
-                        <button 
-                          type="submit" 
-                          disabled={!waInput.trim() && !attachedFile} 
-                          className="p-2 rounded-full text-muted hover:text-green disabled:opacity-50 shrink-0 transition-colors"
-                        >
-                          <Send size={16} />
+                        <button type="submit" disabled={!waInput.trim() && !attachedFile}
+                          className="p-1.5 rounded-xl bg-green-500/15 text-green-500 hover:bg-green-500/25 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95" title="Send">
+                          <Send size={14} />
                         </button>
                       </form>
                     </div>
-                  </>
-                ) : (
-                  /* Thread Placeholder */
-                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted">
-                    <MessageCircle size={40} className="text-muted/20 mb-3 animate-pulse" />
-                    <h3 className="font-bold text-xs text-text mb-1">No Chat Selected</h3>
-                    <p className="text-[11px] max-w-[280px]">Select a patient or click on an active chat on the left to start sending messages.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Registration / Edit Form */}
+              <div className="bg-bg2/60 border border-glass-border p-4.5 rounded-2xl shrink-0 backdrop-blur-md">
+                <div className="flex items-center justify-between mb-3.5">
+                  <h3 className="font-bold flex items-center gap-2 text-xs text-text uppercase tracking-wider">
+                    <UserPlus size={15} className="text-primary animate-pulse-slow" />
+                    {editingId !== null ? 'Edit Patient' : 'Register Patient'}
+                  </h3>
+                  {selectedPatient && (
+                    <div className="flex items-center gap-1.5 text-[10px] bg-bg3/65 border border-glass-border/30 rounded-xl p-1 px-2">
+                      <span className="font-bold text-sky truncate max-w-[80px]">{selectedPatient.name}</span>
+                      <button onClick={() => handlePatientWaClick(selectedPatient.phone, selectedPatient.name)} className="p-0.5 hover:scale-105 hover:text-green text-[#25D366] transition-colors" title="Send WhatsApp">
+                        <MessageSquare size={11} />
+                      </button>
+                      <button onClick={() => showNotif('Email composer opened')} className="p-0.5 hover:scale-105 hover:text-red text-red transition-colors" title="Send Email">
+                        <Mail size={11} />
+                      </button>
+                      <button onClick={() => setSelectedPatient(null)} className="text-muted hover:text-text"><X size={11} /></button>
+                    </div>
+                  )}
+                </div>
+                <form onSubmit={handleSave} className="space-y-3.5">
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-muted uppercase tracking-wider">Name *</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                        value={form.name}
+                        onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-muted uppercase tracking-wider">Phone</label>
+                      <input
+                        type="tel"
+                        className="premium-input w-full text-xs rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                        placeholder="10-digit number"
+                        value={form.phone}
+                        onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                        maxLength={10}
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
-
-            </div>
-          ) : (
-            /* Connection / QR scan panel */
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center w-full">
-              <div className="w-44 h-44 mx-auto bg-white rounded-xl flex items-center justify-center p-3 shadow-inner mb-5">
-                {waStatus.qrUrl ? (
-                  <img src={waStatus.qrUrl} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
-                ) : (
-                  <div className="animate-pulse flex flex-col items-center justify-center w-full h-full">
-                    <div className="w-8 h-8 border-4 border-green/30 border-t-green rounded-full animate-spin mb-3"></div>
-                    <span className="text-[10px] text-muted font-bold text-center">Waiting for QR...<br/>Check terminal</span>
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-muted uppercase tracking-wider">Address</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                        value={form.address}
+                        onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-muted uppercase tracking-wider">Notes</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                        placeholder="e.g. Diabetes"
+                        value={form.notes}
+                        onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
-              <h3 className="text-text font-bold text-base mb-2">Connect WhatsApp</h3>
-              <p className="text-muted text-[11px] max-w-[240px] leading-relaxed whitespace-pre-line mb-4">
-                {waStatus.message || "1. Open WhatsApp on your phone\n2. Tap Menu → Linked Devices\n3. Tap Link a Device\n4. Point your phone at this screen"}
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <button
-                  onClick={handleOpenWaLoginWindow}
-                  disabled={isOpeningWaWindow}
-                  className="text-xs font-bold bg-green/20 text-green px-4 py-1.5 rounded-full hover:bg-green/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
-                  title="Open Chrome to scan QR code"
-                >
-                  <LogIn size={12} />
-                  {isOpeningWaWindow ? 'Opening...' : 'Log In (Chrome Popup)'}
-                </button>
-                <button
-                  onClick={fetchWaStatus}
-                  className="text-xs font-bold bg-bg3 text-muted border border-glass-border px-4 py-1.5 rounded-full hover:bg-bg2 hover:text-text transition-all flex items-center gap-1"
-                >
-                  Refresh
-                </button>
-                <button
-                  onClick={handleWaReconnect}
-                  className="text-xs font-bold bg-red/10 text-red px-4 py-1.5 rounded-full hover:bg-red/20 transition-all flex items-center gap-1.5"
-                  title="Clear session and force new QR"
-                >
-                  <LogOut size={12} />
-                  Log Out WhatsApp
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ═══════ RIGHT SIDE (30%): Form + Patient Directory ═══════ */}
-        <div className="lg:col-span-3 flex flex-col min-h-0 min-w-0 gap-4">
-
-          {/* Registration / Edit Form */}
-          <div className="bg-glass-bg border border-glass-border p-4 rounded-2xl shrink-0">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold flex items-center gap-2 text-sm text-text">
-                <UserPlus size={16} className="text-primary" />
-                {editingId !== null ? 'Edit Patient' : 'Register New Patient'}
-              </h3>
-              {selectedPatient && (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-bold text-sky">{selectedPatient.name}</span>
-                  <button onClick={() => handlePatientWaClick(selectedPatient.phone, selectedPatient.name)} className="flex items-center gap-1 bg-[#25D366]/20 text-[#25D366] px-2 py-0.5 rounded-full hover:bg-[#25D366]/30 transition-all font-bold">
-                    <MessageCircle size={10} /> Send WA
-                  </button>
-                  <button onClick={() => showNotif('Email composer opened')} className="flex items-center gap-1 bg-red/20 text-red px-2 py-0.5 rounded-full hover:bg-red/30 transition-all font-bold">
-                    <Mail size={10} /> Send Email
-                  </button>
-                  <button onClick={() => setSelectedPatient(null)} className="text-muted hover:text-text ml-2"><X size={12} /></button>
-                </div>
-              )}
-            </div>
-            <form onSubmit={handleSave} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Name *</label>
-                  <input
-                    type="text"
-                    className="premium-input w-full text-xs"
-                    value={form.name}
-                    onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Phone</label>
-                  <input
-                    type="tel"
-                    className="premium-input w-full text-xs"
-                    placeholder="10-digit number"
-                    value={form.phone}
-                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                    maxLength={10}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Address</label>
-                  <input
-                    type="text"
-                    className="premium-input w-full text-xs"
-                    value={form.address}
-                    onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Notes</label>
-                  <input
-                    type="text"
-                    className="premium-input w-full text-xs"
-                    placeholder="e.g. Diabetes"
-                    value={form.notes}
-                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                {editingId !== null && (
-                  <button type="button" onClick={() => { setEditingId(null); setForm(emptyForm); }}
-                    className="p-2 py-1 bg-bg3 border border-glass-border hover:bg-bg2 rounded text-muted text-xs">
-                    Cancel
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="premium-btn bg-primary text-white shadow-[0_4px_14px_rgba(14,165,233,0.3)] hover:bg-sky-500 font-bold text-xs px-4"
-                >
-                  {saving ? 'Saving...' : editingId !== null ? 'Update' : 'Save'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Unified Patient Timeline (Shows only when patient selected) */}
-          {timelineElement}
-
-          {/* Patient Directory List */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl flex-1 flex flex-col overflow-hidden min-h-0">
-            <div className="p-3 border-b border-glass-border bg-bg3 flex flex-col gap-2 shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Users size={16} className="text-sky" />
-                  <h3 className="font-bold text-sm text-text">Patient Directory</h3>
-                </div>
-                <div className="text-[10px] text-muted">
-                  Count: <strong>{filtered.length}</strong>
-                </div>
-              </div>
-              <div className="relative w-full">
-                <Search className="absolute left-2.5 top-2.5 text-muted" size={13} />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search name or phone..."
-                  className="premium-input pl-8 pr-3 py-1.5 text-xs w-full"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5 text-[9px] text-muted">
-                <div className="flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1">
-                    <span>From:</span>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      min="2020-01-01"
-                      max={getTodayString()}
-                      onChange={e => handleDateFromChange(e.target.value)}
-                      className="px-1 py-0.5 bg-bg2 border border-glass-border rounded text-[9px] text-text focus:outline-none"
-                    />
+                  <div className="flex justify-end gap-2 pt-1">
+                    {editingId !== null && (
+                      <button type="button" onClick={() => { setEditingId(null); setForm(emptyForm); }}
+                        className="px-3 py-1.5 bg-bg3/65 border border-glass-border/40 hover:bg-bg2 rounded-lg text-muted text-xs transition-colors">
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="premium-btn bg-primary hover:bg-green/90 text-bg shadow-[0_4px_12px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-[0.98] transition-all font-bold text-xs px-5 py-1.5 rounded-lg"
+                    >
+                      {saving ? 'Saving...' : editingId !== null ? 'Update' : 'Save'}
+                    </button>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span>To:</span>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      min="2020-01-01"
-                      max={getTodayString()}
-                      disabled={!manualToDate}
-                      onChange={e => handleDateToChange(e.target.value)}
-                      className="px-1 py-0.5 bg-bg2 border border-glass-border rounded text-[9px] text-text focus:outline-none disabled:opacity-50"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <label className="flex items-center gap-1 cursor-pointer select-none text-[8px]">
-                    <input
-                      type="checkbox"
-                      checked={manualToDate}
-                      onChange={e => setManualToDate(e.target.checked)}
-                      className="rounded border-glass-border text-primary focus:ring-primary/20 bg-bg w-2.5 h-2.5"
-                    />
-                    <span>Edit To Date</span>
-                  </label>
-                </div>
+                </form>
               </div>
-            </div>
-            <div className="flex-1 overflow-auto bg-bg2 divide-y divide-glass-border/30 custom-scrollbar">
-              {patientListElement}
+
+              {/* Unified Patient Timeline (Shows only when patient selected) */}
+              {timelineElement}
             </div>
           </div>
-        </div>
-      </div>
-      </>
+        </>
       )}
 
       {/* Lightbox Modal */}
       {lightbox.isOpen && (
-        <div className="fixed inset-0 z-global-modal bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}>
+        <div className="fixed inset-0 z-global-modal bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}>
           <button 
             onClick={() => setLightbox({ isOpen: false, src: '', name: '' })}
-            className="absolute top-4 right-4 p-2 bg-bg3 hover:bg-bg2 border border-glass-border rounded-full text-text transition-colors shadow-lg"
+            className="absolute top-4 right-4 p-2.5 bg-bg3 hover:bg-bg2 border border-glass-border rounded-full text-text transition-colors shadow-lg hover:scale-105 active:scale-95"
           >
             <X size={20} />
           </button>
           <div className="max-w-4xl max-h-[80vh] flex items-center justify-center animate-zoom-in" onClick={e => e.stopPropagation()}>
-            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl border border-glass-border/10" />
+            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl border border-glass-border/20" />
           </div>
-          <p className="mt-4 text-xs font-bold text-text bg-bg3/60 px-3 py-1.5 rounded-full border border-glass-border/20 tracking-wide">{lightbox.name}</p>
+          <p className="mt-4 text-xs font-bold text-text bg-bg3/80 px-4 py-2 rounded-full border border-glass-border/30 tracking-wide shadow-md backdrop-blur-md">{lightbox.name}</p>
         </div>
       )}
+
       {/* Ignore List Manager Modal */}
       {showIgnoreModal && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-glass-bg border border-glass-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] overflow-hidden">
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-bg2/95 border border-glass-border/60 rounded-3xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh] overflow-hidden backdrop-blur-xl animate-zoom-in">
             {/* Header */}
-            <div className="p-4 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
+            <div className="p-4 border-b border-glass-border/40 bg-bg3/30 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                 <EyeOff className="w-4 h-4 text-primary animate-pulse" />
                 <h3 className="font-bold text-xs text-text uppercase tracking-wider">Manage Ignore List</h3>
@@ -1502,15 +1547,15 @@ const CRM = () => {
                   setShowIgnoreModal(false);
                   setNewIgnorePhone('');
                 }}
-                className="text-muted hover:text-text hover:bg-bg2 p-1 rounded-lg transition-colors"
+                className="text-muted hover:text-text hover:bg-bg3 p-1.5 rounded-lg transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Add Ignore Form */}
-            <div className="p-4 border-b border-glass-border bg-bg2/40 shrink-0">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">
+            <div className="p-4 border-b border-glass-border/30 bg-bg2/40 shrink-0 space-y-2">
+              <label className="text-[10px] font-black text-muted uppercase tracking-wider block mb-1">
                 Ignore New Number or Group ID
               </label>
               <div className="flex gap-2">
@@ -1519,25 +1564,25 @@ const CRM = () => {
                   placeholder="e.g. 9876543210 or group ID"
                   value={newIgnorePhone}
                   onChange={(e) => setNewIgnorePhone(e.target.value)}
-                  className="flex-1 bg-bg3 border border-glass-border rounded-lg px-3 py-1.5 text-xs text-text placeholder-muted focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="flex-1 bg-bg3 border border-glass-border rounded-xl px-3 py-1.5 text-xs text-text placeholder-muted focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/50 transition-all"
                   onKeyDown={(e) => e.key === 'Enter' && handleAddIgnore()}
                 />
                 <button
                   type="button"
                   onClick={handleAddIgnore}
-                  className="bg-primary/20 hover:bg-primary/30 border border-primary/20 text-primary text-xs font-bold px-4 py-1.5 rounded-lg transition-colors shrink-0"
+                  className="bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary text-xs font-bold px-4 py-1.5 rounded-xl transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
                   Ignore
                 </button>
               </div>
-              <p className="text-[9px] text-muted mt-1.5 leading-relaxed">
-                Tip: 10-digit phone numbers will be automatically formatted (e.g., adding country prefix 91 and @c.us suffix).
+              <p className="text-[9px] text-muted leading-relaxed">
+                Tip: 10-digit phone numbers will be automatically formatted (e.g. adding 91 prefix and @c.us suffix).
               </p>
             </div>
 
             {/* List of ignored numbers */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-2">
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar bg-bg/10">
+              <span className="text-[10px] font-black text-muted uppercase tracking-wider block mb-1">
                 Currently Ignored ({ignoredPhones.size})
               </span>
               {Array.from(ignoredPhones.entries()).map(([phone, status]) => {
@@ -1547,18 +1592,18 @@ const CRM = () => {
                 return (
                   <div 
                     key={phone} 
-                    className="flex justify-between items-center bg-bg3/60 border border-glass-border/30 rounded-xl p-2.5 hover:bg-bg3 transition-colors"
+                    className="flex justify-between items-center bg-bg3/40 border border-glass-border/20 rounded-2xl p-3 hover:bg-bg3/60 hover:border-glass-border/30 transition-all"
                   >
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-text truncate">{phone}</p>
+                    <div className="min-w-0 pr-3">
+                      <p className="text-xs font-bold text-text truncate">{phone}</p>
                       <p className="text-[8px] text-muted font-mono uppercase mt-0.5">
-                        {isGroup ? 'Group Chat' : 'Individual'} • {isExplicitUnignored ? 'Scanning Allowed (Override)' : 'Muted'}
+                        {isGroup ? 'Group Chat' : 'Individual'} • {isExplicitUnignored ? 'Scanning Allowed' : 'Muted'}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => toggleIgnore(phone, !isExplicitUnignored)}
-                      className="text-xs font-semibold px-2 py-1 rounded bg-red/10 text-red-400 hover:bg-red/20 transition-all uppercase tracking-wider text-[9px] shrink-0"
+                      className="text-xs font-bold px-3 py-1.5 rounded-xl bg-red/10 border border-red/20 text-red-400 hover:bg-red/20 hover:scale-105 active:scale-95 transition-all uppercase tracking-wider text-[9px] shrink-0"
                       title={isExplicitUnignored ? 'Mute' : 'Allow Scanning'}
                     >
                       {isExplicitUnignored ? 'Mute' : 'Unignore'}
@@ -1568,11 +1613,23 @@ const CRM = () => {
               })}
 
               {ignoredPhones.size === 0 && (
-                <div className="text-center py-8 text-muted text-xs">
+                <div className="text-center py-12 text-muted text-xs font-medium">
                   Ignore list is empty. All active chats will be scanned.
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {selectedMatch && (
+        <div className="absolute top-0 right-0 h-full w-[400px] bg-bg2/95 border-l border-glass-border/60 z-30 shadow-2xl p-5 flex flex-col gap-4 animate-slide-in backdrop-blur-xl">
+          <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+            <AdminMatchPanel
+              match={selectedMatch}
+              onClose={() => setSelectedMatch(null)}
+              onSuccess={(msg) => showNotif(msg)}
+            />
           </div>
         </div>
       )}

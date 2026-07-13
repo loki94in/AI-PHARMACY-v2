@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { authenticateApiKey } from './middleware/auth.js';
@@ -188,6 +189,46 @@ app.use('/api', lazyRoute('./routes/medicineAvailability.js'));
 app.use(notFoundHandler);
 app.use(errorHandler);
 
+// --- Python Bridge Function for SciSpacy Medicine Extraction ---
+export function extractMedicinesWithPython(messageText: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+        // Path to the Python executable in your virtual environment
+        const pythonExecutable = path.resolve('python_scripts', '.venv', 'Scripts', 'python.exe');
+        const scriptPath = path.resolve('python_scripts', 'extract_medicine.py');
+
+        const pythonProcess = spawn(pythonExecutable, [scriptPath, messageText]);
+        
+        let resultData = '';
+        let errorData = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            resultData += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            errorData += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`[Python Error] Exit code ${code}: ${errorData}`);
+                return reject(new Error('Python script crashed.'));
+            }
+            try {
+                const parsedResult = JSON.parse(resultData);
+                if (parsedResult.success) {
+                    resolve(parsedResult.medicines);
+                } else {
+                    reject(new Error(parsedResult.error || 'Unknown Python error.'));
+                }
+            } catch (error) {
+                console.error(`[Parse Error] Output was not valid JSON: ${resultData}`);
+                reject(new Error("Failed to parse Python JSON output."));
+            }
+        });
+    });
+}
+
 const PORT = process.env.PORT || 3000;
 
 // Start HTTP server immediately to accept requests in <20ms
@@ -234,18 +275,16 @@ app.listen(PORT, async () => {
         const initSteps = [
           // Step 1: WhatsApp automated client (if enabled)
           (async () => {
-            if (isAutoEnabled) {
-              const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
-              if (waRow && waRow.value === 'true') {
-                const { shouldRouteToBusiness } = await import('./whatsappClient.js');
-                const useBusiness = await shouldRouteToBusiness();
-                if (!useBusiness) {
-                  console.log('[Boot] WhatsApp Web (automated) is enabled, initializing in background...');
-                  const { initClient } = await import('./whatsappClient.js');
-                  await initClient().catch(err => console.error('Background WhatsApp init failed:', err));
-                } else {
-                  console.log('[Boot] WhatsApp Business API is active. Skipping automated client initialization.');
-                }
+            const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
+            if (waRow && waRow.value === 'true') {
+              const { shouldRouteToBusiness } = await import('./whatsappClient.js');
+              const useBusiness = await shouldRouteToBusiness();
+              if (!useBusiness) {
+                console.log('[Boot] WhatsApp Web (automated) is enabled, initializing in background...');
+                const { startWhatsAppClient } = await import('./whatsappHandler.js');
+                startWhatsAppClient();
+              } else {
+                console.log('[Boot] WhatsApp Business API is active. Skipping automated client initialization.');
               }
             }
           })(),

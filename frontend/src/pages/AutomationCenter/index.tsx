@@ -401,23 +401,23 @@ const AutomationCenter = () => {
   }, []);
 
   return (
-    <div className="h-full flex flex-col fade-in gap-3 pb-4 overflow-hidden">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 bg-white/[0.02] p-4 rounded-2xl border border-glass-border">
+    <div className="h-full flex flex-col fade-in gap-4 pb-4 overflow-hidden">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 bg-bg2/40 backdrop-blur-md p-5 rounded-2xl border border-glass-border/40 shadow-sm">
         <div>
-          <h2 className="text-lg font-bold bg-gradient-to-r from-text to-sky bg-clip-text text-transparent flex items-center gap-2">
-            <Sliders size={20} className="text-sky" />
+          <h2 className="text-lg font-extrabold bg-gradient-to-r from-text to-sky bg-clip-text text-transparent flex items-center gap-2">
+            <Sliders size={20} className="text-sky animate-pulse-slow" />
             Communication & Automation Center
           </h2>
-          <p className="text-xs text-muted mt-1">Manage patient refill intervals, monitor message delivery status logs, and configure manual retry controls.</p>
+          <p className="text-xs text-muted mt-1 leading-relaxed">Manage patient refill intervals, monitor message delivery status logs, and configure manual retry controls.</p>
         </div>
 
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex bg-bg3/50 border border-glass-border/30 rounded-xl p-1 gap-1 w-full sm:w-auto shrink-0 shadow-sm">
           <button
             onClick={() => setActiveTab('reminders')}
-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 border ${
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 ${
               activeTab === 'reminders'
-                ? 'bg-primary/20 border-primary text-primary shadow-[inset_0_0_15px_rgba(59,130,246,0.15)]'
-                : 'bg-white/5 border-glass-border text-muted hover:text-text hover:bg-white/10'
+                ? 'bg-primary/10 border border-primary/20 text-primary shadow-[0_2px_8px_rgba(34,197,94,0.06)]'
+                : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
             }`}
           >
             <Clock size={14} />
@@ -425,10 +425,10 @@ const AutomationCenter = () => {
           </button>
           <button
             onClick={() => setActiveTab('logs')}
-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 border ${
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 ${
               activeTab === 'logs'
-                ? 'bg-primary/20 border-primary text-primary shadow-[inset_0_0_15px_rgba(59,130,246,0.15)]'
-                : 'bg-white/5 border-glass-border text-muted hover:text-text hover:bg-white/10'
+                ? 'bg-primary/10 border border-primary/20 text-primary shadow-[0_2px_8px_rgba(34,197,94,0.06)]'
+                : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
             }`}
           >
             <MessageSquare size={14} />
@@ -438,21 +438,21 @@ const AutomationCenter = () => {
       </div>
 
       {activeTab === 'reminders' && (
-        <div className="flex-1 flex flex-col min-h-0 glass-panel bg-white/5 border-glass-border">
-          <div className="p-4 border-b border-glass-border bg-black/10 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+        <div className="flex-1 flex flex-col min-h-0 bg-bg2/30 border border-glass-border/40 rounded-2xl overflow-hidden shadow-xl">
+          <div className="p-4 border-b border-glass-border/30 bg-bg3/30 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
             <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-3 top-2.5 text-muted" size={14} />
+              <Search className="absolute left-3 top-3 text-muted" size={14} />
               <input
                 type="text"
                 value={refillSearch}
                 onChange={e => setRefillSearch(e.target.value)}
-                placeholder="Search patient, phone, medicine..."
-                className="premium-input pl-9 pr-4 py-1.5 text-xs w-full"
+                placeholder="Search patient, phone, or medicine..."
+                className="premium-input pl-9 pr-4 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/10 transition-all"
               />
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-xl border border-glass-border mr-2">
+            <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end">
+              <div className="flex items-center gap-2 bg-bg3/60 px-3.5 py-1.5 rounded-xl border border-glass-border/30 shadow-inner">
                 <span className="text-[10px] font-black text-muted uppercase tracking-wider">Notice Days:</span>
                 <input
                   type="number"
@@ -460,12 +460,12 @@ const AutomationCenter = () => {
                   max="30"
                   value={noticeDays}
                   onChange={e => handleUpdateNoticeDays(parseInt(e.target.value) || 3)}
-                  className="w-12 text-center font-mono font-bold bg-black/40 border border-glass-border/60 rounded px-1 py-0.5 text-text focus:outline-none focus:border-primary/50 text-xs"
+                  className="w-12 text-center font-mono font-bold bg-bg border border-glass-border/50 rounded-lg px-1.5 py-0.5 text-text focus:outline-none focus:border-primary/40 text-xs"
                 />
               </div>
               <button
                 onClick={() => queryClient.invalidateQueries({ queryKey: ['automation-refills'] })}
-                className="p-2 rounded-xl bg-white/5 border border-glass-border hover:bg-white/10 hover:text-text text-muted transition-all"
+                className="p-2.5 rounded-xl bg-bg3 hover:bg-bg2 text-muted hover:text-text border border-glass-border/40 hover:scale-105 active:scale-95 transition-all shadow-sm"
                 title="Refresh List"
               >
                 <RefreshCw size={14} />
@@ -480,28 +480,28 @@ const AutomationCenter = () => {
                   setSelectedMedicines([]);
                   setShowReminderModal(true);
                 }}
-                className="premium-btn bg-primary text-white shadow-[0_4px_14px_rgba(14,165,233,0.35)] px-4 py-2 text-xs flex items-center gap-1.5"
+                className="premium-btn bg-primary hover:bg-green/90 text-bg shadow-[0_4px_12px_rgba(34,197,94,0.2)] px-4 py-2 text-xs flex items-center gap-1.5 font-bold hover:scale-[1.02] active:scale-[0.98] transition-all rounded-xl"
               >
                 <Plus size={14} />
-                Create Refill reminder
+                Create Refill Reminder
               </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto bg-black/10">
+          <div className="flex-1 overflow-auto bg-bg2/10 custom-scrollbar">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="sticky top-0 bg-bg2/95 backdrop-blur z-10">
+              <thead className="sticky top-0 bg-bg3/85 backdrop-blur-md z-10">
                 <tr>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Patient Info</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Medicine</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border text-center">Refill Cycle (Days)</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Next Due Date</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border text-center">Automation Status</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border text-center">Refill Status</th>
-                  <th className="p-4 text-xs font-bold text-muted border-b border-glass-border text-right">Actions</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Patient Info</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Medicine</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Refill Cycle (Days)</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Next Due Date</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Automation Status</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Refill Status</th>
+                  <th className="p-4 text-xs font-black border-b border-glass-border/30 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-glass-border/10">
                 {loadingRefills ? (
                   <tr>
                     <td colSpan={7} className="p-12 text-center text-muted">
@@ -518,7 +518,7 @@ const AutomationCenter = () => {
                   </tr>
                 ) : (
                   filteredRefills.map(refill => (
-                    <tr key={refill.id} className="hover:bg-white/5 border-b border-glass-border/30 transition-all">
+                    <tr key={refill.id} className="hover:bg-bg3/40 border-b border-glass-border/10 transition-colors">
                       <td className="p-4">
                         <div className="font-bold text-text">{refill.patient_name}</div>
                         <div className="text-[10px] text-muted font-mono mt-0.5">{refill.patient_phone}</div>
@@ -536,38 +536,40 @@ const AutomationCenter = () => {
                           onKeyDown={e => {
                             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                           }}
-                          className="w-16 text-center font-mono font-bold bg-black/40 border border-glass-border/60 rounded px-1.5 py-0.5 text-text focus:outline-none focus:border-primary/50"
+                          className="w-16 text-center font-mono font-bold bg-bg border border-glass-border/40 rounded-lg px-2 py-0.5 text-text focus:outline-none focus:border-primary/50 transition-colors"
                         />
                       </td>
-                      <td className="p-4 font-mono font-medium text-text select-none">
-                        {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString() : 'N/A'}
-                        <div className="text-[10px] text-muted">
+                      <td className="p-4 font-mono font-semibold text-text select-none">
+                        <span className="bg-sky/10 border border-sky/20 px-2.5 py-0.5 rounded-lg text-sky">
+                          {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString() : 'N/A'}
+                        </span>
+                        <div className="text-[9px] text-muted font-medium mt-1 pl-1">
                           {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                         </div>
                       </td>
                       <td className="p-4 text-center">
                         <button
                           onClick={() => handleToggleActive(refill)}
-                          className={`px-3 py-1 rounded-xl text-[10px] font-bold border flex items-center justify-center gap-1 mx-auto transition-all ${
+                          className={`px-3 py-1 rounded-xl text-[10px] font-extrabold border flex items-center justify-center gap-1 mx-auto transition-all duration-150 ${
                             refill.is_active === 1
                               ? 'bg-green/10 border-green/30 text-green hover:bg-green/20'
-                              : 'bg-zinc-500/10 border-glass-border text-muted hover:bg-white/5'
+                              : 'bg-zinc-500/10 border-glass-border/30 text-muted hover:bg-bg3/60'
                           }`}
                         >
-                          {refill.is_active === 1 ? <Play size={10} /> : <Pause size={10} />}
-                          {refill.is_active === 1 ? 'Active / Resumed' : 'Paused'}
+                          {refill.is_active === 1 ? <Play size={10} className="animate-pulse" /> : <Pause size={10} />}
+                          {refill.is_active === 1 ? 'Active' : 'Paused'}
                         </button>
                       </td>
                       <td className="p-4 text-center select-none">
                         {refill.status === 'pending' && refill.is_ready === 1 ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-green/15 text-green border border-green/30 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.15)]">
+                          <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-green/15 text-green border border-green/30 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.1)]">
                             Ready (Manual Send)
                           </span>
                         ) : (
-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase border font-mono ${
                             refill.status === 'notified'
-                              ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
-                              : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                              ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                              : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                           }`}>
                             {refill.status}
                           </span>
@@ -578,22 +580,22 @@ const AutomationCenter = () => {
                           <button
                             onClick={() => handleSendNow(refill.id)}
                             disabled={refill.is_active !== 1}
-                            className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky hover:bg-sky-500/20 disabled:opacity-40 transition-all flex items-center gap-1"
+                            className="p-1.5 rounded-lg bg-sky/10 border border-sky/30 text-sky hover:bg-sky/20 disabled:opacity-40 hover:scale-105 active:scale-95 transition-all flex items-center gap-1 shadow-sm"
                             title="Send WhatsApp reminder notification immediately"
                           >
                             <Send size={12} />
-                            <span className="text-[10px] font-bold">Send Now</span>
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider">Send</span>
                           </button>
                           <button
                             onClick={() => handleEditReminderClick(refill)}
-                            className="p-1.5 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 text-muted hover:text-text transition-all"
+                            className="p-1.5 rounded-lg bg-bg3 border border-glass-border/40 hover:bg-bg2 text-muted hover:text-text hover:scale-105 active:scale-95 transition-all shadow-sm"
                             title="Edit reminder configuration"
                           >
                             <Settings size={12} />
                           </button>
                           <button
                             onClick={() => handleDeleteReminder(refill.id)}
-                            className="p-1.5 rounded-lg bg-red/10 border border-red/20 hover:bg-red/20 text-red transition-all"
+                            className="p-1.5 rounded-lg bg-red/10 border border-red/20 hover:bg-red/20 hover:scale-105 active:scale-95 text-red transition-all shadow-sm"
                             title="Cancel schedule"
                           >
                             <Trash2 size={12} />
@@ -608,29 +610,28 @@ const AutomationCenter = () => {
           </div>
         </div>
       )}
-
       {activeTab === 'logs' && (
-        <div className="flex-1 flex flex-col min-h-0 glass-panel bg-white/5 border-glass-border">
-          <div className="p-4 border-b border-glass-border bg-black/15 flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
+        <div className="flex-1 flex flex-col min-h-0 bg-bg2/30 border border-glass-border/40 rounded-2xl overflow-hidden shadow-xl">
+          <div className="p-4 border-b border-glass-border/30 bg-bg3/30 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
             <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-2.5 text-muted" size={14} />
+              <Search className="absolute left-3 top-3 text-muted" size={14} />
               <input
                 type="text"
                 value={logsSearch}
                 onChange={e => setLogsSearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && setLogsSearchTerm(logsSearch)}
-                placeholder="Search patient, distributor, msg..."
-                className="premium-input pl-9 pr-4 py-1.5 text-xs w-full"
+                placeholder="Search logs and press Enter..."
+                className="premium-input pl-9 pr-4 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/10 transition-all"
               />
             </div>
 
             <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-muted font-bold uppercase">Type:</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted font-black uppercase">Type:</span>
                 <select
                   value={logsTypeFilter}
                   onChange={e => setLogsTypeFilter(e.target.value)}
-                  className="px-2 py-1 bg-black/40 border border-glass-border text-xs text-text rounded focus:outline-none"
+                  className="px-3 py-1.5 bg-bg border border-glass-border/60 text-xs text-text rounded-lg focus:outline-none focus:border-primary/45 transition-colors"
                 >
                   <option value="All">All Types</option>
                   <option value="refill_reminder">Patient Refills</option>
@@ -642,12 +643,12 @@ const AutomationCenter = () => {
                 </select>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-muted font-bold uppercase">Status:</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted font-black uppercase">Status:</span>
                 <select
                   value={logsStatusFilter}
                   onChange={e => setLogsStatusFilter(e.target.value)}
-                  className="px-2 py-1 bg-black/40 border border-glass-border text-xs text-text rounded focus:outline-none"
+                  className="px-3 py-1.5 bg-bg border border-glass-border/60 text-xs text-text rounded-lg focus:outline-none focus:border-primary/45 transition-colors"
                 >
                   <option value="All">All Statuses</option>
                   <option value="sent">Sent Automatically</option>
@@ -658,7 +659,7 @@ const AutomationCenter = () => {
 
               <button
                 onClick={() => setLogsSearchTerm(logsSearch)}
-                className="p-2 rounded-xl bg-white/5 border border-glass-border hover:bg-white/10 hover:text-text text-muted transition-all"
+                className="p-2.5 rounded-xl bg-bg3 border border-glass-border/40 hover:bg-bg2 hover:text-text text-muted hover:scale-105 active:scale-95 shadow-sm transition-all"
                 title="Refresh Logs"
               >
                 <RefreshCw size={14} />
@@ -666,19 +667,19 @@ const AutomationCenter = () => {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto bg-black/10">
+          <div className="flex-1 overflow-auto bg-bg2/10 custom-scrollbar">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="sticky top-0 bg-bg2/95 backdrop-blur z-10">
+              <thead className="sticky top-0 bg-bg3/85 backdrop-blur-md z-10">
                 <tr>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Message Type</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Recipient</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border max-w-sm">Message Snippet</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Status</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase border-b border-glass-border">Time Dispatched</th>
-                  <th className="p-4 text-xs font-bold text-muted border-b border-glass-border text-right">Action</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Message Type</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Recipient</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 max-w-sm">Message Snippet</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Status</th>
+                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Time Dispatched</th>
+                  <th className="p-4 text-xs font-black border-b border-glass-border/30 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-glass-border/10">
                 {loadingLogs ? (
                   <tr>
                     <td colSpan={6} className="p-12 text-center text-muted">
@@ -695,33 +696,33 @@ const AutomationCenter = () => {
                   </tr>
                 ) : (
                   logs.map(log => (
-                    <tr key={log.id} className="hover:bg-white/5 border-b border-glass-border/30 transition-all">
+                    <tr key={log.id} className="hover:bg-bg3/40 border-b border-glass-border/10 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center gap-2">
                           {getLogTypeIcon(log.type)}
                           <span className="font-bold text-text">{getLogTypeLabel(log.type)}</span>
                         </div>
                         {log.reference_id && (
-                          <div className="text-[9px] text-muted mt-0.5">Ref ID: #{log.reference_id}</div>
+                          <div className="text-[9px] text-muted font-mono mt-0.5 pl-5">Ref ID: #{log.reference_id}</div>
                         )}
                       </td>
                       <td className="p-4">
                         <div className="font-bold text-text">{log.recipient_name || 'System Admin'}</div>
                         <div className="text-[10px] text-muted font-mono mt-0.5">{log.recipient_phone || 'None'}</div>
                       </td>
-                      <td className="p-4 max-w-xs truncate font-medium text-text select-text" title={log.message}>
+                      <td className="p-4 max-w-xs truncate font-semibold text-text select-text" title={log.message}>
                         {log.message}
                       </td>
                       <td className="p-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase inline-flex items-center gap-1 border ${
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase inline-flex items-center gap-1 border ${
                           log.status === 'sent'
                             ? 'bg-green/10 border-green/30 text-green'
                             : log.status === 'sent_manually'
                               ? 'bg-sky-500/10 border-sky-500/30 text-sky'
                               : log.status === 'pending'
-                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-550'
                                 : log.status === 'cancelled'
-                                  ? 'bg-zinc-500/10 border-glass-border text-muted'
+                                  ? 'bg-zinc-500/10 border-glass-border/30 text-muted'
                                   : 'bg-red/10 border-red/30 text-red'
                         }`}>
                           {log.status === 'sent' && <CheckCircle2 size={10} />}
@@ -735,9 +736,9 @@ const AutomationCenter = () => {
                           </div>
                         )}
                       </td>
-                      <td className="p-4 font-mono font-medium text-text select-none">
+                      <td className="p-4 font-mono font-semibold text-text select-none">
                         {new Date(log.created_at).toLocaleDateString()}
-                        <div className="text-[10px] text-muted">
+                        <div className="text-[9px] text-muted font-medium">
                            {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </td>
@@ -746,7 +747,7 @@ const AutomationCenter = () => {
                           {log.status === 'failed' && (
                             <button
                               onClick={() => handleRetryDispatch(log.id)}
-                              className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 text-sky hover:text-white transition-all text-[10px] font-bold flex items-center gap-1"
+                              className="p-1.5 rounded-lg bg-sky/10 border border-sky/30 hover:bg-sky/20 text-sky hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
                               title="Resend this message automatically via WhatsApp queue"
                             >
                               <Send size={11} />
@@ -756,7 +757,7 @@ const AutomationCenter = () => {
                           {(log.status === 'pending' || log.status === 'failed') && (
                             <button
                               onClick={() => handleCancelDispatch(log.id)}
-                              className="p-1.5 rounded-lg bg-red/10 border border-red/25 hover:bg-red/20 text-red transition-all text-[10px] font-bold flex items-center gap-1"
+                              className="p-1.5 rounded-lg bg-red/10 border border-red/30 hover:bg-red/20 text-red transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
                               title="Cancel this notification"
                             >
                               <Trash2 size={11} />
@@ -766,15 +767,15 @@ const AutomationCenter = () => {
                           {log.status === 'failed' && (
                             <button
                               onClick={() => setManualSendNotification(log)}
-                              className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-500 hover:text-white transition-all text-[10px] font-bold flex items-center gap-1"
+                              className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-500 hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
                               title="Open manual copyable layout to dispatch to customer manually"
                             >
                               <ExternalLink size={11} />
-                              Send Manually
+                              Copy & Send
                             </button>
                           )}
                           {log.status !== 'pending' && log.status !== 'failed' && (
-                            <span className="text-[10px] text-muted italic select-none">No Action Required</span>
+                            <span className="text-[10px] text-muted italic select-none pr-2 font-semibold">Processed</span>
                           )}
                         </div>
                       </td>
@@ -789,9 +790,9 @@ const AutomationCenter = () => {
 
       {showReminderModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="glass-panel w-full max-w-md p-6 bg-bg2 border border-glass-border animate-slide-in shadow-2xl relative my-8">
-            <h3 className="text-base font-bold text-text mb-4 border-b border-glass-border pb-3">
-              {editingRefillId ? 'Modify Refill Reminder Configuration' : 'Register New Patient Refill Schedule'}
+          <div className="bg-bg2 border border-glass-border w-full max-w-md p-6 rounded-3xl shadow-2xl relative my-8 backdrop-blur-xl animate-zoom-in">
+            <h3 className="text-base font-extrabold text-text mb-4 border-b border-glass-border/30 pb-3">
+              {editingRefillId ? 'Modify Refill Reminder Configuration' : 'Register Patient Refill Schedule'}
             </h3>
             <form onSubmit={handleSaveReminder} className="space-y-4">
               <div className="space-y-2">
@@ -802,7 +803,7 @@ const AutomationCenter = () => {
                   value={patientName}
                   onChange={e => setPatientName(e.target.value)}
                   placeholder="Patient Name"
-                  className="premium-input w-full font-semibold"
+                  className="premium-input w-full font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                 />
               </div>
               <div className="space-y-2">
@@ -814,7 +815,7 @@ const AutomationCenter = () => {
                   onChange={e => setPatientPhone(e.target.value)}
                   placeholder="e.g. 9876543210"
                   maxLength={10}
-                  className="premium-input w-full font-mono font-semibold"
+                  className="premium-input w-full font-mono font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                 />
               </div>
               <div className="space-y-2 relative">
@@ -827,7 +828,7 @@ const AutomationCenter = () => {
                   }}
                   onFocus={() => { if (medicineSearchResults.length > 0) setShowMedicineDropdown(true); }}
                   placeholder="Search inventory medicines..."
-                  className="premium-input w-full font-semibold"
+                  className="premium-input w-full font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                 />
                 {loadingMedicineSearch && (
                   <div className="absolute right-3 top-8">
@@ -840,7 +841,7 @@ const AutomationCenter = () => {
                       <div
                         key={idx}
                         onClick={() => handleSelectMedicine(med)}
-                        className="p-2.5 border-b border-glass-border/10 hover:bg-bg2/80 transition-colors cursor-pointer text-xs font-semibold text-text flex justify-between"
+                        className="p-2.5 border-b border-glass-border/10 hover:bg-bg2/85 transition-colors cursor-pointer text-xs font-semibold text-text flex justify-between"
                       >
                         <span>{med.name}</span>
                         {med.strength && <span className="text-[10px] text-muted">{med.strength}</span>}
@@ -853,7 +854,7 @@ const AutomationCenter = () => {
                     {selectedMedicines.map(med => (
                       <div
                         key={med.id}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-primary/20 border border-primary/40 rounded-lg text-[11px] font-bold text-primary"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-primary/10 border border-primary/30 rounded-lg text-[11px] font-bold text-primary shadow-sm"
                       >
                         <span>{med.name}</span>
                         <button
@@ -872,7 +873,7 @@ const AutomationCenter = () => {
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-[10px] font-black text-muted uppercase tracking-wider">Refill Cycle Interval (0 - 120 Days) *</label>
-                  <span className="text-xs font-bold text-primary font-mono bg-primary/10 px-2 py-0.5 rounded">{refillInterval} days</span>
+                  <span className="text-xs font-bold text-primary font-mono bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">{refillInterval} days</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <input
@@ -890,22 +891,22 @@ const AutomationCenter = () => {
                     onChange={e => setRefillInterval(Math.max(0, Math.min(120, parseInt(e.target.value) || 0)))}
                     min="0"
                     max="120"
-                    className="premium-input w-20 text-center font-mono font-semibold"
+                    className="premium-input w-20 text-center font-mono font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                   />
                 </div>
               </div>
-              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border">
+              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border/30">
                 <button
                   type="button"
                   onClick={() => setShowReminderModal(false)}
-                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border text-muted hover:text-text hover:bg-white/5"
+                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border/40 text-muted hover:text-text hover:bg-bg3 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={modalSubmitting}
-                  className="premium-btn bg-primary text-white shadow-[0_4px_14px_rgba(14,165,233,0.3)] px-4 py-2 text-xs"
+                  className="premium-btn bg-primary text-bg shadow-[0_4px_12px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-[0.98] transition-all px-5 py-2 text-xs font-bold rounded-xl"
                 >
                   {modalSubmitting ? 'Saving...' : 'Save Schedule'}
                 </button>
@@ -918,56 +919,56 @@ const AutomationCenter = () => {
 
       {manualSendNotification && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="glass-panel w-full max-w-lg p-6 bg-bg2 border border-glass-border animate-slide-in shadow-2xl my-8">
-            <h3 className="text-base font-bold text-text mb-2 flex items-center gap-2">
-              <ExternalLink size={18} className="text-amber-500" />
+          <div className="bg-bg2 border border-glass-border w-full max-w-lg p-6 rounded-3xl shadow-2xl my-8 animate-zoom-in backdrop-blur-xl">
+            <h3 className="text-base font-extrabold text-text mb-2 flex items-center gap-2">
+              <ExternalLink size={18} className="text-amber-500 animate-pulse" />
               Manual WhatsApp Send Assistant
             </h3>
-            <p className="text-xs text-muted mb-4">
+            <p className="text-xs text-muted mb-4 leading-relaxed">
               Since automated dispatch failed, you can manually copy this message text and share it via WhatsApp Web.
             </p>
             <div className="space-y-4">
-              <div className="p-3 bg-white/[0.02] border border-glass-border rounded-xl">
+              <div className="p-3.5 bg-bg3/40 border border-glass-border/30 rounded-2xl shadow-inner">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-[10px] text-muted font-bold uppercase block">Recipient Name</span>
+                    <span className="text-[10px] text-muted font-black uppercase block tracking-wider">Recipient Name</span>
                     <span className="font-bold text-text">{manualSendNotification.recipient_name || 'Customer'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-muted font-bold uppercase block">WhatsApp Number</span>
+                    <span className="text-[10px] text-muted font-black uppercase block tracking-wider">WhatsApp Number</span>
                     <span className="font-bold font-mono text-text">{manualSendNotification.recipient_phone}</span>
                   </div>
                 </div>
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Message Content</span>
+                <div className="flex justify-between items-center pr-1">
+                  <span className="text-[10px] text-muted font-black uppercase tracking-wider">Message Content</span>
                   <button
                     onClick={() => handleCopyMessage(manualSendNotification.message)}
-                    className="text-[10px] text-sky hover:underline font-bold flex items-center gap-1"
+                    className="text-[10px] text-sky hover:underline font-bold flex items-center gap-1 transition-all"
                   >
                     <Copy size={11} />
                     Copy Text
                   </button>
                 </div>
-                <div className="p-4 bg-black/40 border border-glass-border rounded-xl text-xs font-medium text-text select-all font-sans whitespace-pre-wrap leading-relaxed shadow-inner">
+                <div className="p-4 bg-bg3/60 border border-glass-border/35 rounded-2xl text-xs font-semibold text-text select-all font-sans whitespace-pre-wrap leading-relaxed shadow-inner">
                   {manualSendNotification.message}
                 </div>
               </div>
-              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border">
+              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border/30">
                 <button
                   type="button"
                   onClick={() => setManualSendNotification(null)}
-                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border text-muted hover:text-text hover:bg-white/5"
+                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border/40 text-muted hover:text-text hover:bg-bg3 transition-colors"
                 >
                   Close Assistant
                 </button>
                 <button
                   type="button"
                   onClick={() => handleMarkSentManually(manualSendNotification)}
-                  className="premium-btn bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 hover:border-amber-500/60 text-amber-400 hover:text-white px-5 py-2 text-xs font-bold flex items-center gap-1.5 shadow-[0_4px_14px_rgba(245,158,11,0.15)] animate-pulse-slow"
+                  className="premium-btn bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 px-5 py-2 text-xs font-bold flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all rounded-xl"
                 >
-                  <Send size={13} />
+                  <Send size={13} className="animate-pulse" />
                   Open WhatsApp & Mark Sent
                 </button>
               </div>

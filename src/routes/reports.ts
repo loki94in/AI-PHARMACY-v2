@@ -7,52 +7,127 @@ const router = express.Router();
 
 // Fetch summary metrics for stats cards
 router.get('/', async (req, res) => {
-  const { fromDate, toDate } = req.query;
+  const { fromDate, toDate, type } = req.query;
   const from = fromDate ? String(fromDate) : '1970-01-01';
   const to = toDate ? String(toDate) : '9999-12-31';
+  const reportType = type ? String(type) : 'sales';
 
   try {
     const db = await dbManager.getConnection();
     
-    // 1. Total sales revenue
-    const salesRow = await db.get(
-      "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?)",
-      [from, to]
-    );
-    
-    // 2. Total purchases amount
-    const purchasesRow = await db.get(
-      "SELECT IFNULL(SUM(total_amount), 0) as total FROM purchases WHERE date(date, 'localtime') BETWEEN date(?) AND date(?)",
-      [from, to]
-    );
+    if (reportType === 'sales') {
+      const salesRow = await db.get(
+        "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE date >= ? AND date <= ?",
+        [from + ' 00:00:00', to + ' 23:59:59']
+      );
+      
+      const marginRow = await db.get(`
+        SELECT IFNULL(SUM(si.quantity * si.unit_price), 0) as revenue,
+               IFNULL(SUM(si.quantity * IFNULL(im.cost_price, 0)), 0) as cost,
+               IFNULL(SUM(si.quantity), 0) as items_sold
+        FROM sale_items si
+        JOIN sales_invoices sinv ON si.invoice_id = sinv.id
+        JOIN inventory_master im ON si.inventory_id = im.id
+        WHERE sinv.date >= ? AND sinv.date <= ?
+      `, [from + ' 00:00:00', to + ' 23:59:59']);
 
-    // 3. Profit Margin (using sum of sale items unit_price vs cost_price in inventory)
-    const marginRow = await db.get(`
-      SELECT IFNULL(SUM(si.quantity * si.unit_price), 0) as revenue,
-             IFNULL(SUM(si.quantity * IFNULL(im.cost_price, 0)), 0) as cost
-      FROM sale_items si
-      JOIN sales_invoices sinv ON si.invoice_id = sinv.id
-      JOIN inventory_master im ON si.inventory_id = im.id
-      WHERE date(sinv.date, 'localtime') BETWEEN date(?) AND date(?)
-    `, [from, to]);
+      const revenue = marginRow.revenue || 0;
+      const cost = marginRow.cost || 0;
+      const netProfit = revenue - cost;
+      const profitMargin = revenue > 0 ? Math.round((netProfit / revenue) * 100) : 0;
 
-    const revenue = marginRow.revenue || 0;
-    const cost = marginRow.cost || 0;
-    const profitMargin = revenue > 0 ? Math.round(((revenue - cost) / revenue) * 100) : 0;
+      return res.json({
+        totalSales: salesRow.total || 0,
+        cogs: cost,
+        profitMargin: profitMargin,
+        itemsSold: marginRow.items_sold || 0,
+        netProfit: netProfit
+      });
+    }
 
-    // 4. Items sold count
-    const itemsSoldRow = await db.get(`
-      SELECT IFNULL(SUM(quantity), 0) as count
-      FROM sale_items si
-      JOIN sales_invoices sinv ON si.invoice_id = sinv.id
-      WHERE date(sinv.date, 'localtime') BETWEEN date(?) AND date(?)
-    `, [from, to]);
+    if (reportType === 'purchases') {
+      const purchasesRow = await db.get(
+        "SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(DISTINCT distributor_id) as suppliers FROM purchases WHERE date >= ? AND date <= ?",
+        [from + ' 00:00:00', to + ' 23:59:59']
+      );
 
+      const itemsRow = await db.get(`
+        SELECT IFNULL(SUM(quantity), 0) as qty
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        WHERE p.date >= ? AND p.date <= ?
+      `, [from + ' 00:00:00', to + ' 23:59:59']);
+
+      const total = purchasesRow.total || 0;
+      const qty = itemsRow.qty || 0;
+      const avgItemPrice = qty > 0 ? (total / qty) : 0;
+
+      return res.json({
+        totalPurchases: total,
+        itemsPurchased: qty,
+        suppliersCount: purchasesRow.suppliers || 0,
+        avgItemPrice: avgItemPrice
+      });
+    }
+
+    if (reportType === 'inventory') {
+      const invRow = await db.get(`
+        SELECT IFNULL(SUM(quantity), 0) as qty,
+               IFNULL(SUM(quantity * cost_price), 0) as cost_val,
+               IFNULL(SUM(quantity * mrp), 0) as mrp_val,
+               COUNT(DISTINCT medicine_id) as items
+        FROM inventory_master
+        WHERE quantity > 0
+      `);
+
+      return res.json({
+        totalStock: invRow.qty || 0,
+        holdValuationCost: invRow.cost_val || 0,
+        holdValuationMrp: invRow.mrp_val || 0,
+        uniqueMedicines: invRow.items || 0
+      });
+    }
+
+    if (reportType === 'expiry') {
+      let countQuery = '';
+      let params: any[] = [];
+      if (fromDate || toDate) {
+        countQuery = `
+          SELECT COUNT(DISTINCT medicine_id) as items,
+                 IFNULL(SUM(quantity), 0) as qty,
+                 IFNULL(SUM(quantity * cost_price), 0) as cost_val,
+                 IFNULL(SUM(quantity * mrp), 0) as mrp_val
+          FROM inventory_master
+          WHERE date(expiry_date) BETWEEN date(?) AND date(?) AND quantity > 0
+        `;
+        params = [from, to];
+      } else {
+        countQuery = `
+          SELECT COUNT(DISTINCT medicine_id) as items,
+                 IFNULL(SUM(quantity), 0) as qty,
+                 IFNULL(SUM(quantity * cost_price), 0) as cost_val,
+                 IFNULL(SUM(quantity * mrp), 0) as mrp_val
+          FROM inventory_master
+          WHERE date(expiry_date) <= date('now', '+180 days') AND quantity > 0
+        `;
+      }
+
+      const expRow = await db.get(countQuery, params);
+
+      return res.json({
+        expiringMedicines: expRow.items || 0,
+        expiringStockQty: expRow.qty || 0,
+        expiringCostValue: expRow.cost_val || 0,
+        expiringMrpValue: expRow.mrp_val || 0
+      });
+    }
+
+    // Default fallback
     res.json({
-      totalSales: salesRow.total || 0,
-      totalPurchases: purchasesRow.total || 0,
-      profitMargin: profitMargin,
-      itemsSold: itemsSoldRow.count || 0
+      totalSales: 0,
+      totalPurchases: 0,
+      profitMargin: 0,
+      itemsSold: 0
     });
   } catch (err) {
     console.error('Reports summary error:', err);
@@ -82,7 +157,7 @@ router.get('/data', async (req, res) => {
       );
     } else if (type === 'inventory') {
       data = await db.all(`
-        SELECT m.name as medicine_name, im.quantity as stock, (im.quantity * im.cost_price) as value 
+        SELECT m.name as medicine_name, im.batch_no, im.quantity as stock, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value 
         FROM inventory_master im 
         JOIN medicines m ON im.medicine_id = m.id 
         ORDER BY stock DESC LIMIT 100
@@ -90,18 +165,18 @@ router.get('/data', async (req, res) => {
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         data = await db.all(`
-          SELECT m.name as medicine_name, im.batch_no, im.expiry_date 
+          SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) BETWEEN date(?) AND date(?)
+          WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0
           ORDER BY im.expiry_date ASC LIMIT 100
         `, [from, to]);
       } else {
         data = await db.all(`
-          SELECT m.name as medicine_name, im.batch_no, im.expiry_date 
+          SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) <= date('now', '+180 days') 
+          WHERE date(im.expiry_date) <= date('now', '+180 days') AND im.quantity > 0
           ORDER BY im.expiry_date ASC LIMIT 100
         `);
       }
@@ -148,25 +223,25 @@ router.get('/export-pdf', async (req, res) => {
       colWidths = [120, 180, 112, 100];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';
-      headers = ['Medicine Name', 'Batch No', 'Expiry Date', 'Stock Qty', 'Value'];
-      keys = ['medicine_name', 'batch_no', 'expiry_date', 'quantity', 'value'];
-      query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
-      alignMap = { medicine_name: 'left', batch_no: 'left', expiry_date: 'center', quantity: 'right', value: 'right' };
-      colWidths = [180, 80, 92, 80, 80];
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price', 'MRP', 'Valuation (Cost)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'mrp', 'value'];
+      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
+      alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', cost_price: 'right', mrp: 'right', value: 'right' };
+      colWidths = [150, 70, 60, 60, 60, 112];
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
         title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
-      headers = ['Medicine Name', 'Batch No', 'Expiry Date', 'Stock Qty'];
-      keys = ['medicine_name', 'batch_no', 'expiry_date', 'quantity'];
-      alignMap = { medicine_name: 'left', batch_no: 'left', expiry_date: 'center', quantity: 'right' };
-      colWidths = [220, 100, 100, 92];
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price', 'Expiry Date', 'Cost Value'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
+      alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', cost_price: 'right', expiry_date: 'center', value: 'right' };
+      colWidths = [150, 70, 60, 60, 80, 92];
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }
@@ -211,21 +286,21 @@ router.get('/export-excel', async (req, res) => {
       params = [from, to];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';
-      headers = ['Medicine Name', 'Batch No', 'Expiry Date', 'Stock Qty', 'Value (Rs.)'];
-      keys = ['medicine_name', 'batch_no', 'expiry_date', 'quantity', 'value'];
-      query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'MRP (Rs.)', 'Valuation Cost (Rs.)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'mrp', 'value'];
+      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
         title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
-      headers = ['Medicine Name', 'Batch No', 'Expiry Date', 'Stock Qty'];
-      keys = ['medicine_name', 'batch_no', 'expiry_date', 'quantity'];
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }

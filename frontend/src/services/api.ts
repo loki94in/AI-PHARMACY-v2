@@ -539,6 +539,7 @@ export const api = {
 
   // Staged / Offline Sync Review
   getStagedSales: (all?: boolean) => apiClient.get(all ? '/sales/staged?all=true' : '/sales/staged').then(res => res.data),
+  createStagedSale: (data: { patient_name: string; patient_phone?: string; discount?: number; items: any[] }) => apiClient.post('/sales/staged', data).then(res => res.data),
   approveStagedSale: (id: number, data: any) => apiClient.post(`/sales/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedSale: (id: number) => apiClient.post(`/sales/staged/${id}/reject`).then(res => res.data),
   getStagedPurchases: () => apiClient.get('/purchases/staged').then(res => res.data),
@@ -588,8 +589,7 @@ export const api = {
   setSearchTerm: (id: number, searchTerm: string) => apiClient.post('/enrichment/set-search-term', { id, searchTerm }).then(res => res.data),
   triggerOnlineEnrichment: (id: number) => apiClient.post(`/enrichment/trigger-online/${id}`).then(res => res.data),
   
-  // Reports
-  getReportsSummary: (params: { fromDate?: string; toDate?: string }) => apiClient.get('/reports', { params }).then(res => res.data),
+  getReportsSummary: (params: { type?: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports', { params }).then(res => res.data),
   getReportsData: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/data', { params }).then(res => res.data),
   exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
   exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/export-excel', { params, responseType: 'blob' }).then(res => res.data),

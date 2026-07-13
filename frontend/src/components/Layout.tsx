@@ -52,6 +52,7 @@ import {
   Send as SendIcon
 } from 'lucide-react';
 
+
 import { toastEvent, quickOrderEvent, liveCartAddEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
@@ -122,8 +123,7 @@ const Sidebar = ({
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
-    { path: '/message-listener', label: 'Message Listener', icon: <MessageSquareIcon size={18} /> },
-    { path: '/crm', label: 'CRM / Patients', icon: <Users size={18} /> },
+    { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
@@ -207,8 +207,14 @@ const Sidebar = ({
               const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
               const currentTab = new URLSearchParams(location.search).get('tab');
               if (targetTab) {
+                if (!currentTab && targetTab === 'crm' && basePath === '/crm') return true;
+                if (!currentTab && targetTab === 'products' && basePath === '/database') return true;
+                if (!currentTab && targetTab === 'clinical' && basePath === '/learning') return true;
+                if (!currentTab && targetTab === 'returns' && basePath === '/returns') return true;
+                if (!currentTab && targetTab === 'cart' && basePath === '/pharmarack-cart') return true;
                 return currentTab === targetTab;
               } else {
+                if (basePath === '/reports') return true;
                 if (basePath === '/crm') return !currentTab || currentTab === 'crm';
                 if (basePath === '/database') return !currentTab || currentTab === 'products';
                 if (basePath === '/learning') return !currentTab || currentTab === 'clinical';

@@ -1206,6 +1206,62 @@ router.get('/hold', async (req, res) => {
   }
 });
 
+// Create a new staged sale (Phone Sale)
+router.post('/staged', async (req, res) => {
+  try {
+    const { patient_name, patient_phone, discount = 0, items } = req.body;
+    if (!patient_name || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Patient name and non-empty items array are required' });
+    }
+
+    const db = await dbManager.getConnection();
+    const resolvedItems = [];
+
+    for (const item of items) {
+      const name = item.name || item.medicine_name;
+      const quantity = Number(item.quantity || 1);
+      const unit = item.unit || '';
+
+      // Try to resolve locally
+      const local = await db.get(`
+        SELECT im.id as inventory_id, im.mrp, COALESCE(m.pack_size, 10) as pack_size
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        WHERE m.name LIKE ? OR m.name LIKE ?
+        LIMIT 1
+      `, [name, `%${name}%`]);
+
+      resolvedItems.push({
+        inventory_id: local ? local.inventory_id : null,
+        name: name,
+        quantity: quantity,
+        unit_price: local ? local.mrp : 0,
+        loose_qty: 0,
+        pack_size: local ? local.pack_size : 10,
+        discount_per: 0
+      });
+    }
+
+    const result = await db.run(
+      `INSERT INTO staged_sales (patient_name, patient_phone, discount, sale_date, items_json) VALUES (?, ?, ?, ?, ?)`,
+      [patient_name, patient_phone || '', Number(discount), new Date().toISOString(), JSON.stringify(resolvedItems)]
+    );
+
+    // Broadcast SSE update
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('sales_sync', { success: true, count: 1 });
+    } catch (sseErr) {
+      console.warn('Could not broadcast sales_sync update:', sseErr);
+    }
+
+    res.json({ success: true, id: result.lastID });
+  } catch (err: any) {
+    console.error('Failed to create staged sale:', err);
+    res.status(500).json({ error: err.message || 'Failed to create staged sale' });
+  }
+});
+
 // Retrieve pending or all staged sales
 router.get('/staged', async (req, res) => {
   const { all } = req.query;

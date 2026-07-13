@@ -98,7 +98,7 @@ function App() {
               <Route path="/automation-center" element={<Navigate to="/crm?tab=automation" replace />} />
               <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
               <Route path="/pharmarack-cart" element={<PharmarackCart />} />
-              <Route path="/message-listener" element={<MessageListener />} />
+              <Route path="/message-listener" element={<Navigate to="/crm?tab=crm" replace />} />
               <Route path="/non-mapped-distributors" element={<Navigate to="/pharmarack-cart?tab=non-mapped" replace />} />
               <Route path="/migration" element={<Migration />} />
               <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />

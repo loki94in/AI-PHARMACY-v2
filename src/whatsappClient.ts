@@ -12,31 +12,50 @@ const UPLOADS_DIR = path.resolve(__dirname, '..', 'uploads');
 
 // Keep types and flags aligned so imports from other modules do not break
 export let currentQr: string | null = null;
-export let isReady: boolean = true;
+export let isReady: boolean = false;
 let initializing = false;
+
+export function setCurrentQr(qr: string | null) {
+  currentQr = qr;
+}
+
+export function setIsReady(ready: boolean) {
+  isReady = ready;
+}
 
 /** Helper to check whether we should route messages to WhatsApp Business Cloud API */
 export async function shouldRouteToBusiness(): Promise<boolean> {
-  return true; // We are now 100% on the WhatsApp Business Cloud API
+  const db = await dbManager.getConnection();
+  
+  // First, check preferred system
+  const preferredSystemRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_preferred_system'");
+  if (preferredSystemRow) {
+    if (preferredSystemRow.value === 'official') return true;
+    if (preferredSystemRow.value === 'automated') return false;
+  }
+  
+  // Fallback to wa_business_enabled
+  const row = await db.get("SELECT value FROM app_settings WHERE key = 'wa_business_enabled'");
+  return row ? row.value === 'true' : false;
 }
 
-/** Initialize the WhatsApp client - Database wrapper is always ready */
+/** Initialize the WhatsApp client */
 export async function initClient(): Promise<any> {
-  isReady = true;
+  // Headless client wrapper disabled at user request.
+  isReady = false;
   initializing = false;
   return {};
 }
 
-/** Destroy the WhatsApp client (no-op) */
+/** Destroy the WhatsApp client */
 export async function destroyClient(): Promise<void> {
   isReady = false;
   initializing = false;
 }
 
-/** Force reconnect (no-op) */
+/** Force reconnect */
 export async function forceReconnect(): Promise<void> {
-  isReady = true;
-  initializing = false;
+  // No-op in direct/manual mode
 }
 
 /** Send a media or text message using the WhatsApp Business API and log it to SQLite */
@@ -71,30 +90,41 @@ export async function sendMessage(
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
+    const useBusiness = await shouldRouteToBusiness();
+    if (!useBusiness && !isReady) {
+      throw new Error('Client not initialized');
+    }
+
     try {
-      if (file && file.mimetype && file.data) {
-        if (!fs.existsSync(appConfig.tempDir)) {
-          fs.mkdirSync(appConfig.tempDir, { recursive: true });
-        }
-        const tempFilePath = path.join(appConfig.tempDir, `wa_temp_${Date.now()}_${file.filename || 'document.pdf'}`);
-        fs.writeFileSync(tempFilePath, Buffer.from(file.data, 'base64'));
-        try {
-          const result = await whatsappBusinessService.sendDocument(cleanPhone, tempFilePath, caption, file.filename);
+      if (!useBusiness) {
+        // Automated headless client disabled at user request. Log message to SQLite.
+        console.log(`[WhatsApp Client] Headless client disabled. Logged message to ${chatId}: ${caption || ''}`);
+        success = true;
+      } else {
+        if (file && file.mimetype && file.data) {
+          if (!fs.existsSync(appConfig.tempDir)) {
+            fs.mkdirSync(appConfig.tempDir, { recursive: true });
+          }
+          const tempFilePath = path.join(appConfig.tempDir, `wa_temp_${Date.now()}_${file.filename || 'document.pdf'}`);
+          fs.writeFileSync(tempFilePath, Buffer.from(file.data, 'base64'));
+          try {
+            const result = await whatsappBusinessService.sendDocument(cleanPhone, tempFilePath, caption, file.filename);
+            success = result.success;
+            if (result.messageId) messageId = result.messageId;
+          } finally {
+            if (fs.existsSync(tempFilePath)) {
+              fs.unlinkSync(tempFilePath);
+            }
+          }
+        } else if (mediaPath) {
+          const result = await whatsappBusinessService.sendDocument(cleanPhone, mediaPath, caption);
           success = result.success;
           if (result.messageId) messageId = result.messageId;
-        } finally {
-          if (fs.existsSync(tempFilePath)) {
-            fs.unlinkSync(tempFilePath);
-          }
+        } else {
+          const result = await whatsappBusinessService.sendTextMessage(cleanPhone, caption ?? '');
+          success = result.success;
+          if (result.messageId) messageId = result.messageId;
         }
-      } else if (mediaPath) {
-        const result = await whatsappBusinessService.sendDocument(cleanPhone, mediaPath, caption);
-        success = result.success;
-        if (result.messageId) messageId = result.messageId;
-      } else {
-        const result = await whatsappBusinessService.sendTextMessage(cleanPhone, caption ?? '');
-        success = result.success;
-        if (result.messageId) messageId = result.messageId;
       }
     } catch (err) {
       console.error('[WhatsApp Client Wrapper] Send failed:', err);
@@ -161,7 +191,7 @@ export async function getChats(): Promise<any[]> {
 }
 
 /** Get messages for a specific chat from local SQLite cache */
-export async function getChatMessages(chatId: string, limit: number = 50): Promise<any[]> {
+export async function getChatMessages(chatId: string, limit: number = 500): Promise<any[]> {
   let cleanId = String(chatId);
   if (!cleanId.includes('@')) {
     let cleanPhone = cleanId.replace(/\D/g, '');

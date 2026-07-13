@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -18,7 +19,9 @@ import {
   PieChart,
   Boxes,
   HelpCircle,
-  Undo2
+  Undo2,
+  Percent,
+  Users
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -28,7 +31,15 @@ const Reports = () => {
   const [fromDate, setFromDate] = useState(getNDaysAgoString(30));
   const [toDate, setToDate] = useState(getTodayString());
   const [manualToDate, setManualToDate] = useState(false);
-  const [activeTab, setActiveTab] = useState<'sales' | 'inventory' | 'purchases' | 'expiry' | 'nonMoving' | 'trace'>('sales');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get('tab') || 'sales') as 'sales' | 'inventory' | 'purchases' | 'expiry' | 'nonMoving' | 'trace';
+
+  const setActiveTab = (tab: string) => {
+    setSearchParams((prev) => {
+      prev.set('tab', tab);
+      return prev;
+    });
+  };
   
   // Non-moving report local settings
   const [nonMovingDays, setNonMovingDays] = useState(90);
@@ -64,19 +75,19 @@ const Reports = () => {
 
   // Main reports query (sales, purchases, inventory, expiry) - enabled by default so it auto-loads
   const { data: reportData, isLoading: loading, refetch } = useApiQuery<{
-    summary: { totalSales: number; totalPurchases: number; profitMargin: number; itemsSold: number };
+    summary: any;
     records: any[];
   }>(
     ['reports', activeTab, fromDate, toDate],
     async () => {
       // Don't query default endpoints if tab is nonMoving or trace
       if (activeTab === 'nonMoving' || activeTab === 'trace') {
-        const summaryData = await api.getReportsSummary({ fromDate, toDate });
+        const summaryData = await api.getReportsSummary({ type: activeTab, fromDate, toDate });
         return { summary: summaryData, records: [] };
       }
 
       const [summaryData, tableData] = await Promise.all([
-        api.getReportsSummary({ fromDate, toDate }),
+        api.getReportsSummary({ type: activeTab, fromDate, toDate }),
         api.getReportsData({ type: activeTab, fromDate, toDate })
       ]);
       return { summary: summaryData, records: tableData };
@@ -163,7 +174,7 @@ const Reports = () => {
     }
   };
 
-  const stats = reportData?.summary ?? { totalSales: 0, totalPurchases: 0, profitMargin: 0, itemsSold: 0 };
+  const stats = reportData?.summary ?? {};
   const records = reportData?.records ?? [];
 
   // Calculate dynamic stats based on active tab
@@ -171,6 +182,7 @@ const Reports = () => {
     if (activeTab === 'nonMoving') {
       const deadItems = nonMovingData?.items ?? [];
       const totalDeadValuation = deadItems.reduce((acc, item) => acc + (item.totalValue || 0), 0);
+      const totalDeadCostValuation = deadItems.reduce((acc, item) => acc + (item.totalCostValue || 0), 0);
       const neverMovedCount = deadItems.filter(item => item.daysSinceLastTransaction === 999).length;
 
       return [
@@ -183,12 +195,20 @@ const Reports = () => {
           desc: `No sales in ${nonMovingDays} days`
         },
         {
-          label: 'Locked Capital Valuation',
-          value: `₹${totalDeadValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          label: 'Locked Capital (Cost)',
+          value: `₹${totalDeadCostValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           icon: IndianRupee,
           color: 'red',
           gradient: 'rgba(239,68,68,0.12)',
-          desc: 'Valued at MRP prices'
+          desc: 'Valued at purchase cost'
+        },
+        {
+          label: 'Locked Capital (MRP)',
+          value: `₹${totalDeadValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: TrendingUp,
+          color: 'sky',
+          gradient: 'rgba(14,165,233,0.12)',
+          desc: 'Retail value of non-moving stock'
         },
         {
           label: 'Never Sold Items',
@@ -197,14 +217,6 @@ const Reports = () => {
           color: 'purple',
           gradient: 'rgba(168,85,247,0.12)',
           desc: 'Zero transactions recorded'
-        },
-        {
-          label: 'Target Liquidation',
-          value: deadItems.slice(0, 5).length > 0 ? `${deadItems.slice(0, 5).length} Items` : '0 Items',
-          icon: TrendingUp,
-          color: 'sky',
-          gradient: 'rgba(14,165,233,0.12)',
-          desc: 'High priority actions recommended'
         }
       ];
     }
@@ -248,41 +260,155 @@ const Reports = () => {
       ];
     }
 
-    // Default dashboard metrics
-    return [
-      {
-        label: 'Total Revenue',
-        value: `₹${(stats.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        icon: IndianRupee,
-        color: 'green',
-        gradient: 'rgba(34,197,150,0.12)',
-        desc: 'Accumulated invoices'
-      },
-      {
-        label: 'Total Purchases',
-        value: `₹${(stats.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        icon: ShoppingBag,
-        color: 'sky',
-        gradient: 'rgba(14,165,233,0.12)',
-        desc: 'Supplier bills registered'
-      },
-      {
-        label: 'Average Profit Margin',
-        value: `${stats.profitMargin || 0}%`,
-        icon: TrendingUp,
-        color: 'amber',
-        gradient: 'rgba(245,158,11,0.12)',
-        desc: 'Based on item purchase costs'
-      },
-      {
-        label: 'Items Sold',
-        value: (stats.itemsSold || 0).toLocaleString('en-IN'),
-        icon: Package,
-        color: 'purple',
-        gradient: 'rgba(168,85,247,0.12)',
-        desc: 'Total inventory items dispatched'
-      }
-    ];
+    if (activeTab === 'sales') {
+      return [
+        {
+          label: 'Total Revenue',
+          value: `₹${(stats.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: IndianRupee,
+          color: 'green',
+          gradient: 'rgba(34,197,150,0.12)',
+          desc: 'Accumulated invoices'
+        },
+        {
+          label: 'Cost of Goods Sold (COGS)',
+          value: `₹${(stats.cogs || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: ShoppingBag,
+          color: 'sky',
+          gradient: 'rgba(14,165,233,0.12)',
+          desc: 'Cost value of medicines sold'
+        },
+        {
+          label: 'Net Profit',
+          value: `₹${(stats.netProfit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: TrendingUp,
+          color: 'amber',
+          gradient: 'rgba(245,158,11,0.12)',
+          desc: 'Revenue minus COGS'
+        },
+        {
+          label: 'Profit Margin',
+          value: `${stats.profitMargin || 0}%`,
+          icon: Percent,
+          color: 'purple',
+          gradient: 'rgba(168,85,247,0.12)',
+          desc: 'Profit margin percentage'
+        }
+      ];
+    }
+
+    if (activeTab === 'purchases') {
+      return [
+        {
+          label: 'Total Purchases Cost',
+          value: `₹${(stats.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: ShoppingBag,
+          color: 'sky',
+          gradient: 'rgba(14,165,233,0.12)',
+          desc: 'Supplier bills registered'
+        },
+        {
+          label: 'Items Purchased',
+          value: (stats.itemsPurchased || 0).toLocaleString('en-IN'),
+          icon: Package,
+          color: 'purple',
+          gradient: 'rgba(168,85,247,0.12)',
+          desc: 'Total inventory items stocked'
+        },
+        {
+          label: 'Suppliers/Distributors',
+          value: (stats.suppliersCount || 0).toLocaleString('en-IN'),
+          icon: Users,
+          color: 'green',
+          gradient: 'rgba(34,197,150,0.12)',
+          desc: 'Distinct suppliers in period'
+        },
+        {
+          label: 'Avg Price per Item',
+          value: `₹${(stats.avgItemPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: IndianRupee,
+          color: 'amber',
+          gradient: 'rgba(245,158,11,0.12)',
+          desc: 'Average purchase price per item'
+        }
+      ];
+    }
+
+    if (activeTab === 'inventory') {
+      return [
+        {
+          label: 'Total Stock sitting',
+          value: (stats.totalStock || 0).toLocaleString('en-IN'),
+          icon: Package,
+          color: 'purple',
+          gradient: 'rgba(168,85,247,0.12)',
+          desc: 'Total units currently in stock'
+        },
+        {
+          label: 'Total Hold Value (Cost)',
+          value: `₹${(stats.holdValuationCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: IndianRupee,
+          color: 'green',
+          gradient: 'rgba(34,197,150,0.12)',
+          desc: 'Stock valued at purchase cost'
+        },
+        {
+          label: 'Total Hold Value (MRP)',
+          value: `₹${(stats.holdValuationMrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: TrendingUp,
+          color: 'sky',
+          gradient: 'rgba(14,165,233,0.12)',
+          desc: 'Stock valued at retail MRP'
+        },
+        {
+          label: 'Unique Medicines',
+          value: (stats.uniqueMedicines || 0).toLocaleString('en-IN'),
+          icon: Boxes,
+          color: 'amber',
+          gradient: 'rgba(245,158,11,0.12)',
+          desc: 'Different medicine lines in stock'
+        }
+      ];
+    }
+
+    if (activeTab === 'expiry') {
+      return [
+        {
+          label: 'Expiring Items Qty',
+          value: (stats.expiringStockQty || 0).toLocaleString('en-IN'),
+          icon: Package,
+          color: 'purple',
+          gradient: 'rgba(168,85,247,0.12)',
+          desc: 'Total units expiring soon'
+        },
+        {
+          label: 'Cost Value at Risk',
+          value: `₹${(stats.expiringCostValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: IndianRupee,
+          color: 'red',
+          gradient: 'rgba(239,68,68,0.12)',
+          desc: 'Total loss if stock expires (Cost)'
+        },
+        {
+          label: 'MRP Value at Risk',
+          value: `₹${(stats.expiringMrpValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          icon: TrendingUp,
+          color: 'amber',
+          gradient: 'rgba(245,158,11,0.12)',
+          desc: 'Total retail value at risk (MRP)'
+        },
+        {
+          label: 'Unique Medicines',
+          value: (stats.expiringMedicines || 0).toLocaleString('en-IN'),
+          icon: Boxes,
+          color: 'sky',
+          gradient: 'rgba(14,165,233,0.12)',
+          desc: 'Unique medicines expiring soon'
+        }
+      ];
+    }
+
+    return [];
   };
 
   const tabs = [
@@ -639,21 +765,24 @@ const Reports = () => {
                   <thead className="sticky top-0 bg-bg2 border-b border-glass-border/30 shadow-sm z-10">
                     <tr className="text-muted/80 text-[10px] font-black uppercase tracking-wider">
                       <th className="p-3.5 border-b border-glass-border/20 pl-5">Medicine Stock Name</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Batch No</th>
                       <th className="p-3.5 border-b border-glass-border/20">Current Stock Qty</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Unit Cost (₹)</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Unit MRP (₹)</th>
                       <th className="p-3.5 border-b border-glass-border/20 text-right pr-5">Hold Valuation (Cost)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={3} className="p-12 text-center text-xs text-muted">
+                        <td colSpan={6} className="p-12 text-center text-xs text-muted">
                           <Loader2 className="animate-spin mx-auto mb-2 text-primary" size={20} />
                           <span className="font-bold">Loading inventory metrics...</span>
                         </td>
                       </tr>
                     ) : records.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="p-16 text-center text-xs text-muted">
+                        <td colSpan={6} className="p-16 text-center text-xs text-muted">
                           <AlertTriangle className="mx-auto mb-3 opacity-30 text-amber-500" size={28} />
                           <p className="font-bold">No inventory master records</p>
                           <p className="text-[10px] mt-0.5">No stock is registered in the database catalog.</p>
@@ -663,7 +792,10 @@ const Reports = () => {
                       records.map((row, idx) => (
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicine_name || '—'}</td>
+                          <td className="p-3.5 font-mono text-muted">{row.batch_no || 'N/A'}</td>
                           <td className="p-3.5 font-mono font-semibold text-text">{row.stock ?? 0}</td>
+                          <td className="p-3.5 font-mono text-text">₹{(row.cost_price || 0).toFixed(2)}</td>
+                          <td className="p-3.5 font-mono text-text">₹{(row.mrp || 0).toFixed(2)}</td>
                           <td className="p-3.5 text-right pr-5 font-mono font-black text-text">₹{(row.value || 0).toFixed(2)}</td>
                         </tr>
                       ))
@@ -705,20 +837,23 @@ const Reports = () => {
                     <tr className="text-muted/80 text-[10px] font-black uppercase tracking-wider">
                       <th className="p-3.5 border-b border-glass-border/20 pl-5">Medicine Name</th>
                       <th className="p-3.5 border-b border-glass-border/20">Batch Number</th>
-                      <th className="p-3.5 border-b border-glass-border/20 text-right pr-5">Expiry Date</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Stock Qty</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Unit Cost (₹)</th>
+                      <th className="p-3.5 border-b border-glass-border/20 text-red font-bold">Expiry Date</th>
+                      <th className="p-3.5 border-b border-glass-border/20 text-right pr-5">Valuation at Risk (Cost)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={3} className="p-12 text-center text-xs text-muted">
+                        <td colSpan={6} className="p-12 text-center text-xs text-muted">
                           <Loader2 className="animate-spin mx-auto mb-2 text-primary" size={20} />
                           <span className="font-bold">Loading expiry warning lists...</span>
                         </td>
                       </tr>
                     ) : records.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="p-16 text-center text-xs text-muted">
+                        <td colSpan={6} className="p-16 text-center text-xs text-muted">
                           <AlertTriangle className="mx-auto mb-3 opacity-30 text-amber-500" size={28} />
                           <p className="font-bold">No expiry alerts registered</p>
                           <p className="text-[10px] mt-0.5">No medicine batch is expiring within the specified timeline.</p>
@@ -729,7 +864,10 @@ const Reports = () => {
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicine_name || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batch_no || '—'}</td>
-                          <td className="p-3.5 text-right pr-5 font-mono font-black text-red">{row.expiry_date || '—'}</td>
+                          <td className="p-3.5 font-mono text-text">{row.quantity ?? 0}</td>
+                          <td className="p-3.5 font-mono text-text">₹{(row.cost_price || 0).toFixed(2)}</td>
+                          <td className="p-3.5 font-mono font-black text-red">{row.expiry_date || '—'}</td>
+                          <td className="p-3.5 text-right pr-5 font-mono font-black text-red">₹{(row.value || 0).toFixed(2)}</td>
                         </tr>
                       ))
                     )}
@@ -755,22 +893,23 @@ const Reports = () => {
                       <th className="p-3.5 border-b border-glass-border/20 pl-5">Medicine Name</th>
                       <th className="p-3.5 border-b border-glass-border/20">Batch</th>
                       <th className="p-3.5 border-b border-glass-border/20">Quantity</th>
-                      <th className="p-3.5 border-b border-glass-border/20">MRP (₹)</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Hold Valuation</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Unit Cost (₹)</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Hold Value (Cost)</th>
+                      <th className="p-3.5 border-b border-glass-border/20">Hold Value (MRP)</th>
                       <th className="p-3.5 border-b border-glass-border/20 text-right pr-5">Dormant Period</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loadingNonMoving ? (
                       <tr>
-                        <td colSpan={6} className="p-12 text-center text-xs text-muted">
+                        <td colSpan={7} className="p-12 text-center text-xs text-muted">
                           <Loader2 className="animate-spin mx-auto mb-2 text-primary" size={20} />
                           <span className="font-bold">Calculating dormant items...</span>
                         </td>
                       </tr>
                     ) : !nonMovingData || !nonMovingData.items || nonMovingData.items.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-16 text-center text-xs text-muted">
+                        <td colSpan={7} className="p-16 text-center text-xs text-muted">
                           <FileCheck2 className="mx-auto mb-3 opacity-30 text-green" size={28} />
                           <p className="font-bold">No dormant items found</p>
                           <p className="text-[10px] mt-0.5">All stock items have transaction activity in the last {nonMovingDays} days.</p>
@@ -782,7 +921,8 @@ const Reports = () => {
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicineName || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batchNo || 'N/A'}</td>
                           <td className="p-3.5 font-mono text-text">{row.quantity ?? 0}</td>
-                          <td className="p-3.5 font-mono text-text">₹{(row.mrp || 0).toFixed(2)}</td>
+                          <td className="p-3.5 font-mono text-text">₹{(row.costPrice || 0).toFixed(2)}</td>
+                          <td className="p-3.5 font-mono text-text">₹{(row.totalCostValue || 0).toFixed(2)}</td>
                           <td className="p-3.5 font-mono font-bold text-text">₹{(row.totalValue || 0).toFixed(2)}</td>
                           <td className="p-3.5 text-right pr-5 font-mono font-black text-amber-500">
                             {row.daysSinceLastTransaction === 999 ? (
