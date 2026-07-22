@@ -103,7 +103,7 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
   return (qty * rate) / totalItems;
 };
 
-export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () => void }> = ({ initialSearch, onClose }) => {
   const [isOpen, setIsOpen] = useState(true);
   
   const handleClose = () => {
@@ -112,7 +112,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
   };
   
   // Input fields
-  const [product, setProduct] = useState('');
+  const [product, setProduct] = useState(initialSearch || '');
   const [qty, setQty] = useState(1);
   
   // Selected Pharmarack Metadata
@@ -161,6 +161,45 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
   const [distributorPickerRefillId, setDistributorPickerRefillId] = useState<number | null>(null);
   const [distributorPickerResults, setDistributorPickerResults] = useState<SuggestionMedicine[]>([]);
   const [distributorPickerLoading, setDistributorPickerLoading] = useState(false);
+
+  // New Special Request inline form states
+  const [showNewRequestForm, setShowNewRequestForm] = useState(false);
+  const [newReqProduct, setNewReqProduct] = useState('');
+  const [newReqQty, setNewReqQty] = useState(1);
+  const [newReqRequester, setNewReqRequester] = useState('');
+  const [newReqNotes, setNewReqNotes] = useState('');
+  const [isSavingNewReq, setIsSavingNewReq] = useState(false);
+
+  const handleCreateSpecialRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newReqProduct.trim()) {
+      toastEvent.trigger('Please enter medicine name for special request', 'error');
+      return;
+    }
+    setIsSavingNewReq(true);
+    try {
+      await api.createOrder({
+        product: newReqProduct.trim(),
+        qty: Number(newReqQty) || 1,
+        requester: newReqRequester.trim() || 'Walk-in Customer',
+        notes: newReqNotes.trim() || undefined,
+        priority: 'Normal',
+        status: 'Pending'
+      });
+      toastEvent.trigger(`Created special request for "${newReqProduct}"!`, 'success');
+      setNewReqProduct('');
+      setNewReqQty(1);
+      setNewReqRequester('');
+      setNewReqNotes('');
+      setShowNewRequestForm(false);
+      await fetchPendingOrders();
+    } catch (err: any) {
+      console.error('Failed to create special request:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to create special request', 'error');
+    } finally {
+      setIsSavingNewReq(false);
+    }
+  };
 
   const fetchPendingOrders = async () => {
     try {
@@ -550,39 +589,29 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
 
   useEffect(() => {
     if (isOpen) {
-      fetchCart();
-      fetchPendingOrders();
-      fetchPendingRefills();
-      fetchReconOrders();
+      Promise.allSettled([
+        fetchCart(),
+        fetchPendingOrders(),
+        fetchPendingRefills(),
+        fetchReconOrders(),
+        api.checkPharmarackSession().then(data => setPrMode(data.mode || 'Live')).catch(() => setPrMode('Live'))
+      ]);
     }
   }, [isOpen]);
 
   useEffect(() => {
     const handleRefresh = () => {
       if (isOpen) {
-        fetchCart();
-        fetchPendingOrders();
-        fetchPendingRefills();
-        fetchReconOrders();
+        Promise.allSettled([
+          fetchCart(),
+          fetchPendingOrders(),
+          fetchPendingRefills(),
+          fetchReconOrders()
+        ]);
       }
     };
     window.addEventListener('refresh-pharmarack-cart', handleRefresh);
     return () => window.removeEventListener('refresh-pharmarack-cart', handleRefresh);
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      const fetchSessionStatus = async () => {
-        try {
-          const data = await api.checkPharmarackSession();
-          setPrMode(data.mode || 'Live');
-        } catch (err) {
-          console.error('Failed to fetch Pharmarack session status in live add modal:', err);
-          setPrMode('Live');
-        }
-      };
-      fetchSessionStatus();
-    }
   }, [isOpen]);
 
   // Autofocus on mount
@@ -675,7 +704,7 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
       } finally {
         setSearchLoading(false);
       }
-    }, 500);
+    }, 150);
 
     return () => clearTimeout(delayDebounce);
   }, [product]);
@@ -749,7 +778,37 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedProductId || !selectedStoreId) {
+    let storeIdToUse = selectedStoreId;
+    let productIdToUse = selectedProductId;
+    let rateToUse = selectedRate;
+    let mrpToUse = selectedMrp;
+    let mappedToUse = selectedMapped;
+    let schemeToUse = selectedScheme;
+    let productCodeToUse = selectedProductCode;
+    let companyToUse = selectedCompany;
+    let packagingToUse = selectedPackaging;
+    let distributorToUse = selectedDistributor;
+    let productNameToUse = product.trim();
+
+    // Auto-select top valid suggestion if user pressed Enter without manually clicking
+    if ((!storeIdToUse || !productIdToUse) && suggestions.length > 0) {
+      const topValid = suggestions.find(s => !s.isErrorMessage && s.productId && s.storeId);
+      if (topValid) {
+        storeIdToUse = topValid.storeId || '';
+        productIdToUse = topValid.productId || '';
+        rateToUse = topValid.rate !== undefined && topValid.rate !== null ? topValid.rate : '';
+        mrpToUse = topValid.mrp !== undefined && topValid.mrp !== null ? topValid.mrp : '';
+        mappedToUse = topValid.mapped !== undefined ? topValid.mapped : null;
+        schemeToUse = topValid.scheme || '';
+        productCodeToUse = topValid.productCode || '';
+        companyToUse = topValid.company || '';
+        packagingToUse = topValid.packaging || '';
+        distributorToUse = topValid.distributor || '';
+        productNameToUse = `${topValid.medicine_name} (${topValid.packaging})`;
+      }
+    }
+
+    if (!productIdToUse || !storeIdToUse) {
       toastEvent.trigger('Please search and select a matching distributor product from the dropdown list.', 'error');
       return;
     }
@@ -762,20 +821,20 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
     setIsSubmitting(true);
     try {
       await api.addPharmarackCart([{
-        productId: selectedProductId,
-        storeId: selectedStoreId,
+        productId: productIdToUse,
+        storeId: storeIdToUse,
         qty,
-        rate: selectedRate !== '' ? Number(selectedRate) : undefined,
-        scheme: selectedScheme || undefined,
-        productCode: selectedProductCode,
-        company: selectedCompany,
-        productName: product.trim(),
-        storeName: selectedDistributor,
-        packaging: selectedPackaging,
-        mapped: selectedMapped === false ? false : true
+        rate: rateToUse !== '' ? Number(rateToUse) : undefined,
+        scheme: schemeToUse || undefined,
+        productCode: productCodeToUse,
+        company: companyToUse,
+        productName: productNameToUse,
+        storeName: distributorToUse,
+        packaging: packagingToUse,
+        mapped: mappedToUse === false ? false : true
       }]);
 
-      toastEvent.trigger(`Added "${product}" directly to live Pharmarack cart!`, 'success');
+      toastEvent.trigger(`Added "${productNameToUse}" directly to live Pharmarack cart!`, 'success');
       
       // Reset form and keep open
       setProduct('');
@@ -792,6 +851,9 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
       setSelectedPackaging('');
       setSelectedMedicineName('');
       
+      // Refresh cart preview immediately
+      await fetchCart();
+
       // Focus back to search input so user can add another medicine
       setTimeout(() => {
         productInputRef.current?.focus();
@@ -845,15 +907,71 @@ export const LiveCartAddModal: React.FC<{ onClose: () => void }> = ({ onClose })
           <div className="flex flex-col h-full overflow-hidden pr-2">
             {/* Header */}
             <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length})
-              </span>
-              <div className="flex gap-1.5 text-[9px] font-bold uppercase">
-                <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">{pendingOrders.length} Ord</span>
-                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{pendingRefills.length} Refill</span>
-                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">{reconOrders.length} Recon</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                  Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowNewRequestForm(prev => !prev)}
+                  className="px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-[9px] font-bold uppercase transition-all flex items-center gap-0.5"
+                  title="Log a new special medicine request"
+                >
+                  <Plus size={10} />
+                  + Req
+                </button>
+              </div>
+              <div className="flex gap-1 text-[8px] font-bold uppercase">
+                <span className="px-1 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">{pendingOrders.length} Ord</span>
+                <span className="px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{pendingRefills.length} Refill</span>
+                <span className="px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">{reconOrders.length} Recon</span>
               </div>
             </div>
+
+            {/* Inline New Special Request Form */}
+            {showNewRequestForm && (
+              <form onSubmit={handleCreateSpecialRequest} className="my-2 p-2.5 bg-bg3/60 border border-primary/30 rounded-xl space-y-2 animate-in fade-in zoom-in-95 duration-150 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary flex items-center gap-1">
+                    <Sparkles size={11} /> New Special Medicine Request
+                  </span>
+                  <button type="button" onClick={() => setShowNewRequestForm(false)} className="text-muted hover:text-text text-xs">✕</button>
+                </div>
+                <input
+                  type="text"
+                  value={newReqProduct}
+                  onChange={e => setNewReqProduct(e.target.value)}
+                  placeholder="Medicine Name (e.g. Augmentin 625)"
+                  className="w-full premium-input px-2.5 py-1 text-xs font-medium"
+                  autoFocus
+                  required
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={newReqQty}
+                    onChange={e => setNewReqQty(parseInt(e.target.value) || 1)}
+                    placeholder="Qty"
+                    className="w-full premium-input px-2.5 py-1 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={newReqRequester}
+                    onChange={e => setNewReqRequester(e.target.value)}
+                    placeholder="Customer / Phone"
+                    className="w-full premium-input px-2.5 py-1 text-xs"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSavingNewReq}
+                  className="w-full py-1 bg-primary hover:bg-primary/90 text-bg font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                >
+                  {isSavingNewReq ? <Loader2 size={12} className="animate-spin" /> : 'Save Request'}
+                </button>
+              </form>
+            )}
 
             {/* Table */}
             <div className="flex-1 overflow-y-auto scrollbar-thin mt-1">

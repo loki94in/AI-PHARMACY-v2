@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Shield,
   HardDrive,
@@ -170,8 +171,8 @@ const BackupCenterModal: React.FC<BackupCenterModalProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
       <div className="bg-bg border border-glass-border rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-glass-border bg-bg3/50">
@@ -455,7 +456,8 @@ const BackupCenterModal: React.FC<BackupCenterModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

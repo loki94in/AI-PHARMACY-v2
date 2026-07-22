@@ -1271,8 +1271,8 @@ const Settings = () => {
           </h3>
           <button
             onClick={() => {
-              if (typeof (window as any).openBackupCenter === 'function') {
-                (window as any).openBackupCenter();
+              if (typeof window.openBackupCenter === 'function') {
+                window.openBackupCenter();
               }
             }}
             className="premium-btn bg-primary text-white hover:bg-blue-600 flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase"

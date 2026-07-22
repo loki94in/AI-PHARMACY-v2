@@ -778,7 +778,7 @@ const DatabasePage = () => {
       )}
 
       {/* Price History Modal */}
-      {showPriceHistoryModal && (
+      {showPriceHistoryModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md">
           <div className="bg-bg border border-glass-border rounded-2xl w-11/12 max-w-4xl shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
             {/* Modal Header */}
@@ -854,7 +854,8 @@ const DatabasePage = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {universalEditMedicineId && (

@@ -10,10 +10,12 @@ import { eventService } from './eventService.js';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
+import { config } from '../config/index.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+const getDbPath = () => config.dbPath;
 const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
 const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
 const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
@@ -33,7 +35,10 @@ export class BackupRecoveryService {
 
   private constructor() {
     // Start background resilience scan for pending uploads
-    setInterval(() => this.retryPendingUploads(), 60 * 60 * 1000); // Every hour
+    const interval = setInterval(() => this.retryPendingUploads(), 60 * 60 * 1000); // Every hour
+    if (interval.unref) {
+      interval.unref();
+    }
   }
 
   public static getInstance(): BackupRecoveryService {
@@ -114,7 +119,7 @@ export class BackupRecoveryService {
 
     // Safely clone database via checkpointed WAL copy to temporary raw file
     const tempDbPath = destPath.replace('.gz', '');
-    const tempDb = new Database(DB_PATH);
+    const tempDb = new Database(getDbPath());
     await tempDb.backup(tempDbPath);
     tempDb.close();
 
@@ -485,11 +490,11 @@ export class BackupRecoveryService {
   public listArchives(): { filename: string; date: string; sizeBytes: number; source: string }[] {
     if (!fs.existsSync(ARCHIVES_DIR)) return [];
 
-    const uploadLogRaw = fs.existsSync(DB_PATH) ? '' : '{}'; // Avoid connection during early startup queries if possible
+    const uploadLogRaw = fs.existsSync(getDbPath()) ? '' : '{}'; // Avoid connection during early startup queries if possible
     let uploadLog: Record<string, { gdrive?: boolean; telegram?: boolean }> = {};
     try {
       // Direct load if DB is initialized
-      const db = new Database(DB_PATH, { readonly: true });
+      const db = new Database(getDbPath(), { readonly: true });
       const row = db.prepare("SELECT value FROM app_settings WHERE key = 'backup_upload_log'").get() as any;
       uploadLog = JSON.parse(row?.value || '{}');
       db.close();
@@ -578,10 +583,10 @@ export class BackupRecoveryService {
       if (targetDbFile.endsWith('.gz')) {
         const gunzip = zlib.createGunzip();
         const source = fs.createReadStream(targetDbPath);
-        const destination = fs.createWriteStream(DB_PATH);
+        const destination = fs.createWriteStream(getDbPath());
         await pipeline(source, gunzip, destination);
       } else {
-        fs.copyFileSync(targetDbPath, DB_PATH);
+        fs.copyFileSync(targetDbPath, getDbPath());
       }
 
       // Clean temp folder
@@ -592,10 +597,10 @@ export class BackupRecoveryService {
       if (sanitized.endsWith('.gz')) {
         const gunzip = zlib.createGunzip();
         const source = fs.createReadStream(filePath);
-        const destination = fs.createWriteStream(DB_PATH);
+        const destination = fs.createWriteStream(getDbPath());
         await pipeline(source, gunzip, destination);
       } else {
-        fs.copyFileSync(filePath, DB_PATH);
+        fs.copyFileSync(filePath, getDbPath());
       }
     }
 

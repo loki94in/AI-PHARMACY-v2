@@ -128,3 +128,4 @@ export class SearchCache {
 }
 
 export const searchCache = new SearchCache();
+searchCache.clear();

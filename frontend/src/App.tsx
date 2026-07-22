@@ -37,7 +37,6 @@ const CompositionQueue = lazy(pageImports['/composition-queue']);
 const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
-const MessageListener = lazy(pageImports['/message-listener']);
 
 // ──────────────────────────────────────────────
 // App Component
@@ -95,10 +94,10 @@ function App() {
               <Route path="/purchase-history" element={<PurchaseHistory />} />
               <Route path="/crm" element={<CRM />} />
               <Route path="/orders" element={<Orders />} />
-              <Route path="/automation-center" element={<Navigate to="/crm?tab=automation" replace />} />
+              <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
               <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
               <Route path="/pharmarack-cart" element={<PharmarackCart />} />
-              <Route path="/message-listener" element={<Navigate to="/crm?tab=crm" replace />} />
+              <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
               <Route path="/non-mapped-distributors" element={<Navigate to="/pharmarack-cart?tab=non-mapped" replace />} />
               <Route path="/migration" element={<Migration />} />
               <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />

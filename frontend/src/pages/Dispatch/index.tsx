@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -239,8 +240,8 @@ const Dispatch = () => {
       </div>
 
       {/* New Dispatch Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      {showModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="glass-panel p-6 w-full max-w-lg space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold flex items-center gap-2 text-sm">
@@ -307,7 +308,8 @@ const Dispatch = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

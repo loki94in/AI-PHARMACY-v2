@@ -181,8 +181,8 @@ export default function PhoneSales() {
       toastEvent.trigger(`Sale approved! Invoice #${response.invoice_no} dispatched on WhatsApp.`, 'success');
       setSelectedSale(null);
       await fetchStagedSales();
-      if ((window as any).refreshStagedCounts) {
-        (window as any).refreshStagedCounts();
+      if (window.refreshStagedCounts) {
+        window.refreshStagedCounts();
       }
     } catch (err: any) {
       console.error(err);
@@ -201,8 +201,8 @@ export default function PhoneSales() {
       toastEvent.trigger('Staged sale rejected and deleted successfully.', 'success');
       setSelectedSale(null);
       await fetchStagedSales();
-      if ((window as any).refreshStagedCounts) {
-        (window as any).refreshStagedCounts();
+      if (window.refreshStagedCounts) {
+        window.refreshStagedCounts();
       }
     } catch (err: any) {
       console.error(err);

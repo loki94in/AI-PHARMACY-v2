@@ -207,15 +207,9 @@ const Sidebar = ({
               const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
               const currentTab = new URLSearchParams(location.search).get('tab');
               if (targetTab) {
-                if (!currentTab && targetTab === 'crm' && basePath === '/crm') return true;
-                if (!currentTab && targetTab === 'products' && basePath === '/database') return true;
-                if (!currentTab && targetTab === 'clinical' && basePath === '/learning') return true;
-                if (!currentTab && targetTab === 'returns' && basePath === '/returns') return true;
-                if (!currentTab && targetTab === 'cart' && basePath === '/pharmarack-cart') return true;
                 return currentTab === targetTab;
               } else {
                 if (basePath === '/reports') return true;
-                if (basePath === '/crm') return !currentTab || currentTab === 'crm';
                 if (basePath === '/database') return !currentTab || currentTab === 'products';
                 if (basePath === '/learning') return !currentTab || currentTab === 'clinical';
                 if (basePath === '/returns') return !currentTab || currentTab === 'returns';
@@ -262,12 +256,6 @@ const Sidebar = ({
                       queryClient.prefetchQuery({
                         queryKey: ['orders'],
                         queryFn: () => api.getOrders(),
-                        staleTime: 5 * 60_000,
-                      });
-                    } else if (basePath === '/crm') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['crm-patients'],
-                        queryFn: () => api.getPatients(),
                         staleTime: 5 * 60_000,
                       });
                     } else if (basePath === '/pos') {
@@ -793,7 +781,7 @@ const Topbar = ({
     <>
       <FlashToast toast={flashToast} onDismiss={() => setFlashToast(null)} onOpenReview={onOpenStagedReview} />
       
-      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 relative z-30 shrink-0">
+      <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 relative z-sticky-header shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onMenuClick}
@@ -964,8 +952,8 @@ const Topbar = ({
           {/* Backup Center Shortcut Button */}
           <button
             onClick={() => {
-              if (typeof (window as any).openBackupCenter === 'function') {
-                (window as any).openBackupCenter();
+              if (typeof window.openBackupCenter === 'function') {
+                window.openBackupCenter();
               }
             }}
             className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
@@ -1281,6 +1269,7 @@ export const Layout = ({
   const [pendingStagedPurchasesCount, setPendingStagedPurchasesCount] = useState(0);
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [showLiveCartAdd, setShowLiveCartAdd] = useState(false);
+  const [liveCartAddSearch, setLiveCartAddSearch] = useState<string | undefined>(undefined);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -1340,13 +1329,13 @@ export const Layout = ({
     };
     checkBackupStatus();
 
-    (window as any).openBackupCenter = () => {
+    window.openBackupCenter = () => {
       setIsBackupStartupMode(false);
       setShowBackupModal(true);
     };
 
     return () => {
-      delete (window as any).openBackupCenter;
+      delete window.openBackupCenter;
     };
   }, []);
 
@@ -1375,16 +1364,19 @@ export const Layout = ({
 
   useEffect(() => {
     fetchStagedCounts();
-    (window as any).refreshStagedCounts = fetchStagedCounts;
+    window.refreshStagedCounts = fetchStagedCounts;
     return () => {
-      delete (window as any).refreshStagedCounts;
+      delete window.refreshStagedCounts;
     };
   }, [fetchStagedCounts]);
 
   // Subscribe to global open events for modals (G2)
   useEffect(() => {
     const unsubscribeQuickOrder = quickOrderEvent.subscribeOpen(() => setShowQuickOrder(true));
-    const unsubscribeLiveCartAdd = liveCartAddEvent.subscribeOpen(() => setShowLiveCartAdd(true));
+    const unsubscribeLiveCartAdd = liveCartAddEvent.subscribeOpen((detail) => {
+      setLiveCartAddSearch(detail?.search);
+      setShowLiveCartAdd(true);
+    });
     return () => {
       unsubscribeQuickOrder();
       unsubscribeLiveCartAdd();
@@ -1532,12 +1524,12 @@ export const Layout = ({
           onOpenConnectModal={() => setShowConnectModal(true)}
           onMenuClick={() => setMobileNavOpen(true)}
         />
-        <div className="flex-1 flex flex-row overflow-hidden relative z-10">
-          <main className={`flex-1 flex flex-col ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative z-10 transition-all duration-200`}>
+        <div className="flex-1 flex flex-row overflow-hidden relative">
+          <main className={`flex-1 flex flex-col ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative transition-all duration-200`}>
             {children}
           </main>
           
-          {(location.pathname === '/' || location.pathname === '/pos' || location.pathname === '/crm') && (
+          {(location.pathname === '/' || location.pathname === '/pos') && (
             <RefillControlSidebar
               expanded={isSidebarExpanded}
               setExpanded={setIsSidebarExpanded}
@@ -1553,7 +1545,13 @@ export const Layout = ({
           <QuickOrderModal onClose={() => setShowQuickOrder(false)} />
         )}
         {showLiveCartAdd && (
-          <LiveCartAddModal onClose={() => setShowLiveCartAdd(false)} />
+          <LiveCartAddModal 
+            initialSearch={liveCartAddSearch}
+            onClose={() => {
+              setShowLiveCartAdd(false);
+              setLiveCartAddSearch(undefined);
+            }} 
+          />
         )}
 
         {showStagedReview && (

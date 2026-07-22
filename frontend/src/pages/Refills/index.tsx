@@ -288,7 +288,7 @@ const RefillsPage = () => {
                                   </button>
                                 ) : (
                                   <button
-                                    onClick={() => liveCartAddEvent.triggerOpen()}
+                                    onClick={() => liveCartAddEvent.triggerOpen(med.medicine_name)}
                                     className="py-1 px-3 bg-red/10 hover:bg-red/20 border border-red/30 text-red font-extrabold text-[10px] rounded-lg flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
                                   >
                                     <ShoppingCart size={11} />

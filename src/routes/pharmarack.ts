@@ -257,7 +257,7 @@ router.get('/search', async (req, res) => {
             mapped: p.IsMapped === 1,
             stock: p.Stock !== undefined ? String(p.Stock) : 'High',
             scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
-            productId: p.PrProductId || p.ProductId || p.ProductCode,
+            productId: p.ProductId || p.PrProductId || p.ProductCode,
             productCode: p.ProductCode || '',
             company: p.Company || '',
             storeId: p.StoreId
@@ -834,7 +834,7 @@ router.post('/cart/add', async (req, res) => {
           IsShowNonMappedOrderStock: 1,
           RStockVisibility: 0,
           IsMapped: (item.mapped === false || item.isMapped === false) ? 0 : 1,
-          ProductId: Number(item.productId) || 0,
+          ProductId: (() => { const v = item.productId; if (!v) return 0; const n = Number(v); if (!isNaN(n) && n > 0) return n; const stripped = String(v).replace(/^PR/i, ''); const sn = Number(stripped); return (!isNaN(sn) && sn > 0) ? sn : 0; })(),
           MRP: String(item.mrp || rateVal),
           ProductWiseAmount: 0,
           ProductWiseGSTAmount: 0,
@@ -856,10 +856,10 @@ router.post('/cart/add', async (req, res) => {
 
         if (response.ok) {
           const resJson = await response.json();
-          if (resJson && resJson.StatusCode === 200) {
+          if (resJson && (resJson.StatusCode === 200 || resJson.statusCode === 200 || resJson.status === 200 || resJson.status === 'success' || resJson.success === true)) {
             cartSuccess = true;
           } else {
-            lastError = `AddUserProductCartDetail response: ${resJson.message || 'Unknown error'}`;
+            lastError = `AddUserProductCartDetail response: ${resJson.message || resJson.Message || JSON.stringify(resJson)}`;
             cartSuccess = false;
             break;
           }
@@ -1002,7 +1002,7 @@ router.post('/cart/add', async (req, res) => {
               IsShowNonMappedOrderStock: 1,
               RStockVisibility: 0,
               IsMapped: (item.mapped === false || item.isMapped === false) ? 0 : 1,
-              ProductId: Number(item.productId) || 0,
+              ProductId: (() => { const v = item.productId; if (!v) return 0; const n = Number(v); if (!isNaN(n) && n > 0) return n; const stripped = String(v).replace(/^PR/i, ''); const sn = Number(stripped); return (!isNaN(sn) && sn > 0) ? sn : 0; })(),
               MRP: String(item.mrp || rateVal),
               ProductWiseAmount: 0,
               ProductWiseGSTAmount: 0,
@@ -1028,8 +1028,8 @@ router.post('/cart/add', async (req, res) => {
                 });
                 if (res.ok) {
                   let rJson = await res.json();
-                  if (rJson && rJson.StatusCode === 200) return { success: true };
-                  return { success: false, error: rJson.message || 'Verification failed' };
+                  if (rJson && (rJson.StatusCode === 200 || rJson.statusCode === 200 || rJson.status === 200 || rJson.status === 'success' || rJson.success === true)) return { success: true };
+                  return { success: false, error: rJson.message || rJson.Message || 'Verification failed' };
                 }
                 let errText = await res.text().catch(() => '');
                 return { success: false, error: 'Status: ' + res.status + ' | ' + errText };

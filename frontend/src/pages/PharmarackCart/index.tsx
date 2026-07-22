@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
-import { api, type SpecialOrder, type Refill } from '../../services/api';
+import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useSearchParams } from 'react-router-dom';
 import NonMappedDistributors from '../NonMappedDistributors';
@@ -54,6 +55,72 @@ export default function PharmarackCart() {
   const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills'>('requests');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
+
+  // Saved distributor contacts and store settings
+  const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
+  const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string }>({
+    name: 'AI Pharmacy',
+    phone: '',
+    address: ''
+  });
+
+  // Custom phone number override map by storeId
+  const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>({});
+
+  // Distributor filter sub-tab state ('all' | 'mapped' | 'non-mapped')
+  const [distributorFilterTab, setDistributorFilterTab] = useState<'all' | 'mapped' | 'non-mapped'>('all');
+
+  // Distributor search & contact edit modal state
+  const [editingDistributor, setEditingDistributor] = useState<Distributor | null>(null);
+  const [modalSearchTerm, setModalSearchTerm] = useState('');
+  const [modalPhoneInput, setModalPhoneInput] = useState('');
+  const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
+  const [isSavingContact, setIsSavingContact] = useState(false);
+
+  const isDistributorMapped = (dist: Distributor) => {
+    const custom = customDistributorPhones[dist.storeId];
+    if (custom && custom.trim().length > 0) return true;
+    const matched = savedDistributorsList.find(
+      (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
+    );
+    return Boolean(matched && (matched.phone || matched.mobile || matched.whatsapp));
+  };
+
+  const mappedDistributors = React.useMemo(() => {
+    return distributors.filter(d => isDistributorMapped(d));
+  }, [distributors, customDistributorPhones, savedDistributorsList]);
+
+  const nonMappedDistributors = React.useMemo(() => {
+    return distributors.filter(d => !isDistributorMapped(d));
+  }, [distributors, customDistributorPhones, savedDistributorsList]);
+
+  const filteredDistributorList = React.useMemo(() => {
+    if (distributorFilterTab === 'mapped') return mappedDistributors;
+    if (distributorFilterTab === 'non-mapped') return nonMappedDistributors;
+    return distributors;
+  }, [distributorFilterTab, mappedDistributors, nonMappedDistributors, distributors]);
+
+  useEffect(() => {
+    // Fetch saved distributor directory (with phone numbers)
+    api.getDistributors().then((res: any) => {
+      if (Array.isArray(res)) {
+        setSavedDistributorsList(res);
+      } else if (Array.isArray(res?.data)) {
+        setSavedDistributorsList(res.data);
+      }
+    }).catch(e => console.error('Failed to load saved distributors for WhatsApp matching:', e));
+
+    // Fetch pharmacy settings (store name, phone, address)
+    apiClient.get('/settings').then(res => {
+      if (res?.data) {
+        setStoreInfo({
+          name: res.data.store_name || res.data.pharmacy_name || 'AI Pharmacy',
+          phone: res.data.store_phone || res.data.pharmacy_phone || res.data.phone || '',
+          address: res.data.store_address || res.data.address || ''
+        });
+      }
+    }).catch(e => console.error('Failed to load store info:', e));
+  }, []);
 
   const fetchPendingRefills = async () => {
     try {
@@ -229,6 +296,127 @@ export default function PharmarackCart() {
       toastEvent.trigger(err?.response?.data?.error || 'Failed to send notifications.', 'error');
     } finally {
       setSendingNotifId(null);
+    }
+  };
+
+  const handleSendWhatsAppOrder = (dist: Distributor) => {
+    // Try to match distributor phone: 1. Custom override -> 2. Matched saved distributor
+    let phoneNum = customDistributorPhones[dist.storeId];
+    if (!phoneNum) {
+      const matched = savedDistributorsList.find(
+        (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
+      );
+      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
+    }
+
+    // Delivery staff contact if available
+    const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
+
+    let msg = `🏬 *NEW STOCK ORDER — ${storeInfo.name.toUpperCase()}*\n\n`;
+    msg += `📋 *Pharmacy Details:*\n`;
+    msg += `• Store: *${storeInfo.name}*\n`;
+    if (storeInfo.phone) msg += `• Phone: *${storeInfo.phone}*\n`;
+    if (storeInfo.address) msg += `• Address: *${storeInfo.address}*\n`;
+
+    if (deliveryStaff) {
+      msg += `\n🛵 *Delivery Contact:*\n`;
+      msg += `• Person: *${deliveryStaff.name}*\n`;
+      if ((deliveryStaff as any).code || (deliveryStaff as any).phone) {
+        msg += `• Contact Info: *${(deliveryStaff as any).phone || (deliveryStaff as any).code}*\n`;
+      }
+    }
+
+    msg += `\n----------------------------------\n`;
+    msg += `📦 *ORDERED MEDICINES:*\n`;
+    dist.items.forEach((item, idx) => {
+      const pack = item.packaging ? ` (${item.packaging})` : '';
+      const rateText = item.ptr > 0 ? ` @ ₹${item.ptr.toFixed(2)}` : '';
+      msg += `${idx + 1}. *${item.productName}*${pack} — Qty: *${item.qty}*${rateText}\n`;
+    });
+    msg += `----------------------------------\n`;
+    msg += `📊 *Total Items:* ${dist.items.length}\n`;
+    if (dist.lineTotal > 0) {
+      msg += `💰 *Subtotal:* ₹${dist.lineTotal.toFixed(2)}\n`;
+    }
+    msg += `🕒 *Time:* ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
+    msg += `*Please confirm order receipt & dispatch.*`;
+
+    let cleanPhone = phoneNum.replace(/\D/g, '');
+    if (!cleanPhone) {
+      handleOpenEditModal(dist);
+      return;
+    }
+
+    if (cleanPhone) {
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+      toastEvent.trigger(`Opening WhatsApp chat for ${dist.storeName}...`, 'success');
+    }
+  };
+
+  const handleOpenEditModal = (dist: Distributor) => {
+    setEditingDistributor(dist);
+    setModalSearchTerm(dist.storeName || '');
+    
+    // Check if phone override exists or find matched saved distributor
+    const custom = customDistributorPhones[dist.storeId];
+    const matched = savedDistributorsList.find(
+      (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
+    );
+
+    if (custom) {
+      setModalPhoneInput(custom);
+      setSelectedSavedDistId(matched?.id || null);
+    } else if (matched?.phone || matched?.mobile || matched?.whatsapp) {
+      setModalPhoneInput(matched.phone || matched.mobile || matched.whatsapp || '');
+      setSelectedSavedDistId(matched.id);
+    } else {
+      setModalPhoneInput('');
+      setSelectedSavedDistId(null);
+    }
+  };
+
+  const handleSaveDistributorContact = async () => {
+    if (!editingDistributor) return;
+    setIsSavingContact(true);
+    try {
+      const cleanPhone = modalPhoneInput.trim();
+      const storeId = editingDistributor.storeId;
+      const distName = editingDistributor.storeName;
+
+      // 1. Update local custom override map
+      setCustomDistributorPhones(prev => ({
+        ...prev,
+        [storeId]: cleanPhone
+      }));
+
+      // 2. Save or Update in database if matched or selected
+      if (selectedSavedDistId) {
+        await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
+          name: distName,
+          phone: cleanPhone
+        });
+      } else if (cleanPhone) {
+        // Save new distributor contact in database
+        const res = await apiClient.post('/settings/distributors', {
+          name: distName,
+          phone: cleanPhone
+        });
+        if (res?.data?.data?.id) {
+          setSelectedSavedDistId(res.data.data.id);
+        }
+      }
+
+      // Refresh saved distributors list silently
+      const refreshList = await api.getDistributors();
+      if (Array.isArray(refreshList)) setSavedDistributorsList(refreshList);
+
+      toastEvent.trigger(`Updated contact for ${distName}`, 'success');
+      setEditingDistributor(null);
+    } catch (err: any) {
+      console.error('Failed to save distributor contact:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to save contact info', 'error');
+    } finally {
+      setIsSavingContact(false);
     }
   };
 
@@ -666,15 +854,110 @@ export default function PharmarackCart() {
               </div>
             </div>
           ) : (
-            distributors.map((dist) => (
-              <div key={dist.storeId} className="bg-bg2/30 border border-glass-border rounded-xl overflow-hidden shadow-sm">
+            <>
+              {/* ── Sub-Filter Toggle Bar (All / Mapped / Non-Mapped) ── */}
+              <div className="flex items-center justify-between pb-2 border-b border-glass-border/30 shrink-0">
+                <div className="flex items-center gap-1.5 bg-bg2/40 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none">
+                  <button
+                    onClick={() => setDistributorFilterTab('all')}
+                    className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                      distributorFilterTab === 'all'
+                        ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                        : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                    }`}
+                  >
+                    <Building2 size={13} />
+                    <span>All Distributors</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-bg/50 border border-glass-border/30 font-mono">
+                      {distributors.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setDistributorFilterTab('mapped')}
+                    className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                      distributorFilterTab === 'mapped'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                        : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                    }`}
+                  >
+                    <Check size={13} className="text-emerald-400" />
+                    <span>Mapped</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                      {mappedDistributors.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setDistributorFilterTab('non-mapped')}
+                    className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                      distributorFilterTab === 'non-mapped'
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
+                        : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                    }`}
+                  >
+                    <AlertCircle size={13} className="text-amber-400" />
+                    <span>Non-Mapped</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                      {nonMappedDistributors.length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {filteredDistributorList.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+                  {distributorFilterTab === 'mapped' ? (
+                    <>
+                      <Check size={36} className="text-emerald-400/40" />
+                      <p className="text-xs font-bold text-text">No Mapped Distributors in Cart</p>
+                      <p className="text-[11px] text-muted">Click "+ Add Phone" on any unmapped distributor to link it!</p>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={36} className="text-emerald-400/40" />
+                      <p className="text-xs font-bold text-emerald-400">All Distributors are Mapped! 🎉</p>
+                      <p className="text-[11px] text-muted">All stores in your cart are linked with confirmed WhatsApp numbers.</p>
+                    </>
+                  )}
+                </div>
+              ) : (
+                filteredDistributorList.map((dist) => (
+                  <div key={dist.storeId} className="bg-bg2/30 border border-glass-border rounded-xl overflow-hidden shadow-sm">
                 {/* Distributor header */}
                 <div className="bg-bg3/60 px-4 py-2.5 border-b border-glass-border flex items-center justify-between">
-                  <h4 className="text-xs font-extrabold text-text tracking-wide uppercase flex items-center gap-2">
-                    <Package size={14} className="text-sky" />
-                    {dist.storeName}
-                  </h4>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <h4 className="text-xs font-extrabold text-text tracking-wide uppercase flex items-center gap-2">
+                      <Package size={14} className="text-sky" />
+                      {dist.storeName}
+                    </h4>
+
+                    {/* Phone Badge & Contact Search/Edit trigger */}
+                    {(() => {
+                      const custom = customDistributorPhones[dist.storeId];
+                      const matched = savedDistributorsList.find(
+                        (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
+                      );
+                      const activePhone = custom || matched?.phone || matched?.mobile || matched?.whatsapp || '';
+
+                      return (
+                        <button
+                          onClick={() => handleOpenEditModal(dist)}
+                          className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 ${
+                            activePhone
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                          }`}
+                          title="Search saved distributors & edit WhatsApp phone number"
+                        >
+                          <Phone size={10} />
+                          <span>{activePhone || '+ Add Phone'}</span>
+                          <Edit2 size={9} className="opacity-70" />
+                        </button>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     {dist.deliveryPersons.length > 0 && (
                       <span className="text-[10px] text-muted flex items-center gap-1">
                         <Truck size={11} />
@@ -684,18 +967,30 @@ export default function PharmarackCart() {
                     <span className="text-[10px] text-muted font-bold px-2 py-0.5 bg-bg/50 rounded-full border border-glass-border/30">
                       {dist.items.length} item{dist.items.length !== 1 ? 's' : ''}
                     </span>
+
+                    {/* Button 1: Send to Pharmarack Order */}
                     <button
                       onClick={() => handleSendManualNotification(dist)}
                       disabled={sendingNotifId === dist.storeId}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
-                      title="Send WhatsApp alert to distributor & delivery boy"
+                      className="flex items-center gap-1.5 px-2 py-1 rounded bg-sky/10 hover:bg-sky/20 text-sky border border-sky/30 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
+                      title="Send notification / place order in Pharmarack"
                     >
                       {sendingNotifId === dist.storeId ? (
-                        <span className="w-2.5 h-2.5 border border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
+                        <span className="w-2.5 h-2.5 border border-sky/20 border-t-sky rounded-full animate-spin" />
                       ) : (
                         <Send size={10} />
                       )}
-                      <span>Notify Order</span>
+                      <span>Send to Pharmarack</span>
+                    </button>
+
+                    {/* Button 2: Send via WhatsApp */}
+                    <button
+                      onClick={() => handleSendWhatsAppOrder(dist)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
+                      title="Send formatted order message directly to Distributor via WhatsApp"
+                    >
+                      <MessageSquare size={10} />
+                      <span>Send via WhatsApp</span>
                     </button>
                   </div>
                 </div>
@@ -838,6 +1133,8 @@ export default function PharmarackCart() {
               </div>
             ))
           )}
+        </>
+      )}
         </div>
       </div>
 
@@ -877,7 +1174,130 @@ export default function PharmarackCart() {
           </a>
         </div>
       )}
-      </div>
+      {/* ── Distributor Search & Phone Contact Edit Modal ── */}
+      {editingDistributor && createPortal(
+        <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
+            {/* Header */}
+            <div className="bg-bg3/80 px-5 py-3.5 border-b border-glass-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 size={16} className="text-primary" />
+                <h3 className="text-xs font-bold text-text uppercase tracking-wider">
+                  Link Distributor Contact
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingDistributor(null)}
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-bg3 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
+                  Pharmarack Store Name
+                </label>
+                <div className="text-xs font-black text-text bg-bg3/40 px-3 py-2 rounded-xl border border-glass-border/40 flex items-center gap-2">
+                  <Package size={14} className="text-sky shrink-0" />
+                  <span>{editingDistributor.storeName}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
+                  WhatsApp Contact Phone Number
+                </label>
+                <div className="relative">
+                  <Phone size={14} className="absolute left-3 top-2.5 text-muted" />
+                  <input
+                    type="tel"
+                    placeholder="e.g. +91 9876543210"
+                    value={modalPhoneInput}
+                    onChange={(e) => setModalPhoneInput(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-bg border border-glass-border text-xs text-text font-mono font-bold focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Saved Distributors Search & Selector */}
+              <div>
+                <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
+                  Search & Select from Saved Directory
+                </label>
+                <div className="relative mb-2">
+                  <Search size={13} className="absolute left-3 top-2.5 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search saved distributors..."
+                    value={modalSearchTerm}
+                    onChange={(e) => setModalSearchTerm(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg border border-glass-border text-xs text-text focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                  {savedDistributorsList
+                    .filter((d: any) => 
+                      !modalSearchTerm || 
+                      (d.name && d.name.toLowerCase().includes(modalSearchTerm.toLowerCase())) ||
+                      (d.phone && d.phone.includes(modalSearchTerm))
+                    )
+                    .map((d: any) => {
+                      const isSelected = selectedSavedDistId === d.id;
+                      return (
+                        <div
+                          key={d.id}
+                          onClick={() => {
+                            setSelectedSavedDistId(d.id);
+                            if (d.phone) setModalPhoneInput(d.phone);
+                          }}
+                          className={`p-2 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                            isSelected 
+                              ? 'bg-primary/10 border-primary text-primary font-bold' 
+                              : 'bg-bg3/30 border-glass-border/30 text-text hover:bg-bg3/60'
+                          }`}
+                        >
+                          <div className="flex flex-col min-w-0">
+                            <span className="truncate text-[11px] font-bold">{d.name}</span>
+                            <span className="text-[10px] text-muted font-mono">{d.phone || 'No phone set'}</span>
+                          </div>
+                          {isSelected && <Check size={14} className="text-primary shrink-0" />}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="bg-bg3/40 px-5 py-3 border-t border-glass-border flex items-center justify-end gap-2">
+              <button
+                onClick={() => setEditingDistributor(null)}
+                className="px-4 py-2 rounded-xl bg-bg border border-glass-border text-xs text-muted hover:text-text font-bold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveDistributorContact}
+                disabled={isSavingContact}
+                className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isSavingContact ? (
+                  <span className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Check size={14} />
+                )}
+                <span>Save Contact</span>
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+        </div>
       )}
     </div>
   );

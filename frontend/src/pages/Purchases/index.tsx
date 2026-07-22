@@ -648,7 +648,7 @@ const Purchases: React.FC = () => {
       setMfgSuggestions(res || []);
       setShowMfgSuggestions(true);
     } catch (err) {
-      console.error('Error fetching manufacturers:', err);
+      console.error('Error fetching manufacturers (typeahead):', err);
     }
   };
 
@@ -658,7 +658,7 @@ const Purchases: React.FC = () => {
       setMfgSuggestions(res || []);
       setShowMfgSuggestions(true);
     } catch (err) {
-      console.error('Error fetching manufacturers:', err);
+      console.error('Error fetching manufacturers (focus):', err);
     }
   };
 

@@ -269,7 +269,7 @@ router.post('/ledger/pay', async (req, res) => {
       'UPDATE customers SET credit_balance = MAX(0, credit_balance - ?) WHERE id = ?',
       [amount, customer_id]
     );
-        res.json({ success: true, message: `Paid ₹${amount} successfully` });
+    res.json({ success: true, message: `Paid ₹${amount} successfully` });
   } catch (error) {
     console.error('Failed to pay ledger:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -277,3 +277,4 @@ router.post('/ledger/pay', async (req, res) => {
 });
 
 export default router;
+

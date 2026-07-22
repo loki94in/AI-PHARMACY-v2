@@ -36,7 +36,12 @@ export async function shouldRouteToBusiness(): Promise<boolean> {
   
   // Fallback to wa_business_enabled
   const row = await db.get("SELECT value FROM app_settings WHERE key = 'wa_business_enabled'");
-  return row ? row.value === 'true' : false;
+  if (row) {
+    return row.value === 'true';
+  }
+
+  // Default to official API mode (no headless browser wrapper needed)
+  return true;
 }
 
 /** Initialize the WhatsApp client */

@@ -1881,8 +1881,8 @@ const CatalogUpload = () => {
         document.body
       )}
 
-      {isCaptchaActive && (
-        <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+      {isCaptchaActive && createPortal(
+        <div className="fixed inset-0 z-global-modal bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-bg2 border border-border p-6 rounded-2xl max-w-md w-full shadow-2xl flex flex-col items-center text-center gap-4 animate-pulse">
             <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full flex items-center justify-center">
               <AlertTriangle size={32} />
@@ -1907,7 +1907,8 @@ const CatalogUpload = () => {
               <span>Waiting for CAPTCHA resolution...</span>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

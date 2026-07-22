@@ -35,13 +35,25 @@ export const quickOrderEvent = {
   },
 };
 
+export interface LiveCartAddEventDetail {
+  search?: string;
+}
+
 export const liveCartAddEvent = {
-  triggerOpen: () => {
-    window.dispatchEvent(new CustomEvent('app-open-live-cart-add'));
+  triggerOpen: (search?: string) => {
+    window.dispatchEvent(
+      new CustomEvent<LiveCartAddEventDetail>('app-open-live-cart-add', {
+        detail: { search },
+      })
+    );
   },
-  subscribeOpen: (callback: () => void) => {
-    window.addEventListener('app-open-live-cart-add', callback);
-    return () => window.removeEventListener('app-open-live-cart-add', callback);
+  subscribeOpen: (callback: (detail?: LiveCartAddEventDetail) => void) => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<LiveCartAddEventDetail>;
+      callback(customEvent.detail);
+    };
+    window.addEventListener('app-open-live-cart-add', handler);
+    return () => window.removeEventListener('app-open-live-cart-add', handler);
   },
 };
 

@@ -29,16 +29,51 @@ interface UserCart {
   updatedAt: Date;
 }
 
-// In-memory storage for carts (with plans to move to persistent storage)
-// TODO: Replace with database/persistent storage as per plan
+// In-memory cache — acts as a write-through layer over SQLite.
+// Warm reads come from memory; every write is also persisted to the DB.
 const carts = new Map<number, UserCart>();
+
+/** Ensure the telegram_carts table exists and warm-up the in-memory cache. */
+async function initCartStore(): Promise<void> {
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS telegram_carts (
+        chat_id   INTEGER PRIMARY KEY,
+        items     TEXT    NOT NULL DEFAULT '[]',
+        created_at TEXT   NOT NULL,
+        updated_at TEXT   NOT NULL
+      )
+    `);
+    // Load all non-expired carts into memory
+    const rows: Array<{ chat_id: number; items: string; created_at: string; updated_at: string }> =
+      await db.all('SELECT * FROM telegram_carts') as any;
+    for (const row of rows) {
+      carts.set(row.chat_id, {
+        chatId: row.chat_id,
+        items: JSON.parse(row.items),
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+      });
+    }
+    console.log(`[TelegramCart] Loaded ${rows.length} persisted cart(s) from DB.`);
+  } catch (err) {
+    console.error('[TelegramCart] Failed to initialize cart store:', err);
+  }
+}
+
+// Kick off table creation + cache warm-up without blocking module load
+initCartStore();
 
 class TelegramPrescriptionService {
   private readonly CART_EXPIRY_HOURS = 24; // Cart expires after 24 hours
 
   constructor() {
     // Start cleanup interval for expired carts
-    setInterval(() => this.cleanupExpiredCarts(), 60 * 60 * 1000); // Every hour
+    const interval = setInterval(() => this.cleanupExpiredCarts(), 60 * 60 * 1000); // Every hour
+    if (interval.unref) {
+      interval.unref();
+    }
   }
 
   /**
@@ -47,7 +82,6 @@ class TelegramPrescriptionService {
   private getOrCreateCart(chatId: number): UserCart {
     const existingCart = carts.get(chatId);
     if (existingCart) {
-      // Update timestamp
       existingCart.updatedAt = new Date();
       return existingCart;
     }
@@ -56,7 +90,7 @@ class TelegramPrescriptionService {
       chatId,
       items: [],
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     carts.set(chatId, newCart);
@@ -71,25 +105,53 @@ class TelegramPrescriptionService {
   }
 
   /**
-   * Save cart (placeholder for future persistent storage)
+   * Save cart — writes to in-memory cache AND SQLite.
    */
   private async saveCart(cart: UserCart): Promise<void> {
-    // TODO: Implement persistent storage (database or file)
-    // For now, we keep in memory but this function prepares for future persistence
     carts.set(cart.chatId, cart);
+    try {
+      const db = await dbManager.getConnection();
+      await db.run(
+        `INSERT INTO telegram_carts (chat_id, items, created_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           items = excluded.items,
+           updated_at = excluded.updated_at`,
+        [
+          cart.chatId,
+          JSON.stringify(cart.items),
+          cart.createdAt.toISOString(),
+          cart.updatedAt.toISOString(),
+        ]
+      );
+    } catch (err) {
+      console.error('[TelegramCart] Failed to persist cart to DB:', err);
+    }
   }
 
   /**
-   * Clean up expired carts
+   * Clean up expired carts — removes from memory and DB.
    */
-  private cleanupExpiredCarts(): void {
+  private async cleanupExpiredCarts(): Promise<void> {
     const now = new Date();
     const expiryTime = now.getTime() - (this.CART_EXPIRY_HOURS * 60 * 60 * 1000);
+    const expiredIds: number[] = [];
 
     for (const [chatId, cart] of carts.entries()) {
       if (cart.updatedAt.getTime() < expiryTime) {
         carts.delete(chatId);
-        console.log(`Cleaned up expired cart for chat ${chatId}`);
+        expiredIds.push(chatId);
+        console.log(`[TelegramCart] Cleaned up expired cart for chat ${chatId}`);
+      }
+    }
+
+    if (expiredIds.length > 0) {
+      try {
+        const db = await dbManager.getConnection();
+        const placeholders = expiredIds.map(() => '?').join(', ');
+        await db.run(`DELETE FROM telegram_carts WHERE chat_id IN (${placeholders})`, expiredIds);
+      } catch (err) {
+        console.error('[TelegramCart] Failed to delete expired carts from DB:', err);
       }
     }
   }

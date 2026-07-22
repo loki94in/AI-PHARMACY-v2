@@ -1,5 +1,6 @@
 // AI Learning & Automation Command Center (Agent 2 Redesign)
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Brain, 
   Database, 
@@ -2112,7 +2113,7 @@ const Learning: React.FC = () => {
       </div>
 
       {/* Side-by-Side Comparator Modal */}
-      {comparatorFileId && (
+      {comparatorFileId && createPortal(
         <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-bg border border-glass-border rounded-3xl w-11/12 max-w-5xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
             {/* Modal Header */}
@@ -2255,12 +2256,13 @@ const Learning: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Add New Distributor Modal */}
-      {showAddDistModal && (
-        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      {showAddDistModal && createPortal(
+        <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-bg border border-glass-border w-full max-w-md rounded-3xl p-6 space-y-4 text-left shadow-2xl">
             <div className="flex justify-between items-center border-b border-glass-border pb-2.5">
               <h3 className="font-bold text-sm text-text flex items-center gap-2">
@@ -2323,12 +2325,13 @@ const Learning: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Add New Doctor Modal */}
-      {showAddDocModal && (
-        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
+      {showAddDocModal && createPortal(
+        <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
           <div className="bg-bg border border-glass-border w-full max-w-md rounded-3xl p-6 space-y-4 text-left shadow-2xl">
             <div className="flex justify-between items-center border-b border-glass-border pb-2.5">
               <h3 className="font-bold text-sm text-text flex items-center gap-2">
@@ -2423,7 +2426,8 @@ const Learning: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

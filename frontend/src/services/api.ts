@@ -93,7 +93,7 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Diagnostics check for false backend errors
+    // Diagnostics check for false backend errors — result attached to the rejected error so callers can inspect it
     if (isNetworkError && config && config.url !== '/verification/health' && config.url !== '/api/verification/health') {
       console.warn(`[Verification Layer] Request to ${config.url} failed. Performing silent health check...`);
       axios.get('/api/verification/health', {
@@ -101,13 +101,19 @@ apiClient.interceptors.response.use(
       })
       .then(res => {
         if (res.data && res.data.success) {
-          console.error(`[Verification Layer] Diagnostics: Backend & DB are healthy. End-point specific issue or client timeout on: ${config.url}`);
+          const msg = `Backend & DB healthy — endpoint-specific issue on: ${config.url}`;
+          console.error(`[Verification Layer] Diagnostics: ${msg}`);
+          (error as any)._diagnostics = msg;
         } else {
-          console.error(`[Verification Layer] Diagnostics: Database or backend failure detected! Message: ${res.data?.message || 'Unknown backend error'}`);
+          const msg = `Database or backend failure: ${res.data?.message || 'Unknown'}`;
+          console.error(`[Verification Layer] Diagnostics: ${msg}`);
+          (error as any)._diagnostics = msg;
         }
       })
       .catch(healthErr => {
-        console.error(`[Verification Layer] Diagnostics: Backend is fully unreachable. Connection offline. Error: ${healthErr.message}`);
+        const msg = `Backend fully unreachable: ${healthErr.message}`;
+        console.error(`[Verification Layer] Diagnostics: ${msg}`);
+        (error as any)._diagnostics = msg;
       });
     }
 
@@ -142,8 +148,8 @@ let compactInventoryCache: any[] | null = null;
 
 export const getCompactInventoryCache = (): any[] => {
   if (compactInventoryCache) return compactInventoryCache;
-  if (typeof window !== 'undefined' && (window as any).__INVENTORY__) {
-    compactInventoryCache = (window as any).__INVENTORY__;
+  if (typeof window !== 'undefined' && window.__INVENTORY__) {
+    compactInventoryCache = window.__INVENTORY__ as any[];
     return compactInventoryCache || [];
   }
   return [];
@@ -157,6 +163,97 @@ export const setCompactInventoryCache = (data: any[]) => {
     window.dispatchEvent(new Event('inventory-cache-ready'));
   }
 };
+
+// ── Inline payload types for the most-used write operations ──────────────────
+// Keeping these local avoids touching types/api.ts while still giving
+// TypeScript enough info to catch field-name typos at call sites.
+
+interface SaleBillItem {
+  inventory_id: number;
+  medicine_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  discount_percent?: number;
+  batch_number?: string;
+  expiry_date?: string | null;
+  hsn_code?: string;
+  cgst_per?: number;
+  sgst_per?: number;
+  medicine_id?: number;
+}
+
+interface SalePayload {
+  patient_name?: string;
+  patient_phone?: string;
+  doctor_id?: number | null;
+  discount?: number;
+  payment_mode?: string;
+  items: SaleBillItem[];
+  invoice_no?: string;
+}
+
+interface PurchaseBillItem {
+  medicine_name: string;
+  medicine_id?: number | null;
+  batch_number: string;
+  expiry_date: string;
+  quantity: number;
+  purchase_price: number;
+  mrp: number;
+  cgst_per?: number;
+  sgst_per?: number;
+  hsn_code?: string;
+  rack_location?: string;
+  pack_size?: number;
+}
+
+interface PurchasePayload {
+  invoice_no: string;
+  distributor_id?: number | null;
+  distributor_name?: string;
+  purchase_date: string;
+  items: PurchaseBillItem[];
+  total_amount?: number;
+  discount?: number;
+}
+
+interface ReturnPayload {
+  distributor_id?: number;
+  distributor_name?: string;
+  return_date?: string;
+  notes?: string;
+  items: Array<{
+    inventory_id: number;
+    medicine_name: string;
+    quantity: number;
+    purchase_price: number;
+    batch_number?: string;
+    expiry_date?: string;
+  }>;
+  total_amount: number;
+}
+
+interface CustomerReturnPayload {
+  invoice_no: string;
+  patient_name?: string;
+  patient_phone?: string;
+  return_date?: string;
+  reason?: string;
+  items: Array<{
+    inventory_id: number;
+    medicine_name: string;
+    quantity: number;
+    unit_price: number;
+  }>;
+  total_amount: number;
+}
+
+interface AppSettings {
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // API methods mapping
 export const api = {
@@ -193,22 +290,22 @@ export const api = {
   
   // Sales / POS
   getSalesHistory: () => apiClient.get('/sales/history').then(res => res.data),
-  createSale: (data: any) => apiClient.post('/sales', data).then(res => res.data),
-  holdBill: (data: any) => apiClient.post('/sales/hold', data).then(res => res.data),
+  createSale: (data: SalePayload) => apiClient.post('/sales', data).then(res => res.data),
+  holdBill: (data: SalePayload) => apiClient.post('/sales/hold', data).then(res => res.data),
   getHeldBills: () => apiClient.get('/sales/hold').then(res => res.data),
   restoreHeldBill: (id: number) => apiClient.post(`/sales/hold/${id}/restore`).then(res => res.data),
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
   
   // Verification Layer APIs
   verifyHealth: () => apiClient.get('/verification/health').then(res => res.data),
-  validateBill: (data: any) => apiClient.post('/verification/validate-bill', data).then(res => res.data),
+  validateBill: (data: SalePayload) => apiClient.post('/verification/validate-bill', data).then(res => res.data),
   verifySalesHistory: (invoiceNo: string) => apiClient.get(`/verification/verify-sales-history/${invoiceNo}`).then(res => res.data),
   
   // Sells (invoice list/edit)
   listSales: (params?: { search?: string; date_from?: string; date_to?: string; batch?: string; limit?: number; page?: number; include_items?: string }) =>
     apiClient.get('/sales/list', { params }).then(res => res.data),
   getSale: (id: number) => apiClient.get(`/sales/${id}`).then(res => res.data),
-  updateSale: (id: number, data: any) => apiClient.put(`/sales/${id}`, data).then(res => res.data),
+  updateSale: (id: number, data: Partial<SalePayload>) => apiClient.put(`/sales/${id}`, data).then(res => res.data),
   deleteSale: (id: number) => apiClient.delete(`/sales/${id}`).then(res => res.data),
   
   // Purchases
@@ -216,17 +313,17 @@ export const api = {
   getEarliestPurchaseDate: () => apiClient.get<{ earliest: string | null }>('/purchases/earliest-date').then(res => res.data),
   getPurchaseItems: () => apiClient.get('/purchases/items/all').then(res => res.data),
   getPurchase: (id: number) => apiClient.get(`/purchases/${id}`).then(res => res.data),
-  updatePurchase: (id: number, data: any) => apiClient.put(`/purchases/${id}/full`, data).then(res => res.data),
+  updatePurchase: (id: number, data: Partial<PurchasePayload>) => apiClient.put(`/purchases/${id}/full`, data).then(res => res.data),
   deletePurchase: (id: number) => apiClient.delete(`/purchases/${id}`).then(res => res.data),
-  createPurchase: (data: any) => apiClient.post('/purchases', data).then(res => res.data),
+  createPurchase: (data: PurchasePayload) => apiClient.post('/purchases', data).then(res => res.data),
 
   // Customer Returns
   searchInvoiceForReturn: (invoice_no: string) => apiClient.get('/customer-returns/search-invoice', { params: { invoice_no } }).then(res => res.data),
-  createCustomerReturn: (data: any) => apiClient.post('/customer-returns', data).then(res => res.data),
+  createCustomerReturn: (data: CustomerReturnPayload) => apiClient.post('/customer-returns', data).then(res => res.data),
   getCustomerReturnsHistory: (params?: { page?: number; limit?: number; start?: string; end?: string; search?: string }) => apiClient.get('/customer-returns/history', { params }).then(res => res.data),
   
   // Returns (Supplier)
-  createManualPurchase: (data: any) => apiClient.post('/purchases/manual', data).then(res => res.data),
+  createManualPurchase: (data: PurchasePayload) => apiClient.post('/purchases/manual', data).then(res => res.data),
   getDistributors: () => apiClient.get('/distributors').then(res => res.data),
   getPendingReturns: (distributorId: number) => apiClient.get(`/distributors/${distributorId}/pending-returns`).then(res => res.data),
   getLastPurchase: (name: string, distributorId?: number) => {
@@ -313,10 +410,10 @@ export const api = {
   restoreSnapshot: (snapshotId: number) => apiClient.post('/migration/snapshots/restore', { snapshotId }).then(r => r.data),
 
   
-  addPatient: (data: any) => apiClient.post('/crm/patients', data).then(res => res.data),
+  addPatient: (data: Omit<import('../types/api').Patient, 'id'>) => apiClient.post('/crm/patients', data).then(res => res.data),
   getDoctors: () => apiClient.get('/crm/doctors').then(res => res.data),
-  addDoctor: (data: any) => apiClient.post('/crm/doctors', data).then(res => res.data),
-  updateDoctor: (id: number | string, data: any) => apiClient.put(`/crm/doctors/${id}`, data).then(res => res.data),
+  addDoctor: (data: Omit<import('../types/api').Doctor, 'id'>) => apiClient.post('/crm/doctors', data).then(res => res.data),
+  updateDoctor: (id: number | string, data: Partial<import('../types/api').Doctor>) => apiClient.put(`/crm/doctors/${id}`, data).then(res => res.data),
   sendDailyDoctorReports: (date?: string) => apiClient.post('/crm/doctors/send-daily-reports', { date }).then(res => res.data),
   getDoctorSuggestions: (id: number, limit = 25) =>
     apiClient.get(`/crm/doctors/${id}/suggestions`, { params: { limit } }).then(r => r.data),
@@ -449,7 +546,7 @@ export const api = {
   toggleIgnore: (phone: string, ignore: boolean, reason?: string) => apiClient.post('/messaging/toggle-ignore', { phone, ignore, reason }).then(res => res.data),
   triggerManualScan: (chatId: string, messageId: string) => apiClient.post(`/messaging/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/scan`).then(res => res.data),
   getSettings: () => apiClient.get('/settings').then(res => res.data),
-  saveSettings: (settings: any) => apiClient.post('/settings/save', settings).then(res => res.data),
+  saveSettings: (settings: AppSettings) => apiClient.post('/settings/save', settings).then(res => res.data),
   
   // Returns
   getReturns: (params?: { search?: string; date_from?: string; date_to?: string; min_amount?: number; max_amount?: number; limit?: number }) => apiClient.get('/returns', { params }).then(res => res.data),
@@ -457,7 +554,7 @@ export const api = {
   resolveReturnMissing: (id: number) => apiClient.get(`/returns/${id}/resolve-missing`).then(res => res.data),
   deleteReturn: (id: number) => apiClient.delete(`/returns/${id}`).then(res => res.data),
   updateReturn: (id: number, data: { items: any[]; total_amount: number }) => apiClient.put(`/returns/${id}`, data).then(res => res.data),
-  createReturn: (data: any) => apiClient.post('/returns', data).then(res => res.data),
+  createReturn: (data: ReturnPayload) => apiClient.post('/returns', data).then(res => res.data),
   getNearExpiry: (months: number = 6) => apiClient.get('/returns/near-expiry', { params: { months } }).then(res => res.data),
   lookupPurchases: (name: string, batch?: string) => {
     const params: any = { name };
@@ -505,7 +602,7 @@ export const api = {
   deleteDeliveryBoy: (id: number) => apiClient.delete(`/dispatch/delivery-boys/${id}`).then(res => res.data),
 
   // CRM — extended
-  updatePatient: (id: number, data: any) => apiClient.put(`/crm/patients/${id}`, data).then(res => res.data),
+  updatePatient: (id: number, data: Partial<import('../types/api').Patient>) => apiClient.put(`/crm/patients/${id}`, data).then(res => res.data),
   deletePatient: (id: number) => apiClient.delete(`/crm/patients/${id}`).then(res => res.data),
   deleteDoctor: (id: number | string) => apiClient.delete(`/crm/doctors/${id}`).then(res => res.data),
   getPatientHistory: (id: number) => apiClient.get(`/crm/${id}/history`).then(res => res.data),

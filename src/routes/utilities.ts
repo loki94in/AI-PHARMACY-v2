@@ -3,9 +3,11 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { config } from '../config/index.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+const getDbPath = () => config.dbPath;
 
 const router = express.Router();
 
@@ -201,7 +203,7 @@ router.post('/cloud/push', async (req, res) => {
     const bucketName = process.env.S3_BUCKET_NAME || 'ai-pharmacy-backups';
     const key = `backups/app_${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
 
-    const fileStream = fs.createReadStream(DB_PATH);
+    const fileStream = fs.createReadStream(getDbPath());
 
     const uploadParams = {
       Bucket: bucketName,
@@ -406,7 +408,7 @@ router.post('/backup/manual', async (req, res) => {
       // Create backup of active db directly as a zip archive
       const tempDbFile = `snapshot_manual_${Date.now()}.db`;
       const tempDbPath = path.join(SNAPSHOTS_DIR, tempDbFile);
-      const tempDb = new Database(DB_PATH);
+      const tempDb = new Database(getDbPath());
       await tempDb.backup(tempDbPath);
       tempDb.close();
 
@@ -544,7 +546,7 @@ router.post('/reset-data', async (req, res) => {
       try {
         const { open } = await import('sqlite');
         const { default: sqlite3 } = await import('sqlite3');
-        const dbRaw = await open({ filename: DB_PATH, driver: sqlite3.Database });
+        const dbRaw = await open({ filename: getDbPath(), driver: sqlite3.Database });
         try {
           appSettingsRows = await dbRaw.all('SELECT * FROM app_settings');
         } catch (_) {}
@@ -593,7 +595,7 @@ router.post('/reset-data', async (req, res) => {
 
     // 3. Recreate all tables from scratch via the schema migrations
     const { ensureSchema } = await import('../database.js');
-    await ensureSchema(DB_PATH);
+    await ensureSchema(getDbPath());
 
     // 3b. Compact the DB file to reclaim space from dropped tables
     try {
@@ -607,7 +609,7 @@ router.post('/reset-data', async (req, res) => {
       try {
         const { open } = await import('sqlite');
         const { default: sqlite3 } = await import('sqlite3');
-        const dbRaw = await open({ filename: DB_PATH, driver: sqlite3.Database });
+        const dbRaw = await open({ filename: getDbPath(), driver: sqlite3.Database });
         
         await dbRaw.run('BEGIN TRANSACTION');
         try {
@@ -635,7 +637,7 @@ router.post('/reset-data', async (req, res) => {
       try {
         const { open } = await import('sqlite');
         const { default: sqlite3 } = await import('sqlite3');
-        const dbRaw = await open({ filename: DB_PATH, driver: sqlite3.Database });
+        const dbRaw = await open({ filename: getDbPath(), driver: sqlite3.Database });
         await dbRaw.run(
           "INSERT INTO action_logs (action_type, description) VALUES ('FACTORY_RESET', 'Full factory reset — all data and settings wiped')"
         );
