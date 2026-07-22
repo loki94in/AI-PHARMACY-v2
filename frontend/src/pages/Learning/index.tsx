@@ -1940,7 +1940,7 @@ const Learning: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-glass-border/40">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-3 border-t border-glass-border/40">
                     <div className="space-y-1">
                       <label className="text-[9px] font-bold text-muted uppercase">Admin Alert Numbers</label>
                       <input
@@ -1962,13 +1962,23 @@ const Learning: React.FC = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Alert Numbers</label>
+                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Alert Numbers (1)</label>
                       <input
                         type="text"
                         className="premium-input w-full text-xs"
                         placeholder="e.g. +919876543210"
                         value={settingsData.delivery_boy_whatsapp || ''}
                         onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Alert Numbers (2 / Admin)</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs"
+                        placeholder="e.g. +919876543210"
+                        value={settingsData.delivery_boy_whatsapp_2 || ''}
+                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp_2: e.target.value })}
                       />
                     </div>
                   </div>

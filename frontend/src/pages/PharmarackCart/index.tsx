@@ -58,11 +58,13 @@ export default function PharmarackCart() {
 
   // Saved distributor contacts and store settings
   const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
-  const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; deliveryBoyPhone: string }>({
+  const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; deliveryBoyPhone: string; deliveryBoyPhone2: string }>({
     name: 'AI Pharmacy',
     phone: '',
     address: '',
-    deliveryBoyPhone: ''
+    email: '',
+    deliveryBoyPhone: '',
+    deliveryBoyPhone2: ''
   });
 
   // Custom phone number override map by storeId
@@ -111,14 +113,16 @@ export default function PharmarackCart() {
       }
     }).catch(e => console.error('Failed to load saved distributors for WhatsApp matching:', e));
 
-    // Fetch pharmacy settings (store name, phone, address, delivery boy whatsapp)
+    // Fetch pharmacy settings (store name, phone, address, email, delivery boy whatsapp)
     apiClient.get('/settings').then(res => {
       if (res?.data) {
         setStoreInfo({
           name: res.data.shop_name || res.data.store_name || res.data.pharmacy_name || 'AI Pharmacy',
           phone: res.data.shop_phone || res.data.store_phone || res.data.pharmacy_phone || res.data.phone || '',
           address: res.data.shop_address || res.data.store_address || res.data.address || '',
-          deliveryBoyPhone: res.data.delivery_boy_whatsapp || res.data.dinesh_whatsapp_number || ''
+          email: res.data.email || '',
+          deliveryBoyPhone: res.data.delivery_boy_whatsapp || res.data.dinesh_whatsapp_number || '',
+          deliveryBoyPhone2: res.data.delivery_boy_whatsapp_2 || res.data.admin_whatsapp || ''
         });
       }
     }).catch(e => console.error('Failed to load store info:', e));
@@ -311,20 +315,22 @@ export default function PharmarackCart() {
       phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
     }
 
-    // Delivery staff contact from Pharmarack or saved delivery alert numbers
+    // Delivery staff contact from Pharmarack or saved delivery alert numbers (Primary & Secondary / Admin)
     const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
-    const deliveryContactPhone = (deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone || '';
+    const deliveryContactPhone1 = (deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone || '';
+    const deliveryContactPhone2 = storeInfo.deliveryBoyPhone2 || '';
 
     let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
     msg += `• Store: *${storeInfo.name}*\n`;
     msg += `• Phone: *${storeInfo.phone || 'N/A'}*\n`;
     msg += `• Address: *${storeInfo.address || 'N/A'}*\n`;
+    if (storeInfo.email) msg += `• Email: *${storeInfo.email}*\n`;
 
-    if (deliveryStaff || deliveryContactPhone) {
+    if (deliveryContactPhone1) {
       msg += `\n🛵 *Delivery Contact:*\n`;
       if (deliveryStaff) msg += `• Person: *${deliveryStaff.name}*\n`;
-      if (deliveryContactPhone) msg += `• Phone: *${deliveryContactPhone}*\n`;
+      msg += `• Phone: *${deliveryContactPhone1}*\n`;
     }
 
     msg += `\n----------------------------------\n`;
