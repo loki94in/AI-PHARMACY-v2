@@ -377,13 +377,46 @@ const DistributorMessagesSection: React.FC = () => {
 // WHATSAPP SECTION — embedded web.whatsapp.com iframe
 // ═══════════════════════════════════════════════════════════════════════════════
 
+interface WaChatItem {
+  id: string;
+  name: string;
+  unreadCount: number;
+  timestamp?: number;
+  isGroup?: boolean;
+  lastMessage?: string | null;
+  resolvedNumber?: string;
+}
+
+interface WaMessageItem {
+  id: string;
+  body: string;
+  fromMe: boolean;
+  timestamp: number;
+  type?: string;
+  hasMedia?: boolean;
+}
+
 const WhatsAppSection: React.FC = () => {
   const [status, setStatus] = useState<{ isReady: boolean; qrUrl: string | null; message?: string }>({ isReady: false, qrUrl: null });
-  const [loading, setLoading] = useState(false);
+  const [chats, setChats] = useState<WaChatItem[]>([]);
+  const [activeChat, setActiveChat] = useState<WaChatItem | null>(null);
+  const [messages, setMessages] = useState<WaMessageItem[]>([]);
+  const [chatSearch, setChatSearch] = useState('');
+  const [messageInput, setMessageInput] = useState('');
+  const [loadingChats, setLoadingChats] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [sending, setSending] = useState(false);
   const [launchingLogin, setLaunchingLogin] = useState(false);
-  const [targetPhone, setTargetPhone] = useState('');
-  const [quickMsg, setQuickMsg] = useState('');
-  const [templateType, setTemplateType] = useState<string>('custom');
+
+  // New Chat modal/state
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [newChatPhone, setNewChatPhone] = useState('');
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   const checkStatus = async () => {
     try {
@@ -394,18 +427,64 @@ const WhatsAppSection: React.FC = () => {
     }
   };
 
+  const fetchChats = async () => {
+    setLoadingChats(true);
+    try {
+      const data = await apiClient.get('/messaging/chats').then(res => res.data);
+      if (Array.isArray(data)) {
+        setChats(data);
+        if (!activeChat && data.length > 0) {
+          setActiveChat(data[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch WhatsApp chats:', err);
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
+  const fetchMessages = async (chatId: string) => {
+    setLoadingMsgs(true);
+    try {
+      const data = await apiClient.get(`/messaging/chats/${encodeURIComponent(chatId)}/messages`).then(res => res.data);
+      if (Array.isArray(data)) {
+        setMessages(data);
+        setTimeout(scrollToBottom, 100);
+      }
+    } catch (err) {
+      console.error('Failed to fetch chat messages:', err);
+    } finally {
+      setLoadingMsgs(false);
+    }
+  };
+
   useEffect(() => {
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    fetchChats();
+    const interval = setInterval(() => {
+      checkStatus();
+      fetchChats();
+    }, 6000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (activeChat) {
+      fetchMessages(activeChat.id);
+      const msgInterval = setInterval(() => {
+        fetchMessages(activeChat.id);
+      }, 5000);
+      return () => clearInterval(msgInterval);
+    }
+  }, [activeChat?.id]);
 
   const handleLaunchLogin = async () => {
     setLaunchingLogin(true);
     try {
-      toastEvent.trigger('Opening official WhatsApp login page...', 'info');
+      toastEvent.trigger('Opening WhatsApp login page...', 'info');
       await apiClient.post('/messaging/login-window');
-      toastEvent.trigger('WhatsApp login window launched. Scan QR code in Chrome.', 'success');
+      toastEvent.trigger('WhatsApp login window launched in Chrome.', 'success');
       setTimeout(checkStatus, 2000);
     } catch (err: any) {
       console.error('Failed to launch login window:', err);
@@ -419,43 +498,92 @@ const WhatsAppSection: React.FC = () => {
     window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer');
   };
 
-  const handleSendQuickMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!targetPhone.trim()) {
-      toastEvent.trigger('Please enter a recipient mobile number', 'error');
-      return;
+    if (!messageInput.trim() || !activeChat) return;
+
+    const textToSend = messageInput.trim();
+    const recipientNum = activeChat.resolvedNumber || activeChat.id.split('@')[0];
+
+    setSending(true);
+    try {
+      await apiClient.post('/messaging/send', { number: recipientNum, message: textToSend });
+      toastEvent.trigger('Message sent!', 'success');
+      setMessageInput('');
+      
+      // Append optimistically
+      const newMsg: WaMessageItem = {
+        id: `temp_${Date.now()}`,
+        body: textToSend,
+        fromMe: true,
+        timestamp: Math.floor(Date.now() / 1000)
+      };
+      setMessages(prev => [...prev, newMsg]);
+      setTimeout(scrollToBottom, 50);
+
+      // Refresh messages
+      await fetchMessages(activeChat.id);
+      await fetchChats();
+    } catch (err: any) {
+      console.error('Failed to send message:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to send message', 'error');
+    } finally {
+      setSending(false);
     }
-    let cleanNum = targetPhone.replace(/\D/g, '');
-    if (cleanNum.length === 10) cleanNum = `91${cleanNum}`;
-    const encodedText = encodeURIComponent(quickMsg.trim());
-    window.open(`https://wa.me/${cleanNum}?text=${encodedText}`, '_blank');
-    toastEvent.trigger(`Opening WhatsApp for ${cleanNum}...`, 'success');
   };
 
-  const applyTemplate = (type: string) => {
-    setTemplateType(type);
-    if (type === 'refill') {
-      setQuickMsg('Hello! This is a reminder from AI Pharmacy that your monthly medicine refill is due. Please contact us to confirm your order.');
-    } else if (type === 'invoice') {
-      setQuickMsg('Dear Customer, your pharmacy invoice is ready. Thank you for choosing AI Pharmacy!');
-    } else if (type === 'order') {
-      setQuickMsg('Your medicine order has been packed and is ready for pickup/delivery at AI Pharmacy.');
-    } else {
-      setQuickMsg('');
+  const handleStartNewChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChatPhone.trim()) return;
+
+    let clean = newChatPhone.replace(/\D/g, '');
+    if (clean.length === 10) clean = `91${clean}`;
+    const chatId = `${clean}@c.us`;
+
+    const newChatItem: WaChatItem = {
+      id: chatId,
+      name: `+${clean}`,
+      unreadCount: 0,
+      resolvedNumber: clean
+    };
+
+    setChats(prev => [newChatItem, ...prev.filter(c => c.id !== chatId)]);
+    setActiveChat(newChatItem);
+    setShowNewChatModal(false);
+    setNewChatPhone('');
+  };
+
+  const applyTemplate = (text: string) => {
+    setMessageInput(text);
+  };
+
+  const filteredChats = chats.filter(c => 
+    c.name.toLowerCase().includes(chatSearch.toLowerCase()) || 
+    (c.resolvedNumber && c.resolvedNumber.includes(chatSearch)) ||
+    (c.lastMessage && c.lastMessage.toLowerCase().includes(chatSearch.toLowerCase()))
+  );
+
+  const formatTimestamp = (ts?: number) => {
+    if (!ts) return '';
+    const date = new Date(ts * 1000);
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
+    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   };
 
   return (
-    <div className="flex flex-col h-full gap-4 overflow-y-auto p-1">
-      {/* Top Header Card */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-bg2 rounded-xl border border-border flex-shrink-0">
+    <div className="flex flex-col h-full gap-3 overflow-hidden">
+      {/* Top Controls Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg2 rounded-xl border border-border flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
-            <MessageCircle size={22} />
+          <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
+            <MessageCircle size={18} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-text">WhatsApp Account &amp; Messaging</h2>
+              <h2 className="text-xs font-bold text-text uppercase tracking-wider">WhatsApp Live Chat Hub</h2>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                 status.isReady 
                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
@@ -464,153 +592,277 @@ const WhatsAppSection: React.FC = () => {
                 {status.isReady ? 'Active & Connected' : 'Login Required'}
               </span>
             </div>
-            <p className="text-xs text-muted mt-0.5">Official WhatsApp session management &amp; patient messaging hub</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={openDirectWeb}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-bg3 border border-border rounded-lg text-xs font-semibold text-text hover:bg-bg transition-colors"
+            onClick={fetchChats}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg transition-colors"
+            title="Refresh chats"
           >
-            <ExternalLink size={14} />
-            Open web.whatsapp.com
+            <RefreshCw size={13} className={loadingChats ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setShowNewChatModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg transition-colors"
+          >
+            <Send size={13} />
+            + New Chat
           </button>
           <button
             onClick={handleLaunchLogin}
             disabled={launchingLogin}
-            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
           >
-            <Zap size={14} />
-            {launchingLogin ? 'Opening Login...' : 'Link WhatsApp Account'}
+            <Zap size={13} />
+            {launchingLogin ? 'Opening...' : 'Link Account'}
           </button>
         </div>
       </div>
 
-      {/* Main Grid Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
-        {/* Card 1: Account Login Status */}
-        <div className="p-5 bg-bg2 rounded-xl border border-border flex flex-col gap-4">
-          <div className="border-b border-border pb-3">
-            <h3 className="text-xs font-bold text-text uppercase tracking-wider">Session Status</h3>
-            <p className="text-xs text-muted mt-0.5">Scan QR code or click Link Account to authorize Chrome session</p>
+      {/* Main WhatsApp Workspace UI */}
+      <div className="flex flex-1 min-h-0 bg-bg2 rounded-xl border border-border overflow-hidden">
+        {/* Left Chat List Sidebar */}
+        <div className="w-80 flex flex-col border-r border-border bg-bg2/60 flex-shrink-0">
+          {/* Search Bar */}
+          <div className="p-3 border-b border-border">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Search chats or phone numbers..."
+                value={chatSearch}
+                onChange={e => setChatSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
+              />
+            </div>
           </div>
 
-          {status.isReady ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-center gap-3">
-              <div className="p-3 bg-emerald-500/10 rounded-full text-emerald-400">
-                <CheckCircle2 size={32} />
+          {/* Chat List */}
+          <div className="flex-1 overflow-y-auto divide-y divide-border/50">
+            {loadingChats && chats.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted">Loading WhatsApp chats...</div>
+            ) : filteredChats.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted">
+                {chats.length === 0 ? 'No active chats found. Start a new chat above!' : 'No chats match search filter.'}
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-text">WhatsApp Session Active</h4>
-                <p className="text-xs text-muted mt-1 max-w-xs">Your WhatsApp account is authenticated and ready to send messages and reminders.</p>
+            ) : (
+              filteredChats.map(chat => (
+                <div
+                  key={chat.id}
+                  onClick={() => setActiveChat(chat)}
+                  className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${
+                    activeChat?.id === chat.id
+                      ? 'bg-primary/10 border-l-2 border-l-primary'
+                      : 'hover:bg-bg3/50'
+                  }`}
+                >
+                  {/* Contact Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs flex-shrink-0 border border-emerald-500/30">
+                    {(chat.name || 'W')[0].toUpperCase()}
+                  </div>
+
+                  {/* Contact Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-semibold text-text truncate">{chat.name}</h4>
+                      {chat.timestamp && (
+                        <span className="text-[10px] text-muted flex-shrink-0">{formatTimestamp(chat.timestamp)}</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted truncate mt-0.5">
+                      {chat.lastMessage || 'No recent messages'}
+                    </p>
+                  </div>
+
+                  {/* Unread badge */}
+                  {chat.unreadCount > 0 && (
+                    <span className="px-1.5 py-0.5 bg-emerald-500 text-white rounded-full text-[10px] font-bold">
+                      {chat.unreadCount}
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Right Active Chat Thread */}
+        <div className="flex-1 flex flex-col min-w-0 bg-bg">
+          {activeChat ? (
+            <>
+              {/* Chat Thread Header */}
+              <div className="flex items-center justify-between p-3.5 border-b border-border bg-bg2 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs border border-emerald-500/30">
+                    {(activeChat.name || 'W')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-text">{activeChat.name}</h3>
+                    <p className="text-[10px] text-muted">{activeChat.resolvedNumber ? `+${activeChat.resolvedNumber}` : activeChat.id}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openDirectWeb}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-bg3 border border-border rounded-md text-[11px] font-medium text-text hover:bg-bg"
+                  >
+                    <ExternalLink size={12} />
+                    Open web.whatsapp.com
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={handleLaunchLogin}
-                className="mt-2 text-xs font-semibold text-emerald-400 hover:underline"
-              >
-                Re-authenticate / Change Account
-              </button>
-            </div>
-          ) : status.qrUrl ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-4 bg-bg3 border border-border rounded-xl text-center gap-3">
-              <img src={status.qrUrl} alt="WhatsApp QR Code" className="w-48 h-48 rounded-lg border border-border p-2 bg-white" />
-              <p className="text-xs text-muted">Scan this QR code with WhatsApp on your phone (Linked Devices)</p>
-            </div>
+
+              {/* Chat Message History Stream */}
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3.5 bg-bg/50">
+                {loadingMsgs && messages.length === 0 ? (
+                  <div className="m-auto text-xs text-muted">Loading conversation history...</div>
+                ) : messages.length === 0 ? (
+                  <div className="m-auto text-center text-xs text-muted max-w-xs">
+                    No recorded messages in this chat yet. Type a message below to start the conversation!
+                  </div>
+                ) : (
+                  messages.map(msg => (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col max-w-[70%] ${
+                        msg.fromMe ? 'ml-auto items-end' : 'mr-auto items-start'
+                      }`}
+                    >
+                      <div
+                        className={`p-3 rounded-2xl text-xs leading-relaxed break-words ${
+                          msg.fromMe
+                            ? 'bg-emerald-600 text-white rounded-br-none shadow-sm'
+                            : 'bg-bg2 text-text border border-border rounded-bl-none shadow-sm'
+                        }`}
+                      >
+                        {msg.body}
+                      </div>
+                      <span className="text-[10px] text-muted px-1 mt-1">
+                        {formatTimestamp(msg.timestamp)}
+                      </span>
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Quick Template Chips */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg2 border-t border-border flex-shrink-0 overflow-x-auto">
+                <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex-shrink-0">Quick Templates:</span>
+                {[
+                  { label: 'Refill Reminder', text: 'Hello! This is a reminder from AI Pharmacy that your monthly medicine refill is due. Please contact us to confirm your order.' },
+                  { label: 'Bill Shared', text: 'Dear Customer, your pharmacy invoice is ready. Thank you for choosing AI Pharmacy!' },
+                  { label: 'Order Ready', text: 'Your medicine order has been packed and is ready for pickup/delivery at AI Pharmacy.' },
+                ].map((tpl, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => applyTemplate(tpl.text)}
+                    className="px-2.5 py-1 bg-bg3 border border-border hover:bg-primary/20 hover:border-primary/40 rounded-full text-[11px] font-medium text-text flex-shrink-0 transition-colors"
+                  >
+                    {tpl.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Message Composer Bar */}
+              <form onSubmit={handleSendMessage} className="p-3 bg-bg2 border-t border-border flex items-center gap-2 flex-shrink-0">
+                <textarea
+                  rows={1}
+                  placeholder="Type a WhatsApp message..."
+                  value={messageInput}
+                  onChange={e => setMessageInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage(e);
+                    }
+                  }}
+                  className="flex-1 px-3.5 py-2 bg-bg3 border border-border rounded-xl text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary resize-none"
+                />
+                <button
+                  type="submit"
+                  disabled={sending || !messageInput.trim()}
+                  className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-sm transition-colors disabled:opacity-40 flex-shrink-0"
+                  title="Send message"
+                >
+                  <Send size={15} />
+                </button>
+              </form>
+            </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-bg3 border border-border rounded-xl text-center gap-3">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
               <div className="p-3 bg-bg2 rounded-full text-muted">
-                <Clock size={32} />
+                <MessageSquare size={36} />
               </div>
               <div>
-                <h4 className="text-sm font-semibold text-text">No Active Session</h4>
-                <p className="text-xs text-muted mt-1 max-w-xs">Click <strong>Link WhatsApp Account</strong> above to open the official WhatsApp login page cleanly in Chrome.</p>
+                <h3 className="text-sm font-bold text-text">No Chat Selected</h3>
+                <p className="text-xs text-muted mt-1">Select a conversation from the left sidebar or click + New Chat to message a patient.</p>
               </div>
               <button
-                onClick={handleLaunchLogin}
-                className="px-4 py-2 bg-primary text-white font-semibold rounded-lg text-xs hover:brightness-110 transition-colors shadow-sm"
+                onClick={() => setShowNewChatModal(true)}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-500 shadow-sm"
               >
-                Open Official Login Page
+                + Start New WhatsApp Chat
               </button>
             </div>
           )}
         </div>
-
-        {/* Card 2: Direct Patient Message Console */}
-        <div className="p-5 bg-bg2 rounded-xl border border-border flex flex-col gap-4">
-          <div className="border-b border-border pb-3">
-            <h3 className="text-xs font-bold text-text uppercase tracking-wider">Direct Patient Messaging</h3>
-            <p className="text-xs text-muted mt-0.5">Send instant WhatsApp bills, refill reminders, or customer alerts</p>
-          </div>
-
-          <form onSubmit={handleSendQuickMessage} className="flex flex-col gap-3.5 flex-1">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-text">Mobile Number</label>
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-2 bg-bg3 border border-border rounded-lg text-xs font-semibold text-text">
-                  +91
-                </span>
-                <input
-                  type="tel"
-                  placeholder="Enter 10-digit phone number"
-                  value={targetPhone}
-                  onChange={(e) => setTargetPhone(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-text">Quick Template</label>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { id: 'custom', label: 'Custom' },
-                  { id: 'refill', label: 'Refill Reminder' },
-                  { id: 'invoice', label: 'Bill Shared' },
-                  { id: 'order', label: 'Order Ready' },
-                ].map(t => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => applyTemplate(t.id)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                      templateType === t.id
-                        ? 'bg-primary text-white'
-                        : 'bg-bg3 text-muted hover:text-text border border-border'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1 flex-1">
-              <label className="text-xs font-medium text-text">Message Content</label>
-              <textarea
-                rows={3}
-                placeholder="Type your message..."
-                value={quickMsg}
-                onChange={(e) => setQuickMsg(e.target.value)}
-                className="w-full h-full min-h-[90px] p-3 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary resize-none"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg text-xs transition-colors shadow-sm w-fit"
-            >
-              <Send size={14} />
-              Send via WhatsApp
-            </button>
-          </form>
-        </div>
       </div>
+
+      {/* New Chat Modal */}
+      {showNewChatModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-border rounded-xl p-5 w-full max-w-md shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="text-sm font-bold text-text">Start New WhatsApp Conversation</h3>
+              <button onClick={() => setShowNewChatModal(false)} className="text-muted hover:text-text">✕</button>
+            </div>
+
+            <form onSubmit={handleStartNewChat} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-text">Patient Mobile Number</label>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-2 bg-bg3 border border-border rounded-lg text-xs font-semibold text-text">+91</span>
+                  <input
+                    type="tel"
+                    placeholder="Enter 10-digit mobile number"
+                    value={newChatPhone}
+                    onChange={e => setNewChatPhone(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
+                    autoFocus
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewChatModal(false)}
+                  className="px-4 py-2 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm"
+                >
+                  Open Chat
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 
 
 

@@ -1,3 +1,47 @@
+# Restore WhatsApp Web Client Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Re-enable the real `whatsapp-web.js` client in `src/whatsappClient.ts` so the existing Settings-page QR login and `whatsappIntentService` inbound pipeline work with a live WhatsApp Web session again, without touching the Business Cloud API path or any frontend code.
+
+**Architecture:** `src/whatsappClient.ts` currently has `initClient`/`destroyClient`/`forceReconnect` stubbed to no-ops (commit `f208f220`), and `sendMessage`'s non-business branch just logs instead of sending. This plan restores the real Puppeteer-backed `whatsapp-web.js` `Client` (QR auth, session persistence via `LocalAuth`, `message_create`/`message_ack` event handlers, background chat sync) that existed before that commit, re-integrated into the current file's structure. The Business API branch (`shouldRouteToBusiness()`, `whatsappBusinessService` calls) is untouched.
+
+**Tech Stack:** Node/TypeScript (ESM, `Node16` module resolution), `whatsapp-web.js` ^1.22.0 (already installed, bundles its own `puppeteer` 24.38.0 — already present in `node_modules`), existing SQLite (`dbManager`) and SSE (`eventService`) infra.
+
+## Global Constraints
+
+- Spec: `docs/superpowers/specs/2026-07-22-restore-whatsapp-web-client-design.md`
+- `shouldRouteToBusiness()` must stay byte-for-byte unchanged — it is exercised by `tests/whatsappRouting.test.ts` (in the jest `testMatch` allowlist in `jest.config.js`) and by other suites that mock `../src/whatsappClient.js`.
+- `getChats()`, `getChatMessages()`, `getMessageMedia()` must stay byte-for-byte unchanged — they read from the SQLite cache and don't depend on which client is active (per spec).
+- No new npm dependencies, no new DB tables/columns, no frontend changes.
+- No unrelated refactors (e.g. don't extract the ignore-check into a shared module even though `whatsappIntentService.ts` has a near-identical private copy — that duplication predates this change and is out of scope).
+
+---
+
+### Task 1: Restore the real whatsapp-web.js client
+
+**Files:**
+- Modify: `src/whatsappClient.ts` (full contents replaced — see below)
+- Test (existing, unmodified, used to verify no regression): `tests/whatsappRouting.test.ts`, `tests/whatsappIntentGate.test.ts`
+
+**Interfaces:**
+- Consumes: `whatsappIntentService.handleInbound(msg)` from `src/services/whatsappIntentService.ts` (already exists, unchanged — expects a `whatsapp-web.js` `Message`-shaped object with `.from`, `.to`, `.body`, `.id._serialized`, `.hasMedia`, `.client.getContactLidAndPhone()`, `.getContact()`, `.downloadMedia()`).
+- Consumes: `eventService.broadcast(event, payload)` from `src/services/eventService.js` (existing).
+- Consumes: `dbManager.getConnection()` from `src/database/connection.js` (existing) — tables `whatsapp_messages`, `whatsapp_chats`, `ignored_whatsapp_numbers`, `app_settings` already exist in the schema.
+- Consumes: `whatsappBusinessService.sendTextMessage/sendDocument` from `src/services/whatsappBusinessService.js` (existing, unchanged).
+- Produces (unchanged export surface, consumed by `src/routes/messaging.ts`, `src/routes/whatsappBusiness.ts`, `src/server.ts`, and multiple test files that `jest.unstable_mockModule` this file): `currentQr: string | null`, `isReady: boolean`, `setCurrentQr(qr)`, `setIsReady(ready)`, `shouldRouteToBusiness(): Promise<boolean>`, `initClient(): Promise<any>`, `destroyClient(): Promise<void>`, `forceReconnect(): Promise<void>`, `sendMessage(to, mediaPath?, caption?, file?): Promise<void>`, `getChats(): Promise<any[]>`, `getChatMessages(chatId, limit?): Promise<any[]>`, `getMessageMedia(chatId, messageId): Promise<{mimetype, data, filename?}>`.
+
+**Why one task, not several:** `initClient`, `destroyClient`, `forceReconnect`, and the `sendMessage` automated branch all share the same module-level `clientInstance`/`activeClient` state and only make sense together — an intermediate state (e.g. real `initClient` but stub `sendMessage`) would not compile cleanly against the restored types and isn't independently reviewable as "done."
+
+- [ ] **Step 1: Read the current file to confirm no drift**
+
+Run: confirm `src/whatsappClient.ts` still matches the version this plan was written against (253 lines, `initClient()` returns `{}`, `sendMessage`'s automated branch just does `console.log(...)`). If it has changed, stop and re-diff before proceeding.
+
+- [ ] **Step 2: Replace `src/whatsappClient.ts` with the restored implementation**
+
+Write the complete file:
+
+```typescript
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import fs from 'fs';
@@ -641,8 +685,8 @@ export async function getChats(): Promise<any[]> {
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage, resolved_number as resolvedNumber
-       FROM whatsapp_chats
+      `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage, resolved_number as resolvedNumber 
+       FROM whatsapp_chats 
        ORDER BY timestamp DESC`
     );
     return rows;
@@ -654,22 +698,22 @@ export async function getChats(): Promise<any[]> {
 
 /** Get messages for a specific chat from local SQLite cache */
 export async function getChatMessages(chatId: string, limit: number = 500): Promise<any[]> {
-  const raw = String(chatId || '').trim();
-  if (!raw) return [];
-
-  const digits = raw.replace(/\D/g, '');
-  const phoneWithoutCc = digits.length >= 10 ? digits.slice(-10) : digits;
-  const likePattern = `%${phoneWithoutCc}%`;
+  let cleanId = String(chatId);
+  if (!cleanId.includes('@')) {
+    let cleanPhone = cleanId.replace(/\D/g, '');
+    if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+    cleanId = `${cleanPhone}@c.us`;
+  }
 
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT id, body, from_me as fromMe, timestamp, type, has_media as hasMedia
-       FROM whatsapp_messages
-       WHERE chat_id = ? OR chat_id LIKE ?
-       ORDER BY timestamp ASC
+      `SELECT id, body, from_me as fromMe, timestamp, type, has_media as hasMedia 
+       FROM whatsapp_messages 
+       WHERE chat_id = ? AND (body != '' OR has_media = 1)
+       ORDER BY timestamp ASC 
        LIMIT ?`,
-      [raw, likePattern, limit]
+      [cleanId, limit]
     );
     return rows;
   } catch (err) {
@@ -677,7 +721,6 @@ export async function getChatMessages(chatId: string, limit: number = 500): Prom
     return [];
   }
 }
-
 
 /** Retrieve cached media file from local storage */
 export async function getMessageMedia(chatId: string, messageId: string): Promise<{ mimetype: string; data: string; filename?: string }> {
@@ -709,3 +752,81 @@ export async function getMessageMedia(chatId: string, messageId: string): Promis
     filename: matchedFile
   };
 }
+```
+
+Note on `messageId` typing: `whatsappBusinessService.sendTextMessage`/`sendDocument` return `SendMessageResult` with an optional `messageId?: string` — this matches the existing (pre-change) code exactly, no new typing concerns introduced.
+
+- [ ] **Step 3: Type-check the change**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors attributable to `src/whatsappClient.ts`. (If pre-existing unrelated errors exist elsewhere in the repo, compare against a `tsc --noEmit` run from before this change to confirm you haven't added any.)
+
+- [ ] **Step 4: Run the existing WhatsApp-routing regression tests**
+
+Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js tests/whatsappRouting.test.ts tests/whatsappIntentGate.test.ts --no-coverage`
+Expected: `Test Suites: 2 passed, 2 total`, `Tests: 7 passed, 7 total` (same as the pre-change baseline captured during planning).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/whatsappClient.ts
+git commit -m "$(cat <<'EOF'
+fix: restore real whatsapp-web.js client for automated WhatsApp mode
+
+Re-enables the Puppeteer-backed whatsapp-web.js client that was
+stubbed to no-ops in f208f220 when the Business Cloud API was added.
+The existing Settings QR panel and whatsappIntentService inbound
+pipeline now run against a live session again. Business API path is
+untouched; sendMessage's automated branch now performs a real send
+instead of only logging, and skips the manual SQLite-write tail for
+that branch since the client's own message_create event logs it with
+the real WhatsApp message id (avoiding duplicate rows).
+EOF
+)"
+```
+
+---
+
+### Task 2: Manual end-to-end verification
+
+**Files:** none (no code changes — this is a human-in-the-loop verification gate; automated tests can't drive a real Puppeteer/WhatsApp QR-scan flow).
+
+**Interfaces:** N/A.
+
+- [ ] **Step 1: Start the app**
+
+Run: `npm run dev` (or the project's existing dev-start command) with `whatsapp_preferred_system` NOT set to `official` (default is `automated` per Task 1's restored `shouldRouteToBusiness()` fallback logic once `whatsapp_preferred_system` is explicitly set to `'automated'` in Settings, or once `wa_business_enabled` is left `false`).
+
+- [ ] **Step 2: Confirm a real QR renders**
+
+In the app's Settings page, enable WhatsApp. Confirm the QR panel shows a real, freshly-generated QR code image (not a stale/blank one), and server logs show `WhatsApp QR code received`.
+
+- [ ] **Step 3: Scan and confirm connection**
+
+Scan the QR with a test WhatsApp account's phone (Linked Devices → Link a Device). Confirm:
+- Server logs show `WhatsApp Client is ready!`
+- The Settings page QR panel updates to a "connected" state within the next 15s poll.
+
+- [ ] **Step 4: Confirm inbound message flow**
+
+From another phone, send a text message like "do you have paracetamol 500mg" to the connected number. Confirm:
+- The message appears in `whatsapp_messages`/`whatsapp_chats` (check via existing chat-viewing UI or `sqlite3 data/app.db "SELECT * FROM whatsapp_messages ORDER BY timestamp DESC LIMIT 1;"`).
+- Server logs show the `whatsappIntentService` pipeline running (e.g. `[Intent Service] Match result for ...`).
+
+- [ ] **Step 5: Confirm outbound send + no duplicate logging**
+
+Trigger a message send from the app (any existing feature that calls `sendMessage`, e.g. a manual chat reply). Confirm:
+- The message is delivered on the real WhatsApp session (visible on the receiving phone).
+- Exactly one row for that message appears in `whatsapp_messages` (not two) — confirms the duplicate-logging fix from Task 1 Step 2 works.
+
+- [ ] **Step 6: Confirm session persistence across restart**
+
+Restart the server process. Confirm the client reconnects using the saved `.wwebjs_auth` session without requiring a fresh QR scan.
+
+- [ ] **Step 7: Confirm Business API path is unaffected**
+
+In Settings, switch `whatsapp_preferred_system` to `official`. Trigger a send. Confirm it routes through `whatsappBusinessService` (check server logs / Business API dashboard) rather than the live WhatsApp Web session.
+
+- [ ] **Step 8: Record results**
+
+If any step fails, note the failure and return to Task 1 to fix before considering this plan complete. If all steps pass, the feature is done — no commit needed for this task since no files changed.
