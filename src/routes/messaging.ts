@@ -2,7 +2,9 @@
 import express from 'express';
 import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness } from '../whatsappClient.js';
 import QRCode from 'qrcode';
+import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
+
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer-core';
@@ -113,6 +115,14 @@ router.post('/login-window', async (req, res) => {
 
         if (isLoggedIn) {
           console.log('[WhatsApp] Login detected in Chrome popup!');
+          try {
+            const db = await dbManager.getConnection();
+            await db.run(
+              "INSERT INTO app_settings (key, value) VALUES ('whatsapp_preferred_system', 'automated') ON CONFLICT(key) DO UPDATE SET value = 'automated'"
+            );
+          } catch (e) {
+            console.warn('[WhatsApp] Could not set whatsapp_preferred_system setting:', e);
+          }
           // Give it a moment to sync cookies and IndexedDB to userDataDir
           await new Promise(resolve => setTimeout(resolve, 3000));
           break;

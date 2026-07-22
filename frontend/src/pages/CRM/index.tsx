@@ -377,6 +377,24 @@ const DistributorMessagesSection: React.FC = () => {
 // WHATSAPP SECTION — embedded web.whatsapp.com iframe
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function parseAllPhoneNumbers(...inputs: (string | undefined | null)[]): string[] {
+  const nums: string[] = [];
+  inputs.forEach(input => {
+    if (!input) return;
+    const parts = String(input).split(/[,/;\n]+/);
+    parts.forEach(p => {
+      const clean = p.replace(/\D/g, '');
+      if (clean.length >= 10) {
+        const formatted = clean.length === 10 ? `+91 ${clean}` : `+${clean}`;
+        if (!nums.includes(formatted)) {
+          nums.push(formatted);
+        }
+      }
+    });
+  });
+  return nums;
+}
+
 interface WaChatItem {
   id: string;
   name: string;
@@ -419,6 +437,7 @@ const WhatsAppSection: React.FC = () => {
   };
 
   const checkStatus = async () => {
+
     try {
       const data = await apiClient.get('/messaging/qr').then(res => res.data);
       setStatus(data || { isReady: false, qrUrl: null });
@@ -459,12 +478,66 @@ const WhatsAppSection: React.FC = () => {
     }
   };
 
+  const [storeSettings, setStoreSettings] = useState<{
+
+
+    storeName: string;
+    storeAddress: string;
+    medicalPhones: string[];
+    deliveryPhones: string[];
+    distributorPhones: string[];
+  }>({
+    storeName: 'AI Pharmacy',
+    storeAddress: '',
+    medicalPhones: [],
+    deliveryPhones: [],
+    distributorPhones: [],
+  });
+
+  const fetchStoreSettings = async () => {
+    try {
+      const [res, profilesRes] = await Promise.all([
+        apiClient.get('/settings').then(r => r.data || {}).catch(() => ({})),
+        apiClient.get('/distributor-learning/profiles').then(r => Array.isArray(r.data) ? r.data : []).catch(() => [])
+      ]);
+
+      const storeName = res.pharmacy_name || res.pharmacyName || res.store_name || 'AI Pharmacy';
+      const storeAddress = res.address || res.store_address || '';
+      
+      const medicalPhones = parseAllPhoneNumbers(
+        res.phone, res.phone2, res.store_phone, res.admin_whatsapp, res.dineshWhatsappNumber
+      );
+
+      const deliveryPhones = parseAllPhoneNumbers(
+        res.delivery_boy_whatsapp, res.delivery_boy_phone, res.delivery_boy_phone_2, res.delivery_boy_whatsapp_2
+      );
+
+      // Distributor numbers from Learning Distributors tab + Settings
+      const profilePhones = profilesRes.map((p: any) => p.distributor_phone).filter(Boolean);
+      const distributorPhones = parseAllPhoneNumbers(
+        res.distributor_whatsapp, ...profilePhones
+      );
+
+      setStoreSettings({
+        storeName,
+        storeAddress,
+        medicalPhones,
+        deliveryPhones,
+        distributorPhones
+      });
+    } catch (err) {
+      console.error('Failed to load synced settings & distributor contacts:', err);
+    }
+  };
+
   useEffect(() => {
     checkStatus();
     fetchChats();
+    fetchStoreSettings();
     const interval = setInterval(() => {
       checkStatus();
       fetchChats();
+      fetchStoreSettings();
     }, 6000);
     return () => clearInterval(interval);
   }, []);
@@ -492,10 +565,6 @@ const WhatsAppSection: React.FC = () => {
     } finally {
       setLaunchingLogin(false);
     }
-  };
-
-  const openDirectWeb = () => {
-    window.open('https://web.whatsapp.com/', '_blank', 'noopener,noreferrer');
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -553,9 +622,31 @@ const WhatsAppSection: React.FC = () => {
     setNewChatPhone('');
   };
 
-  const applyTemplate = (text: string) => {
-    setMessageInput(text);
+  const applyTemplate = (type: string) => {
+    const sName = storeSettings.storeName || 'AI Pharmacy';
+    const sAddress = storeSettings.storeAddress || '';
+    const medPhonesStr = storeSettings.medicalPhones.join(' / ');
+    const delPhonesStr = storeSettings.deliveryPhones.join(' / ');
+    const distPhonesStr = storeSettings.distributorPhones.join(' / ');
+
+    let templateMsg = '';
+    if (type === 'delivery') {
+      templateMsg = `🏥 *${sName}*\n${sAddress ? `📍 Address: ${sAddress}\n` : ''}${delPhonesStr ? `🛵 Delivery Contact: ${delPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
+    } else if (type === 'refill') {
+      templateMsg = `🏥 *${sName}*\nHello! This is a reminder from ${sName} that your monthly medicine refill is due. Please contact us to confirm.\n${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
+    } else if (type === 'order') {
+      templateMsg = `🏥 *${sName}*\nYour medicine order has been packed and is ready for pickup/delivery!\n${sAddress ? `📍 Address: ${sAddress}\n` : ''}${delPhonesStr ? `🛵 Delivery Contact: ${delPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
+    } else if (type === 'distributor') {
+      templateMsg = `🏥 *${sName}* — Order Query\nHello, please confirm stock availability and supply for our order.\n${distPhonesStr ? `🏬 Distributor Contacts: ${distPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
+    } else {
+      templateMsg = type;
+    }
+
+    setMessageInput(templateMsg.trim());
   };
+
+
+
 
   const filteredChats = chats.filter(c => 
     c.name.toLowerCase().includes(chatSearch.toLowerCase()) || 
@@ -706,14 +797,11 @@ const WhatsAppSection: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={openDirectWeb}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-bg3 border border-border rounded-md text-[11px] font-medium text-text hover:bg-bg"
-                  >
-                    <ExternalLink size={12} />
-                    Open web.whatsapp.com
-                  </button>
+                  <span className="text-[10px] text-emerald-400 font-semibold px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                    In-App WhatsApp Session Active
+                  </span>
                 </div>
+
               </div>
 
               {/* Chat Message History Stream */}
@@ -754,20 +842,23 @@ const WhatsAppSection: React.FC = () => {
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg2 border-t border-border flex-shrink-0 overflow-x-auto">
                 <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex-shrink-0">Quick Templates:</span>
                 {[
-                  { label: 'Refill Reminder', text: 'Hello! This is a reminder from AI Pharmacy that your monthly medicine refill is due. Please contact us to confirm your order.' },
-                  { label: 'Bill Shared', text: 'Dear Customer, your pharmacy invoice is ready. Thank you for choosing AI Pharmacy!' },
-                  { label: 'Order Ready', text: 'Your medicine order has been packed and is ready for pickup/delivery at AI Pharmacy.' },
+                  { label: '🚚 Delivery Alert', id: 'delivery' },
+                  { label: '💊 Refill Reminder', id: 'refill' },
+                  { label: '📦 Order Packed', id: 'order' },
+                  { label: '🏬 Distributor Query', id: 'distributor' },
                 ].map((tpl, i) => (
+
                   <button
                     key={i}
                     type="button"
-                    onClick={() => applyTemplate(tpl.text)}
-                    className="px-2.5 py-1 bg-bg3 border border-border hover:bg-primary/20 hover:border-primary/40 rounded-full text-[11px] font-medium text-text flex-shrink-0 transition-colors"
+                    onClick={() => applyTemplate(tpl.id)}
+                    className="px-2.5 py-1 bg-bg3 border border-border hover:bg-emerald-500/20 hover:border-emerald-500/40 rounded-full text-[11px] font-medium text-text flex-shrink-0 transition-colors"
                   >
                     {tpl.label}
                   </button>
                 ))}
               </div>
+
 
               {/* Message Composer Bar */}
               <form onSubmit={handleSendMessage} className="p-3 bg-bg2 border-t border-border flex items-center gap-2 flex-shrink-0">

@@ -67,8 +67,8 @@ export async function shouldRouteToBusiness(): Promise<boolean> {
     return row.value === 'true';
   }
 
-  // Default to official API mode (no headless browser wrapper needed)
-  return true;
+  // Default to automated mode (use the scanned in-app WhatsApp Web session headlessly)
+  return false;
 }
 
 /** Kill stale Chrome/Edge processes and remove lock files holding the wwebjs session profile. */
