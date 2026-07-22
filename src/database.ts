@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 11;
 
 /**
  * Ensure required SQLite tables exist.
@@ -1178,6 +1178,47 @@ export async function ensureSchema(dbPath: string) {
     }
   } catch (healErr) {
     console.warn('[Database Healing] Non-critical warning, failed to run database healing checks:', healErr);
+  }
+
+  // WhatsApp silent-send queue: holds messages to be retried once the client is ready
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS whatsapp_send_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      number TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      sent_at INTEGER
+    )
+  `);
+
+  // WhatsApp message templates for quick CRM sending
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS whatsapp_message_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // Seed default starter templates if empty
+  const tmplCount = await db.get('SELECT COUNT(*) as count FROM whatsapp_message_templates');
+  if (!tmplCount || tmplCount.count === 0) {
+    const now = Date.now();
+    const seedTemplates = [
+      { name: 'Refill Reminder', category: 'Patients', body: 'Hello {{name}}, this is a friendly reminder from AI Pharmacy that your prescription for {{medicine}} is due for refill. Reply to confirm order delivery.' },
+      { name: 'Payment Dues Reminder', category: 'Patients', body: 'Dear {{name}}, your bill invoice #{{invoice}} of ₹{{amount}} is due. Kindly let us know if you need assistance with payment.' },
+      { name: 'Stock Availability Inquiry', category: 'Distributors', body: 'Dear {{distributor}}, please check stock availability and rate for: {{medicines}}. Thank you.' },
+      { name: 'General Reply', category: 'General', body: 'Hello! Thank you for contacting AI Pharmacy. How can we help you today?' }
+    ];
+    for (const t of seedTemplates) {
+      await db.run(
+        'INSERT INTO whatsapp_message_templates (name, category, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [t.name, t.category, t.body, now, now]
+      );
+    }
   }
 
   // Stamp schema version so subsequent boots skip all DDL

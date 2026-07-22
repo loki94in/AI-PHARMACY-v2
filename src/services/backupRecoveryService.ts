@@ -77,22 +77,8 @@ export class BackupRecoveryService {
    * Triggers a debounced snapshot creation after database writes.
    */
   public triggerSnapshot(): void {
-    if (snapshotTimeout) {
-      clearTimeout(snapshotTimeout);
-    }
-
-    snapshotTimeout = setTimeout(async () => {
-      try {
-        const autoEnabled = await this.getSetting('backup_auto_enabled', 'true') === 'true';
-        const isPaused = await this.getSetting('backup_is_paused', 'false') === 'true';
-        
-        if (autoEnabled && !isPaused) {
-          await this.createSnapshot();
-        }
-      } catch (err) {
-        console.error('[Backup] Snapshot trigger execution failed:', err);
-      }
-    }, 5000); // 5 seconds debounce
+    // Database snapshots disabled per configuration
+    return;
   }
 
   /**

@@ -293,6 +293,11 @@ export async function initClient(): Promise<WAClient> {
       syncWhatsappData(client).catch(err => {
         console.error('[WhatsApp] Background sync failed:', err);
       });
+
+      // Drain any messages that were queued while client was initializing
+      drainSendQueue().catch(err => {
+        console.error('[WhatsApp] Queue drain failed (non-fatal):', err);
+      });
     });
 
     client.on('disconnected', (reason: string) => {
@@ -587,9 +592,9 @@ export async function sendMessage(
           if (result.messageId) messageId = result.messageId;
         }
       }
-    } catch (err) {
-      console.error('[WhatsApp Client Wrapper] Send failed:', err);
-      continue;
+    } catch (err: any) {
+      console.error('[WhatsApp Client Wrapper] Send failed:', err?.message || err);
+      throw err;
     }
 
     // Business API sends have no local client event to log them, so write here.
@@ -633,6 +638,30 @@ export async function sendMessage(
     } catch (dbErr) {
       console.error('[WhatsApp Client Wrapper] SQLite write error:', dbErr);
     }
+  }
+}
+
+/** Drain pending outbound messages from whatsapp_send_queue once the client is ready */
+async function drainSendQueue(): Promise<void> {
+  if (!isReady || !clientInstance) return;
+  try {
+    const db = await dbManager.getConnection();
+    const pending = await db.all(
+      'SELECT id, number, message FROM whatsapp_send_queue WHERE sent_at IS NULL ORDER BY created_at ASC'
+    );
+    if (pending.length === 0) return;
+    console.log(`[WhatsApp] Draining ${pending.length} queued message(s)...`);
+    for (const row of pending) {
+      try {
+        await sendMessage(row.number, undefined, row.message);
+        await db.run('UPDATE whatsapp_send_queue SET sent_at = ? WHERE id = ?', [Date.now(), row.id]);
+        console.log(`[WhatsApp] Queued message sent to ${row.number}`);
+      } catch (err: any) {
+        console.warn(`[WhatsApp] Failed to send queued message to ${row.number}:`, err?.message);
+      }
+    }
+  } catch (err: any) {
+    console.error('[WhatsApp] drainSendQueue error:', err?.message);
   }
 }
 

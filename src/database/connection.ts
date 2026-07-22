@@ -269,7 +269,7 @@ class DatabaseManager {
   }
 
   public async close(force: boolean = false): Promise<void> {
-    if (force || process.env.NODE_ENV === 'test') {
+    if (force) {
       if (this.connection) {
         try {
           await this.connection.close();

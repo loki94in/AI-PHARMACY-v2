@@ -414,539 +414,621 @@ interface WaMessageItem {
   hasMedia?: boolean;
 }
 
+interface WaMessageTemplate {
+  id: number;
+  name: string;
+  category: string;
+  body: string;
+}
+
 const WhatsAppSection: React.FC = () => {
-  const [status, setStatus] = useState<{ isReady: boolean; qrUrl: string | null; message?: string }>({ isReady: false, qrUrl: null });
   const [chats, setChats] = useState<WaChatItem[]>([]);
-  const [activeChat, setActiveChat] = useState<WaChatItem | null>(null);
-  const [messages, setMessages] = useState<WaMessageItem[]>([]);
-  const [chatSearch, setChatSearch] = useState('');
-  const [messageInput, setMessageInput] = useState('');
   const [loadingChats, setLoadingChats] = useState(false);
-  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [search, setSearch] = useState('');
+  const [activeChat, setActiveChat] = useState<WaChatItem | null>(null);
+
+  const [messages, setMessages] = useState<WaMessageItem[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [composerText, setComposerText] = useState('');
   const [sending, setSending] = useState(false);
-  const [launchingLogin, setLaunchingLogin] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<{ filename: string; mimetype: string; data: string } | null>(null);
 
-  // New Chat modal/state
-  const [showNewChatModal, setShowNewChatModal] = useState(false);
-  const [newChatPhone, setNewChatPhone] = useState('');
+  const [isReady, setIsReady] = useState(true);
+  const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
+  const [showTemplatePopover, setShowTemplatePopover] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Template form state
+  const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
+  const [tmplName, setTmplName] = useState('');
+  const [tmplCategory, setTmplCategory] = useState('General');
+  const [tmplBody, setTmplBody] = useState('');
+  const [savingTmpl, setSavingTmpl] = useState(false);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const checkStatus = async () => {
-
+  // Load WhatsApp status
+  const checkStatus = useCallback(async () => {
     try {
-      const data = await apiClient.get('/messaging/qr').then(res => res.data);
-      setStatus(data || { isReady: false, qrUrl: null });
-    } catch (err) {
-      console.error('Failed to check WhatsApp status:', err);
+      const res = await apiClient.get<{ isReady: boolean }>('/messaging/qr');
+      setIsReady(res.data.isReady);
+    } catch {
+      setIsReady(false);
     }
-  };
+  }, []);
 
-  const fetchChats = async () => {
+  // Fetch Chat List
+  const loadChats = useCallback(async () => {
     setLoadingChats(true);
     try {
-      const data = await apiClient.get('/messaging/chats').then(res => res.data);
-      if (Array.isArray(data)) {
-        setChats(data);
-        if (!activeChat && data.length > 0) {
-          setActiveChat(data[0]);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch WhatsApp chats:', err);
+      const res = await apiClient.get<WaChatItem[]>('/messaging/chats');
+      setChats(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      toastEvent.trigger('Failed to load WhatsApp chats', 'error', '/crm');
     } finally {
       setLoadingChats(false);
     }
-  };
+  }, []);
 
-  const fetchMessages = async (chatId: string) => {
-    setLoadingMsgs(true);
+  // Fetch Message Templates
+  const loadTemplates = useCallback(async () => {
     try {
-      const data = await apiClient.get(`/messaging/chats/${encodeURIComponent(chatId)}/messages`).then(res => res.data);
-      if (Array.isArray(data)) {
-        setMessages(data);
-        setTimeout(scrollToBottom, 100);
-      }
+      const res = await apiClient.get<WaMessageTemplate[]>('/messaging/templates');
+      setTemplates(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      console.error('Failed to fetch chat messages:', err);
-    } finally {
-      setLoadingMsgs(false);
+      console.error('Failed to load message templates:', err);
     }
-  };
-
-  const [storeSettings, setStoreSettings] = useState<{
-
-
-    storeName: string;
-    storeAddress: string;
-    medicalPhones: string[];
-    deliveryPhones: string[];
-    distributorPhones: string[];
-  }>({
-    storeName: 'AI Pharmacy',
-    storeAddress: '',
-    medicalPhones: [],
-    deliveryPhones: [],
-    distributorPhones: [],
-  });
-
-  const fetchStoreSettings = async () => {
-    try {
-      const [res, profilesRes] = await Promise.all([
-        apiClient.get('/settings').then(r => r.data || {}).catch(() => ({})),
-        apiClient.get('/distributor-learning/profiles').then(r => Array.isArray(r.data) ? r.data : []).catch(() => [])
-      ]);
-
-      const storeName = res.pharmacy_name || res.pharmacyName || res.store_name || 'AI Pharmacy';
-      const storeAddress = res.address || res.store_address || '';
-      
-      const medicalPhones = parseAllPhoneNumbers(
-        res.phone, res.phone2, res.store_phone, res.admin_whatsapp, res.dineshWhatsappNumber
-      );
-
-      const deliveryPhones = parseAllPhoneNumbers(
-        res.delivery_boy_whatsapp, res.delivery_boy_phone, res.delivery_boy_phone_2, res.delivery_boy_whatsapp_2
-      );
-
-      // Distributor numbers from Learning Distributors tab + Settings
-      const profilePhones = profilesRes.map((p: any) => p.distributor_phone).filter(Boolean);
-      const distributorPhones = parseAllPhoneNumbers(
-        res.distributor_whatsapp, ...profilePhones
-      );
-
-      setStoreSettings({
-        storeName,
-        storeAddress,
-        medicalPhones,
-        deliveryPhones,
-        distributorPhones
-      });
-    } catch (err) {
-      console.error('Failed to load synced settings & distributor contacts:', err);
-    }
-  };
-
-  useEffect(() => {
-    checkStatus();
-    fetchChats();
-    fetchStoreSettings();
-    const interval = setInterval(() => {
-      checkStatus();
-      fetchChats();
-      fetchStoreSettings();
-    }, 6000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    if (activeChat) {
-      fetchMessages(activeChat.id);
-      const msgInterval = setInterval(() => {
-        fetchMessages(activeChat.id);
-      }, 5000);
-      return () => clearInterval(msgInterval);
+    checkStatus();
+    loadChats();
+    loadTemplates();
+  }, [checkStatus, loadChats, loadTemplates]);
+
+  // Load Thread Messages when activeChat changes
+  useEffect(() => {
+    if (!activeChat) {
+      setMessages([]);
+      return;
     }
-  }, [activeChat?.id]);
+    setLoadingMessages(true);
+    apiClient.get<WaMessageItem[]>(`/messaging/chats/${encodeURIComponent(activeChat.id)}/messages?limit=500`)
+      .then(res => {
+        setMessages(Array.isArray(res.data) ? res.data : []);
+        setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      })
+      .catch(() => toastEvent.trigger('Failed to load message history', 'error', '/crm'))
+      .finally(() => setLoadingMessages(false));
+  }, [activeChat]);
 
-  const handleLaunchLogin = async () => {
-    setLaunchingLogin(true);
-    try {
-      toastEvent.trigger('Opening WhatsApp login page...', 'info');
-      await apiClient.post('/messaging/login-window');
-      toastEvent.trigger('WhatsApp login window launched in Chrome.', 'success');
-      setTimeout(checkStatus, 2000);
-    } catch (err: any) {
-      console.error('Failed to launch login window:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to open login page', 'error');
-    } finally {
-      setLaunchingLogin(false);
-    }
-  };
+  // SSE event listener for real-time messages
+  useEffect(() => {
+    const eventSource = new EventSource('/api/notifications/stream');
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!messageInput.trim() || !activeChat) return;
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'wa_new_message') {
+          const newMsg: WaMessageItem = data.payload.message;
+          const chatId: string = data.payload.chat_id;
 
-    const textToSend = messageInput.trim();
-    const recipientNum = activeChat.resolvedNumber || activeChat.id.split('@')[0];
+          if (activeChat && activeChat.id === chatId) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+            setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+          }
+          // Refresh chats list preview
+          loadChats();
+        } else if (data.type === 'auth_failure') {
+          setIsReady(false);
+        }
+      } catch (err) {
+        console.error('SSE message parse error:', err);
+      }
+    };
 
+    return () => {
+      eventSource.close();
+    };
+  }, [activeChat, loadChats]);
+
+  // Handle Send Message
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!activeChat) return;
+    if (!composerText.trim() && !attachedFile) return;
+
+    const recipient = activeChat.resolvedNumber || activeChat.id.split('@')[0];
     setSending(true);
-    try {
-      await apiClient.post('/messaging/send', { number: recipientNum, message: textToSend });
-      toastEvent.trigger('Message sent!', 'success');
-      setMessageInput('');
-      
-      // Append optimistically
-      const newMsg: WaMessageItem = {
-        id: `temp_${Date.now()}`,
-        body: textToSend,
-        fromMe: true,
-        timestamp: Math.floor(Date.now() / 1000)
-      };
-      setMessages(prev => [...prev, newMsg]);
-      setTimeout(scrollToBottom, 50);
 
-      // Refresh messages
-      await fetchMessages(activeChat.id);
-      await fetchChats();
+    try {
+      await apiClient.post('/messaging/send', {
+        number: recipient,
+        message: composerText.trim(),
+        file: attachedFile || undefined
+      });
+      setComposerText('');
+      setAttachedFile(null);
+      toastEvent.trigger('Message sent via WhatsApp', 'success', '/crm');
     } catch (err: any) {
-      console.error('Failed to send message:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to send message', 'error');
+      toastEvent.trigger(err.response?.data?.error || 'Failed to send message', 'error', '/crm');
     } finally {
       setSending(false);
     }
   };
 
-  const handleStartNewChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newChatPhone.trim()) return;
-
-    let clean = newChatPhone.replace(/\D/g, '');
-    if (clean.length === 10) clean = `91${clean}`;
-    const chatId = `${clean}@c.us`;
-
-    const newChatItem: WaChatItem = {
-      id: chatId,
-      name: `+${clean}`,
-      unreadCount: 0,
-      resolvedNumber: clean
+  // Handle File Select
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64Data = result.split(',')[1];
+      setAttachedFile({
+        filename: file.name,
+        mimetype: file.type || 'application/octet-stream',
+        data: base64Data
+      });
     };
-
-    setChats(prev => [newChatItem, ...prev.filter(c => c.id !== chatId)]);
-    setActiveChat(newChatItem);
-    setShowNewChatModal(false);
-    setNewChatPhone('');
+    reader.readAsDataURL(file);
   };
 
-  const applyTemplate = (type: string) => {
-    const sName = storeSettings.storeName || 'AI Pharmacy';
-    const sAddress = storeSettings.storeAddress || '';
-    const medPhonesStr = storeSettings.medicalPhones.join(' / ');
-    const delPhonesStr = storeSettings.deliveryPhones.join(' / ');
-    const distPhonesStr = storeSettings.distributorPhones.join(' / ');
-
-    let templateMsg = '';
-    if (type === 'delivery') {
-      templateMsg = `🏥 *${sName}*\n${sAddress ? `📍 Address: ${sAddress}\n` : ''}${delPhonesStr ? `🛵 Delivery Contact: ${delPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
-    } else if (type === 'refill') {
-      templateMsg = `🏥 *${sName}*\nHello! This is a reminder from ${sName} that your monthly medicine refill is due. Please contact us to confirm.\n${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
-    } else if (type === 'order') {
-      templateMsg = `🏥 *${sName}*\nYour medicine order has been packed and is ready for pickup/delivery!\n${sAddress ? `📍 Address: ${sAddress}\n` : ''}${delPhonesStr ? `🛵 Delivery Contact: ${delPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
-    } else if (type === 'distributor') {
-      templateMsg = `🏥 *${sName}* — Order Query\nHello, please confirm stock availability and supply for our order.\n${distPhonesStr ? `🏬 Distributor Contacts: ${distPhonesStr}\n` : ''}${medPhonesStr ? `📞 Medical Contact: ${medPhonesStr}` : ''}`;
-    } else {
-      templateMsg = type;
+  // Handle Save Template (Create / Edit)
+  const handleSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tmplName.trim() || !tmplBody.trim()) {
+      toastEvent.trigger('Name and content are required', 'error');
+      return;
     }
-
-    setMessageInput(templateMsg.trim());
-  };
-
-
-
-
-  const filteredChats = chats.filter(c => 
-    c.name.toLowerCase().includes(chatSearch.toLowerCase()) || 
-    (c.resolvedNumber && c.resolvedNumber.includes(chatSearch)) ||
-    (c.lastMessage && c.lastMessage.toLowerCase().includes(chatSearch.toLowerCase()))
-  );
-
-  const formatTimestamp = (ts?: number) => {
-    if (!ts) return '';
-    const date = new Date(ts * 1000);
-    const now = new Date();
-    if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setSavingTmpl(true);
+    try {
+      if (editingTemplateId) {
+        await apiClient.put(`/messaging/templates/${editingTemplateId}`, {
+          name: tmplName,
+          category: tmplCategory,
+          body: tmplBody
+        });
+        toastEvent.trigger('Template updated', 'success');
+      } else {
+        await apiClient.post('/messaging/templates', {
+          name: tmplName,
+          category: tmplCategory,
+          body: tmplBody
+        });
+        toastEvent.trigger('Template created', 'success');
+      }
+      setTmplName('');
+      setTmplCategory('General');
+      setTmplBody('');
+      setEditingTemplateId(null);
+      await loadTemplates();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to save template', 'error');
+    } finally {
+      setSavingTmpl(false);
     }
-    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   };
+
+  // Delete Template
+  const handleDeleteTemplate = async (id: number) => {
+    try {
+      await apiClient.delete(`/messaging/templates/${id}`);
+      toastEvent.trigger('Template deleted', 'success');
+      await loadTemplates();
+    } catch {
+      toastEvent.trigger('Failed to delete template', 'error');
+    }
+  };
+
+  // Edit Template
+  const handleStartEditTemplate = (t: WaMessageTemplate) => {
+    setEditingTemplateId(t.id);
+    setTmplName(t.name);
+    setTmplCategory(t.category || 'General');
+    setTmplBody(t.body);
+  };
+
+  // Filtered Chats
+  const filteredChats = chats.filter(c => {
+    const query = search.toLowerCase().trim();
+    if (!query) return true;
+    return (
+      (c.name && c.name.toLowerCase().includes(query)) ||
+      (c.resolvedNumber && c.resolvedNumber.includes(query)) ||
+      (c.id && c.id.includes(query))
+    );
+  });
 
   return (
-    <div className="flex flex-col h-full gap-3 overflow-hidden">
-      {/* Top Controls Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg2 rounded-xl border border-border flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
-            <MessageCircle size={18} />
+    <div className="w-full h-full flex flex-col gap-3">
+      {/* WhatsApp Disconnected Banner */}
+      {!isReady && (
+        <div className="flex items-center justify-between p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={15} />
+            <span>WhatsApp is currently disconnected. Click to re-authenticate session.</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs font-bold text-text uppercase tracking-wider">WhatsApp Live Chat Hub</h2>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                status.isReady 
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-              }`}>
-                {status.isReady ? 'Active & Connected' : 'Login Required'}
-              </span>
-            </div>
-          </div>
+          <a
+            href="/settings?tab=general"
+            className="flex items-center gap-1 font-bold underline hover:text-amber-300 transition-all"
+          >
+            <span>Go to Settings</span>
+            <ExternalLink size={12} />
+          </a>
         </div>
+      )}
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchChats}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg transition-colors"
-            title="Refresh chats"
-          >
-            <RefreshCw size={13} className={loadingChats ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-          <button
-            onClick={() => setShowNewChatModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg transition-colors"
-          >
-            <Send size={13} />
-            + New Chat
-          </button>
-          <button
-            onClick={handleLaunchLogin}
-            disabled={launchingLogin}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
-          >
-            <Zap size={13} />
-            {launchingLogin ? 'Opening...' : 'Link Account'}
-          </button>
-        </div>
-      </div>
-
-      {/* Main WhatsApp Workspace UI */}
-      <div className="flex flex-1 min-h-0 bg-bg2 rounded-xl border border-border overflow-hidden">
-        {/* Left Chat List Sidebar */}
-        <div className="w-80 flex flex-col border-r border-border bg-bg2/60 flex-shrink-0">
-          {/* Search Bar */}
-          <div className="p-3 border-b border-border">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+      {/* Main Chat Grid Interface */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
+        {/* Left: Chat List Panel (4 cols) */}
+        <div className="md:col-span-4 border-r border-border flex flex-col bg-bg3/40 min-h-0">
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-2.5 text-muted" />
               <input
                 type="text"
-                placeholder="Search chats or phone numbers..."
-                value={chatSearch}
-                onChange={e => setChatSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
+                placeholder="Search chats..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
               />
             </div>
+            <button
+              onClick={loadChats}
+              disabled={loadingChats}
+              className="p-2 rounded-xl bg-bg border border-border text-muted hover:text-text transition-all active:scale-95 disabled:opacity-50"
+              title="Refresh chat list"
+            >
+              <RefreshCw size={14} className={loadingChats ? 'animate-spin' : ''} />
+            </button>
           </div>
 
-          {/* Chat List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-border/50">
+          <div className="flex-1 overflow-y-auto divide-y divide-border/40">
             {loadingChats && chats.length === 0 ? (
-              <div className="p-6 text-center text-xs text-muted">Loading WhatsApp chats...</div>
+              <div className="p-8 text-center text-xs text-muted">Loading chats...</div>
             ) : filteredChats.length === 0 ? (
-              <div className="p-6 text-center text-xs text-muted">
-                {chats.length === 0 ? 'No active chats found. Start a new chat above!' : 'No chats match search filter.'}
-              </div>
+              <div className="p-8 text-center text-xs text-muted">No WhatsApp chats found.</div>
             ) : (
-              filteredChats.map(chat => (
-                <div
-                  key={chat.id}
-                  onClick={() => setActiveChat(chat)}
-                  className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${
-                    activeChat?.id === chat.id
-                      ? 'bg-primary/10 border-l-2 border-l-primary'
-                      : 'hover:bg-bg3/50'
-                  }`}
-                >
-                  {/* Contact Avatar */}
-                  <div className="w-9 h-9 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs flex-shrink-0 border border-emerald-500/30">
-                    {(chat.name || 'W')[0].toUpperCase()}
-                  </div>
+              filteredChats.map(c => {
+                const isActive = activeChat?.id === c.id;
+                const displayName = c.name || c.resolvedNumber || c.id.split('@')[0];
+                const initial = displayName.charAt(0).toUpperCase();
 
-                  {/* Contact Details */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-semibold text-text truncate">{chat.name}</h4>
-                      {chat.timestamp && (
-                        <span className="text-[10px] text-muted flex-shrink-0">{formatTimestamp(chat.timestamp)}</span>
-                      )}
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setActiveChat(c)}
+                    className={`p-3 flex items-start gap-3 cursor-pointer transition-all hover:bg-bg/60 ${
+                      isActive ? 'bg-primary/10 border-l-4 border-primary' : ''
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-primary/20 text-primary border border-primary/30 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                      {initial}
                     </div>
-                    <p className="text-[11px] text-muted truncate mt-0.5">
-                      {chat.lastMessage || 'No recent messages'}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-text truncate">{displayName}</h4>
+                        {c.timestamp && (
+                          <span className="text-[10px] text-muted">{formatTs(c.timestamp)}</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted truncate mt-0.5">
+                        {c.lastMessage || 'No messages yet'}
+                      </p>
+                    </div>
+                    {c.unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-primary text-white font-bold text-[10px]">
+                        {c.unreadCount}
+                      </span>
+                    )}
                   </div>
-
-                  {/* Unread badge */}
-                  {chat.unreadCount > 0 && (
-                    <span className="px-1.5 py-0.5 bg-emerald-500 text-white rounded-full text-[10px] font-bold">
-                      {chat.unreadCount}
-                    </span>
-                  )}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* Right Active Chat Thread */}
-        <div className="flex-1 flex flex-col min-w-0 bg-bg">
+        {/* Right: Active Chat Thread & Composer (8 cols) */}
+        <div className="md:col-span-8 flex flex-col min-h-0 bg-bg">
           {activeChat ? (
             <>
-              {/* Chat Thread Header */}
-              <div className="flex items-center justify-between p-3.5 border-b border-border bg-bg2 flex-shrink-0">
+              {/* Thread Header */}
+              <div className="p-3 border-b border-border bg-bg2 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs border border-emerald-500/30">
-                    {(activeChat.name || 'W')[0].toUpperCase()}
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center border border-emerald-500/30">
+                    {(activeChat.name || activeChat.id).charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold text-text">{activeChat.name}</h3>
-                    <p className="text-[10px] text-muted">{activeChat.resolvedNumber ? `+${activeChat.resolvedNumber}` : activeChat.id}</p>
+                    <h3 className="text-xs font-bold text-text">
+                      {activeChat.name || activeChat.resolvedNumber || activeChat.id.split('@')[0]}
+                    </h3>
+                    <p className="text-[10px] text-muted">
+                      {activeChat.resolvedNumber || activeChat.id}
+                    </p>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-emerald-400 font-semibold px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
-                    In-App WhatsApp Session Active
-                  </span>
-                </div>
-
               </div>
 
-              {/* Chat Message History Stream */}
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3.5 bg-bg/50">
-                {loadingMsgs && messages.length === 0 ? (
-                  <div className="m-auto text-xs text-muted">Loading conversation history...</div>
+              {/* Thread Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-bg/50">
+                {loadingMessages ? (
+                  <div className="p-8 text-center text-xs text-muted">Loading message history...</div>
                 ) : messages.length === 0 ? (
-                  <div className="m-auto text-center text-xs text-muted max-w-xs">
-                    No recorded messages in this chat yet. Type a message below to start the conversation!
-                  </div>
+                  <div className="p-8 text-center text-xs text-muted">No messages in this chat.</div>
                 ) : (
-                  messages.map(msg => (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col max-w-[70%] ${
-                        msg.fromMe ? 'ml-auto items-end' : 'mr-auto items-start'
-                      }`}
-                    >
+                  messages.map(m => {
+                    const isOut = m.fromMe;
+                    return (
                       <div
-                        className={`p-3 rounded-2xl text-xs leading-relaxed break-words ${
-                          msg.fromMe
-                            ? 'bg-emerald-600 text-white rounded-br-none shadow-sm'
-                            : 'bg-bg2 text-text border border-border rounded-bl-none shadow-sm'
-                        }`}
+                        key={m.id}
+                        className={`flex flex-col ${isOut ? 'items-end' : 'items-start'}`}
                       >
-                        {msg.body}
+                        <div
+                          className={`max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                            isOut
+                              ? 'bg-primary text-white rounded-br-none'
+                              : 'bg-bg2 border border-border text-text rounded-bl-none'
+                          }`}
+                        >
+                          <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                          {m.hasMedia && (
+                            <div className="mt-1 pt-1 border-t border-white/20 text-[10px] opacity-80 flex items-center gap-1">
+                              <span>📁 Media Attachment</span>
+                            </div>
+                          )}
+                          <div
+                            className={`text-[9px] mt-1 text-right ${
+                              isOut ? 'text-white/70' : 'text-muted'
+                            }`}
+                          >
+                            {formatTs(m.timestamp)}
+                          </div>
+                        </div>
                       </div>
-                      <span className="text-[10px] text-muted px-1 mt-1">
-                        {formatTimestamp(msg.timestamp)}
-                      </span>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
-                <div ref={messagesEndRef} />
+                <div ref={threadEndRef} />
               </div>
 
-              {/* Quick Template Chips */}
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg2 border-t border-border flex-shrink-0 overflow-x-auto">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex-shrink-0">Quick Templates:</span>
-                {[
-                  { label: '🚚 Delivery Alert', id: 'delivery' },
-                  { label: '💊 Refill Reminder', id: 'refill' },
-                  { label: '📦 Order Packed', id: 'order' },
-                  { label: '🏬 Distributor Query', id: 'distributor' },
-                ].map((tpl, i) => (
+              {/* Attached File Bar */}
+              {attachedFile && (
+                <div className="px-4 py-2 bg-primary/10 border-t border-primary/20 flex items-center justify-between text-xs text-primary">
+                  <div className="flex items-center gap-2 truncate">
+                    <Package size={14} />
+                    <span className="font-bold truncate">{attachedFile.filename}</span>
+                  </div>
+                  <button
+                    onClick={() => setAttachedFile(null)}
+                    className="p-1 hover:text-text transition-all"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Composer & Quick Templates Popover */}
+              <div className="p-3 border-t border-border bg-bg2 relative">
+                {/* Templates Popover */}
+                {showTemplatePopover && (
+                  <div className="absolute bottom-16 left-3 w-80 max-h-64 bg-bg2 border border-border rounded-2xl shadow-xl z-20 flex flex-col overflow-hidden">
+                    <div className="p-2.5 border-b border-border bg-bg3 flex items-center justify-between text-xs font-bold text-text">
+                      <span>Quick Message Templates</span>
+                      <button
+                        onClick={() => {
+                          setShowTemplatePopover(false);
+                          setShowManageModal(true);
+                        }}
+                        className="text-[10px] text-primary hover:underline"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-1 divide-y divide-border/40">
+                      {templates.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-muted">No templates found.</div>
+                      ) : (
+                        templates.map(t => (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setComposerText(prev => (prev ? `${prev}\n${t.body}` : t.body));
+                              setShowTemplatePopover(false);
+                            }}
+                            className="p-2 hover:bg-bg3 rounded-xl cursor-pointer transition-all"
+                          >
+                            <div className="flex items-center justify-between text-xs font-bold text-text">
+                              <span>{t.name}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+                                {t.category || 'General'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-muted truncate mt-0.5">{t.body}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTemplatePopover(prev => !prev)}
+                    className="p-2 rounded-xl bg-bg border border-border text-muted hover:text-primary transition-all active:scale-95 text-xs font-bold flex items-center gap-1"
+                    title="Quick Templates"
+                  >
+                    <Zap size={14} />
+                  </button>
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 rounded-xl bg-bg border border-border text-muted hover:text-text transition-all active:scale-95"
+                    title="Attach file"
+                  >
+                    <Package size={14} />
+                  </button>
+
+                  <input
+                    type="text"
+                    placeholder="Type WhatsApp message..."
+                    value={composerText}
+                    onChange={e => setComposerText(e.target.value)}
+                    className="flex-1 px-4 py-2 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
+                  />
 
                   <button
-                    key={i}
-                    type="button"
-                    onClick={() => applyTemplate(tpl.id)}
-                    className="px-2.5 py-1 bg-bg3 border border-border hover:bg-emerald-500/20 hover:border-emerald-500/40 rounded-full text-[11px] font-medium text-text flex-shrink-0 transition-colors"
+                    type="submit"
+                    disabled={sending || (!composerText.trim() && !attachedFile)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
                   >
-                    {tpl.label}
+                    <Send size={13} />
+                    <span>{sending ? 'Sending...' : 'Send'}</span>
                   </button>
-                ))}
+                </form>
               </div>
-
-
-              {/* Message Composer Bar */}
-              <form onSubmit={handleSendMessage} className="p-3 bg-bg2 border-t border-border flex items-center gap-2 flex-shrink-0">
-                <textarea
-                  rows={1}
-                  placeholder="Type a WhatsApp message..."
-                  value={messageInput}
-                  onChange={e => setMessageInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage(e);
-                    }
-                  }}
-                  className="flex-1 px-3.5 py-2 bg-bg3 border border-border rounded-xl text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary resize-none"
-                />
-                <button
-                  type="submit"
-                  disabled={sending || !messageInput.trim()}
-                  className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-sm transition-colors disabled:opacity-40 flex-shrink-0"
-                  title="Send message"
-                >
-                  <Send size={15} />
-                </button>
-              </form>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-              <div className="p-3 bg-bg2 rounded-full text-muted">
-                <MessageSquare size={36} />
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center border border-primary/20">
+                <MessageCircle size={24} />
               </div>
-              <div>
-                <h3 className="text-sm font-bold text-text">No Chat Selected</h3>
-                <p className="text-xs text-muted mt-1">Select a conversation from the left sidebar or click + New Chat to message a patient.</p>
-              </div>
-              <button
-                onClick={() => setShowNewChatModal(true)}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-500 shadow-sm"
-              >
-                + Start New WhatsApp Chat
-              </button>
+              <p className="text-xs">Select a WhatsApp chat from the list to view history &amp; send messages.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* New Chat Modal */}
-      {showNewChatModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-bg2 border border-border rounded-xl p-5 w-full max-w-md shadow-2xl flex flex-col gap-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="text-sm font-bold text-text">Start New WhatsApp Conversation</h3>
-              <button onClick={() => setShowNewChatModal(false)} className="text-muted hover:text-text">✕</button>
+      {/* Template Manager Modal */}
+      {showManageModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold text-text flex items-center gap-2">
+                <Zap size={16} className="text-primary" />
+                <span>Manage Quick Message Templates</span>
+              </h3>
+              <button
+                onClick={() => setShowManageModal(false)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3"
+              >
+                ✕
+              </button>
             </div>
 
-            <form onSubmit={handleStartNewChat} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-text">Patient Mobile Number</label>
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-2 bg-bg3 border border-border rounded-lg text-xs font-semibold text-text">+91</span>
-                  <input
-                    type="tel"
-                    placeholder="Enter 10-digit mobile number"
-                    value={newChatPhone}
-                    onChange={e => setNewChatPhone(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-bg3 border border-border rounded-lg text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-                    autoFocus
-                    required
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              {/* Form */}
+              <form onSubmit={handleSaveTemplate} className="p-3 bg-bg3/50 border border-border rounded-xl space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted uppercase">Template Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Refill Notice"
+                      value={tmplName}
+                      onChange={e => setTmplName(e.target.value)}
+                      className="w-full mt-1 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs text-text"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted uppercase">Category</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Patients / General"
+                      value={tmplCategory}
+                      onChange={e => setTmplCategory(e.target.value)}
+                      className="w-full mt-1 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs text-text"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-muted uppercase">Message Body</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Type template message text..."
+                    value={tmplBody}
+                    onChange={e => setTmplBody(e.target.value)}
+                    className="w-full mt-1 px-3 py-1.5 bg-bg border border-border rounded-lg text-xs text-text"
                   />
                 </div>
-              </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewChatModal(false)}
-                  className="px-4 py-2 bg-bg3 border border-border rounded-lg text-xs font-medium text-text hover:bg-bg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm"
-                >
-                  Open Chat
-                </button>
+                <div className="flex items-center justify-end gap-2">
+                  {editingTemplateId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTemplateId(null);
+                        setTmplName('');
+                        setTmplCategory('General');
+                        setTmplBody('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-muted hover:bg-bg3"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingTmpl}
+                    className="px-4 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {savingTmpl ? 'Saving...' : editingTemplateId ? 'Update Template' : 'Add Template'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Template List */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-text uppercase tracking-wider">Existing Templates</h4>
+                <div className="space-y-2">
+                  {templates.map(t => (
+                    <div
+                      key={t.id}
+                      className="p-3 bg-bg border border-border rounded-xl flex items-start justify-between gap-3"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-text">{t.name}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+                            {t.category || 'General'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted mt-1 whitespace-pre-wrap">{t.body}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleStartEditTemplate(t)}
+                          className="p-1.5 rounded-lg text-muted hover:text-primary hover:bg-bg3"
+                          title="Edit"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTemplate(t.id)}
+                          className="p-1.5 rounded-lg text-muted hover:text-rose-400 hover:bg-bg3"
+                          title="Delete"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

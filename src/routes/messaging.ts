@@ -16,7 +16,11 @@ function findChromePath() {
   const paths = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null,
+    process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : null,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Microsoft\\Edge\\Application\\msedge.exe') : null
   ].filter(Boolean) as string[];
 
   for (const p of paths) {
@@ -82,16 +86,29 @@ router.post('/login-window', async (req, res) => {
 
       console.log('[WhatsApp] Launching Chrome for WhatsApp login from:', chromePath);
       const authPath = path.resolve(process.cwd(), '.wwebjs_auth', 'session');
+      const lockFiles = ['lockfile', 'SingletonLock', 'DevToolsActivePort'];
+      for (const lf of lockFiles) {
+        const p = path.join(authPath, lf);
+        if (fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch (e) {}
+        }
+      }
+
       browser = await puppeteer.launch({
         executablePath: chromePath,
         headless: false,
         defaultViewport: null,
-        args: ['--start-maximized', '--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+          '--start-maximized',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        ],
         userDataDir: authPath
       });
 
       const [page] = await browser.pages();
-      await page.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle2' });
+      await page.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded' });
 
       // Poll for login confirmation or user closure (up to 10 minutes)
       for (let i = 0; i < 600; i++) {
@@ -170,19 +187,38 @@ router.post('/reconnect', async (req, res) => {
   }
 });
 
-// Send a WhatsApp message via the hub
+// Send a WhatsApp message via the hub — non-blocking (returns immediately, sends in background)
 router.post('/send', async (req, res) => {
   const { number, message, mediaUrl, file } = req.body;
   if (!number || (!message && !file)) {
     return res.status(400).json({ error: 'number and either message or file are required' });
   }
-  try {
-    await sendMessage(number, mediaUrl, message, file);
-    res.json({ success: true, message: 'WhatsApp message sent' });
-  } catch (err) {
-    console.error('Messaging hub error:', err);
-    res.status(500).json({ error: 'Failed to send message' });
-  }
+
+  // Return immediately so the frontend never times out
+  res.status(202).json({ success: true, message: 'Message queued for delivery' });
+
+  // Fire-and-forget: attempt send in background
+  setImmediate(async () => {
+    try {
+      await sendMessage(number, mediaUrl, message, file);
+      console.log(`[Messaging] Silent send OK → ${number}`);
+    } catch (err: any) {
+      console.warn(`[Messaging] Silent send failed for ${number}, queueing:`, err?.message || err);
+      // Queue for retry when client becomes ready
+      try {
+        const { dbManager } = await import('../database/connection.js');
+        const db = await dbManager.getConnection();
+        await db.run(
+          `INSERT INTO whatsapp_send_queue (number, message, created_at) VALUES (?, ?, ?)
+           ON CONFLICT DO NOTHING`,
+          [number, message || '', Date.now()]
+        );
+        console.log(`[Messaging] Queued message for ${number} (will retry when WhatsApp is ready)`);
+      } catch (qErr: any) {
+        console.error('[Messaging] Failed to queue message:', qErr?.message || qErr);
+      }
+    }
+  });
 });
 
 // Get all WhatsApp chats
@@ -360,6 +396,90 @@ router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to trigger scan:', err);
     res.status(500).json({ error: err.message || 'Failed to trigger scan' });
+  }
+});
+
+// ── Message Templates Endpoints ───────────────────────────────────────────────
+
+// GET /messaging/templates — List all message templates
+router.get('/templates', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      'SELECT id, name, category, body, created_at as createdAt, updated_at as updatedAt FROM whatsapp_message_templates ORDER BY category ASC, name ASC'
+    );
+    res.json(rows);
+  } catch (err: any) {
+    console.error('Failed to fetch message templates:', err);
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// POST /messaging/templates — Create new template
+router.post('/templates', async (req, res) => {
+  const { name, category, body } = req.body;
+  if (!name || !body) {
+    return res.status(400).json({ error: 'name and body are required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const now = Date.now();
+    const result = await db.run(
+      'INSERT INTO whatsapp_message_templates (name, category, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      [name.trim(), (category || 'General').trim(), body.trim(), now, now]
+    );
+    res.status(201).json({
+      id: result.lastID,
+      name: name.trim(),
+      category: (category || 'General').trim(),
+      body: body.trim(),
+      createdAt: now,
+      updatedAt: now
+    });
+  } catch (err: any) {
+    console.error('Failed to create message template:', err);
+    res.status(500).json({ error: 'Failed to create template' });
+  }
+});
+
+// PUT /messaging/templates/:id — Update template
+router.put('/templates/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, category, body } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    const existing = await db.get('SELECT id FROM whatsapp_message_templates WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+    const now = Date.now();
+    await db.run(
+      `UPDATE whatsapp_message_templates 
+       SET name = COALESCE(?, name),
+           category = COALESCE(?, category),
+           body = COALESCE(?, body),
+           updated_at = ?
+       WHERE id = ?`,
+      [name ? name.trim() : null, category ? category.trim() : null, body ? body.trim() : null, now, id]
+    );
+    const updated = await db.get('SELECT id, name, category, body, created_at as createdAt, updated_at as updatedAt FROM whatsapp_message_templates WHERE id = ?', [id]);
+    res.json(updated);
+  } catch (err: any) {
+    console.error('Failed to update message template:', err);
+    res.status(500).json({ error: 'Failed to update template' });
+  }
+});
+
+// DELETE /messaging/templates/:id — Delete template
+router.delete('/templates/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('DELETE FROM whatsapp_message_templates WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Template deleted' });
+  } catch (err: any) {
+    console.error('Failed to delete message template:', err);
+    res.status(500).json({ error: 'Failed to delete template' });
   }
 });
 

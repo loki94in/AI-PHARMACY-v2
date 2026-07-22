@@ -56,6 +56,9 @@ export default function PharmarackCart() {
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
 
+  const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
+  const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
+  const [sentWaStatusMap, setSentWaStatusMap] = useState<Record<number, 'success' | 'queued' | 'error'>>({});
   // Saved distributor contacts and store settings
   const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
   const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; deliveryBoyPhone: string; deliveryBoyPhone2: string }>({
@@ -83,9 +86,20 @@ export default function PharmarackCart() {
   const isDistributorMapped = (dist: Distributor) => {
     const custom = customDistributorPhones[dist.storeId];
     if (custom && custom.trim().length > 0) return true;
-    const matched = savedDistributorsList.find(
-      (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
-    );
+
+    const normCartName = (dist.storeName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!normCartName) return false;
+
+    const matched = savedDistributorsList.find((d: any) => {
+      if (!d.name) return false;
+      const normSavedName = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!normSavedName) return false;
+      return (
+        normCartName === normSavedName ||
+        normCartName.includes(normSavedName) ||
+        normSavedName.includes(normCartName)
+      );
+    });
     return Boolean(matched && (matched.phone || matched.mobile || matched.whatsapp));
   };
 
@@ -305,20 +319,9 @@ export default function PharmarackCart() {
     }
   };
 
-  const handleSendWhatsAppOrder = (dist: Distributor) => {
-    // Try to match distributor phone: 1. Custom override -> 2. Matched saved distributor
-    let phoneNum = customDistributorPhones[dist.storeId];
-    if (!phoneNum) {
-      const matched = savedDistributorsList.find(
-        (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
-      );
-      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
-    }
-
-    // Delivery staff contact from Pharmarack or saved delivery alert numbers (Primary & Secondary / Admin)
+  const buildDistributorOrderMessage = (dist: Distributor) => {
     const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
     const deliveryContactPhone1 = (deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone || '';
-    const deliveryContactPhone2 = storeInfo.deliveryBoyPhone2 || '';
 
     let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
@@ -347,16 +350,123 @@ export default function PharmarackCart() {
     }
     msg += `🕒 *Time:* ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
     msg += `*Please confirm order receipt & dispatch.*`;
+    return msg;
+  };
+
+  const findSavedDistributorMatch = (distName: string) => {
+    const normCartName = (distName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!normCartName) return null;
+    return savedDistributorsList.find((d: any) => {
+      if (!d.name) return false;
+      const normSavedName = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!normSavedName) return false;
+      return (
+        normCartName === normSavedName ||
+        normCartName.includes(normSavedName) ||
+        normSavedName.includes(normCartName)
+      );
+    });
+  };
+
+  const handleSendWhatsAppOrder = async (dist: Distributor) => {
+    let phoneNum = customDistributorPhones[dist.storeId];
+    if (!phoneNum) {
+      const matched = findSavedDistributorMatch(dist.storeName);
+      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
+    }
 
     let cleanPhone = phoneNum.replace(/\D/g, '');
     if (!cleanPhone) {
+      // No number saved — open the edit modal so the user can add one
       handleOpenEditModal(dist);
       return;
     }
 
-    if (cleanPhone) {
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
-      toastEvent.trigger(`Opening WhatsApp chat for ${dist.storeName}...`, 'success');
+    const msg = buildDistributorOrderMessage(dist);
+
+    setSendingWaDistributorId(dist.storeId);
+    toastEvent.trigger(`📤 Sending WhatsApp order to ${dist.storeName}...`, 'info');
+    try {
+      const res = await api.sendWhatsappMessage(cleanPhone, msg);
+      const isQueued = res?.message?.toLowerCase()?.includes('queue');
+      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: isQueued ? 'queued' : 'success' }));
+      toastEvent.trigger(
+        isQueued
+          ? `⏳ WhatsApp message queued for ${dist.storeName}!`
+          : `✅ WhatsApp order dispatched to ${dist.storeName}!`,
+        'success'
+      );
+    } catch (err: any) {
+      console.error(`WhatsApp send error for ${dist.storeName}:`, err);
+      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
+      toastEvent.trigger(`⚠️ Could not reach server for ${dist.storeName}. Check WhatsApp connection in CRM.`, 'error');
+    } finally {
+      setSendingWaDistributorId(null);
+    }
+  };
+
+  const handleSendAllWhatsAppOrders = async () => {
+    const mapped = distributors.filter(d => isDistributorMapped(d));
+    const unmapped = distributors.filter(d => !isDistributorMapped(d));
+
+    if (distributors.length === 0) {
+      toastEvent.trigger('Your cart is empty.', 'error');
+      return;
+    }
+
+    if (mapped.length === 0 && unmapped.length === 0) {
+      toastEvent.trigger('No distributors found in cart.', 'error');
+      return;
+    }
+
+    setIsSendingBatchWhatsApp(true);
+    let sentCount = 0;
+    let failCount = 0;
+
+    try {
+      // 1. Send all saved numbers directly in 1-click
+      if (mapped.length > 0) {
+        toastEvent.trigger(`Sending WhatsApp stock orders to ${mapped.length} saved distributor(s)...`, 'info');
+        for (const dist of mapped) {
+          let phoneNum = customDistributorPhones[dist.storeId];
+          if (!phoneNum) {
+            const matched = savedDistributorsList.find(
+              (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
+            );
+            phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
+          }
+          let cleanPhone = phoneNum.replace(/\D/g, '');
+          if (!cleanPhone) continue;
+
+          const msg = buildDistributorOrderMessage(dist);
+
+          try {
+            await api.sendWhatsappMessage(cleanPhone, msg);
+            sentCount++;
+          } catch (e) {
+            console.error(`Failed to send silent WhatsApp to ${dist.storeName}:`, e);
+            failCount++;
+          }
+        }
+      }
+
+      if (sentCount > 0) {
+        toastEvent.trigger(`Successfully sent ${sentCount} order(s) via WhatsApp!`, 'success');
+      }
+      if (failCount > 0) {
+        toastEvent.trigger(`Failed to send WhatsApp message to ${failCount} distributor(s). Check WhatsApp connection.`, 'error');
+      }
+
+      // 2. If there are unsaved/unmapped distributors, prompt the user to add number or skip
+      if (unmapped.length > 0) {
+        toastEvent.trigger(`${unmapped.length} distributor(s) do not have saved WhatsApp numbers. Please add number or skip.`, 'info');
+        handleOpenEditModal(unmapped[0]);
+      }
+    } catch (err: any) {
+      console.error('Batch WhatsApp send error:', err);
+      toastEvent.trigger(err?.message || 'Failed to send WhatsApp messages', 'error');
+    } finally {
+      setIsSendingBatchWhatsApp(false);
     }
   };
 
@@ -655,6 +765,20 @@ export default function PharmarackCart() {
                 title="Refresh Cart Contents"
               >
                 <RefreshCw size={14} className={loading ? 'animate-spin text-primary' : ''} />
+              </button>
+
+              <button
+                onClick={handleSendAllWhatsAppOrders}
+                disabled={isSendingBatchWhatsApp || distributors.length === 0}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 font-bold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm"
+                title="Send order messages silently to all saved distributor WhatsApp numbers in the background"
+              >
+                {isSendingBatchWhatsApp ? (
+                  <span className="w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+                ) : (
+                  <MessageSquare size={13} />
+                )}
+                <span>Send All via WhatsApp ({distributors.length})</span>
               </button>
 
               <a
@@ -981,14 +1105,46 @@ export default function PharmarackCart() {
                             </button>
 
                             {/* Button 2: Send via WhatsApp */}
-                            <button
-                              onClick={() => handleSendWhatsAppOrder(dist)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
-                              title="Send formatted order message directly to Distributor via WhatsApp"
-                            >
-                              <MessageSquare size={10} />
-                              <span>Send via WhatsApp</span>
-                            </button>
+                            {(() => {
+                              const isSending = sendingWaDistributorId === dist.storeId;
+                              const status = sentWaStatusMap[dist.storeId];
+                              let btnClass = "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border-emerald-500/40";
+                              if (status === 'success') btnClass = "bg-emerald-500 text-white border-emerald-600 animate-pulse";
+                              if (status === 'queued') btnClass = "bg-amber-500/20 text-amber-300 border-amber-500/40";
+                              if (status === 'error') btnClass = "bg-rose-500/20 text-rose-400 border-rose-500/40";
+
+                              return (
+                                <button
+                                  onClick={() => handleSendWhatsAppOrder(dist)}
+                                  disabled={isSending}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[10px] font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50 ${btnClass}`}
+                                  title="Send formatted order message directly to Distributor via WhatsApp"
+                                >
+                                  {isSending ? (
+                                    <span className="w-2.5 h-2.5 border border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+                                  ) : status === 'success' ? (
+                                    <Check size={11} className="text-white animate-bounce" />
+                                  ) : status === 'queued' ? (
+                                    <Clock size={11} className="text-amber-300" />
+                                  ) : status === 'error' ? (
+                                    <AlertCircle size={11} className="text-rose-400" />
+                                  ) : (
+                                    <MessageSquare size={10} />
+                                  )}
+                                  <span>
+                                    {isSending
+                                      ? 'Sending...'
+                                      : status === 'success'
+                                      ? 'Sent!'
+                                      : status === 'queued'
+                                      ? 'Queued'
+                                      : status === 'error'
+                                      ? 'Retry WhatsApp'
+                                      : 'Send via WhatsApp'}
+                                  </span>
+                                </button>
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -1170,128 +1326,6 @@ export default function PharmarackCart() {
                 <span>Proceed to Checkout</span>
               </a>
             </div>
-          )}
-          {/* ── Distributor Search & Phone Contact Edit Modal ── */}
-          {editingDistributor && createPortal(
-            <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
-                {/* Header */}
-                <div className="bg-bg3/80 px-5 py-3.5 border-b border-glass-border flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Building2 size={16} className="text-primary" />
-                    <h3 className="text-xs font-bold text-text uppercase tracking-wider">
-                      Link Distributor Contact
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setEditingDistributor(null)}
-                    className="text-muted hover:text-text p-1 rounded-lg hover:bg-bg3 transition-colors"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                {/* Body */}
-                <div className="p-5 space-y-4">
-                  <div>
-                    <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
-                      Pharmarack Store Name
-                    </label>
-                    <div className="text-xs font-black text-text bg-bg3/40 px-3 py-2 rounded-xl border border-glass-border/40 flex items-center gap-2">
-                      <Package size={14} className="text-sky shrink-0" />
-                      <span>{editingDistributor.storeName}</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
-                      WhatsApp Contact Phone Number
-                    </label>
-                    <div className="relative">
-                      <Phone size={14} className="absolute left-3 top-2.5 text-muted" />
-                      <input
-                        type="tel"
-                        placeholder="e.g. +91 9876543210"
-                        value={modalPhoneInput}
-                        onChange={(e) => setModalPhoneInput(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-bg border border-glass-border text-xs text-text font-mono font-bold focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Saved Distributors Search & Selector */}
-                  <div>
-                    <label className="text-[10px] text-muted font-bold uppercase tracking-wider block mb-1">
-                      Search & Select from Saved Directory
-                    </label>
-                    <div className="relative mb-2">
-                      <Search size={13} className="absolute left-3 top-2.5 text-muted" />
-                      <input
-                        type="text"
-                        placeholder="Search saved distributors..."
-                        value={modalSearchTerm}
-                        onChange={(e) => setModalSearchTerm(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg border border-glass-border text-xs text-text focus:outline-none focus:border-primary"
-                      />
-                    </div>
-
-                    <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                      {savedDistributorsList
-                        .filter((d: any) =>
-                          !modalSearchTerm ||
-                          (d.name && d.name.toLowerCase().includes(modalSearchTerm.toLowerCase())) ||
-                          (d.phone && d.phone.includes(modalSearchTerm))
-                        )
-                        .map((d: any) => {
-                          const isSelected = selectedSavedDistId === d.id;
-                          return (
-                            <div
-                              key={d.id}
-                              onClick={() => {
-                                setSelectedSavedDistId(d.id);
-                                if (d.phone) setModalPhoneInput(d.phone);
-                              }}
-                              className={`p-2 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${isSelected
-                                  ? 'bg-primary/10 border-primary text-primary font-bold'
-                                  : 'bg-bg3/30 border-glass-border/30 text-text hover:bg-bg3/60'
-                                }`}
-                            >
-                              <div className="flex flex-col min-w-0">
-                                <span className="truncate text-[11px] font-bold">{d.name}</span>
-                                <span className="text-[10px] text-muted font-mono">{d.phone || 'No phone set'}</span>
-                              </div>
-                              {isSelected && <Check size={14} className="text-primary shrink-0" />}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer Actions */}
-                <div className="bg-bg3/40 px-5 py-3 border-t border-glass-border flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => setEditingDistributor(null)}
-                    className="px-4 py-2 rounded-xl bg-bg border border-glass-border text-xs text-muted hover:text-text font-bold transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSaveDistributorContact}
-                    disabled={isSavingContact}
-                    className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {isSavingContact ? (
-                      <span className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Check size={14} />
-                    )}
-                    <span>Save Contact</span>
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
           )}
         </div>
       )}

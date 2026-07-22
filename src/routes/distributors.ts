@@ -8,10 +8,8 @@ router.get('/distributors', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const distributors = await db.all('SELECT * FROM distributors ORDER BY name');
-    await dbManager.close();
     res.json(distributors);
   } catch (error) {
-    await dbManager.close();
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -28,14 +26,8 @@ router.post('/purchases', async (req, res) => {
     await db.run('INSERT INTO purchases (distributor_id, invoice_no, total_amount) VALUES (?, ?, ?)',
       [distRow.id, invoice_no, total_amount]);
 
-    await dbManager.close();
-
-    // Trigger checking refills now that new purchase stock is saved
-    // This would be handled via events or services in a more complete refactor
-
     res.json({ success: true, message: 'Purchase saved' });
   } catch (error) {
-    await dbManager.close();
     console.error('Failed to save purchase:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -49,10 +41,8 @@ router.post('/returns/reconcile-credit', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const result = await reconcileCreditNote(db, distributor_id, actual_credit_amount, purchase_id);
-    await dbManager.close();
     res.json(result);
   } catch (error) {
-    await dbManager.close();
     console.error('Failed to reconcile credit note:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -70,10 +60,8 @@ router.get('/:id/pending-returns', async (req, res) => {
        ORDER BY ert.return_date ASC`,
       [id]
     );
-    await dbManager.close();
     res.json(pendingReturns);
   } catch (error) {
-    await dbManager.close();
     console.error('Failed to fetch pending returns:', error);
     res.status(500).json({ error: 'Internal server error' });
   }

@@ -329,6 +329,30 @@ const Learning: React.FC = () => {
     }
   };
 
+  const [testingWaMsg, setTestingWaMsg] = useState(false);
+
+  const handleTestWaMessage = async () => {
+    setTestingWaMsg(true);
+    try {
+      const targetPhone = settingsData?.shop_phone || settingsData?.store_phone || settingsData?.delivery_boy_whatsapp || settingsData?.admin_whatsapp || '';
+      if (!targetPhone) {
+        toastEvent.trigger('Please save a Phone / WhatsApp Number in Settings or Learning Operations tab first.', 'error');
+        return;
+      }
+      toastEvent.trigger(`Sending test WhatsApp message to ${targetPhone}...`, 'info');
+      await apiClient.post('/messaging/send', {
+        number: targetPhone,
+        message: `🏥 *AI PHARMACY TEST MESSAGE*\n\nYour WhatsApp messaging integration is working successfully!\n\n🕒 *Timestamp:* ${new Date().toLocaleString()}`
+      });
+      toastEvent.trigger(`Test WhatsApp message successfully sent to ${targetPhone}!`, 'success');
+    } catch (err: any) {
+      console.error('Test WhatsApp message failed:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to send test message. Make sure WhatsApp is linked or logged in.', 'error');
+    } finally {
+      setTestingWaMsg(false);
+    }
+  };
+
   const handleTestWaBusiness = async () => {
     setWaBusinessTesting(true);
     setWaBusinessTestResult(null);
@@ -1362,21 +1386,30 @@ const Learning: React.FC = () => {
                             <p className="text-[10px] text-muted max-w-xs leading-normal">
                               {waStatus.isReady ? "Session active and linked." : waStatus.message || "Scan the QR code with WhatsApp to connect."}
                             </p>
-                            <div className="flex gap-2 justify-center">
-                              {!waStatus.isReady && (
-                                <button 
-                                  onClick={handleOpenWaLoginWindow}
-                                  disabled={isOpeningWaWindow}
-                                  className="text-[9px] font-bold bg-green/20 text-green px-3 py-1.5 rounded-lg hover:bg-green/30"
-                                >
-                                  {isOpeningWaWindow ? 'Opening...' : 'Chrome Login'}
-                                </button>
-                              )}
+                            <div className="flex flex-wrap gap-2 justify-center pt-1">
+                              <button 
+                                onClick={handleOpenWaLoginWindow}
+                                disabled={isOpeningWaWindow}
+                                className="text-[9px] font-bold bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/30 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                              >
+                                <Zap size={10} />
+                                <span>{isOpeningWaWindow ? 'Opening Chrome...' : 'Launch Chrome Login Popup'}</span>
+                              </button>
+
+                              <button 
+                                onClick={handleTestWaMessage}
+                                disabled={testingWaMsg}
+                                className="text-[9px] font-bold bg-sky-500/20 text-sky px-3 py-1.5 rounded-lg hover:bg-sky-500/30 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                              >
+                                <Send size={10} />
+                                <span>{testingWaMsg ? 'Sending Test...' : 'Send Test WhatsApp Message'}</span>
+                              </button>
+
                               <button 
                                 onClick={handleReconnect}
-                                className="text-[9px] font-bold bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/30"
+                                className="text-[9px] font-bold bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/30 transition-all active:scale-95"
                               >
-                                Logout WhatsApp
+                                Reconnect / Reset Session
                               </button>
                             </div>
                           </div>

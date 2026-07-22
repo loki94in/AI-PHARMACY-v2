@@ -51,7 +51,11 @@ function findChromePath() {
   const paths = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null,
+    process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : null,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Microsoft\\Edge\\Application\\msedge.exe') : null
   ].filter(Boolean) as string[];
 
   for (const p of paths) {
@@ -1297,19 +1301,9 @@ router.get('/cart', async (req, res) => {
         }
       }
 
-      // 4. Update snapshot database for currently active stores in the cart
-      for (const dist of distributors) {
-        if (dist.items.length > 0) {
-          await db.run(
-            `INSERT OR REPLACE INTO pharmarack_cart_snapshots (store_id, store_name, items_json, delivery_persons_json, last_updated)
-             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [dist.storeId, dist.storeName, JSON.stringify(dist.items), JSON.stringify(dist.deliveryPersons)]
-          );
-        } else {
-          // If empty in fresh cart, ensure it is deleted from snapshot
-          await db.run("DELETE FROM pharmarack_cart_snapshots WHERE store_id = ?", [dist.storeId]);
-        }
-      }
+      // 4. Update snapshot database for currently active stores in the cart (Disabled per configuration)
+      // Snapshots disabled
+
     } catch (dbErr) {
       console.error('[AutoNotif] Error running automatic cart transition checks:', dbErr);
     }
