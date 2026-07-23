@@ -40,6 +40,26 @@ let cachedPendingRefills: Refill[] = [];
 let cachedPriceHistory: Record<string, any[]> = {};
 let cachedLastFetched: Date | null = null;
 
+let waWindowRef: Window | null = null;
+
+function openOrReuseWhatsappTab(url: string) {
+  try {
+    if (waWindowRef && !waWindowRef.closed) {
+      waWindowRef.location.href = url;
+      waWindowRef.focus();
+      return;
+    }
+  } catch (err) {
+    console.warn('Could not navigate existing WhatsApp Web window handle:', err);
+  }
+  waWindowRef = window.open(url, 'whatsapp_web_tab');
+  if (waWindowRef) {
+    try {
+      waWindowRef.focus();
+    } catch (_) {}
+  }
+}
+
 export default function PharmarackCart() {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'cart';
@@ -70,8 +90,21 @@ export default function PharmarackCart() {
     deliveryBoyPhone2: ''
   });
 
-  // Custom phone number override map by storeId
-  const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>({});
+  // Custom phone number override map by storeId (persisted to localStorage)
+  const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>(() => {
+    try {
+      const saved = localStorage.getItem('custom_distributor_phones');
+      return saved ? JSON.parse(saved) : {};
+    } catch (_) {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('custom_distributor_phones', JSON.stringify(customDistributorPhones));
+    } catch (_) {}
+  }, [customDistributorPhones]);
 
   // Distributor filter sub-tab state ('all' | 'mapped' | 'non-mapped')
   const [distributorFilterTab, setDistributorFilterTab] = useState<'all' | 'mapped' | 'non-mapped'>('all');
@@ -83,24 +116,68 @@ export default function PharmarackCart() {
   const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
 
+  const normalizeDistName = (rawName: string): string => {
+    if (!rawName) return '';
+    return rawName
+      .toLowerCase()
+      .trim()
+      .replace(/\(.*?\)/g, '')
+      .replace(/pvt|ltd|limited|private|distributors|distributor|pharma|pharmaceuticals|agency|agencies|medicals|medical|co|and|llp|delivery|surgical|surgicals|generic/gi, '')
+      .replace(/[^a-z0-9]/g, '');
+  };
+
+  const findSavedDistributorMatch = (distName: string) => {
+    if (!distName || !Array.isArray(savedDistributorsList)) return null;
+
+    const normCart = normalizeDistName(distName);
+    const rawCartNorm = distName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!normCart && !rawCartNorm) return null;
+
+    const getPhone = (d: any) => {
+      const p = d.phone || d.mobile || d.whatsapp || d.contact || '';
+      return p.trim();
+    };
+
+    // 1. First priority: Exact or noise-cleaned match WITH a valid phone number
+    const matchWithPhone = savedDistributorsList.find((d: any) => {
+      if (!d || !d.name || !getPhone(d)) return false;
+
+      const normSaved = normalizeDistName(d.name);
+      const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      return (
+        (rawCartNorm && rawCartNorm === rawSavedNorm) ||
+        (normCart && normSaved && normCart === normSaved) ||
+        (normCart && normSaved && (normCart.includes(normSaved) || normSaved.includes(normCart))) ||
+        (rawCartNorm && rawSavedNorm && (rawCartNorm.includes(rawSavedNorm) || rawSavedNorm.includes(rawCartNorm)))
+      );
+    });
+
+    if (matchWithPhone) return matchWithPhone;
+
+    // 2. Second priority: Any matching distributor record (fallback)
+    return savedDistributorsList.find((d: any) => {
+      if (!d || !d.name) return false;
+
+      const normSaved = normalizeDistName(d.name);
+      const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      return (
+        (rawCartNorm && rawCartNorm === rawSavedNorm) ||
+        (normCart && normSaved && normCart === normSaved) ||
+        (normCart && normSaved && (normCart.includes(normSaved) || normSaved.includes(normCart))) ||
+        (rawCartNorm && rawSavedNorm && (rawCartNorm.includes(rawSavedNorm) || rawSavedNorm.includes(rawCartNorm)))
+      );
+    });
+  };
+
   const isDistributorMapped = (dist: Distributor) => {
     const custom = customDistributorPhones[dist.storeId];
     if (custom && custom.trim().length > 0) return true;
 
-    const normCartName = (dist.storeName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!normCartName) return false;
-
-    const matched = savedDistributorsList.find((d: any) => {
-      if (!d.name) return false;
-      const normSavedName = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (!normSavedName) return false;
-      return (
-        normCartName === normSavedName ||
-        normCartName.includes(normSavedName) ||
-        normSavedName.includes(normCartName)
-      );
-    });
-    return Boolean(matched && (matched.phone || matched.mobile || matched.whatsapp));
+    const matched = findSavedDistributorMatch(dist.storeName);
+    const phone = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+    return Boolean(phone && phone.trim().length > 0);
   };
 
   const mappedDistributors = React.useMemo(() => {
@@ -321,7 +398,27 @@ export default function PharmarackCart() {
 
   const buildDistributorOrderMessage = (dist: Distributor) => {
     const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
-    const deliveryContactPhone1 = (deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone || '';
+    
+    // Extract & format best available delivery contact phone
+    const rawDeliveryPhone = 
+      (deliveryStaff as any)?.phone || 
+      (deliveryStaff as any)?.code || 
+      (deliveryStaff as any)?.mobile ||
+      storeInfo.deliveryBoyPhone || 
+      storeInfo.deliveryBoyPhone2 || 
+      storeInfo.phone || 
+      '';
+
+    let cleanDeliveryPhone = rawDeliveryPhone.replace(/\D/g, '');
+    if (cleanDeliveryPhone.length === 10) {
+      cleanDeliveryPhone = `+91 ${cleanDeliveryPhone.slice(0, 5)} ${cleanDeliveryPhone.slice(5)}`;
+    } else if (cleanDeliveryPhone.startsWith('91') && cleanDeliveryPhone.length === 12) {
+      cleanDeliveryPhone = `+91 ${cleanDeliveryPhone.slice(2, 7)} ${cleanDeliveryPhone.slice(7)}`;
+    } else if (rawDeliveryPhone) {
+      cleanDeliveryPhone = rawDeliveryPhone;
+    }
+
+    const deliveryPersonName = deliveryStaff?.name || 'Delivery Staff / Store Contact';
 
     let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
@@ -330,11 +427,10 @@ export default function PharmarackCart() {
     msg += `• Address: *${storeInfo.address || 'N/A'}*\n`;
     if (storeInfo.email) msg += `• Email: *${storeInfo.email}*\n`;
 
-    if (deliveryContactPhone1) {
-      msg += `\n🛵 *Delivery Contact:*\n`;
-      if (deliveryStaff) msg += `• Person: *${deliveryStaff.name}*\n`;
-      msg += `• Phone: *${deliveryContactPhone1}*\n`;
-    }
+    // Always include Delivery Contact section
+    msg += `\n🛵 *Delivery Contact:*\n`;
+    msg += `• Person: *${deliveryPersonName}*\n`;
+    msg += `• Phone: *${cleanDeliveryPhone || storeInfo.phone || 'N/A'}*\n`;
 
     msg += `\n----------------------------------\n`;
     msg += `📦 *ORDERED MEDICINES:*\n`;
@@ -351,21 +447,6 @@ export default function PharmarackCart() {
     msg += `🕒 *Time:* ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
     msg += `*Please confirm order receipt & dispatch.*`;
     return msg;
-  };
-
-  const findSavedDistributorMatch = (distName: string) => {
-    const normCartName = (distName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!normCartName) return null;
-    return savedDistributorsList.find((d: any) => {
-      if (!d.name) return false;
-      const normSavedName = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (!normSavedName) return false;
-      return (
-        normCartName === normSavedName ||
-        normCartName.includes(normSavedName) ||
-        normSavedName.includes(normCartName)
-      );
-    });
   };
 
   const handleSendWhatsAppOrder = (dist: Distributor) => {
@@ -389,8 +470,8 @@ export default function PharmarackCart() {
     const encodedMsg = encodeURIComponent(msg);
     const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-    // Directly open WhatsApp Web window
-    window.open(waWebUrl, '_blank');
+    // Directly open or reuse WhatsApp Web tab
+    openOrReuseWhatsappTab(waWebUrl);
     setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
     toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'success');
   };
@@ -431,7 +512,7 @@ export default function PharmarackCart() {
           const encodedMsg = encodeURIComponent(msg);
           const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-          window.open(waWebUrl, '_blank');
+          openOrReuseWhatsappTab(waWebUrl);
           setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
           openedCount++;
         }
@@ -475,46 +556,54 @@ export default function PharmarackCart() {
 
   const handleSaveDistributorContact = async () => {
     if (!editingDistributor) return;
-    setIsSavingContact(true);
+    const cleanPhone = modalPhoneInput.trim();
+    const storeId = editingDistributor.storeId;
+    const distName = editingDistributor.storeName;
+
+    // 1. Immediately update UI state & close modal for instant zero-latency feedback
+    setCustomDistributorPhones(prev => ({
+      ...prev,
+      [storeId]: cleanPhone
+    }));
+    toastEvent.trigger(`Saved WhatsApp contact for ${distName}`, 'success');
+    setEditingDistributor(null);
+
+    // 2. Persist to database in background without blocking UI thread
     try {
-      const cleanPhone = modalPhoneInput.trim();
-      const storeId = editingDistributor.storeId;
-      const distName = editingDistributor.storeName;
-
-      // 1. Update local custom override map
-      setCustomDistributorPhones(prev => ({
-        ...prev,
-        [storeId]: cleanPhone
-      }));
-
-      // 2. Save or Update in database if matched or selected
-      if (selectedSavedDistId) {
-        await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
-          name: distName,
-          phone: cleanPhone
-        });
-      } else if (cleanPhone) {
-        // Save new distributor contact in database
-        const res = await apiClient.post('/settings/distributors', {
-          name: distName,
-          phone: cleanPhone
-        });
-        if (res?.data?.data?.id) {
-          setSelectedSavedDistId(res.data.data.id);
+      if (cleanPhone || selectedSavedDistId) {
+        let saveSuccess = false;
+        if (selectedSavedDistId) {
+          try {
+            await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
+              name: distName,
+              phone: cleanPhone
+            });
+            saveSuccess = true;
+          } catch (e) {
+            console.warn('PUT distributor by ID failed, falling back to name upsert:', e);
+          }
+        }
+        if (!saveSuccess) {
+          await apiClient.post('/settings/distributors', {
+            name: distName,
+            phone: cleanPhone
+          });
         }
       }
 
-      // Refresh saved distributors list silently
-      const refreshList = await api.getDistributors();
-      if (Array.isArray(refreshList)) setSavedDistributorsList(refreshList);
-
-      toastEvent.trigger(`Updated contact for ${distName}`, 'success');
-      setEditingDistributor(null);
+      // 3. Silently update saved distributors list in background
+      try {
+        const refreshList = await api.getDistributors();
+        if (Array.isArray(refreshList)) {
+          setSavedDistributorsList(refreshList);
+        } else if (Array.isArray(refreshList?.data)) {
+          setSavedDistributorsList(refreshList.data);
+        }
+      } catch (e) {
+        console.warn('Silent refresh of saved distributors failed:', e);
+      }
     } catch (err: any) {
-      console.error('Failed to save distributor contact:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to save contact info', 'error');
-    } finally {
-      setIsSavingContact(false);
+      console.warn('Background save distributor contact error:', err);
     }
   };
 
@@ -1308,6 +1397,103 @@ export default function PharmarackCart() {
               </a>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Edit Distributor Contact Modal ── */}
+      {editingDistributor && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-bg3/80 px-6 py-4 border-b border-glass-border flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Phone className="text-emerald-400" size={18} />
+                <div>
+                  <h3 className="font-extrabold text-text text-sm">Distributor WhatsApp Contact</h3>
+                  <p className="text-[11px] text-muted truncate max-w-[240px]">{editingDistributor.storeName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingDistributor(null)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-4">
+              {/* Search / Select Saved Distributor Contact */}
+              <div>
+                <label className="block text-xs font-bold text-muted mb-1.5">
+                  Link to Saved Directory Distributor
+                </label>
+                <select
+                  value={selectedSavedDistId || ''}
+                  onChange={(e) => {
+                    const val = e.target.value ? Number(e.target.value) : null;
+                    setSelectedSavedDistId(val);
+                    if (val) {
+                      const found = savedDistributorsList.find((d: any) => d.id === val);
+                      if (found && (found.phone || found.mobile || found.whatsapp)) {
+                        setModalPhoneInput(found.phone || found.mobile || found.whatsapp || '');
+                      }
+                    }
+                  }}
+                  className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-emerald-500 font-medium"
+                >
+                  <option value="">-- Direct Mobile Number Only --</option>
+                  {savedDistributorsList.map((d: any) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} {d.phone ? `(${d.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* WhatsApp Mobile Number Input */}
+              <div>
+                <label className="block text-xs font-bold text-muted mb-1.5">
+                  WhatsApp Phone Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 9822012345 or +919822012345"
+                  value={modalPhoneInput}
+                  onChange={(e) => setModalPhoneInput(e.target.value)}
+                  className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text font-mono focus:outline-none focus:border-emerald-500 font-bold"
+                />
+                <p className="text-[10px] text-muted mt-1 font-medium">
+                  10-digit mobile numbers will be formatted with +91 country code automatically.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingDistributor(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDistributorContact}
+                disabled={isSavingContact}
+                className="premium-btn bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50 transition-all shadow-md active:scale-95"
+              >
+                {isSavingContact ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Check size={14} />
+                )}
+                <span>Save Contact</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -205,7 +205,6 @@ router.get('/profiles', async (req, res) => {
       LEFT JOIN distributor_learning_profiles lp ON d.id = lp.distributor_id
       ORDER BY d.name ASC
     `);
-    await dbManager.close();
     res.json({ success: true, profiles });
   } catch (error: any) {
     console.error('Failed to fetch learning profiles:', error);

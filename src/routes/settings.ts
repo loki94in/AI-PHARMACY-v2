@@ -179,20 +179,29 @@ router.post('/distributors', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const cleanName = name.trim();
-    const existing = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [cleanName]);
-    if (existing) {
+    const normName = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const existing = await db.all(
+      `SELECT id FROM distributors WHERE LOWER(name) = LOWER(?) OR (LENGTH(?) > 3 AND LOWER(REPLACE(name, ' ', '')) LIKE ?)`,
+      [cleanName, normName, `%${normName}%`]
+    );
+
+    if (existing && existing.length > 0) {
+      const ids = existing.map(e => e.id);
+      const placeholders = ids.map(() => '?').join(',');
       await db.run(
         `UPDATE distributors SET 
           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
           email = CASE WHEN ? != '' THEN ? ELSE email END,
           address = CASE WHEN ? != '' THEN ? ELSE address END,
           state_code = CASE WHEN ? != '' THEN ? ELSE state_code END
-         WHERE id = ?`,
-        [phone || '', phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', existing.id]
+         WHERE id IN (${placeholders})`,
+        [phone || '', phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', ...ids]
       );
-      const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [existing.id]);
+      const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [ids[0]]);
       return res.json({ success: true, data: updated });
     }
+
     const result = await db.run(
       `INSERT INTO distributors (name, phone, email, address, state_code) VALUES (?, ?, ?, ?, ?)`,
       [cleanName, phone || '', email || '', address || '', state_code || '']
@@ -213,8 +222,14 @@ router.put('/distributors/:id', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run(
-      `UPDATE distributors SET name = ?, phone = ?, email = ?, address = ?, state_code = ? WHERE id = ?`,
-      [name, phone || '', email || '', address || '', state_code || '', id]
+      `UPDATE distributors SET 
+        name = ?, 
+        phone = ?, 
+        email = CASE WHEN ? != '' THEN ? ELSE email END, 
+        address = CASE WHEN ? != '' THEN ? ELSE address END, 
+        state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
+       WHERE id = ?`,
+      [name, phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', id]
     );
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });
