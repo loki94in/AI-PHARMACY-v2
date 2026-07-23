@@ -145,20 +145,39 @@ router.post('/', async (req, res) => {
 
     // Resolve or auto-create customer/patient
     let customerId = patient_id || null;
+    if (customerId) {
+      const exists = await db.get('SELECT id FROM customers WHERE id = ?', [customerId]);
+      if (!exists) customerId = null;
+    }
+
     if (!customerId && (patient_phone || patient_name)) {
       const cleanPhone = (patient_phone || '').trim();
+      const digitsOnly = cleanPhone.replace(/\D/g, '').slice(-10);
       const cleanName = (patient_name || 'Customer').trim();
+
       let existing = null;
-      if (cleanPhone) {
-        existing = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+
+      // 1. Match by last 10 digits of phone if available
+      if (digitsOnly.length === 10) {
+        existing = await db.get(
+          `SELECT id, name, phone FROM customers 
+           WHERE phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+          [cleanPhone, `%${digitsOnly}`]
+        );
       }
-      if (!existing && cleanName) {
-        existing = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?) LIMIT 1', [cleanName]);
+
+      // 2. Match by case-insensitive name if no phone match
+      if (!existing && cleanName && cleanName.toLowerCase() !== 'walk-in customer' && cleanName.toLowerCase() !== 'customer') {
+        existing = await db.get(
+          `SELECT id, name, phone FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1`,
+          [cleanName]
+        );
       }
+
       if (existing) {
         customerId = existing.id;
-        if (cleanPhone) {
-          await db.run('UPDATE customers SET phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ?', [cleanPhone, customerId]);
+        if (cleanPhone && (!existing.phone || existing.phone.trim() === '')) {
+          await db.run('UPDATE customers SET phone = ? WHERE id = ?', [cleanPhone, customerId]);
         }
       } else {
         const custResult = await db.run(
@@ -357,19 +376,65 @@ router.post('/', async (req, res) => {
         (async () => {
           try {
             const { sendMessage } = await import('../whatsappClient.js');
-            // Fetch fresh credit balance after the DB update above
-            let totalDues = total;
-            if (customerId) {
-              const custRow = await db.get('SELECT credit_balance FROM customers WHERE id = ?', [customerId]);
-              totalDues = custRow?.credit_balance ?? total;
-            }
+
+            const formatDate = (dStr?: string) => {
+              if (!dStr) return '';
+              try {
+                const d = new Date(dStr);
+                return isNaN(d.getTime()) ? dStr : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+              } catch {
+                return dStr || '';
+              }
+            };
+
             const isCredit = paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID';
             let waMsg = `Dear ${nameForWA},\n\n`;
+
             if (isCredit) {
-              waMsg += `📌 *Credit Purchase Bill: #${invoice_no}*\n`;
-              waMsg += `Bill Amount: *₹${total.toFixed(2)}*\n`;
-              waMsg += `Total Outstanding Dues: *₹${Number(totalDues).toFixed(2)}*\n\n`;
-              waMsg += `This bill has been posted to your credit ledger account.\n\n`;
+              // Fetch old/previous unpaid bills for this customer
+              const oldInvoices = customerId
+                ? await db.all(
+                    `SELECT invoice_no, total_amount, date FROM sales_invoices
+                     WHERE customer_id = ? AND id != ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'
+                     ORDER BY date ASC, id ASC`,
+                    [customerId, invoiceId]
+                  )
+                : [];
+
+              let oldDuesSum = 0;
+              let oldBillsListStr = '';
+              for (const inv of oldInvoices) {
+                const amt = Number(inv.total_amount || 0);
+                oldDuesSum += amt;
+                const dFormatted = formatDate(inv.date);
+                oldBillsListStr += `• Bill #${inv.invoice_no} (${dFormatted}): ₹${amt.toFixed(2)}\n`;
+              }
+
+              const currentBillAmt = Number(total);
+              const finalOutstanding = oldDuesSum + currentBillAmt;
+              const todayStr = formatDate(invoiceDateValue);
+
+              waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
+              waMsg += `🧾 *Current Bill (New)*\n`;
+              waMsg += `• Bill No: *#${invoice_no}*\n`;
+              waMsg += `• Date: *${todayStr}*\n`;
+              waMsg += `• Amount: *₹${currentBillAmt.toFixed(2)}*\n\n`;
+
+              if (oldInvoices.length > 0) {
+                waMsg += `📜 *Previous Unpaid Bills (${oldInvoices.length})*\n`;
+                waMsg += `${oldBillsListStr}\n`;
+
+                waMsg += `📊 *Total Calculation Summary*\n`;
+                waMsg += `Previous Dues: ₹${oldDuesSum.toFixed(2)}\n`;
+                waMsg += `Current Bill:  ₹${currentBillAmt.toFixed(2)}\n`;
+                waMsg += `━━━━━━━━━━━━━━━━━━\n`;
+                waMsg += `💰 *Final Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
+              } else {
+                waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
+              }
+
+              waMsg += `This bill has been posted to your credit ledger account.\n`;
+              waMsg += `Kindly arrange payment at your convenience.\n\n`;
             } else {
               waMsg += `📄 *Sale Invoice: #${invoice_no}*\n`;
               waMsg += `Bill Amount Paid: *₹${total.toFixed(2)}*\n\n`;

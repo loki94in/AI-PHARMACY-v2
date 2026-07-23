@@ -106,15 +106,37 @@ router.get('/:id/history', async (req, res) => {
   const customerId = req.params.id;
   try {
     const db = await dbManager.getConnection();
+    const customer = await db.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+    
+    let matchingCustomerIds = [Number(customerId)];
+    if (customer) {
+      const cleanPhone = (customer.phone || '').trim();
+      const digitsOnly = cleanPhone.replace(/\D/g, '').slice(-10);
+      const cleanName = (customer.name || '').trim();
+
+      if (digitsOnly.length === 10 || (cleanName && cleanName.toLowerCase() !== 'walk-in customer' && cleanName.toLowerCase() !== 'customer')) {
+        const dupeRows = await db.all(
+          `SELECT id FROM customers 
+           WHERE (length(?) = 10 AND (phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?))
+              OR (length(?) > 1 AND LOWER(TRIM(name)) = LOWER(TRIM(?)))`,
+          [digitsOnly, cleanPhone, `%${digitsOnly}`, cleanName, cleanName]
+        );
+        if (dupeRows && dupeRows.length > 0) {
+          matchingCustomerIds = Array.from(new Set([...matchingCustomerIds, ...dupeRows.map(r => r.id)]));
+        }
+      }
+    }
+
+    const placeholders = matchingCustomerIds.map(() => '?').join(',');
     const invoices = await db.all(
       `SELECT si.*, c.name as customer_name, c.phone as customer_phone, d.name as doctor_name
        FROM sales_invoices si
-       JOIN customers c ON c.id = ?
+       LEFT JOIN customers c ON si.customer_id = c.id
        LEFT JOIN doctors d ON d.id = si.doctor_id
-       WHERE si.customer_id = c.id 
+       WHERE si.customer_id IN (${placeholders})
           OR (c.legacy_id IS NOT NULL AND c.legacy_id != '' AND si.legacy_id = c.legacy_id)
        ORDER BY si.date DESC`,
-      [customerId]
+      [...matchingCustomerIds]
     );
 
     for (const inv of invoices) {
@@ -348,12 +370,53 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
     const { sendMessage } = await import('../whatsappClient.js');
     const dueDateStr = customer.credit_due_date ? new Date(customer.credit_due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'As agreed';
 
-    const message = custom_message || `Dear ${customer.name || 'Customer'},\n\n` +
-      `📌 *Credit Due Balance Reminder*\n` +
-      `Outstanding Amount: *₹${(customer.credit_balance || 0).toFixed(2)}*\n` +
-      `Due Date: *${dueDateStr}*\n\n` +
-      `Kindly arrange payment at your earliest convenience or visit our pharmacy.\n\n` +
-      `Thank you!\n— AI Pharmacy OS`;
+    const formatDate = (dStr?: string) => {
+      if (!dStr) return '';
+      try {
+        const d = new Date(dStr);
+        return isNaN(d.getTime()) ? dStr : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      } catch {
+        return dStr || '';
+      }
+    };
+
+    // Fetch all unpaid credit invoices for itemized summary breakdown
+    const pendingInvoices = await db.all(
+      `SELECT invoice_no, total_amount, date FROM sales_invoices
+       WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'
+       ORDER BY date ASC, id ASC`,
+      [id]
+    );
+
+    let billsBreakdownStr = '';
+    let computedTotal = 0;
+    if (pendingInvoices && pendingInvoices.length > 0) {
+      billsBreakdownStr += `📜 *Pending Bills Breakdown (${pendingInvoices.length})*\n`;
+      for (const inv of pendingInvoices) {
+        const amt = Number(inv.total_amount || 0);
+        computedTotal += amt;
+        const dFormatted = formatDate(inv.date);
+        billsBreakdownStr += `• Bill #${inv.invoice_no} (${dFormatted}): ₹${amt.toFixed(2)}\n`;
+      }
+      billsBreakdownStr += `\n`;
+    }
+
+    const finalOutstanding = customer.credit_balance !== undefined && customer.credit_balance !== null 
+      ? Number(customer.credit_balance)
+      : computedTotal;
+
+    let message = custom_message;
+    if (!message) {
+      message = `Dear ${customer.name || 'Customer'},\n\n` +
+        `📌 *Credit Outstanding Balance Reminder*\n\n` +
+        (billsBreakdownStr ? billsBreakdownStr : '') +
+        `📊 *Summary Calculation*\n` +
+        `Due Date: *${dueDateStr}*\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n` +
+        `Kindly arrange payment at your earliest convenience or visit our pharmacy.\n\n` +
+        `Thank you!\n— AI Pharmacy OS`;
+    }
 
     await sendMessage(customer.phone, undefined, message);
 

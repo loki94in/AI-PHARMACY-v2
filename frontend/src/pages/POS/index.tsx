@@ -193,6 +193,7 @@ const POS = () => {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [patientName, setPatientName] = useState(initialActiveTab.patientName || '');
   const [patientPhone, setPatientPhone] = useState(initialActiveTab.patientPhone || '');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(initialActiveTab.selectedCustomerId || null);
   const [patientId] = useState('P-' + Math.floor(100000 + Math.random() * 900000));
   const [refillEnabled, setRefillEnabled] = useState(initialActiveTab.refillEnabled || false);
   const [refillDays, setRefillDays] = useState(initialActiveTab.refillDays || 30);
@@ -1743,6 +1744,7 @@ const POS = () => {
       const payload = {
         items: salesItems,
         discount: discountAmount,
+        patient_id: selectedCustomerId || undefined,
         patient_name: patientName || 'Walk-in Customer',
         patient_phone: phoneToUse,
         doctor_name: doctor || undefined,
@@ -1939,6 +1941,7 @@ const POS = () => {
                         const sel = patientSuggestions[patientHighlightIndex];
                         updatePatientName(sel.name);
                         setPatientPhone(sel.phone || '');
+                        setSelectedCustomerId(sel.id);
                         setShowPatientSuggestions(false);
                         setPatientHighlightIndex(-1);
                       } else if (e.key === 'Escape') {
@@ -1960,6 +1963,7 @@ const POS = () => {
                             onMouseDown={() => {
                               updatePatientName(c.name);
                               setPatientPhone(c.phone || '');
+                              setSelectedCustomerId(c.id);
                               setShowPatientSuggestions(false);
                               setPatientHighlightIndex(-1);
                             }}
