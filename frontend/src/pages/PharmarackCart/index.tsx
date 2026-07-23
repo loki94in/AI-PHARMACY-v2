@@ -399,26 +399,16 @@ export default function PharmarackCart() {
   const buildDistributorOrderMessage = (dist: Distributor) => {
     const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
     
-    // Extract & format best available delivery contact phone
-    const rawDeliveryPhone = 
-      (deliveryStaff as any)?.phone || 
-      (deliveryStaff as any)?.code || 
-      (deliveryStaff as any)?.mobile ||
-      storeInfo.deliveryBoyPhone || 
-      storeInfo.deliveryBoyPhone2 || 
-      storeInfo.phone || 
-      '';
+    const formatPhone = (raw: string) => {
+      if (!raw) return '';
+      let clean = raw.replace(/\D/g, '');
+      if (clean.length === 10) return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+      if (clean.startsWith('91') && clean.length === 12) return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+      return raw;
+    };
 
-    let cleanDeliveryPhone = rawDeliveryPhone.replace(/\D/g, '');
-    if (cleanDeliveryPhone.length === 10) {
-      cleanDeliveryPhone = `+91 ${cleanDeliveryPhone.slice(0, 5)} ${cleanDeliveryPhone.slice(5)}`;
-    } else if (cleanDeliveryPhone.startsWith('91') && cleanDeliveryPhone.length === 12) {
-      cleanDeliveryPhone = `+91 ${cleanDeliveryPhone.slice(2, 7)} ${cleanDeliveryPhone.slice(7)}`;
-    } else if (rawDeliveryPhone) {
-      cleanDeliveryPhone = rawDeliveryPhone;
-    }
-
-    const deliveryPersonName = deliveryStaff?.name || 'Delivery Staff / Store Contact';
+    const del1 = formatPhone((deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone);
+    const del2 = formatPhone(storeInfo.deliveryBoyPhone2);
 
     let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
@@ -427,10 +417,20 @@ export default function PharmarackCart() {
     msg += `• Address: *${storeInfo.address || 'N/A'}*\n`;
     if (storeInfo.email) msg += `• Email: *${storeInfo.email}*\n`;
 
-    // Always include Delivery Contact section
+    // Delivery Boy Contacts section
     msg += `\n🛵 *Delivery Contact:*\n`;
-    msg += `• Person: *${deliveryPersonName}*\n`;
-    msg += `• Phone: *${cleanDeliveryPhone || storeInfo.phone || 'N/A'}*\n`;
+    if (deliveryStaff?.name) {
+      msg += `• Staff: *${deliveryStaff.name}*\n`;
+    }
+    if (del1) {
+      msg += `• Delivery Boy 1: *${del1}*\n`;
+    }
+    if (del2) {
+      msg += `• Delivery Boy 2: *${del2}*\n`;
+    }
+    if (!del1 && !del2) {
+      msg += `• Phone: *${storeInfo.phone ? formatPhone(storeInfo.phone) : 'N/A'}*\n`;
+    }
 
     msg += `\n----------------------------------\n`;
     msg += `📦 *ORDERED MEDICINES:*\n`;

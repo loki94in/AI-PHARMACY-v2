@@ -1965,50 +1965,30 @@ const Learning: React.FC = () => {
                 <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
                   <div className="space-y-1">
                     <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                      <Bell size={14} className="text-purple" />
-                      Alert Broadcast Contacts
+                      <Truck size={14} className="text-emerald-400" />
+                      Delivery Boy Contact Numbers
                     </h4>
                     <p className="text-[10px] text-muted">
-                      Add comma-separated WhatsApp phone numbers for automated systems alerts.
+                      Configure Delivery Boy 1 and 2 WhatsApp numbers to automatically embed in order templates.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-3 border-t border-glass-border/40">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-glass-border/40">
                     <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Admin Alert Numbers</label>
+                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Boy Number 1</label>
                       <input
                         type="text"
-                        className="premium-input w-full text-xs"
-                        placeholder="e.g. +919876543210"
-                        value={settingsData.admin_whatsapp || ''}
-                        onChange={(e) => setSettingsData({ ...settingsData, admin_whatsapp: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Distributor Alert Numbers</label>
-                      <input
-                        type="text"
-                        className="premium-input w-full text-xs"
-                        placeholder="e.g. +919876543210"
-                        value={settingsData.distributor_whatsapp || ''}
-                        onChange={(e) => setSettingsData({ ...settingsData, distributor_whatsapp: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Alert Numbers (1)</label>
-                      <input
-                        type="text"
-                        className="premium-input w-full text-xs"
+                        className="premium-input w-full text-xs font-mono font-bold"
                         placeholder="e.g. +919876543210"
                         value={settingsData.delivery_boy_whatsapp || ''}
                         onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp: e.target.value })}
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Alert Numbers (2 / Admin)</label>
+                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Boy Number 2</label>
                       <input
                         type="text"
-                        className="premium-input w-full text-xs"
+                        className="premium-input w-full text-xs font-mono font-bold"
                         placeholder="e.g. +919876543210"
                         value={settingsData.delivery_boy_whatsapp_2 || ''}
                         onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp_2: e.target.value })}
