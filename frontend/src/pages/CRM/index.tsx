@@ -4,7 +4,7 @@ import { apiClient } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 
@@ -483,6 +483,7 @@ const WhatsAppSection: React.FC = () => {
   const [showTemplatePopover, setShowTemplatePopover] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [scanningOcrId, setScanningOcrId] = useState<string | null>(null);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   // OCR results keyed by message ID (populated from DB via scannedResult or SSE)
   const [ocrResults, setOcrResults] = useState<Record<string, string>>({});
 
@@ -950,19 +951,57 @@ const WhatsAppSection: React.FC = () => {
                         className={`flex flex-col ${isOut ? 'items-end' : 'items-start'}`}
                       >
                         <div
-                          className={`max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                          className={`group relative max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm select-text ${
                             isOut
                               ? 'bg-primary text-white rounded-br-none'
                               : 'bg-bg2 border border-border text-text rounded-bl-none'
                           }`}
                         >
-                          <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                          {/* Copy Button */}
+                          {m.body && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(m.body);
+                                setCopiedMsgId(m.id);
+                                toastEvent.trigger('Message copied to clipboard', 'success');
+                                setTimeout(() => setCopiedMsgId(null), 2000);
+                              }}
+                              className={`absolute top-1.5 right-1.5 p-1 rounded-md transition-all ${
+                                isOut
+                                  ? 'bg-white/20 text-white hover:bg-white/30'
+                                  : 'bg-bg3/80 text-muted hover:text-text hover:bg-bg3'
+                              }`}
+                              title="Copy message text"
+                            >
+                              {copiedMsgId === m.id ? (
+                                <Check size={11} className="text-emerald-400" />
+                              ) : (
+                                <Copy size={11} />
+                              )}
+                            </button>
+                          )}
+
+                          <div className="whitespace-pre-wrap break-words pr-5 select-text">{m.body}</div>
                           {/* OCR medicine result pill — shown when scan result exists */}
                           {ocrResults[m.id] && (
-                            <div className="mt-2 pt-1.5 border-t border-border/40">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-400 text-[10px] font-semibold">
+                            <div className="mt-2 pt-1.5 border-t border-border/40 select-text flex items-center justify-between gap-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-400 text-[10px] font-semibold select-text">
                                 💊 {ocrResults[m.id]}
                               </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(ocrResults[m.id]);
+                                  toastEvent.trigger('OCR medicine text copied', 'success');
+                                }}
+                                className="p-1 text-[10px] text-teal-400 hover:underline flex items-center gap-0.5"
+                                title="Copy OCR text"
+                              >
+                                <Copy size={9} /> Copy
+                              </button>
                             </div>
                           )}
                           {m.hasMedia && (

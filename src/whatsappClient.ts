@@ -546,8 +546,14 @@ export async function sendMessage(
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
     const useBusiness = await shouldRouteToBusiness();
-    if (!useBusiness && !isReady) {
-      throw new Error('Client not initialized');
+    if (!useBusiness && (!isReady || !clientInstance)) {
+      try {
+        console.log('[WhatsApp Client] Client not ready on sendMessage call. Initializing headless WhatsApp client...');
+        await initClient();
+      } catch (initErr) {
+        console.error('[WhatsApp Client] Auto-initialization failed during send:', initErr);
+        throw new Error('WhatsApp session is not connected. Please scan the QR code in Settings or click "Open Live Chrome Window" to log in.');
+      }
     }
 
     try {

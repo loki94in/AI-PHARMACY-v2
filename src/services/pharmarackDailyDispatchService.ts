@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Pharmarack Daily Batch Dispatch Service
  *
  * Collects all of today's verified Pharmarack cart orders and sends ONE combined
@@ -106,7 +106,7 @@ export async function recordPlacedOrder(
   }
 }
 
-function buildBatchMessage(orders: any[], isLate = false): string {
+async function buildBatchMessage(db: any, orders: any[], isLate = false): Promise<string> {
   const today = todayIST();
   const [, mm, dd] = today.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -122,24 +122,46 @@ function buildBatchMessage(orders: any[], isLate = false): string {
     } catch { /* skip malformed */ }
   }
 
-  const prefix = isLate ? `Today Orders (Late Addition) - ` : `Today Orders - `;
+  // Fetch distributor phone numbers from DB
+  const distPhonesMap: Record<string, string> = {};
+  for (const distName of Object.keys(grouped)) {
+    const dRow = await db.get(
+      `SELECT phone FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
+      [distName, `%${distName}%`]
+    );
+    distPhonesMap[distName] = dRow?.phone || 'No phone set';
+  }
+
+  const prefix = isLate ? `📅 TODAY ORDERS (LATE ADDITION) — ` : `📅 TODAY ORDERS SUMMARY — `;
   let msg = `${prefix}${dateLabel}\n\n`;
 
+  const summaryLines: string[] = [];
+
   for (const [distName, items] of Object.entries(grouped)) {
-    msg += `${distName.toUpperCase()}:\n`;
+    const distPhone = distPhonesMap[distName] || 'N/A';
+    msg += `🏬 *${distName.toUpperCase()}*\n`;
+    msg += `📞 Contact: ${distPhone}\n`;
+    msg += `📦 Medicines:\n`;
     for (const item of items) {
       const name = item.productName || item.name || 'Unknown';
       const qty = item.qty || item.Quantity || item.quantity || 1;
-      msg += `- ${name} x ${qty}\n`;
+      const pack = item.packaging ? ` (${item.packaging})` : '';
+      msg += `  • ${name}${pack} — Qty: ${qty}\n`;
     }
-    msg += '\n';
+    msg += `📊 Items Count: ${items.length}\n\n`;
+    summaryLines.push(`• *${distName}*: ${distPhone} (${items.length} items)`);
   }
 
   const totalDists = Object.keys(grouped).length;
-  const totalItems = orders.reduce((s: number, o: any) => {
-    try { return s + JSON.parse(o.items_json).length; } catch { return s; }
-  }, 0);
-  msg += `Total: ${totalDists} distributor${totalDists !== 1 ? 's' : ''} | ${totalItems} item${totalItems !== 1 ? 's' : ''}`;
+  const totalItems = Object.values(grouped).reduce((acc, items) => acc + items.length, 0);
+
+  msg += `==================================\n`;
+  msg += `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS*\n`;
+  msg += summaryLines.join('\n') + `\n\n`;
+  msg += `🚚 *Total Today Distributors:* ${totalDists}\n`;
+  msg += `📦 *Total Today Order Items:* ${totalItems}\n`;
+  msg += `==================================`;
+
   return msg.trim();
 }
 
@@ -184,7 +206,7 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
 async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): Promise<void> {
   if (orders.length === 0) return;
 
-  const message = buildBatchMessage(orders, isLate);
+  const message = await buildBatchMessage(db, orders, isLate);
   const boys = await resolveDeliveryBoyPhones(db, orders);
 
   if (boys.length === 0) {

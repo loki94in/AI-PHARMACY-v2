@@ -434,6 +434,32 @@ export default function PharmarackCart() {
     }
   };
 
+  const [sendingDeliveryBoyNotifId, setSendingDeliveryBoyNotifId] = useState<number | null>(null);
+
+  const handleSendDeliveryBoyNotification = async (dist: Distributor) => {
+    setSendingDeliveryBoyNotifId(dist.storeId);
+    try {
+      const res = await api.sendManualCartNotification({
+        storeId: dist.storeId,
+        storeName: dist.storeName,
+        deliveryPersons: dist.deliveryPersons,
+        items: dist.items
+      });
+      if (res && res.success) {
+        toastEvent.trigger(`Delivery Boy notification sent via WhatsApp for ${dist.storeName}!`, 'success');
+        // Persist sent status so it reflects immediately and across reloads
+        setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to send delivery boy notification.', 'error');
+      }
+    } catch (err: any) {
+      console.error('Failed to send delivery boy notification:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to send delivery boy notification.', 'error');
+    } finally {
+      setSendingDeliveryBoyNotifId(null);
+    }
+  };
+
   const handleSendManualNotification = async (dist: Distributor) => {
     setSendingNotifId(dist.storeId);
     try {
@@ -445,6 +471,7 @@ export default function PharmarackCart() {
       });
       if (res && res.success) {
         toastEvent.trigger(res.message || 'Notification sent successfully!', 'success');
+        setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
       } else {
         toastEvent.trigger(res?.error || 'Failed to send notifications.', 'error');
       }
@@ -1327,7 +1354,22 @@ export default function PharmarackCart() {
                               {dist.items.length} item{dist.items.length !== 1 ? 's' : ''}
                             </span>
 
-                            {/* Button 1: Send to Pharmarack Order */}
+                            {/* Button 1: Send to Delivery Boy via WhatsApp */}
+                            <button
+                              onClick={() => handleSendDeliveryBoyNotification(dist)}
+                              disabled={sendingDeliveryBoyNotifId === dist.storeId}
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
+                              title="Manually trigger and send WhatsApp order notification to assigned Delivery Boy anytime"
+                            >
+                              {sendingDeliveryBoyNotifId === dist.storeId ? (
+                                <span className="w-2.5 h-2.5 border border-teal-300/30 border-t-teal-300 rounded-full animate-spin" />
+                              ) : (
+                                <Truck size={11} className="text-teal-300" />
+                              )}
+                              <span>Send to Delivery Boy</span>
+                            </button>
+
+                            {/* Button 2: Send to Pharmarack Order */}
                             <button
                               onClick={() => handleSendManualNotification(dist)}
                               disabled={sendingNotifId === dist.storeId}

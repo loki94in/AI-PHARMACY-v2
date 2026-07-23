@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 
 /**
  * Ensure required SQLite tables exist.
@@ -402,6 +402,20 @@ export async function ensureSchema(dbPath: string) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       query TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pending_shortage_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      medicine_name TEXT NOT NULL,
+      distributor_name TEXT,
+      quantity INTEGER DEFAULT 1,
+      customer_phone TEXT,
+      customer_name TEXT,
+      source TEXT DEFAULT 'whatsapp',
+      status TEXT CHECK(status IN ('pending', 'inventory_found', 'notified_admin', 'cancelled')) DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      notified_at DATETIME
     );
 
     CREATE TABLE IF NOT EXISTS automation_notifications (

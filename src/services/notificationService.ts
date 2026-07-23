@@ -374,7 +374,13 @@ export class NotificationService {
             [`%${boy.name}%`, boy.name]
           );
 
-          const boyPhoneRaw = dbBoy?.whatsapp_number || '';
+          let boyPhoneRaw = dbBoy?.whatsapp_number || (boy as any).phone || (boy as any).whatsapp || '';
+          if (!boyPhoneRaw) {
+            // Fallback to active delivery boys in database
+            const activeBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL LIMIT 1");
+            boyPhoneRaw = activeBoy?.whatsapp_number || '';
+          }
+
           const boyPhones = boyPhoneRaw
             .split(/[\s,;]+/)
             .map((num: string) => num.replace(/\D/g, ''))
@@ -390,6 +396,40 @@ export class NotificationService {
           }
         }
         deliveryBoysText = deliveryBoysText.trim();
+      }
+
+      // If no delivery persons assigned in Pharmarack cart, fallback to registered active delivery boys from settings/db
+      if (resolvedDeliveryBoys.length === 0) {
+        const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
+        for (const boy of activeBoys) {
+          if (!boy.whatsapp_number) continue;
+          const clean = boy.whatsapp_number.replace(/\D/g, '');
+          if (clean.length >= 10) {
+            const formatted = clean.length === 10 ? `91${clean}` : clean;
+            resolvedDeliveryBoys.push({ name: boy.name, phone: formatted });
+            deliveryBoysText += `${boy.name}\nMobile: ${formatted}\n\n`;
+          }
+        }
+
+        // Fallback to saved delivery boy phone numbers from settings
+        if (resolvedDeliveryBoys.length === 0) {
+          const setting1 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp'");
+          const setting2 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp_2'");
+          const setting3 = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
+
+          const boys = [setting1?.value, setting2?.value, setting3?.value]
+            .filter(Boolean)
+            .map(num => String(num).replace(/\D/g, ''))
+            .filter(num => num.length >= 10);
+
+          const uniqueBoys = Array.from(new Set(boys));
+          for (let i = 0; i < uniqueBoys.length; i++) {
+            const num = uniqueBoys[i];
+            const formatted = num.length === 10 ? `91${num}` : num;
+            resolvedDeliveryBoys.push({ name: `Delivery Staff ${i + 1}`, phone: formatted });
+            deliveryBoysText += `Delivery Staff ${i + 1}\nMobile: ${formatted}\n\n`;
+          }
+        }
       }
 
       if (!deliveryBoysText) {

@@ -436,6 +436,24 @@ async function searchAndBroadcast(opts: {
     context
   }).catch(err => console.error('[Intent Service] Admin escalation failed:', err));
 
+  // Track pending shortage request for >23 hour admin reminder if local stock is missing
+  if (medicineName && (filterResult.matches.length === 0 || confidence < 80)) {
+    try {
+      const { trackMedicineRequest } = await import('./shortageReminderService.js');
+      const distName = catalogResults?.mapped?.[0]?.supplier_name || catalogResults?.nonMapped?.[0]?.distributor_name || 'Standard Distributor';
+      trackMedicineRequest({
+        medicine_name: medicineName,
+        distributor_name: distName,
+        quantity: quantity || 1,
+        customer_phone: customer?.phone || phone || '',
+        customer_name: customer?.name || '',
+        source: 'whatsapp'
+      }).catch(err => console.warn('[Intent Service] Shortage tracking failed:', err));
+    } catch (trackErr) {
+      console.warn('[Intent Service] Failed to import shortageReminderService:', trackErr);
+    }
+  }
+
   console.log(`[Intent Service] Match result for "${medicineName}": ${filterResult.matches.length} local, ${catalogResults?.mapped?.length || 0} mapped, ${catalogResults?.nonMapped?.length || 0} non-mapped (bestScore=${bestScore.toFixed(2)})`);
 }
 

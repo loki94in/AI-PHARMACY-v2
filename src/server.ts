@@ -342,11 +342,18 @@ app.listen(PORT, async () => {
             }
           })(),
 
-          // Step 4: Expiry scan check
+          // Step 4: Expiry & Shortage 23-Hour scan check
           (async () => {
             if (isAutoEnabled) {
               const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
               await checkAndRunScheduledExpiryScan(90).catch(err => console.error('[Boot] Startup catch-up scan check failed:', err));
+
+              const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
+              checkShortageRequestsAndNotifyAdmin(db).catch(err => console.error('[Boot] Shortage check failed:', err));
+              // Run shortage check every 1 hour
+              setInterval(() => {
+                checkShortageRequestsAndNotifyAdmin().catch(err => console.error('[Cron] Hourly shortage check failed:', err));
+              }, 60 * 60 * 1000);
             }
           })(),
 
