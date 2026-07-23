@@ -257,6 +257,75 @@ router.get('/doctors/:id/combinations/:medicineId', async (req, res) => {
   }
 });
 
+// Customer Credit Ledger - List all credit customers with dues & dates
+router.get('/credit-customers', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      `SELECT c.id, c.name, c.phone, c.address, c.credit_balance, c.credit_due_date, c.credit_enabled,
+              (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) as unpaid_bills_count,
+              (SELECT MAX(date) FROM sales_invoices si WHERE si.customer_id = c.id) as last_sale_date
+       FROM customers c
+       WHERE c.credit_balance > 0 OR c.credit_enabled = 1
+       ORDER BY c.credit_balance DESC`
+    );
+    res.json(rows);
+  } catch (error: any) {
+    console.error('Failed to fetch credit customers:', error);
+    res.status(500).json({ error: 'Failed to fetch credit customers: ' + error.message });
+  }
+});
+
+// Update Customer Due Date
+router.put('/credit-customers/:id/due-date', async (req, res) => {
+  const { id } = req.params;
+  const { due_date } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('UPDATE customers SET credit_due_date = ? WHERE id = ?', [due_date || null, id]);
+    res.json({ success: true, message: 'Credit due date updated successfully' });
+  } catch (error: any) {
+    console.error('Failed to update credit due date:', error);
+    res.status(500).json({ error: 'Failed to update due date: ' + error.message });
+  }
+});
+
+// Send Manual Credit WhatsApp Reminder to Patient
+router.post('/credit-customers/:id/send-reminder', async (req, res) => {
+  const { id } = req.params;
+  const { custom_message } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    const customer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
+    if (!customer || !customer.phone) {
+      return res.status(400).json({ error: 'Customer phone number not found' });
+    }
+
+    const { sendMessage } = await import('../whatsappClient.js');
+    const dueDateStr = customer.credit_due_date ? new Date(customer.credit_due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'As agreed';
+
+    const message = custom_message || `Dear ${customer.name || 'Customer'},\n\n` +
+      `📌 *Credit Due Balance Reminder*\n` +
+      `Outstanding Amount: *₹${(customer.credit_balance || 0).toFixed(2)}*\n` +
+      `Due Date: *${dueDateStr}*\n\n` +
+      `Kindly arrange payment at your earliest convenience or visit our pharmacy.\n\n` +
+      `Thank you!\n— AI Pharmacy OS`;
+
+    await sendMessage(customer.phone, undefined, message);
+
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['manual_credit_reminder', customer.name, customer.phone, message, 'sent', `customer_${id}`]
+    );
+
+    res.json({ success: true, message: `Credit reminder sent to ${customer.name} (${customer.phone})` });
+  } catch (error: any) {
+    console.error('Failed to send credit reminder:', error);
+    res.status(500).json({ error: 'Failed to send reminder: ' + error.message });
+  }
+});
+
 // Pay ledger balance
 router.post('/ledger/pay', async (req, res) => {
   const { customer_id, amount } = req.body;

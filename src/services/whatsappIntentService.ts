@@ -162,17 +162,20 @@ export async function handleInbound(msg: any): Promise<void> {
     // Resolve standard phone number if sender is an LID
     if (phone.endsWith('@lid')) {
       try {
-        const mapping = await msg.client.getContactLidAndPhone([phone]);
-        if (mapping && mapping[0] && mapping[0].pn) {
-          phone = `${mapping[0].pn}@c.us`;
-        } else {
+        if (msg.client && typeof msg.client.getContactLidAndPhone === 'function') {
+          const mapping = await msg.client.getContactLidAndPhone([phone]);
+          if (mapping && mapping[0] && mapping[0].pn) {
+            phone = `${mapping[0].pn}@c.us`;
+          }
+        }
+        if (phone.endsWith('@lid') && typeof msg.getContact === 'function') {
           const contact = await msg.getContact();
           if (contact && contact.number) {
             phone = `${contact.number}@c.us`;
           }
         }
       } catch (e) {
-        console.error('[Intent Service] Failed to get contact for LID:', e);
+        console.warn('[Intent Service] Non-fatal LID resolution skipped:', e);
       }
     }
 

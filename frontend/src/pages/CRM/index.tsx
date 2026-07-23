@@ -60,6 +60,7 @@ function formatDate(dateStr: string) {
 
 const TABS = [
   { key: 'refills', label: 'Refills', icon: <Repeat2 size={15} /> },
+  { key: 'credit', label: 'Customer Credit', icon: <Users size={15} /> },
   { key: 'messages', label: 'Distributor Messages', icon: <Bell size={15} /> },
   { key: 'whatsapp', label: 'WhatsApp Business', icon: <MessageCircle size={15} /> },
 ];
@@ -1291,6 +1292,271 @@ const WhatsAppSection: React.FC = () => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOMER CREDIT SECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface CreditCustomerItem {
+  id: number;
+  name: string;
+  phone: string;
+  address?: string;
+  credit_balance: number;
+  credit_due_date?: string;
+  unpaid_bills_count: number;
+  last_sale_date?: string;
+}
+
+const CustomerCreditSection: React.FC = () => {
+  const [customers, setCustomers] = useState<CreditCustomerItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [newDueDate, setNewDueDate] = useState('');
+  const [payingId, setPayingId] = useState<number | null>(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [sendingId, setSendingId] = useState<number | null>(null);
+
+  const loadCreditCustomers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get<CreditCustomerItem[]>('/crm/credit-customers');
+      setCustomers(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      toastEvent.trigger('Failed to load credit customers', 'error', '/crm');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCreditCustomers();
+  }, [loadCreditCustomers]);
+
+  const handleSaveDueDate = async (id: number) => {
+    try {
+      await apiClient.put(`/crm/credit-customers/${id}/due-date`, { due_date: newDueDate || null });
+      toastEvent.trigger('Due date updated', 'success', '/crm');
+      setEditingId(null);
+      await loadCreditCustomers();
+    } catch {
+      toastEvent.trigger('Failed to update due date', 'error', '/crm');
+    }
+  };
+
+  const handleSendManualReminder = async (cust: CreditCustomerItem) => {
+    setSendingId(cust.id);
+    try {
+      await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`);
+      toastEvent.trigger(`Manual credit reminder sent to ${cust.name}`, 'success', '/crm');
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to send WhatsApp reminder', 'error', '/crm');
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const handlePayBalance = async (id: number) => {
+    const amt = parseFloat(payAmount);
+    if (isNaN(amt) || amt <= 0) {
+      toastEvent.trigger('Enter a valid payment amount', 'error', '/crm');
+      return;
+    }
+    try {
+      await apiClient.post('/crm/ledger/pay', { customer_id: id, amount: amt });
+      toastEvent.trigger(`Collected ₹${amt.toFixed(2)} payment`, 'success', '/crm');
+      setPayingId(null);
+      setPayAmount('');
+      await loadCreditCustomers();
+    } catch {
+      toastEvent.trigger('Failed to process payment', 'error', '/crm');
+    }
+  };
+
+  const filtered = customers.filter(c => {
+    const q = search.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.phone && c.phone.includes(q))
+    );
+  });
+
+  const totalDues = customers.reduce((sum, c) => sum + (c.credit_balance || 0), 0);
+
+  return (
+    <div className="w-full h-full flex flex-col gap-4 overflow-y-auto pr-1">
+      {/* Header Cards & Search */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
+        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-xs text-muted font-medium">Total Credit Outstanding</p>
+            <h3 className="text-xl font-bold text-amber-400 mt-1">₹{totalDues.toFixed(2)}</h3>
+          </div>
+          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <Users size={20} />
+          </div>
+        </div>
+
+        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-xs text-muted font-medium">Credit Customers</p>
+            <h3 className="text-xl font-bold text-text mt-1">{customers.length} Patients</h3>
+          </div>
+          <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <Users size={20} />
+          </div>
+        </div>
+
+        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="relative w-full">
+            <Search size={14} className="absolute left-3 top-3 text-muted" />
+            <input
+              type="text"
+              placeholder="Search patient name or mobile..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Credit Customer Table */}
+      <div className="bg-bg2 border border-border rounded-2xl p-4 shadow-sm flex-1">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-text">Customer Credit Ledger &amp; Due Dates</h3>
+          <button
+            onClick={loadCreditCustomers}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-xs text-text hover:text-primary transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh Dues</span>
+          </button>
+        </div>
+
+        {loading && customers.length === 0 ? (
+          <div className="p-12 text-center text-xs text-muted">Loading credit customer ledger...</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center text-xs text-muted">No credit customers found.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted font-medium">
+                  <th className="pb-2.5 font-bold">Patient Name</th>
+                  <th className="pb-2.5 font-bold">Phone Number</th>
+                  <th className="pb-2.5 font-bold">Outstanding Due</th>
+                  <th className="pb-2.5 font-bold">Due Date</th>
+                  <th className="pb-2.5 font-bold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {filtered.map(cust => (
+                  <tr key={cust.id} className="hover:bg-bg/40 transition-colors">
+                    <td className="py-3 font-bold text-text">
+                      <div>{cust.name || 'Unnamed Patient'}</div>
+                      {cust.address && <span className="text-[10px] text-muted font-normal">{cust.address}</span>}
+                    </td>
+                    <td className="py-3 text-muted">{cust.phone || 'No phone'}</td>
+                    <td className="py-3 font-bold text-amber-400">₹{(cust.credit_balance || 0).toFixed(2)}</td>
+                    <td className="py-3">
+                      {editingId === cust.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="date"
+                            value={newDueDate}
+                            onChange={e => setNewDueDate(e.target.value)}
+                            className="px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none focus:border-primary"
+                          />
+                          <button
+                            onClick={() => handleSaveDueDate(cust.id)}
+                            className="px-2 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-600 transition-all"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="px-2 py-1 rounded-lg bg-bg3 text-muted text-xs hover:text-text"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={cust.credit_due_date ? 'text-text font-medium' : 'text-muted italic'}>
+                            {cust.credit_due_date ? formatDate(cust.credit_due_date) : 'Not Set'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingId(cust.id);
+                              setNewDueDate(cust.credit_due_date || '');
+                            }}
+                            className="text-[10px] text-primary hover:underline font-bold"
+                          >
+                            Edit Date
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {/* Collect Payment */}
+                        {payingId === cust.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              placeholder="Amount (₹)"
+                              value={payAmount}
+                              onChange={e => setPayAmount(e.target.value)}
+                              className="w-24 px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none"
+                            />
+                            <button
+                              onClick={() => handlePayBalance(cust.id)}
+                              className="px-2 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs"
+                            >
+                              Collect
+                            </button>
+                            <button
+                              onClick={() => setPayingId(null)}
+                              className="px-2 py-1 text-muted hover:text-text text-xs"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setPayingId(cust.id); setPayAmount(String(cust.credit_balance)); }}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-bold transition-all"
+                          >
+                            Collect Payment
+                          </button>
+                        )}
+
+                        {/* Send Manual WhatsApp Reminder */}
+                        <button
+                          onClick={() => handleSendManualReminder(cust)}
+                          disabled={sendingId === cust.id}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all disabled:opacity-50"
+                          title="Send instant manual credit reminder on WhatsApp"
+                        >
+                          <Send size={12} className={sendingId === cust.id ? 'animate-pulse' : ''} />
+                          <span>Send WhatsApp Message</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN CRM PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1305,7 +1571,7 @@ const CRM: React.FC = () => {
       {/* Header */}
       <div className="flex-shrink-0">
         <h1 className="text-lg font-bold text-text">CRM &amp; Messaging</h1>
-        <p className="text-xs text-muted mt-0.5">Refills, distributor alerts &amp; WhatsApp Web</p>
+        <p className="text-xs text-muted mt-0.5">Refills, customer credit ledger &amp; WhatsApp Web</p>
       </div>
 
       {/* Tab bar */}
@@ -1329,6 +1595,7 @@ const CRM: React.FC = () => {
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'refills' && <RefillsSection />}
+        {activeTab === 'credit' && <CustomerCreditSection />}
         {activeTab === 'messages' && <DistributorMessagesSection />}
         {activeTab === 'whatsapp' && <WhatsAppSection />}
       </div>

@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 
 /**
  * Ensure required SQLite tables exist.
@@ -304,6 +304,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE customers ADD COLUMN credit_enabled INTEGER DEFAULT 0`,
     `ALTER TABLE customers ADD COLUMN credit_balance REAL DEFAULT 0`,
     `ALTER TABLE customers ADD COLUMN created_at DATETIME`,
+    `ALTER TABLE customers ADD COLUMN credit_due_date TEXT`,
     `UPDATE customers SET created_at = datetime('now') WHERE created_at IS NULL`,
     `ALTER TABLE sales_invoices ADD COLUMN payment_status TEXT DEFAULT 'PAID'`,
     `ALTER TABLE sales_invoices ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`,
