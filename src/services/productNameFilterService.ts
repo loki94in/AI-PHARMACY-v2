@@ -142,30 +142,46 @@ function ngramSimilarity(s1: string, s2: string, n: number = 2): number {
 
 // Enhanced similarity function combining multiple techniques
 export function enhancedSimilarity(s1: string, s2: string): number {
-  // Convert to lowercase and clean for better matching
-  const clean1 = s1.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const clean2 = s2.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const norm1 = s1.toLowerCase().trim();
+  const norm2 = s2.toLowerCase().trim();
+
+  // Convert to lowercase and clean for character-based matching
+  const clean1 = norm1.replace(/[^a-z0-9]/g, '');
+  const clean2 = norm2.replace(/[^a-z0-9]/g, '');
 
   if (clean1 === clean2) return 1.0; // Exact match after cleaning
 
   // Calculate individual similarities
   let levSim = levenshteinSimilarity(clean1, clean2);
   
-  // Prefix match boost: if one string starts with the other, it's a very strong indicator
+  // Prefix & Substring match boost
   if (clean2.startsWith(clean1) || clean1.startsWith(clean2)) {
     const ratio = Math.min(clean1.length, clean2.length) / Math.max(clean1.length, clean2.length);
-    // Prefix match gets a high score (minimum 0.75, up to 1.0)
     levSim = 0.75 + 0.25 * ratio;
+  } else if (clean2.includes(clean1) || clean1.includes(clean2)) {
+    const ratio = Math.min(clean1.length, clean2.length) / Math.max(clean1.length, clean2.length);
+    levSim = Math.max(levSim, 0.70 + 0.20 * ratio);
   }
 
   const phoneSim = phoneticSimilarity(clean1, clean2);
   const ngramSim = ngramSimilarity(clean1, clean2, 2); // Bigrams
 
-  // Weighted combination optimized for medicine names
-  // Levenshtein/Prefix: good for overall character differences and partial inputs
-  // Phonetic: good for OCR errors (O/Q, 1/I/l, etc.)
-  // N-gram: good for transposed/missing characters
-  return (levSim * 0.5) + (phoneSim * 0.3) + (ngramSim * 0.2);
+  let score = (levSim * 0.5) + (phoneSim * 0.3) + (ngramSim * 0.2);
+
+  // Strength & Number alignment check (e.g. 500mg vs 200mg)
+  const nums1 = norm1.match(/\b\d+\b/g) || [];
+  const nums2 = norm2.match(/\b\d+\b/g) || [];
+
+  if (nums1.length > 0) {
+    const matchingNums = nums1.filter(n => nums2.includes(n));
+    if (matchingNums.length > 0) {
+      score = Math.min(1.0, score + 0.15); // Boost matching dosage strength
+    } else {
+      score = Math.max(0.0, score - 0.25); // Penalize conflicting dosage strength
+    }
+  }
+
+  return score;
 }
 
 export interface FilterOptions {
@@ -370,12 +386,14 @@ export class ProductNameFilterService {
     const normalizedOcr = ocrText.toLowerCase().trim();
     const scoredMatches: Array<{ name: string; score: number }> = [];
 
-    // First check if we have learned corrections for this OCR text
-    const learnedCorrection = this.corrections.get(normalizedOcr);
-    if (learnedCorrection) {
-      // Add the learned correction with high confidence (0.95)
-      scoredMatches.push({ name: learnedCorrection.correctName, score: 0.95 });
-      console.log(`Using learned correction: "${normalizedOcr}" → "${learnedCorrection.correctName}" (count: ${learnedCorrection.count})`);
+    // First check if we have learned corrections (exact or token/substring match) for this OCR text
+    for (const [ocrKey, correctionVal] of this.corrections.entries()) {
+      if (normalizedOcr === ocrKey || normalizedOcr.includes(ocrKey) || (ocrKey.length >= 4 && normalizedOcr.includes(ocrKey))) {
+        if (!scoredMatches.some(m => m.name === correctionVal.correctName)) {
+          scoredMatches.push({ name: correctionVal.correctName, score: 0.96 });
+          console.log(`Using learned OCR correction match: "${normalizedOcr}" → "${correctionVal.correctName}"`);
+        }
+      }
     }
 
     // FTS5 fast-path: use trigram index if available (O(log n) instead of O(n))

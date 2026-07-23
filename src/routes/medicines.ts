@@ -48,9 +48,22 @@ router.get('/medicines', async (req, res) => {
     }
     
     if (search) {
-      const prefixParam = `${search}%`;
-      whereClauses.push('(medicines.name LIKE ? OR medicines.item_code LIKE ? OR medicines.manufacturer LIKE ? OR medicines.api_reference LIKE ?)');
-      params.push(prefixParam, prefixParam, prefixParam, prefixParam);
+      const cleanSearch = search.trim();
+      const tokens = cleanSearch.split(/\s+/).filter(t => t.length > 0);
+      
+      if (tokens.length === 1) {
+        whereClauses.push('(medicines.name LIKE ? OR medicines.name LIKE ? OR medicines.item_code LIKE ? OR medicines.manufacturer LIKE ? OR medicines.api_reference LIKE ?)');
+        const prefixParam = `${cleanSearch}%`;
+        const containsParam = `%${cleanSearch}%`;
+        params.push(prefixParam, containsParam, prefixParam, containsParam, containsParam);
+      } else {
+        const tokenClauses = tokens.map(() => '(medicines.name LIKE ? OR medicines.manufacturer LIKE ? OR medicines.api_reference LIKE ?)');
+        whereClauses.push(`(${tokenClauses.join(' AND ')})`);
+        for (const token of tokens) {
+          const tParam = `%${token}%`;
+          params.push(tParam, tParam, tParam);
+        }
+      }
     }
 
     if (productName) {

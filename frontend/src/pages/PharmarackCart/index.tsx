@@ -96,7 +96,30 @@ export default function PharmarackCart() {
 
   const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
-  const [sentWaStatusMap, setSentWaStatusMap] = useState<Record<number, 'success' | 'queued' | 'error'>>({});
+  
+  // Persistent WhatsApp sent status map by storeId (preserves history across reloads & sessions)
+  const [sentWaStatusMap, setSentWaStatusMap] = useState<Record<number, 'success' | 'queued' | 'error'>>(() => {
+    try {
+      const saved = localStorage.getItem('pharmacart_sent_wa_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.data === 'object') {
+          return parsed.data;
+        }
+      }
+    } catch (_) {}
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pharmacart_sent_wa_history', JSON.stringify({
+        timestamp: Date.now(),
+        data: sentWaStatusMap
+      }));
+    } catch (_) {}
+  }, [sentWaStatusMap]);
+
   // Saved distributor contacts and store settings
   const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
   const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; deliveryBoyPhone: string; deliveryBoyPhone2: string }>({
@@ -124,8 +147,18 @@ export default function PharmarackCart() {
     } catch (_) {}
   }, [customDistributorPhones]);
 
-  // Distributor filter sub-tab state ('all' | 'mapped' | 'non-mapped')
-  const [distributorFilterTab, setDistributorFilterTab] = useState<'all' | 'mapped' | 'non-mapped'>('all');
+  const isValidPhoneNumber = (rawPhone: string): boolean => {
+    if (!rawPhone) return false;
+    const digits = rawPhone.replace(/\D/g, '');
+    if (digits.length === 10) return /^[6789]\d{9}$/.test(digits);
+    if (digits.length === 12 && digits.startsWith('91')) return /^91[6789]\d{9}$/.test(digits);
+    return false;
+  };
+
+  const [batchCountdownSec, setBatchCountdownSec] = useState<number | null>(null);
+
+  // Distributor filter sub-tab state ('all' | 'success' | 'failed' | 'unmapped')
+  const [distributorFilterTab, setDistributorFilterTab] = useState<'all' | 'success' | 'failed' | 'unmapped'>('all');
 
   // Distributor search & contact edit modal state
   const [editingDistributor, setEditingDistributor] = useState<Distributor | null>(null);
@@ -202,15 +235,24 @@ export default function PharmarackCart() {
     return distributors.filter(d => isDistributorMapped(d));
   }, [distributors, customDistributorPhones, savedDistributorsList]);
 
-  const nonMappedDistributors = React.useMemo(() => {
+  const successDistributors = React.useMemo(() => {
+    return distributors.filter(d => sentWaStatusMap[d.storeId] === 'success');
+  }, [distributors, sentWaStatusMap]);
+
+  const failedDistributors = React.useMemo(() => {
+    return distributors.filter(d => sentWaStatusMap[d.storeId] === 'error');
+  }, [distributors, sentWaStatusMap]);
+
+  const unmappedDistributors = React.useMemo(() => {
     return distributors.filter(d => !isDistributorMapped(d));
   }, [distributors, customDistributorPhones, savedDistributorsList]);
 
   const filteredDistributorList = React.useMemo(() => {
-    if (distributorFilterTab === 'mapped') return mappedDistributors;
-    if (distributorFilterTab === 'non-mapped') return nonMappedDistributors;
+    if (distributorFilterTab === 'success') return successDistributors;
+    if (distributorFilterTab === 'failed') return failedDistributors;
+    if (distributorFilterTab === 'unmapped') return unmappedDistributors;
     return distributors;
-  }, [distributorFilterTab, mappedDistributors, nonMappedDistributors, distributors]);
+  }, [distributorFilterTab, successDistributors, failedDistributors, unmappedDistributors, distributors]);
 
   useEffect(() => {
     // Fetch saved distributor directory (with phone numbers)
@@ -475,11 +517,13 @@ export default function PharmarackCart() {
     }
 
     let cleanPhone = phoneNum.replace(/\D/g, '');
-    if (!cleanPhone) {
-      // No number saved — open the edit modal so the user can add one
+    if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
+      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
+      toastEvent.trigger(`Invalid phone number "${phoneNum || 'missing'}" for ${dist.storeName}. Please enter a valid 10-digit number.`, 'error');
       handleOpenEditModal(dist);
       return;
     }
+
     if (cleanPhone.length === 10) {
       cleanPhone = `91${cleanPhone}`;
     }
@@ -522,8 +566,9 @@ export default function PharmarackCart() {
       return;
     }
 
-    if (mapped.length === 0 && unmapped.length === 0) {
-      toastEvent.trigger('No distributors found in cart.', 'error');
+    if (mapped.length === 0) {
+      toastEvent.trigger('No distributor phone numbers linked. Please add phone numbers.', 'info');
+      if (unmapped.length > 0) handleOpenEditModal(unmapped[0]);
       return;
     }
 
@@ -531,61 +576,84 @@ export default function PharmarackCart() {
     let sentCount = 0;
 
     try {
-      if (mapped.length > 0) {
-        toastEvent.trigger(`Sending WhatsApp orders for ${mapped.length} distributor(s) one by one...`, 'info');
-        
-        for (let i = 0; i < mapped.length; i++) {
-          const dist = mapped[i];
-          let phoneNum = customDistributorPhones[dist.storeId];
-          if (!phoneNum) {
-            const matched = findSavedDistributorMatch(dist.storeName);
-            phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
-          }
-          let cleanPhone = phoneNum.replace(/\D/g, '');
-          if (!cleanPhone) continue;
-          if (cleanPhone.length === 10) {
-            cleanPhone = `91${cleanPhone}`;
-          }
+      toastEvent.trigger(`Starting WhatsApp batch delivery for ${mapped.length} distributor(s) with 30-45s safe delay...`, 'info');
+      
+      for (let i = 0; i < mapped.length; i++) {
+        const dist = mapped[i];
+        let phoneNum = customDistributorPhones[dist.storeId];
+        if (!phoneNum) {
+          const matched = findSavedDistributorMatch(dist.storeName);
+          phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+        }
+        let cleanPhone = phoneNum.replace(/\D/g, '');
+        if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
+          setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
+          toastEvent.trigger(`Skipped ${dist.storeName}: Invalid phone number "${phoneNum || 'missing'}"`, 'error');
+          continue;
+        }
 
-          const msg = buildDistributorOrderMessage(dist);
+        if (cleanPhone.length === 10) {
+          cleanPhone = `91${cleanPhone}`;
+        }
 
-          try {
-            // Send silently via backend API
-            await apiClient.post('/messaging/send', {
-              number: cleanPhone,
-              message: msg
-            });
+        const msg = buildDistributorOrderMessage(dist);
+        setSendingWaDistributorId(dist.storeId);
+
+        try {
+          // Send silently via backend API
+          const res = await apiClient.post('/messaging/send', {
+            number: cleanPhone,
+            message: msg
+          });
+
+          if (res?.data?.success) {
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            toastEvent.trigger(`[${i + 1}/${mapped.length}] WhatsApp order sent for ${dist.storeName}!`, 'success');
             sentCount++;
-          } catch (e) {
-            console.warn(`Batch silent send failed for ${dist.storeName}, trying tab fallback:`, e);
+          } else {
+            throw new Error(res?.data?.error || 'Silent send failed');
+          }
+        } catch (e: any) {
+          console.warn(`Batch silent send failed for ${dist.storeName}, trying tab fallback:`, e);
+          try {
             const encodedMsg = encodeURIComponent(msg);
             const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
             openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            toastEvent.trigger(`[${i + 1}/${mapped.length}] Opened WhatsApp Web tab for ${dist.storeName}`, 'info');
             sentCount++;
+          } catch (tabErr) {
+            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
+            toastEvent.trigger(`Failed to send order for ${dist.storeName}`, 'error');
           }
+        } finally {
+          setSendingWaDistributorId(null);
+        }
 
-          // 1.5 seconds sequential delay between order sends (no bulk spamming)
-          if (i < mapped.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
+        // 30–45 second safe randomized delay between distributor orders
+        if (i < mapped.length - 1) {
+          const delaySec = Math.floor(Math.random() * 16) + 30; // Random 30 to 45 seconds
+          for (let sec = delaySec; sec > 0; sec--) {
+            setBatchCountdownSec(sec);
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
+          setBatchCountdownSec(null);
         }
       }
 
       if (sentCount > 0) {
-        toastEvent.trigger(`Successfully sent ${sentCount} distributor order(s) via WhatsApp!`, 'success');
+        toastEvent.trigger(`Batch complete! Successfully sent ${sentCount} distributor order(s) via WhatsApp!`, 'success');
       }
 
       if (unmapped.length > 0) {
-        toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone number.`, 'info');
-        handleOpenEditModal(unmapped[0]);
+        toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone numbers.`, 'info');
       }
     } catch (err: any) {
       console.error('Batch WhatsApp send error:', err);
       toastEvent.trigger(err?.message || 'Failed to send WhatsApp orders', 'error');
     } finally {
       setIsSendingBatchWhatsApp(false);
+      setBatchCountdownSec(null);
     }
   };
 
@@ -896,14 +964,20 @@ export default function PharmarackCart() {
                 onClick={handleSendAllWhatsAppOrders}
                 disabled={isSendingBatchWhatsApp || distributors.length === 0}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 font-bold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm"
-                title="Send order messages silently to all saved distributor WhatsApp numbers in the background"
+                title="Send order messages silently to all saved distributor WhatsApp numbers with 30-45s safe delay"
               >
                 {isSendingBatchWhatsApp ? (
                   <span className="w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
                 ) : (
                   <MessageSquare size={13} />
                 )}
-                <span>Send All via WhatsApp ({distributors.length})</span>
+                <span>
+                  {batchCountdownSec !== null
+                    ? `Next send in ${batchCountdownSec}s…`
+                    : isSendingBatchWhatsApp
+                    ? 'Sending orders…'
+                    : `Send All via WhatsApp (${mappedDistributors.length})`}
+                </span>
               </button>
 
               <a
@@ -1105,48 +1179,62 @@ export default function PharmarackCart() {
                 </div>
               ) : (
                 <>
-                  {/* ── Sub-Filter Toggle Bar (All / Mapped / Non-Mapped) ── */}
+                  {/* ── Sub-Filter Toggle Bar (All / Sent Successfully / Failed / Missing Phone) ── */}
                   <div className="flex items-center justify-between pb-2 border-b border-glass-border/30 shrink-0">
-                    <div className="flex items-center gap-1.5 bg-bg2/40 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none">
+                    <div className="flex items-center gap-1.5 bg-bg2/40 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none overflow-x-auto">
                       <button
                         onClick={() => setDistributorFilterTab('all')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${distributorFilterTab === 'all'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'all'
                             ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <Building2 size={13} />
-                        <span>All Distributors</span>
+                        <span>All</span>
                         <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-bg/50 border border-glass-border/30 font-mono">
                           {distributors.length}
                         </span>
                       </button>
 
                       <button
-                        onClick={() => setDistributorFilterTab('mapped')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${distributorFilterTab === 'mapped'
+                        onClick={() => setDistributorFilterTab('success')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'success'
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <Check size={13} className="text-emerald-400" />
-                        <span>Mapped</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
-                          {mappedDistributors.length}
+                        <span>Sent Successfully</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono font-bold">
+                          {successDistributors.length}
                         </span>
                       </button>
 
                       <button
-                        onClick={() => setDistributorFilterTab('non-mapped')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${distributorFilterTab === 'non-mapped'
+                        onClick={() => setDistributorFilterTab('failed')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'failed'
+                            ? 'bg-red/20 text-red border border-red/30 shadow-sm'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          }`}
+                      >
+                        <AlertCircle size={13} className="text-red" />
+                        <span>Failed / Unsent</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-red/10 text-red border border-red/20 font-mono font-bold">
+                          {failedDistributors.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setDistributorFilterTab('unmapped')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'unmapped'
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
-                        <AlertCircle size={13} className="text-amber-400" />
-                        <span>Non-Mapped</span>
+                        <Phone size={13} className="text-amber-400" />
+                        <span>Missing Phone</span>
                         <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                          {nonMappedDistributors.length}
+                          {unmappedDistributors.length}
                         </span>
                       </button>
                     </div>
@@ -1154,17 +1242,28 @@ export default function PharmarackCart() {
 
                   {filteredDistributorList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
-                      {distributorFilterTab === 'mapped' ? (
+                      {distributorFilterTab === 'success' ? (
+                        <>
+                          <MessageSquare size={36} className="text-muted/30" />
+                          <p className="text-xs font-bold text-text">No Messages Sent Yet</p>
+                          <p className="text-[11px] text-muted">Click "Send All via WhatsApp" to share orders automatically!</p>
+                        </>
+                      ) : distributorFilterTab === 'failed' ? (
                         <>
                           <Check size={36} className="text-emerald-400/40" />
-                          <p className="text-xs font-bold text-text">No Mapped Distributors in Cart</p>
-                          <p className="text-[11px] text-muted">Click "+ Add Phone" on any unmapped distributor to link it!</p>
+                          <p className="text-xs font-bold text-emerald-400">No Failed Messages! 🎉</p>
+                          <p className="text-[11px] text-muted">All sent WhatsApp messages completed without errors.</p>
+                        </>
+                      ) : distributorFilterTab === 'unmapped' ? (
+                        <>
+                          <Check size={36} className="text-emerald-400/40" />
+                          <p className="text-xs font-bold text-emerald-400">All Distributors Have Linked Numbers! 🎉</p>
+                          <p className="text-[11px] text-muted">Every store in your cart is linked with a confirmed WhatsApp number.</p>
                         </>
                       ) : (
                         <>
-                          <Check size={36} className="text-emerald-400/40" />
-                          <p className="text-xs font-bold text-emerald-400">All Distributors are Mapped! 🎉</p>
-                          <p className="text-[11px] text-muted">All stores in your cart are linked with confirmed WhatsApp numbers.</p>
+                          <Building2 size={36} className="text-muted/30" />
+                          <p className="text-xs font-bold text-text">No Distributors Found</p>
                         </>
                       )}
                     </div>
@@ -1173,11 +1272,25 @@ export default function PharmarackCart() {
                       <div key={dist.storeId} className="bg-bg2/30 border border-glass-border rounded-xl overflow-hidden shadow-sm">
                         {/* Distributor header */}
                         <div className="bg-bg3/60 px-4 py-2.5 border-b border-glass-border flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-2.5 flex-wrap">
                             <h4 className="text-xs font-extrabold text-text tracking-wide uppercase flex items-center gap-2">
                               <Package size={14} className="text-sky" />
                               {dist.storeName}
                             </h4>
+
+                            {/* Status Badge (Sent Successfully vs Failed) */}
+                            {sentWaStatusMap[dist.storeId] === 'success' && (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                                <Check size={11} />
+                                <span>WhatsApp Sent</span>
+                              </span>
+                            )}
+                            {sentWaStatusMap[dist.storeId] === 'error' && (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-red/20 text-red border border-red/40 flex items-center gap-1">
+                                <AlertCircle size={11} />
+                                <span>Send Failed</span>
+                              </span>
+                            )}
 
                             {/* Phone Badge & Contact Search/Edit trigger */}
                             {(() => {
