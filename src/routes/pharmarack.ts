@@ -1308,6 +1308,11 @@ router.get('/cart', async (req, res) => {
       console.error('[AutoNotif] Error running automatic cart transition checks:', dbErr);
     }
 
+    // Fire-and-forget: handle daily batch or late-order send for delivery boys
+    import('../services/pharmarackDailyDispatchService.js')
+      .then(m => m.handleCartPageVisit())
+      .catch(err => console.warn('[PharmarackBatch] handleCartPageVisit error:', err));
+
     return res.json({ success: true, mode: 'Live', distributors, totalItems });
   } catch (err: any) {
     console.error('Pharmarack cart fetch error:', err);

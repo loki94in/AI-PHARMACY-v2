@@ -667,7 +667,7 @@ async function drainSendQueue(): Promise<void> {
   }
 }
 
-/** Get all chats from the local SQLite cache */
+/** Get all chats from the local SQLite cache with contact name enrichment */
 export async function getChats(): Promise<any[]> {
   try {
     const db = await dbManager.getConnection();
@@ -676,6 +676,52 @@ export async function getChats(): Promise<any[]> {
        FROM whatsapp_chats
        ORDER BY timestamp DESC`
     );
+
+    // Enrich names from pharmacy DB tables (customers, refills, delivery_boys, doctors)
+    for (const r of rows) {
+      const rawNum = r.resolvedNumber || (r.id ? r.id.split('@')[0] : '');
+      const digits = rawNum.replace(/\D/g, '');
+      const last10 = digits.length >= 10 ? digits.slice(-10) : '';
+
+      if (last10) {
+        const likePattern = `%${last10}%`;
+
+        // 1. Check customers
+        const cust = await db.get('SELECT name FROM customers WHERE mobile LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
+        if (cust?.name) {
+          r.name = cust.name;
+          continue;
+        }
+
+        // 2. Check patient refills
+        const refill = await db.get('SELECT patient_name FROM patient_refills WHERE patient_phone LIKE ? AND patient_name IS NOT NULL AND patient_name != "" LIMIT 1', [likePattern]);
+        if (refill?.patient_name) {
+          r.name = refill.patient_name;
+          continue;
+        }
+
+        // 3. Check delivery boys
+        const deliv = await db.get('SELECT name FROM delivery_boys WHERE (whatsapp_number LIKE ? OR mobile LIKE ?) AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern, likePattern]);
+        if (deliv?.name) {
+          r.name = deliv.name;
+          continue;
+        }
+
+        // 4. Check doctors
+        const doc = await db.get('SELECT name FROM doctors WHERE mobile LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
+        if (doc?.name) {
+          r.name = doc.name;
+          continue;
+        }
+
+        // 5. Check sales invoices
+        const sale = await db.get('SELECT customer_name FROM sales_invoices WHERE customer_phone LIKE ? AND customer_name IS NOT NULL AND customer_name != "" LIMIT 1', [likePattern]);
+        if (sale?.customer_name) {
+          r.name = sale.customer_name;
+        }
+      }
+    }
+
     return rows;
   } catch (err) {
     console.error('[WhatsApp Client Wrapper] getChats SQLite error:', err);
@@ -695,10 +741,13 @@ export async function getChatMessages(chatId: string, limit: number = 500): Prom
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT id, body, from_me as fromMe, timestamp, type, has_media as hasMedia
-       FROM whatsapp_messages
-       WHERE chat_id = ? OR chat_id LIKE ?
-       ORDER BY timestamp ASC
+      `SELECT wm.id, wm.body, wm.from_me as fromMe, wm.timestamp,
+              wm.type, wm.has_media as hasMedia,
+              sm.result_json as scannedResult
+       FROM whatsapp_messages wm
+       LEFT JOIN scanned_messages sm ON sm.msg_id = wm.id
+       WHERE wm.chat_id = ? OR wm.chat_id LIKE ?
+       ORDER BY wm.timestamp ASC
        LIMIT ?`,
       [raw, likePattern, limit]
     );

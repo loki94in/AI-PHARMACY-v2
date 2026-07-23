@@ -562,6 +562,17 @@ async function setupCrons(db: any) {
     }
   });
 
+  // Pharmarack daily batch dispatch: runs every minute during the 11 AM hour.
+  // tryDailySend() is idempotent — it checks the exact window and today's sent-flag internally.
+  cron.schedule('* 11 * * *', async () => {
+    try {
+      const { tryDailySend } = await import('./services/pharmarackDailyDispatchService.js');
+      await tryDailySend();
+    } catch (err) {
+      console.error('[PharmarackBatch] 11AM cron error:', err);
+    }
+  });
+
   // Register OCR completion listener for WhatsApp intent service
   try {
     const { eventService } = await import('./services/eventService.js');

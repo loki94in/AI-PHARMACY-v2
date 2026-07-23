@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 
 /**
  * Ensure required SQLite tables exist.
@@ -977,6 +977,20 @@ export async function ensureSchema(dbPath: string) {
     );
     CREATE INDEX IF NOT EXISTS idx_wa_admin_esc_msg ON wa_admin_escalations (msg_id, medicine_key);
     CREATE INDEX IF NOT EXISTS idx_wa_admin_esc_phone ON wa_admin_escalations (customer_phone, medicine_key, created_at);
+
+    -- Pharmarack daily batch dispatch: log every verified cart order for morning send
+    CREATE TABLE IF NOT EXISTS pharmarack_placed_orders (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_date            TEXT    NOT NULL,   -- YYYY-MM-DD (IST date of placement)
+      store_id              INTEGER,
+      store_name            TEXT    NOT NULL,
+      items_json            TEXT    NOT NULL,   -- [{productName, qty}]
+      delivery_persons_json TEXT,               -- [{name, code}]
+      placed_at             INTEGER NOT NULL,   -- unix ms
+      batch_sent            INTEGER DEFAULT 0,  -- 0=pending, 1=included in batch
+      batch_sent_at         INTEGER             -- unix ms when batch sent it
+    );
+    CREATE INDEX IF NOT EXISTS idx_pharmarack_placed_orders_date ON pharmarack_placed_orders (order_date, batch_sent);
   `);
 
   // FTS5 trigram index for fast fuzzy medicine name search (separate exec — virtual tables can't be inside multi-statement exec)
@@ -1071,6 +1085,12 @@ export async function ensureSchema(dbPath: string) {
   // WhatsApp Admin Auto-Escalation defaults
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('wa_auto_share_admin', 'true')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('admin_whatsapp', '')");
+
+  // Pharmarack daily batch dispatch defaults
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pharmarack_batch_cycle_start', '')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pharmarack_batch_window_offset', '0')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pharmarack_batch_last_sent_date', '')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pharmarack_batch_next_offset', '')");
 
   // Safely add legacy_id/speciality to doctors if the table already existed without them
   const doctorAlters = [

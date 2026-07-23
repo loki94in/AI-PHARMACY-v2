@@ -3,6 +3,7 @@ import { telegramBotService } from '../telegramBot.js';
 import { whatsappBusinessService } from './whatsappBusinessService.js';
 import { config } from '../config/index.js';
 import { dbManager } from '../database/connection.js';
+import { recordPlacedOrder } from './pharmarackDailyDispatchService.js';
 
 export interface NotificationData {
   type: 'whatsapp' | 'whatsapp_business' | 'telegram' | 'email';
@@ -450,6 +451,15 @@ export class NotificationService {
     } catch (err) {
       console.error('[CartOrderNotif] Error sending cart order notifications:', err);
       return false;
+    } finally {
+      // Always record this order for the daily morning batch to delivery boys
+      // (fire-and-forget — does not block the response)
+      try {
+        const batchDb = await dbManager.getConnection();
+        await recordPlacedOrder(batchDb, storeName, storeId, items, deliveryPersons);
+      } catch (recErr) {
+        console.warn('[CartOrderNotif] Failed to record order for daily batch:', recErr);
+      }
     }
   }
 }

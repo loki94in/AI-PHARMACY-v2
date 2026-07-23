@@ -395,6 +395,50 @@ function parseAllPhoneNumbers(...inputs: (string | undefined | null)[]): string[
   return nums;
 }
 
+function formatPhoneNumber(numStr?: string): string {
+  if (!numStr) return '';
+  const digits = numStr.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+  }
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+  }
+  if (digits.length > 13) {
+    return '';
+  }
+  return numStr.includes('+') ? numStr : `+${numStr}`;
+}
+
+function resolveChatDisplay(chat: WaChatItem): { title: string; subtitle: string } {
+  const rawId = chat.id || '';
+  const isLid = rawId.endsWith('@lid');
+  const cleanPhone = formatPhoneNumber(chat.resolvedNumber || (isLid ? '' : rawId.split('@')[0]));
+
+  const rawName = (chat.name || '').trim();
+  const isNameDigitsOnly = /^\d+$/.test(rawName.replace(/\D/g, '')) && rawName.replace(/\D/g, '').length >= 8;
+  const isNameLid = rawName.includes('@lid');
+
+  if (rawName && !isNameDigitsOnly && !isNameLid) {
+    return {
+      title: rawName,
+      subtitle: cleanPhone || (isLid ? '' : chat.resolvedNumber || rawId.split('@')[0])
+    };
+  }
+
+  if (cleanPhone) {
+    return {
+      title: cleanPhone,
+      subtitle: 'WhatsApp Contact'
+    };
+  }
+
+  return {
+    title: rawName || chat.resolvedNumber || rawId.split('@')[0],
+    subtitle: ''
+  };
+}
+
 interface WaChatItem {
   id: string;
   name: string;
@@ -412,6 +456,7 @@ interface WaMessageItem {
   timestamp: number;
   type?: string;
   hasMedia?: boolean;
+  scannedResult?: string | null;
 }
 
 interface WaMessageTemplate {
@@ -437,6 +482,37 @@ const WhatsAppSection: React.FC = () => {
   const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
   const [showTemplatePopover, setShowTemplatePopover] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
+  const [scanningOcrId, setScanningOcrId] = useState<string | null>(null);
+  // OCR results keyed by message ID (populated from DB via scannedResult or SSE)
+  const [ocrResults, setOcrResults] = useState<Record<string, string>>({});
+
+  // Resizable panel width state (persisted in localStorage)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('crm_sidebar_width');
+    return saved ? parseInt(saved, 10) : 340;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Mouse move handler for resizing sidebar
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const newWidth = Math.min(Math.max(e.clientX - 260, 240), 550);
+      setSidebarWidth(newWidth);
+      localStorage.setItem('crm_sidebar_width', String(newWidth));
+    };
+
+    const handleMouseUp = () => setIsDragging(false);
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
 
   // Template form state
   const [editingTemplateId, setEditingTemplateId] = useState<number | null>(null);
@@ -485,22 +561,49 @@ const WhatsAppSection: React.FC = () => {
     checkStatus();
     loadChats();
     loadTemplates();
+
+    // Live polling: refresh chat list every 30 s
+    const chatPollId = setInterval(loadChats, 30_000);
+    return () => clearInterval(chatPollId);
   }, [checkStatus, loadChats, loadTemplates]);
 
   // Load Thread Messages when activeChat changes
   useEffect(() => {
     if (!activeChat) {
       setMessages([]);
+      setOcrResults({});
       return;
     }
-    setLoadingMessages(true);
-    apiClient.get<WaMessageItem[]>(`/messaging/chats/${encodeURIComponent(activeChat.id)}/messages?limit=500`)
-      .then(res => {
-        setMessages(Array.isArray(res.data) ? res.data : []);
-        setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-      })
-      .catch(() => toastEvent.trigger('Failed to load message history', 'error', '/crm'))
-      .finally(() => setLoadingMessages(false));
+
+    const loadMessages = (isInitial = false) => {
+      if (isInitial) setLoadingMessages(true);
+      apiClient.get<WaMessageItem[]>(`/messaging/chats/${encodeURIComponent(activeChat.id)}/messages?limit=500`)
+        .then(res => {
+          const msgs = Array.isArray(res.data) ? res.data : [];
+          setMessages(msgs);
+          // Populate ocrResults map from pre-existing DB scans
+          const preloaded: Record<string, string> = {};
+          for (const msg of msgs) {
+            if (msg.scannedResult) {
+              try {
+                const parsed = JSON.parse(msg.scannedResult);
+                const label = parsed?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
+                  || parsed?.text?.substring(0, 120);
+                if (label) preloaded[msg.id] = label;
+              } catch { /* ignore malformed JSON */ }
+            }
+          }
+          setOcrResults(preloaded);
+          if (isInitial) setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        })
+        .catch(() => { if (isInitial) toastEvent.trigger('Failed to load message history', 'error', '/crm'); })
+        .finally(() => { if (isInitial) setLoadingMessages(false); });
+    };
+
+    loadMessages(true);
+    // Live polling: refresh messages every 10 s when a chat is open
+    const msgPollId = setInterval(() => loadMessages(false), 10_000);
+    return () => clearInterval(msgPollId);
   }, [activeChat]);
 
   // SSE event listener for real-time messages
@@ -523,6 +626,16 @@ const WhatsAppSection: React.FC = () => {
           }
           // Refresh chats list preview
           loadChats();
+        } else if (data.type === 'ocr_scan_complete') {
+          // OCR result arrived from background scan — update pill badge in chat
+          const { msgId, ocrResult } = data.payload || {};
+          if (msgId && ocrResult) {
+            try {
+              const label = ocrResult?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
+                || ocrResult?.text?.substring(0, 120);
+              if (label) setOcrResults(prev => ({ ...prev, [msgId]: label }));
+            } catch { /* ignore */ }
+          }
         } else if (data.type === 'auth_failure') {
           setIsReady(false);
         }
@@ -648,34 +761,28 @@ const WhatsAppSection: React.FC = () => {
 
   return (
     <div className="w-full h-full flex flex-col gap-3">
-      {/* Top Controls: Mode Toggle & Live WhatsApp Launcher */}
-      <div className="flex items-center justify-between gap-3 bg-bg2 p-2 rounded-2xl border border-border shadow-sm shrink-0">
-        <div className="flex items-center gap-1.5 bg-bg3/60 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none">
-          <button
-            onClick={() => setViewMode('live_web')}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              viewMode === 'live_web'
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
-                : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-            }`}
-          >
-            <MessageCircle size={14} className="text-emerald-400" />
-            <span>Live WhatsApp Web</span>
-          </button>
-          <button
-            onClick={() => setViewMode('crm_chats')}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-              viewMode === 'crm_chats'
-                ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
-                : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-            }`}
-          >
-            <MessageSquare size={14} />
-            <span>CRM History & Inquiries</span>
-          </button>
+      {/* Top Controls: Engine Status & Action Controls */}
+      <div className="flex items-center justify-between gap-3 bg-bg2 p-2.5 rounded-2xl border border-border shadow-sm shrink-0">
+        <div className="flex items-center gap-2 select-none">
+          <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-2 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Live WhatsApp CRM Engine</span>
+          </div>
+          <span className="text-[11px] text-muted hidden sm:inline">
+            Drag panel handle to customize width (auto-saved)
+          </span>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowManageModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-text hover:text-primary text-xs font-bold transition-all active:scale-95"
+            title="Manage Message Templates"
+          >
+            <Zap size={13} className="text-primary" />
+            <span>Manage Templates</span>
+          </button>
+
           <button
             onClick={async () => {
               try {
@@ -696,7 +803,7 @@ const WhatsAppSection: React.FC = () => {
 
       {/* WhatsApp Disconnected Banner */}
       {!isReady && (
-        <div className="flex items-center justify-between p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs">
+        <div className="flex items-center justify-between p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs shrink-0">
           <div className="flex items-center gap-2">
             <AlertCircle size={15} />
             <span>WhatsApp session is initializing or disconnected. Click to launch or reconnect.</span>
@@ -718,21 +825,13 @@ const WhatsAppSection: React.FC = () => {
         </div>
       )}
 
-      {/* Main Interface: Live WhatsApp Web vs CRM History */}
-      {viewMode === 'live_web' ? (
-        <div className="flex-1 min-h-0 bg-bg border border-border rounded-2xl overflow-hidden relative flex flex-col shadow-sm">
-          <iframe
-            src="https://web.whatsapp.com"
-            className="w-full h-full border-0 flex-1 min-h-[550px]"
-            title="Live WhatsApp Web Interface"
-            allow="camera; microphone; clipboard-read; clipboard-write; notifications"
-          />
-        </div>
-      ) : (
-        /* Main Chat Grid Interface */
-        <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
-          {/* Left: Chat List Panel (4 cols) */}
-          <div className="md:col-span-4 border-r border-border flex flex-col bg-bg3/40 min-h-0">
+      {/* Main Interface: Resizable Native Chat Panel */}
+      <div className="flex-1 min-h-0 flex bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
+        {/* Left: Chat List Panel (Resizable Width) */}
+        <div
+          style={{ width: `${sidebarWidth}px` }}
+          className="border-r border-border flex flex-col bg-bg3/40 min-h-0 shrink-0 select-none"
+        >
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
             <div className="relative flex-1">
               <Search size={14} className="absolute left-3 top-2.5 text-muted" />
@@ -762,8 +861,8 @@ const WhatsAppSection: React.FC = () => {
             ) : (
               filteredChats.map(c => {
                 const isActive = activeChat?.id === c.id;
-                const displayName = c.name || c.resolvedNumber || c.id.split('@')[0];
-                const initial = displayName.charAt(0).toUpperCase();
+                const display = resolveChatDisplay(c);
+                const initial = display.title.charAt(0).toUpperCase();
 
                 return (
                   <div
@@ -778,13 +877,13 @@ const WhatsAppSection: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-text truncate">{displayName}</h4>
+                        <h4 className="text-xs font-bold text-text truncate">{display.title}</h4>
                         {c.timestamp && (
                           <span className="text-[10px] text-muted">{formatTs(c.timestamp)}</span>
                         )}
                       </div>
                       <p className="text-[11px] text-muted truncate mt-0.5">
-                        {c.lastMessage || 'No messages yet'}
+                        {display.subtitle ? `${display.subtitle} • ` : ''}{c.lastMessage || 'No messages yet'}
                       </p>
                     </div>
                     {c.unreadCount > 0 && (
@@ -799,26 +898,42 @@ const WhatsAppSection: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Active Chat Thread & Composer (8 cols) */}
-        <div className="md:col-span-8 flex flex-col min-h-0 bg-bg">
+        {/* Resizable Divider Handle */}
+        <div
+          onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
+          className="w-1.5 hover:w-2 bg-border/40 hover:bg-primary/60 cursor-col-resize transition-all shrink-0 select-none flex items-center justify-center group"
+          title="Drag to resize WhatsApp panel (auto-saved)"
+        >
+          <div className="w-0.5 h-6 bg-muted/40 group-hover:bg-white rounded-full transition-colors" />
+        </div>
+
+        {/* Right: Active Chat Thread & Composer */}
+        <div className="flex-1 flex flex-col min-h-0 bg-bg min-w-0">
           {activeChat ? (
             <>
               {/* Thread Header */}
-              <div className="p-3 border-b border-border bg-bg2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center border border-emerald-500/30">
-                    {(activeChat.name || activeChat.id).charAt(0).toUpperCase()}
+              {(() => {
+                const activeDisplay = resolveChatDisplay(activeChat);
+                return (
+                  <div className="p-3 border-b border-border bg-bg2 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center border border-emerald-500/30">
+                        {activeDisplay.title.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-bold text-text">
+                          {activeDisplay.title}
+                        </h3>
+                        {activeDisplay.subtitle && (
+                          <p className="text-[10px] text-muted">
+                            {activeDisplay.subtitle}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-text">
-                      {activeChat.name || activeChat.resolvedNumber || activeChat.id.split('@')[0]}
-                    </h3>
-                    <p className="text-[10px] text-muted">
-                      {activeChat.resolvedNumber || activeChat.id}
-                    </p>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Thread Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-bg/50">
@@ -842,9 +957,37 @@ const WhatsAppSection: React.FC = () => {
                           }`}
                         >
                           <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                          {/* OCR medicine result pill — shown when scan result exists */}
+                          {ocrResults[m.id] && (
+                            <div className="mt-2 pt-1.5 border-t border-border/40">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-400 text-[10px] font-semibold">
+                                💊 {ocrResults[m.id]}
+                              </span>
+                            </div>
+                          )}
                           {m.hasMedia && (
-                            <div className="mt-1 pt-1 border-t border-white/20 text-[10px] opacity-80 flex items-center gap-1">
-                              <span>📁 Media Attachment</span>
+                            <div className="mt-2 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-[10px]">
+                              <span className="text-muted flex items-center gap-1">📁 Media Attachment</span>
+                              <button
+                                onClick={async () => {
+                                  setScanningOcrId(m.id);
+                                  try {
+                                    toastEvent.trigger('Queuing OCR prescription scan...', 'info');
+                                    await apiClient.post(
+                                      `/messaging/chats/${encodeURIComponent(activeChat!.id)}/messages/${encodeURIComponent(m.id)}/scan`
+                                    );
+                                    toastEvent.trigger('OCR scan queued – result will appear shortly', 'success', '/crm');
+                                  } catch {
+                                    toastEvent.trigger('Failed to queue prescription scan', 'error');
+                                  } finally {
+                                    setScanningOcrId(null);
+                                  }
+                                }}
+                                disabled={scanningOcrId === m.id}
+                                className="px-2 py-0.5 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-bold transition-all flex items-center gap-1"
+                              >
+                                <span>{scanningOcrId === m.id ? 'Scanning OCR...' : '🔍 OCR Scan Prescription'}</span>
+                              </button>
                             </div>
                           )}
                           <div
@@ -976,7 +1119,6 @@ const WhatsAppSection: React.FC = () => {
           )}
         </div>
       </div>
-      )}
 
       {/* Template Manager Modal */}
       {showManageModal && (

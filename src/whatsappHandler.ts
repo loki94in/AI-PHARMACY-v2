@@ -103,8 +103,23 @@ client.on('ready', async () => {
                 const chatId = chat.id._serialized;
                 if (chatId === 'status@broadcast') continue;
                 
-                const chatName = chat.name || chatId.split('@')[0];
-                const resolvedNumber = chatId.split('@')[0];
+                let resolvedNumber = chatId.split('@')[0];
+                let chatName = chat.name || '';
+
+                try {
+                    const contact = await chat.getContact();
+                    if (contact) {
+                        if (contact.number) resolvedNumber = contact.number;
+                        if (!chatName && (contact.name || contact.pushname)) {
+                            chatName = contact.name || contact.pushname || '';
+                        }
+                    }
+                } catch { /* fallback */ }
+
+                if (!chatName || chatName === chatId.split('@')[0]) {
+                    chatName = resolvedNumber;
+                }
+
                 const unreadCount = chat.unreadCount || 0;
                 const timestamp = chat.timestamp || Math.floor(Date.now() / 1000);
                 
@@ -122,9 +137,11 @@ client.on('ready', async () => {
                     `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
                      VALUES (?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET
+                       name = COALESCE(NULLIF(EXCLUDED.name, ''), whatsapp_chats.name),
                        unread_count = EXCLUDED.unread_count,
                        timestamp = EXCLUDED.timestamp,
-                       last_message = EXCLUDED.last_message`,
+                       last_message = EXCLUDED.last_message,
+                       resolved_number = COALESCE(NULLIF(EXCLUDED.resolved_number, ''), whatsapp_chats.resolved_number)`,
                     [chatId, chatName, unreadCount, timestamp, lastMessageText, chat.isGroup ? 1 : 0, resolvedNumber]
                 );
             }
@@ -144,15 +161,25 @@ client.on('message', async (msg) => {
     const isGroup = msg.from.endsWith('@g.us') || msg.from.includes('-');
     if (msg.from === 'status@broadcast' || isGroup) return;
 
-    const chatId = msg.from; // e.g. "919876543210@c.us"
-    const from = chatId.split('@')[0];
+    const chatId = msg.from; // e.g. "919876543210@c.us" or "@lid"
+    let from = chatId.split('@')[0];
+    let pushName = (msg as any)._data?.notifyName || '';
+
+    try {
+        const contact = await msg.getContact();
+        if (contact) {
+            if (contact.number) from = contact.number;
+            if (contact.name || contact.pushname) pushName = contact.name || contact.pushname || pushName;
+        }
+    } catch { /* fallback */ }
+
     const timestamp = msg.timestamp;
     const bodyText = msg.body || '';
     const msgId = msg.id?._serialized || msg.id?.id || `msg_${msg.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const hasMedia = msg.hasMedia ? 1 : 0;
     const msgType = msg.type || 'text';
 
-    console.log(`\n📩 [New Message] From: ${from} | Text: "${bodyText}"`);
+    console.log(`\n📩 [New Message] From: ${from} (${pushName || 'Unknown'}) | Text: "${bodyText}"`);
 
     // 1. Save message to local database so it displays in CRM chat thread
     try {
@@ -169,15 +196,17 @@ client.on('message', async (msg) => {
         // Fetch or update chat unread count and details
         const existingChat = await db.get('SELECT name, unread_count FROM whatsapp_chats WHERE id = ?', [chatId]);
         const currentUnread = msg.fromMe ? 0 : (existingChat?.unread_count || 0) + 1;
-        const chatName = existingChat?.name || from;
+        const chatName = (existingChat?.name && !existingChat.name.includes('@lid')) ? existingChat.name : (pushName || from);
 
         await db.run(
             `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
+               name = COALESCE(NULLIF(EXCLUDED.name, ''), whatsapp_chats.name),
                unread_count = EXCLUDED.unread_count,
                timestamp = EXCLUDED.timestamp,
-               last_message = EXCLUDED.last_message`,
+               last_message = EXCLUDED.last_message,
+               resolved_number = COALESCE(NULLIF(EXCLUDED.resolved_number, ''), whatsapp_chats.resolved_number)`,
             [chatId, chatName, currentUnread, timestamp, bodyText, 0, from]
         );
 

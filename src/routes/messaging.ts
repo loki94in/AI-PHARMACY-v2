@@ -272,7 +272,8 @@ router.get('/chats/:id/messages', async (req, res) => {
           fromMe: !!m.fromMe,
           timestamp: m.timestamp,
           type: m.type,
-          hasMedia: !!m.hasMedia
+          hasMedia: !!m.hasMedia,
+          scannedResult: m.scannedResult || null
         };
       }
       // Raw nested format from whatsapp-web.js client
