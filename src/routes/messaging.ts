@@ -192,38 +192,54 @@ router.post('/reconnect', async (req, res) => {
   }
 });
 
-// Send a WhatsApp message via the hub — non-blocking (returns immediately, sends in background)
+// Send a WhatsApp message via the hub — waits up to 8 seconds for real result
 router.post('/send', async (req, res) => {
   const { number, message, mediaUrl, file } = req.body;
   if (!number || (!message && !file)) {
     return res.status(400).json({ error: 'number and either message or file are required' });
   }
 
-  // Return immediately so the frontend never times out
-  res.status(202).json({ success: true, message: 'Message queued for delivery' });
+  // Race: actual send vs 8-second timeout
+  // - Resolves in time  → return real success/failure to frontend
+  // - Times out         → fall back to queue + 202 (client may still be initializing)
+  const SEND_TIMEOUT_MS = 8000;
 
-  // Fire-and-forget: attempt send in background
-  setImmediate(async () => {
-    try {
-      await sendMessage(number, mediaUrl, message, file);
-      console.log(`[Messaging] Silent send OK → ${number}`);
-    } catch (err: any) {
-      console.warn(`[Messaging] Silent send failed for ${number}, queueing:`, err?.message || err);
-      // Queue for retry when client becomes ready
+  let timedOut = false;
+  const timeoutPromise = new Promise<'timeout'>(resolve =>
+    setTimeout(() => { timedOut = true; resolve('timeout'); }, SEND_TIMEOUT_MS)
+  );
+
+  try {
+    const result = await Promise.race([
+      sendMessage(number, mediaUrl, message, file).then(() => 'ok' as const),
+      timeoutPromise
+    ]);
+
+    if (result === 'timeout') {
+      // Client is slow to init — queue for retry and return 202
       try {
-        const { dbManager } = await import('../database/connection.js');
         const db = await dbManager.getConnection();
         await db.run(
           `INSERT INTO whatsapp_send_queue (number, message, created_at) VALUES (?, ?, ?)
            ON CONFLICT DO NOTHING`,
           [number, message || '', Date.now()]
         );
-        console.log(`[Messaging] Queued message for ${number} (will retry when WhatsApp is ready)`);
+        console.log(`[Messaging] Send timed out for ${number}, queued for retry.`);
       } catch (qErr: any) {
-        console.error('[Messaging] Failed to queue message:', qErr?.message || qErr);
+        console.error('[Messaging] Failed to queue timed-out message:', qErr?.message || qErr);
       }
+      return res.status(202).json({ success: true, message: 'Message queued for delivery (client initializing)' });
     }
-  });
+
+    // Real success
+    console.log(`[Messaging] Send OK → ${number}`);
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    // Real failure — surface the error message to the frontend
+    const errMsg = err?.message || String(err) || 'Failed to send WhatsApp message';
+    console.warn(`[Messaging] Send failed for ${number}:`, errMsg);
+    return res.status(400).json({ error: errMsg });
+  }
 });
 
 // Get all WhatsApp chats

@@ -31,6 +31,10 @@ function lazyRoute(modulePath: string): express.RequestHandler {
   let router: express.Router | null = null;
   let loadPromise: Promise<express.Router> | null = null;
   return (req, res, next) => {
+    if (process.env.NODE_ENV !== 'production') {
+      import(modulePath).then(m => m.default(req, res, next)).catch(next);
+      return;
+    }
     if (router) return router(req, res, next);
     if (!loadPromise) {
       loadPromise = import(modulePath).then(m => {

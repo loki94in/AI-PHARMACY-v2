@@ -101,20 +101,38 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get customer history
+// Get customer sales invoice history (with items & legacy_id support)
 router.get('/:id/history', async (req, res) => {
   const customerId = req.params.id;
   try {
     const db = await dbManager.getConnection();
-    // Agent 1 manages sales_invoices, we can safely read it here
-    const history = await db.all(
-      'SELECT * FROM sales_invoices WHERE customer_id = ? ORDER BY date DESC',
+    const invoices = await db.all(
+      `SELECT si.*, c.name as customer_name, c.phone as customer_phone, d.name as doctor_name
+       FROM sales_invoices si
+       JOIN customers c ON c.id = ?
+       LEFT JOIN doctors d ON d.id = si.doctor_id
+       WHERE si.customer_id = c.id 
+          OR (c.legacy_id IS NOT NULL AND c.legacy_id != '' AND si.legacy_id = c.legacy_id)
+       ORDER BY si.date DESC`,
       [customerId]
     );
-        res.json(history);
-  } catch (error) {
+
+    for (const inv of invoices) {
+      const items = await db.all(
+        `SELECT sli.*, COALESCE(m.name, 'Medicine') as medicine_name, im.batch_no as batch_number, im.expiry_date, im.mrp, COALESCE(m.pack_size, 10) as pack_size
+         FROM sale_items sli
+         LEFT JOIN inventory_master im ON im.id = sli.inventory_id
+         LEFT JOIN medicines m ON m.id = im.medicine_id
+         WHERE sli.invoice_id = ?`,
+        [inv.id]
+      );
+      inv.items = items;
+    }
+
+    res.json(invoices);
+  } catch (error: any) {
     console.error('Failed to fetch history:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Failed to fetch history: ' + error.message });
   }
 });
 
@@ -262,12 +280,16 @@ router.get('/credit-customers', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT c.id, c.name, c.phone, c.address, c.credit_balance, c.credit_due_date, c.credit_enabled,
+      `SELECT c.id, c.name, c.phone, c.address, 
+              CASE WHEN c.credit_balance = 0 AND (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) > 0
+                   THEN (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID'))
+                   ELSE c.credit_balance END as credit_balance,
+              c.credit_due_date, c.credit_enabled,
               (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) as unpaid_bills_count,
               (SELECT MAX(date) FROM sales_invoices si WHERE si.customer_id = c.id) as last_sale_date
        FROM customers c
-       WHERE c.credit_balance > 0 OR c.credit_enabled = 1
-       ORDER BY c.credit_balance DESC`
+       WHERE c.credit_balance > 0 OR c.credit_enabled = 1 OR (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) > 0
+       ORDER BY credit_balance DESC`
     );
     res.json(rows);
   } catch (error: any) {
@@ -275,6 +297,8 @@ router.get('/credit-customers', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch credit customers: ' + error.message });
   }
 });
+
+
 
 // Update Customer Due Date
 router.put('/credit-customers/:id/due-date', async (req, res) => {

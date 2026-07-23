@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { apiClient } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 
@@ -483,10 +484,36 @@ const WhatsAppSection: React.FC = () => {
   const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
   const [showTemplatePopover, setShowTemplatePopover] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [newChatNumber, setNewChatNumber] = useState('');
   const [scanningOcrId, setScanningOcrId] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   // OCR results keyed by message ID (populated from DB via scannedResult or SSE)
   const [ocrResults, setOcrResults] = useState<Record<string, string>>({});
+
+  const handleStartNewChat = (rawNumber: string) => {
+    let digits = rawNumber.replace(/\D/g, '');
+    if (!digits) return;
+    if (digits.length === 10) digits = `91${digits}`;
+    const chatId = `${digits}@c.us`;
+    const newChatObj: WaChatItem = {
+      id: chatId,
+      name: formatPhoneNumber(digits),
+      unreadCount: 0,
+      timestamp: Math.floor(Date.now() / 1000),
+      resolvedNumber: digits,
+      lastMessage: ''
+    };
+
+    setChats(prev => {
+      if (prev.some(c => c.id === chatId || c.resolvedNumber === digits)) return prev;
+      return [newChatObj, ...prev];
+    });
+    setActiveChat(newChatObj);
+    setShowNewChatModal(false);
+    setNewChatNumber('');
+    setSearch('');
+  };
 
   // Resizable panel width state (persisted in localStorage)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -525,6 +552,9 @@ const WhatsAppSection: React.FC = () => {
 
   const threadEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Ref so SSE handler always sees the latest activeChat without stale closure
+  const activeChatRef = useRef<WaChatItem | null>(null);
+  useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
   // Load WhatsApp status
   const checkStatus = useCallback(async () => {
@@ -582,7 +612,14 @@ const WhatsAppSection: React.FC = () => {
       apiClient.get<WaMessageItem[]>(`/messaging/chats/${encodeURIComponent(activeChat.id)}/messages?limit=500`)
         .then(res => {
           const msgs = Array.isArray(res.data) ? res.data : [];
-          setMessages(msgs);
+          setMessages(prev => {
+            const optimisticMsgs = prev.filter(m => m.id.startsWith('optimistic_'));
+            if (optimisticMsgs.length === 0) return msgs;
+
+            const fetchedBodies = new Set(msgs.map(m => m.body));
+            const pendingOptimistic = optimisticMsgs.filter(m => !fetchedBodies.has(m.body));
+            return [...msgs, ...pendingOptimistic];
+          });
           // Populate ocrResults map from pre-existing DB scans
           const preloaded: Record<string, string> = {};
           for (const msg of msgs) {
@@ -608,6 +645,21 @@ const WhatsAppSection: React.FC = () => {
     return () => clearInterval(msgPollId);
   }, [activeChat]);
 
+function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string): boolean {
+  if (!chat) return false;
+  if (chat.id === targetChatId) return true;
+  if (chat.resolvedNumber && targetChatId.includes(chat.resolvedNumber)) return true;
+  if (resolvedNum && (chat.id.includes(resolvedNum) || chat.resolvedNumber === resolvedNum)) return true;
+
+  const chatDigits = (chat.resolvedNumber || chat.id).replace(/\D/g, '').slice(-10);
+  const targetDigits = ((resolvedNum || targetChatId) || '').replace(/\D/g, '').slice(-10);
+
+  if (chatDigits && targetDigits && chatDigits.length >= 7 && chatDigits === targetDigits) {
+    return true;
+  }
+  return false;
+}
+
   // SSE event listener for real-time messages
   useEffect(() => {
     const eventSource = new EventSource('/api/notifications/stream');
@@ -618,8 +670,11 @@ const WhatsAppSection: React.FC = () => {
         if (data.type === 'wa_new_message') {
           const newMsg: WaMessageItem = data.payload.message;
           const chatId: string = data.payload.chat_id;
+          const resolvedNumber: string = data.payload.resolved_number;
 
-          if (activeChat && activeChat.id === chatId) {
+          // Use ref to avoid stale closure on activeChat
+          const currentChat = activeChatRef.current;
+          if (currentChat && isSameChat(currentChat, chatId, resolvedNumber)) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
@@ -658,18 +713,52 @@ const WhatsAppSection: React.FC = () => {
     if (!composerText.trim() && !attachedFile) return;
 
     const recipient = activeChat.resolvedNumber || activeChat.id.split('@')[0];
+    const textToSend = composerText.trim();
     setSending(true);
+
+    // Optimistic update: show the message immediately in the thread
+    const optimisticId = `optimistic_${Date.now()}`;
+    const optimisticMsg: WaMessageItem = {
+      id: optimisticId,
+      body: attachedFile ? `[Document] ${attachedFile.filename}` : textToSend,
+      fromMe: true,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: attachedFile ? 'document' : 'text',
+      hasMedia: !!attachedFile,
+      scannedResult: null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+
+    // Clear composer immediately for better UX
+    setComposerText('');
+    setAttachedFile(null);
 
     try {
       await apiClient.post('/messaging/send', {
         number: recipient,
-        message: composerText.trim(),
+        message: textToSend,
         file: attachedFile || undefined
       });
-      setComposerText('');
-      setAttachedFile(null);
       toastEvent.trigger('Message sent via WhatsApp', 'success', '/crm');
+      // Refresh chat list immediately so the new or updated chat shows up with preview
+      loadChats();
+      // Reconcile optimistic message with DB record after short delay
+      setTimeout(() => {
+        if (activeChatRef.current) {
+          apiClient.get<WaMessageItem[]>(`/messaging/chats/${encodeURIComponent(activeChatRef.current.id)}/messages?limit=500`)
+            .then(res => {
+              if (Array.isArray(res.data) && res.data.length > 0) {
+                setMessages(res.data);
+                setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+              }
+            })
+            .catch(() => {});
+        }
+      }, 400);
     } catch (err: any) {
+      // Remove optimistic message on failure so user knows the send failed
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
       toastEvent.trigger(err.response?.data?.error || 'Failed to send message', 'error', '/crm');
     } finally {
       setSending(false);
@@ -777,6 +866,15 @@ const WhatsAppSection: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowNewChatModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 text-xs font-bold transition-all active:scale-95"
+            title="Start new chat with any phone number"
+          >
+            <MessageSquare size={13} />
+            <span>New Chat</span>
+          </button>
+
+          <button
             onClick={() => setShowManageModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-text hover:text-primary text-xs font-bold transition-all active:scale-95"
             title="Manage Message Templates"
@@ -859,7 +957,18 @@ const WhatsAppSection: React.FC = () => {
             {loadingChats && chats.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted">Loading chats...</div>
             ) : filteredChats.length === 0 ? (
-              <div className="p-8 text-center text-xs text-muted">No WhatsApp chats found.</div>
+              <div className="p-6 text-center text-xs text-muted flex flex-col items-center gap-3">
+                <span>No WhatsApp chats found.</span>
+                {search.replace(/\D/g, '').length >= 7 && (
+                  <button
+                    onClick={() => handleStartNewChat(search)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <MessageSquare size={13} />
+                    <span>Start Chat with {search.trim()}</span>
+                  </button>
+                )}
+              </div>
             ) : (
               filteredChats.map(c => {
                 const isActive = activeChat?.id === c.id;
@@ -1281,6 +1390,61 @@ const WhatsAppSection: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* New Chat Modal */}
+      {showNewChatModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-border rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold text-text flex items-center gap-2">
+                <MessageSquare size={16} className="text-emerald-400" />
+                <span>Start New WhatsApp Chat</span>
+              </h3>
+              <button
+                onClick={() => { setShowNewChatModal(false); setNewChatNumber(''); }}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3"
+              >
+                ✕
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (newChatNumber.trim()) handleStartNewChat(newChatNumber);
+              }}
+              className="p-4 space-y-3"
+            >
+              <div>
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Mobile / WhatsApp Number</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 9876543210 or 919876543210"
+                  value={newChatNumber}
+                  onChange={e => setNewChatNumber(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowNewChatModal(false); setNewChatNumber(''); }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-muted hover:bg-bg3"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newChatNumber.trim()}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  Open Chat
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1308,6 +1472,9 @@ interface CreditCustomerItem {
 
 const CustomerCreditSection: React.FC = () => {
   const [customers, setCustomers] = useState<CreditCustomerItem[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomerItem | null>(null);
+  const [customerInvoices, setCustomerInvoices] = useState<any[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -1315,18 +1482,40 @@ const CustomerCreditSection: React.FC = () => {
   const [payingId, setPayingId] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [sendingId, setSendingId] = useState<number | null>(null);
+  const [viewInvoice, setViewInvoice] = useState<any | null>(null);
+
+  const loadCustomerInvoices = useCallback(async (customerId: number) => {
+    setLoadingInvoices(true);
+    try {
+      const res = await apiClient.get<any[]>(`/crm/${customerId}/history`);
+      setCustomerInvoices(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      toastEvent.trigger('Failed to load customer purchase bills', 'error', '/crm');
+    } finally {
+      setLoadingInvoices(false);
+    }
+  }, []);
 
   const loadCreditCustomers = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiClient.get<CreditCustomerItem[]>('/crm/credit-customers');
-      setCustomers(Array.isArray(res.data) ? res.data : []);
+      const data = Array.isArray(res.data) ? res.data : [];
+      setCustomers(data);
+      if (data.length > 0) {
+        setSelectedCustomer(prev => {
+          const match = data.find(c => c.id === prev?.id);
+          const active = match || data[0];
+          loadCustomerInvoices(active.id);
+          return active;
+        });
+      }
     } catch {
       toastEvent.trigger('Failed to load credit customers', 'error', '/crm');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadCustomerInvoices]);
 
   useEffect(() => {
     loadCreditCustomers();
@@ -1362,7 +1551,7 @@ const CustomerCreditSection: React.FC = () => {
       return;
     }
     try {
-      await apiClient.post('/crm/ledger/pay', { customer_id: id, amount: amt });
+      await apiClient.post('/crm/ledger/pay', { amount: amt, customer_id: id });
       toastEvent.trigger(`Collected ₹${amt.toFixed(2)} payment`, 'success', '/crm');
       setPayingId(null);
       setPayAmount('');
@@ -1384,174 +1573,387 @@ const CustomerCreditSection: React.FC = () => {
   const totalDues = customers.reduce((sum, c) => sum + (c.credit_balance || 0), 0);
 
   return (
-    <div className="w-full h-full flex flex-col gap-4 overflow-y-auto pr-1">
-      {/* Header Cards & Search */}
+    <div className="w-full h-full flex flex-col gap-3 overflow-hidden pr-1">
+      {/* Header Cards & Quick Search */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
-        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
-            <p className="text-xs text-muted font-medium">Total Credit Outstanding</p>
-            <h3 className="text-xl font-bold text-amber-400 mt-1">₹{totalDues.toFixed(2)}</h3>
+            <p className="text-[11px] text-muted font-medium">Total Outstanding Dues</p>
+            <h3 className="text-lg font-bold text-amber-400 mt-0.5">₹{totalDues.toFixed(2)}</h3>
           </div>
-          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <Users size={20} />
+          <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <Users size={18} />
           </div>
         </div>
 
-        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
-            <p className="text-xs text-muted font-medium">Credit Customers</p>
-            <h3 className="text-xl font-bold text-text mt-1">{customers.length} Patients</h3>
+            <p className="text-[11px] text-muted font-medium">Active Credit Accounts</p>
+            <h3 className="text-lg font-bold text-text mt-0.5">{customers.length} Lenders</h3>
           </div>
-          <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <Users size={20} />
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <Users size={18} />
           </div>
         </div>
 
-        <div className="p-4 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
-          <div className="relative w-full">
-            <Search size={14} className="absolute left-3 top-3 text-muted" />
-            <input
-              type="text"
-              placeholder="Search patient name or mobile..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Credit Customer Table */}
-      <div className="bg-bg2 border border-border rounded-2xl p-4 shadow-sm flex-1">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-text">Customer Credit Ledger &amp; Due Dates</h3>
+        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <button
             onClick={loadCreditCustomers}
             disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-xs text-text hover:text-primary transition-all disabled:opacity-50"
+            className="w-full h-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-bg3 border border-border text-xs font-bold text-text hover:text-primary transition-all disabled:opacity-50"
           >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            <span>Refresh Dues</span>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh Ledger Dues</span>
           </button>
         </div>
-
-        {loading && customers.length === 0 ? (
-          <div className="p-12 text-center text-xs text-muted">Loading credit customer ledger...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-xs text-muted">No credit customers found.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-border text-muted font-medium">
-                  <th className="pb-2.5 font-bold">Patient Name</th>
-                  <th className="pb-2.5 font-bold">Phone Number</th>
-                  <th className="pb-2.5 font-bold">Outstanding Due</th>
-                  <th className="pb-2.5 font-bold">Due Date</th>
-                  <th className="pb-2.5 font-bold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {filtered.map(cust => (
-                  <tr key={cust.id} className="hover:bg-bg/40 transition-colors">
-                    <td className="py-3 font-bold text-text">
-                      <div>{cust.name || 'Unnamed Patient'}</div>
-                      {cust.address && <span className="text-[10px] text-muted font-normal">{cust.address}</span>}
-                    </td>
-                    <td className="py-3 text-muted">{cust.phone || 'No phone'}</td>
-                    <td className="py-3 font-bold text-amber-400">₹{(cust.credit_balance || 0).toFixed(2)}</td>
-                    <td className="py-3">
-                      {editingId === cust.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="date"
-                            value={newDueDate}
-                            onChange={e => setNewDueDate(e.target.value)}
-                            className="px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none focus:border-primary"
-                          />
-                          <button
-                            onClick={() => handleSaveDueDate(cust.id)}
-                            className="px-2 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-600 transition-all"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingId(null)}
-                            className="px-2 py-1 rounded-lg bg-bg3 text-muted text-xs hover:text-text"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className={cust.credit_due_date ? 'text-text font-medium' : 'text-muted italic'}>
-                            {cust.credit_due_date ? formatDate(cust.credit_due_date) : 'Not Set'}
-                          </span>
-                          <button
-                            onClick={() => {
-                              setEditingId(cust.id);
-                              setNewDueDate(cust.credit_due_date || '');
-                            }}
-                            className="text-[10px] text-primary hover:underline font-bold"
-                          >
-                            Edit Date
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {/* Collect Payment */}
-                        {payingId === cust.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              placeholder="Amount (₹)"
-                              value={payAmount}
-                              onChange={e => setPayAmount(e.target.value)}
-                              className="w-24 px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none"
-                            />
-                            <button
-                              onClick={() => handlePayBalance(cust.id)}
-                              className="px-2 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs"
-                            >
-                              Collect
-                            </button>
-                            <button
-                              onClick={() => setPayingId(null)}
-                              className="px-2 py-1 text-muted hover:text-text text-xs"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => { setPayingId(cust.id); setPayAmount(String(cust.credit_balance)); }}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-bold transition-all"
-                          >
-                            Collect Payment
-                          </button>
-                        )}
-
-                        {/* Send Manual WhatsApp Reminder */}
-                        <button
-                          onClick={() => handleSendManualReminder(cust)}
-                          disabled={sendingId === cust.id}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all disabled:opacity-50"
-                          title="Send instant manual credit reminder on WhatsApp"
-                        >
-                          <Send size={12} className={sendingId === cust.id ? 'animate-pulse' : ''} />
-                          <span>Send WhatsApp Message</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
+
+      {/* Split-View Container */}
+      <div className="flex-1 flex flex-col md:flex-row gap-3 overflow-hidden min-h-0">
+        {/* LEFT PANEL: Lender Accounts List */}
+        <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
+          <div className="p-3 border-b border-border bg-bg3/40 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
+              <Users size={14} className="text-amber-400" />
+              Lenders / Credit Accounts
+            </h3>
+            <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-bold">
+              {filtered.length}
+            </span>
+          </div>
+
+          {/* Search Input */}
+          <div className="p-2 border-b border-border bg-bg">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
+              <input
+                type="text"
+                placeholder="Search lender name or mobile..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-8 pr-2.5 py-1.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+
+          {/* Customer Cards List */}
+          <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+            {loading && customers.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted">Loading lenders...</div>
+            ) : filtered.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted">No credit accounts found.</div>
+            ) : (
+              filtered.map(cust => {
+                const isSelected = selectedCustomer?.id === cust.id;
+                return (
+                  <div
+                    key={cust.id}
+                    onClick={() => {
+                      setSelectedCustomer(cust);
+                      loadCustomerInvoices(cust.id);
+                    }}
+                    className={`p-3 cursor-pointer transition-all flex items-center justify-between hover:bg-primary/5 ${
+                      isSelected ? 'bg-primary/10 border-l-4 border-primary font-semibold' : ''
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-text">{cust.name || 'Unnamed Patient'}</div>
+                      <div className="text-[10px] text-muted flex items-center gap-1.5 mt-0.5">
+                        <span>📱 {cust.phone || 'No phone'}</span>
+                        <span>•</span>
+                        <span>{cust.unpaid_bills_count} Unpaid Bill(s)</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-bold text-amber-400">₹{(cust.credit_balance || 0).toFixed(2)}</div>
+                      <div className="text-[9px] text-muted mt-0.5">
+                        {cust.credit_due_date ? `Due: ${formatDate(cust.credit_due_date)}` : 'No Due Date'}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT PANEL: Selected Account Purchases & Actions */}
+        <div className="flex-1 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
+          {selectedCustomer ? (
+            <>
+              {/* Account Header */}
+              <div className="p-3.5 border-b border-border bg-bg3/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-text">{selectedCustomer.name || 'Unnamed Patient'}</h2>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      CREDIT ACCOUNT
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted mt-0.5 flex items-center gap-3">
+                    <span>📱 {selectedCustomer.phone || 'No phone'}</span>
+                    {selectedCustomer.address && <span>📍 {selectedCustomer.address}</span>}
+                  </div>
+                </div>
+
+                {/* Right Side Balance & Action Buttons */}
+                <div className="flex items-center gap-3">
+                  <div className="text-right pr-2">
+                    <div className="text-[10px] text-muted font-medium uppercase tracking-wider">Outstanding Balance</div>
+                    <div className="text-base font-extrabold text-amber-400">₹{(selectedCustomer.credit_balance || 0).toFixed(2)}</div>
+                  </div>
+
+                  {/* Collect Payment Action */}
+                  {payingId === selectedCustomer.id ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        placeholder="Amount (₹)"
+                        value={payAmount}
+                        onChange={e => setPayAmount(e.target.value)}
+                        className="w-24 px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none"
+                      />
+                      <button
+                        onClick={() => handlePayBalance(selectedCustomer.id)}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-600"
+                      >
+                        Collect
+                      </button>
+                      <button onClick={() => setPayingId(null)} className="px-1.5 text-muted hover:text-text text-xs">✕</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setPayingId(selectedCustomer.id); setPayAmount(String(selectedCustomer.credit_balance)); }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-bold transition-all"
+                    >
+                      Collect Payment
+                    </button>
+                  )}
+
+                  {/* WhatsApp Reminder Button */}
+                  <button
+                    onClick={() => handleSendManualReminder(selectedCustomer)}
+                    disabled={sendingId === selectedCustomer.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all disabled:opacity-50"
+                    title="Send instant manual credit reminder on WhatsApp"
+                  >
+                    <Send size={12} className={sendingId === selectedCustomer.id ? 'animate-pulse' : ''} />
+                    <span>Send WhatsApp Message</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Due Date Management Bar */}
+              <div className="px-4 py-2 bg-bg border-b border-border flex items-center justify-between text-xs shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted font-medium">Agreed Credit Due Date:</span>
+                  {editingId === selectedCustomer.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={newDueDate}
+                        onChange={e => setNewDueDate(e.target.value)}
+                        className="px-2 py-0.5 bg-bg2 border border-border rounded text-xs text-text focus:outline-none"
+                      />
+                      <button onClick={() => handleSaveDueDate(selectedCustomer.id)} className="px-2 py-0.5 rounded bg-emerald-500 text-white font-bold text-[10px]">Save</button>
+                      <button onClick={() => setEditingId(null)} className="px-2 py-0.5 text-muted text-[10px]">Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className={selectedCustomer.credit_due_date ? 'text-text font-bold' : 'text-muted italic'}>
+                        {selectedCustomer.credit_due_date ? formatDate(selectedCustomer.credit_due_date) : 'Not Set'}
+                      </span>
+                      <button onClick={() => { setEditingId(selectedCustomer.id); setNewDueDate(selectedCustomer.credit_due_date || ''); }} className="text-[10px] text-primary hover:underline font-bold">
+                        Edit Date
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <span className="text-muted text-[11px] font-medium">{customerInvoices.length} Credit Purchase Bill(s)</span>
+              </div>
+
+              {/* Credit Purchase History Table */}
+              <div className="flex-1 overflow-y-auto p-4">
+                <h4 className="text-xs font-bold text-text uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <FileText size={14} className="text-primary" />
+                  Credit Purchase History &amp; Bills
+                </h4>
+
+                {loadingInvoices ? (
+                  <div className="p-8 text-center text-xs text-muted">Loading purchase bills...</div>
+                ) : customerInvoices.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted">No credit purchase bills found for this lender.</div>
+                ) : (
+                  <div className="overflow-x-auto border border-border rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-bg3/50 border-b border-border text-muted font-bold">
+                          <th className="p-2.5">Purchase Date</th>
+                          <th className="p-2.5">Bill Number</th>
+                          <th className="p-2.5">Doctor</th>
+                          <th className="p-2.5">Payment Mode</th>
+                          <th className="p-2.5">Status</th>
+                          <th className="p-2.5 text-right">Bill Amount</th>
+                          <th className="p-2.5 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/30">
+                        {customerInvoices.map((inv: any) => (
+                          <tr key={inv.id} className="hover:bg-bg/50 transition-colors">
+                            <td className="p-2.5 text-muted">{formatDate(inv.date)}</td>
+                            <td className="p-2.5 font-bold">
+                              <button
+                                onClick={() => setViewInvoice(inv)}
+                                className="text-primary hover:underline font-mono font-bold flex items-center gap-1"
+                                title="Click to view full medicine list & bill preview"
+                              >
+                                <FileText size={12} />
+                                <span>{inv.invoice_no}</span>
+                              </button>
+                            </td>
+                            <td className="p-2.5 text-muted">{inv.doctor_name || '-'}</td>
+                            <td className="p-2.5 font-semibold text-text">{inv.payment_medium || 'CREDIT'}</td>
+                            <td className="p-2.5">
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                inv.payment_status === 'PAID'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}>
+                                {inv.payment_status || 'UNPAID'}
+                              </span>
+                            </td>
+                            <td className="p-2.5 font-extrabold text-amber-400 text-right">₹{(inv.total_amount || 0).toFixed(2)}</td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                onClick={() => setViewInvoice(inv)}
+                                className="px-2.5 py-1 rounded-lg bg-bg3 border border-border text-[11px] font-semibold text-text hover:text-primary transition-all flex items-center gap-1 mx-auto"
+                              >
+                                <FileText size={11} />
+                                <span>View Bill</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8 text-muted text-xs">
+              Select a credit account / lender from the left panel to view purchase bills &amp; details.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bill Preview Modal (Matching Sales History Page Popup) */}
+      {viewInvoice && createPortal(
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col border-primary/20 bg-bg2 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-border flex justify-between items-center bg-bg3/50 shrink-0">
+              <div>
+                <h3 className="font-bold text-base flex items-center gap-2 text-text">
+                  <FileText size={18} className="text-primary" />
+                  Bill Preview: {viewInvoice.invoice_no}
+                </h3>
+                <p className="text-xs text-muted mt-0.5">Read-only preview of credit sale invoice</p>
+              </div>
+              <button
+                onClick={() => setViewInvoice(null)}
+                className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+              {/* Customer & Invoice Summary */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-bg3/30 p-3.5 rounded-xl border border-border text-xs">
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Patient Name</div>
+                  <div className="font-bold text-text">{viewInvoice.customer_name || 'Walk-in'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">WhatsApp / Phone</div>
+                  <div className="font-bold text-text">{viewInvoice.customer_phone || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Payment Method</div>
+                  <div className="font-bold text-amber-400">{viewInvoice.payment_medium || 'CREDIT'} ({viewInvoice.payment_status || 'UNPAID'})</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Sale Date</div>
+                  <div className="font-bold text-text">{formatDate(viewInvoice.date)}</div>
+                </div>
+              </div>
+
+              {/* Purchased Medicines Table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider">Purchased Medicines</h4>
+                  <span className="text-xs text-muted">{viewInvoice.items?.length || 0} item(s)</span>
+                </div>
+                <div className="overflow-x-auto border border-border rounded-xl bg-bg">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-bg3/40 border-b border-border text-muted font-bold">
+                        <th className="p-2.5">Medicine Name</th>
+                        <th className="p-2.5">Batch</th>
+                        <th className="p-2.5 text-center">Qty (Strips/Loose)</th>
+                        <th className="p-2.5 text-center">CD %</th>
+                        <th className="p-2.5">MRP</th>
+                        <th className="p-2.5">Unit Price</th>
+                        <th className="p-2.5 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/30">
+                      {viewInvoice.items?.map((item: any, idx: number) => {
+                        const packSize = item.pack_size || 10;
+                        const looseQty = item.loose_qty || 0;
+                        const discPer = item.discount_per || 0;
+                        const discountedPrice = item.unit_price * (1 - discPer / 100);
+                        const itemTotal = (discountedPrice * item.quantity) + ((discountedPrice / packSize) * looseQty);
+                        return (
+                          <tr key={idx} className="hover:bg-bg2/50">
+                            <td className="p-2.5 font-semibold text-text">{item.medicine_name || `Item #${item.inventory_id}`}</td>
+                            <td className="p-2.5 font-mono text-[11px] text-muted">{item.batch_number || '-'}</td>
+                            <td className="p-2.5 text-center font-bold">{item.quantity} / {looseQty}</td>
+                            <td className="p-2.5 text-center text-muted">{discPer}%</td>
+                            <td className="p-2.5 text-muted">₹{item.mrp || 0}</td>
+                            <td className="p-2.5 font-medium text-text">₹{discountedPrice.toFixed(2)}</td>
+                            <td className="p-2.5 font-bold text-emerald-400 text-right">₹{Math.round(itemTotal)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-border flex justify-between items-center bg-bg3/50 shrink-0">
+              <button
+                onClick={() => setViewInvoice(null)}
+                className="px-4 py-2 bg-bg3 text-muted rounded-xl text-xs font-semibold hover:text-text"
+              >
+                Close Preview
+              </button>
+              <div className="text-right">
+                <div className="text-[10px] text-muted">Total Bill Amount</div>
+                <div className="text-lg font-extrabold text-amber-400">
+                  ₹{(viewInvoice.total_amount || 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

@@ -338,8 +338,8 @@ router.post('/', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Trigger WhatsApp invoice sending if requested
-    if (sendWhatsApp) {
+    // Trigger WhatsApp invoice sending if requested or if credit transaction
+    if (sendWhatsApp || paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID') {
       import('../services/whatsappInvoiceService.js')
         .then(({ whatsappInvoiceService }) => {
           whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId).catch(err => {

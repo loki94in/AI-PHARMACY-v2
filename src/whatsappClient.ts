@@ -38,6 +38,9 @@ let activeClient: WAClient | null = null; // Track currently initializing or act
 let initializing = false;
 let isSyncing = false;
 let qrTimeout: NodeJS.Timeout | null = null;
+// Timestamp (ms) of the last getChats() failure — suppresses retries for 30 s
+let lastSyncFailureAt: number = 0;
+const SYNC_RETRY_COOLDOWN_MS = 30_000;
 
 export let currentQr: string | null = null;
 export let isReady: boolean = false;
@@ -129,10 +132,26 @@ async function syncWhatsappData(client: WAClient) {
     console.log('[WhatsApp] Synchronization already in progress, skipping duplicate request.');
     return;
   }
+
+  // Cooldown: if getChats() failed recently, skip to avoid rapid error loops
+  const now = Date.now();
+  if (lastSyncFailureAt > 0 && (now - lastSyncFailureAt) < SYNC_RETRY_COOLDOWN_MS) {
+    const retryInSec = Math.ceil((SYNC_RETRY_COOLDOWN_MS - (now - lastSyncFailureAt)) / 1000);
+    console.log(`[WhatsApp] Sync skipped — last failure was recent. Retry in ${retryInSec}s.`);
+    return;
+  }
+
   isSyncing = true;
   try {
     console.log('[WhatsApp] Starting background synchronization of chats and messages...');
-    const chats = await client.getChats();
+    let chats: any[];
+    try {
+      chats = await client.getChats();
+    } catch (getChatsErr: any) {
+      lastSyncFailureAt = Date.now();
+      console.warn(`[WhatsApp] getChats() failed (will retry after ${SYNC_RETRY_COOLDOWN_MS / 1000}s):`, getChatsErr?.message || getChatsErr);
+      return;
+    }
     const db = await dbManager.getConnection();
 
     const ignoreRows = await db.all('SELECT phone, reason FROM ignored_whatsapp_numbers');
@@ -293,13 +312,14 @@ export async function initClient(): Promise<WAClient> {
       currentQr = null;
       resolve(client);
 
-      syncWhatsappData(client).catch(err => {
-        console.error('[WhatsApp] Background sync failed:', err);
-      });
-
-      // Drain any messages that were queued while client was initializing
+      // Drain queued messages first (independent of chat sync)
       drainSendQueue().catch(err => {
         console.error('[WhatsApp] Queue drain failed (non-fatal):', err);
+      });
+
+      // Sync chats separately — failure here must not block send queue drain
+      syncWhatsappData(client).catch(err => {
+        console.error('[WhatsApp] Background sync failed:', err);
       });
     });
 
@@ -403,6 +423,7 @@ export async function initClient(): Promise<WAClient> {
 
         eventService.broadcast('wa_new_message', {
           chat_id: chatId,
+          resolved_number: resolvedNumber,
           message: {
             id: msg.id._serialized,
             body: msg.body,
@@ -561,10 +582,10 @@ export async function sendMessage(
 
     try {
       if (!useBusiness) {
-        // Live WhatsApp Web client. Its own message_create event (fromMe: true) will
-        // log this send to SQLite and broadcast it with the real WA message id, so we
-        // must NOT also run the manual DB-write tail below for this branch — that
-        // would insert a second, duplicate row under a synthetic id.
+        // Live WhatsApp Web client. Send via the WA Web.js client.
+        // message_create event will fire shortly after with the real WA message id and
+        // update the DB record. We also write a provisional DB record here so the chat
+        // list and thread panel update immediately without waiting for the event.
         if (file && file.mimetype && file.data) {
           const { MessageMedia } = await import('whatsapp-web.js');
           const media = new MessageMedia(file.mimetype, file.data, file.filename || 'file');
@@ -576,6 +597,51 @@ export async function sendMessage(
         } else {
           await clientInstance!.sendMessage(chatId, caption ?? '');
         }
+
+        // Provisional DB record — ensures chat + message appear immediately in UI.
+        // message_create event inserts the real record (different ID) so both exist
+        // briefly; they reconcile on the next 10s poll.
+        try {
+          const provisionalBody = file ? `[Document] ${file.filename || ''} ${caption || ''}`.trim()
+            : (mediaPath ? `[Document] ${path.basename(mediaPath)} ${caption || ''}`.trim() : (caption || ''));
+          const provTimestamp = Math.floor(Date.now() / 1000);
+          const provHasMedia = file || mediaPath ? 1 : 0;
+
+          await db.run(
+            `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO NOTHING`,
+            [messageId, chatId, provisionalBody, 1, provTimestamp, file || mediaPath ? 'document' : 'text', provHasMedia]
+          );
+
+          const existingChatRow = await db.get('SELECT name FROM whatsapp_chats WHERE id = ?', [chatId]);
+          const chatNameProv = existingChatRow?.name || cleanPhone;
+          await db.run(
+            `INSERT INTO whatsapp_chats (id, name, unread_count, timestamp, last_message, is_group, resolved_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               timestamp = EXCLUDED.timestamp,
+               last_message = EXCLUDED.last_message,
+               resolved_number = EXCLUDED.resolved_number`,
+            [chatId, chatNameProv, 0, provTimestamp, provisionalBody, 0, cleanPhone]
+          );
+
+          eventService.broadcast('wa_new_message', {
+            chat_id: chatId,
+            resolved_number: cleanPhone,
+            message: {
+              id: messageId,
+              body: provisionalBody,
+              fromMe: true,
+              timestamp: provTimestamp,
+              type: file || mediaPath ? 'document' : 'text',
+              hasMedia: !!provHasMedia
+            }
+          });
+        } catch (provErr: any) {
+          console.warn('[WhatsApp] Provisional DB write failed (non-fatal):', provErr?.message);
+        }
+
         continue;
       } else {
         if (file && file.mimetype && file.data) {
@@ -676,7 +742,7 @@ async function drainSendQueue(): Promise<void> {
   }
 }
 
-/** Get all chats from the local SQLite cache with contact name enrichment */
+/** Get all chats from the local SQLite cache with contact name enrichment and LID deduplication */
 export async function getChats(): Promise<any[]> {
   try {
     const db = await dbManager.getConnection();
@@ -686,8 +752,28 @@ export async function getChats(): Promise<any[]> {
        ORDER BY timestamp DESC`
     );
 
-    // Enrich names from pharmacy DB tables (customers, refills, delivery_boys, doctors)
+    // Deduplicate chats that share the same last 10 digits (e.g. @lid vs @c.us)
+    const dedupedMap = new Map<string, any>();
     for (const r of rows) {
+      const rawNum = r.resolvedNumber || (r.id ? r.id.split('@')[0] : '');
+      const digits = rawNum.replace(/\D/g, '');
+      const key = digits.length >= 10 ? digits.slice(-10) : (r.id || rawNum);
+
+      if (dedupedMap.has(key)) {
+        const existing = dedupedMap.get(key);
+        existing.unreadCount = (existing.unreadCount || 0) + (r.unreadCount || 0);
+        if (r.timestamp && r.timestamp > (existing.timestamp || 0)) {
+          existing.timestamp = r.timestamp;
+          if (r.lastMessage) existing.lastMessage = r.lastMessage;
+        }
+      } else {
+        dedupedMap.set(key, { ...r });
+      }
+    }
+    const resultRows = Array.from(dedupedMap.values());
+
+    // Enrich names from pharmacy DB tables (customers, refills, delivery_boys, doctors)
+    for (const r of resultRows) {
       const rawNum = r.resolvedNumber || (r.id ? r.id.split('@')[0] : '');
       const digits = rawNum.replace(/\D/g, '');
       const last10 = digits.length >= 10 ? digits.slice(-10) : '';
@@ -738,14 +824,14 @@ export async function getChats(): Promise<any[]> {
       }
     }
 
-    return rows;
+    return resultRows;
   } catch (err) {
     console.error('[WhatsApp Client Wrapper] getChats SQLite error:', err);
     return [];
   }
 }
 
-/** Get messages for a specific chat from local SQLite cache */
+/** Get messages for a specific chat from local SQLite cache, matching across @lid and @c.us */
 export async function getChatMessages(chatId: string, limit: number = 500): Promise<any[]> {
   const raw = String(chatId || '').trim();
   if (!raw) return [];
@@ -756,16 +842,45 @@ export async function getChatMessages(chatId: string, limit: number = 500): Prom
 
   try {
     const db = await dbManager.getConnection();
+
+    // Look up all chat IDs associated with this contact in whatsapp_chats
+    const relatedChatIds = new Set<string>([raw]);
+    if (phoneWithoutCc && phoneWithoutCc.length >= 7) {
+      const chatRows = await db.all(
+        `SELECT id, resolved_number FROM whatsapp_chats
+         WHERE id = ? OR id LIKE ? OR resolved_number LIKE ? OR resolved_number = ?`,
+        [raw, likePattern, likePattern, phoneWithoutCc]
+      );
+      for (const c of chatRows) {
+        if (c.id) relatedChatIds.add(c.id);
+        if (c.resolved_number) {
+          relatedChatIds.add(c.resolved_number);
+          relatedChatIds.add(`${c.resolved_number}@c.us`);
+        }
+      }
+    }
+
+    const idList = Array.from(relatedChatIds);
+    const inPlaceholders = idList.map(() => '?').join(',');
+    const params: any[] = [...idList];
+
+    let whereClause = `wm.chat_id IN (${inPlaceholders})`;
+    if (phoneWithoutCc && phoneWithoutCc.length >= 7) {
+      whereClause += ` OR wm.chat_id LIKE ?`;
+      params.push(likePattern);
+    }
+    params.push(limit);
+
     const rows = await db.all(
       `SELECT wm.id, wm.body, wm.from_me as fromMe, wm.timestamp,
               wm.type, wm.has_media as hasMedia,
               sm.result_json as scannedResult
        FROM whatsapp_messages wm
        LEFT JOIN scanned_messages sm ON sm.msg_id = wm.id
-       WHERE wm.chat_id = ? OR wm.chat_id LIKE ?
+       WHERE ${whereClause}
        ORDER BY wm.timestamp ASC
        LIMIT ?`,
-      [raw, likePattern, limit]
+      params
     );
     return rows;
   } catch (err) {

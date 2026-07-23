@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2 } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady } from '../../services/api';
@@ -1649,8 +1649,12 @@ const POS = () => {
   const profitOrLoss = grandTotal - totalCost;
   const isLoss = hasValidItems && profitOrLoss < -0.001; // Loss greater than 0.1 paise
 
-  const handleCompleteSale = async () => {
+  const [showPhonePromptModal, setShowPhonePromptModal] = useState(false);
+  const [promptPhoneValue, setPromptPhoneValue] = useState('');
+
+  const handleCompleteSale = async (overridePhone?: string) => {
     if (!hasValidItems) return;
+    const phoneToUse = overridePhone !== undefined ? overridePhone : patientPhone;
 
     if (isLoss) {
       alert(`❌ CANNOT SAVE BILL:\n\nTransaction results in a Net Loss (Grand Total ₹${grandTotal} is less than Cost Price ₹${Math.round(totalCost)}).\nPlease adjust overall discount or items MRP to proceed.`);
@@ -1662,9 +1666,9 @@ const POS = () => {
         alert('Patient/Customer Name is required for Credit transactions to track outstanding balance!');
         return;
       }
-      if (!patientPhone.trim()) {
-        alert('Patient WhatsApp/Contact Number is required for Credit transactions to automatically generate the PDF and share it on WhatsApp! Redirecting to Patient Profile to fill it.');
-        setShowPatientModal(true);
+      if (!phoneToUse.trim()) {
+        setPromptPhoneValue('');
+        setShowPhonePromptModal(true);
         return;
       }
     }
@@ -1740,7 +1744,7 @@ const POS = () => {
         items: salesItems,
         discount: discountAmount,
         patient_name: patientName || 'Walk-in Customer',
-        patient_phone: patientPhone,
+        patient_phone: phoneToUse,
         doctor_name: doctor || undefined,
         total_amount: grandTotal,
         sale_date: (() => {
@@ -1946,29 +1950,45 @@ const POS = () => {
                   />
                   {showPatientSuggestions && (
                     <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
-                      {patientSuggestions.map((c, idx) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          data-highlighted={idx === patientHighlightIndex ? "true" : "false"}
-                          onMouseDown={() => {
-                            updatePatientName(c.name);
-                            setPatientPhone(c.phone || '');
-                            setShowPatientSuggestions(false);
-                            setPatientHighlightIndex(-1);
-                          }}
-                          className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
-                            idx === patientHighlightIndex
-                              ? 'bg-primary/20 text-text font-bold'
-                              : 'text-text hover:bg-primary/10'
-                          }`}
-                        >
-                          <span className="font-semibold truncate">{c.name}</span>
-                          {c.phone && <span className="text-muted font-mono text-[13px] shrink-0">{c.phone}</span>}
-                        </button>
-                      ))}
+                      {patientSuggestions.map((c, idx) => {
+                        const hasCreditDue = (c.credit_balance && c.credit_balance > 0) || c.credit_enabled === 1;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            data-highlighted={idx === patientHighlightIndex ? "true" : "false"}
+                            onMouseDown={() => {
+                              updatePatientName(c.name);
+                              setPatientPhone(c.phone || '');
+                              setShowPatientSuggestions(false);
+                              setPatientHighlightIndex(-1);
+                            }}
+                            className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
+                              idx === patientHighlightIndex
+                                ? 'bg-primary/20 text-text font-bold'
+                                : hasCreditDue
+                                ? 'bg-amber-500/5 hover:bg-amber-500/10 text-text'
+                                : 'text-text hover:bg-primary/10'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-semibold truncate">{c.name}</span>
+                              {hasCreditDue && (
+                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[10px] font-bold leading-none">
+                                  ₹ Credit
+                                  {c.credit_balance > 0 && (
+                                    <span className="ml-0.5 opacity-80">₹{Number(c.credit_balance).toFixed(0)}</span>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                            {c.phone && <span className="text-muted font-mono text-[13px] shrink-0">{c.phone}</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+
                   <button 
                     onClick={() => setShowPatientModal(true)}
                     className="h-9 w-9 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0"
@@ -3125,7 +3145,7 @@ const POS = () => {
                 </div>
 
                 <button 
-                  onClick={handleCompleteSale}
+                  onClick={() => handleCompleteSale()}
                   disabled={cart.length === 0}
                   className={`text-text py-2 px-5 text-xs flex items-center gap-2 font-bold uppercase tracking-wider rounded-xl transition-all h-9 ${
                     cart.length === 0 
@@ -3162,6 +3182,71 @@ const POS = () => {
             >
               <X size={20} />
             </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Credit Phone Number Requirement Prompt Modal */}
+      {showPhonePromptModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-modal p-4 animate-fade-in">
+          <div className="glass-panel max-w-md w-full p-6 space-y-4 border-border bg-bg2/95 rounded-2xl relative shadow-2xl">
+            <div className="flex justify-between items-center border-b border-border pb-3">
+              <h3 className="font-bold flex items-center gap-2 text-base text-text">
+                <Send size={18} className="text-primary" />
+                WhatsApp Number Required for Credit Bill
+              </h3>
+              <button 
+                onClick={() => setShowPhonePromptModal(false)}
+                className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-muted leading-relaxed">
+              To save this credit transaction and automatically send the instant WhatsApp credit PDF bill, please enter the mobile number for <strong className="text-text">{patientName || 'Customer'}</strong>:
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">WhatsApp Phone Number</label>
+              <input
+                type="tel"
+                placeholder="Enter 10-digit phone number (e.g. 9876543210)"
+                value={promptPhoneValue}
+                onChange={e => setPromptPhoneValue(e.target.value)}
+                autoFocus
+                className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-sm text-text font-mono focus:outline-none focus:border-primary shadow-inner"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    const val = promptPhoneValue.trim();
+                    if (!val) { alert('Please enter a WhatsApp contact number'); return; }
+                    setPatientPhone(val);
+                    setShowPhonePromptModal(false);
+                    handleCompleteSale(val);
+                  }
+                }}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowPhonePromptModal(false)}
+                className="px-4 py-2 bg-bg3 text-muted rounded-xl text-xs font-semibold hover:text-text"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const val = promptPhoneValue.trim();
+                  if (!val) { alert('Please enter a WhatsApp contact number'); return; }
+                  setPatientPhone(val);
+                  setShowPhonePromptModal(false);
+                  handleCompleteSale(val);
+                }}
+                className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-md"
+              >
+                <Send size={14} />
+                Save &amp; Send Credit Bill
+              </button>
+            </div>
           </div>
         </div>,
         document.body
