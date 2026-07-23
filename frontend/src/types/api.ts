@@ -48,6 +48,7 @@ export interface SpecialOrder {
   status: string;
   date: string;
   notified: number;
+  notes?: string;
   pharmarack_distributor?: string;
   pharmarack_rate?: number;
   pharmarack_mrp?: number;
@@ -97,8 +98,10 @@ export interface Doctor {
   specialization?: string;
   phone?: string;
   hospital?: string;
+  clinic_name?: string;
   commission_percent?: number;
   registration_no?: string;
+  reg_no?: string;
 }
 
 export interface Distributor {

@@ -633,6 +633,8 @@ const WhatsAppSection: React.FC = () => {
     setTmplBody(t.body);
   };
 
+  const [viewMode, setViewMode] = useState<'live_web' | 'crm_chats'>('live_web');
+
   // Filtered Chats
   const filteredChats = chats.filter(c => {
     const query = search.toLowerCase().trim();
@@ -646,27 +648,91 @@ const WhatsAppSection: React.FC = () => {
 
   return (
     <div className="w-full h-full flex flex-col gap-3">
+      {/* Top Controls: Mode Toggle & Live WhatsApp Launcher */}
+      <div className="flex items-center justify-between gap-3 bg-bg2 p-2 rounded-2xl border border-border shadow-sm shrink-0">
+        <div className="flex items-center gap-1.5 bg-bg3/60 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none">
+          <button
+            onClick={() => setViewMode('live_web')}
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+              viewMode === 'live_web'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+            }`}
+          >
+            <MessageCircle size={14} className="text-emerald-400" />
+            <span>Live WhatsApp Web</span>
+          </button>
+          <button
+            onClick={() => setViewMode('crm_chats')}
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+              viewMode === 'crm_chats'
+                ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+            }`}
+          >
+            <MessageSquare size={14} />
+            <span>CRM History & Inquiries</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              try {
+                toastEvent.trigger('Launching live WhatsApp Web Chrome window...', 'info');
+                await apiClient.post('/messaging/login-window');
+              } catch (err: any) {
+                toastEvent.trigger(err?.response?.data?.error || 'Failed to launch WhatsApp window', 'error');
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-sm active:scale-95"
+            title="Open native live Google Chrome window logged into WhatsApp Web"
+          >
+            <ExternalLink size={13} />
+            <span>Open Live Chrome Window</span>
+          </button>
+        </div>
+      </div>
+
       {/* WhatsApp Disconnected Banner */}
       {!isReady && (
         <div className="flex items-center justify-between p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs">
           <div className="flex items-center gap-2">
             <AlertCircle size={15} />
-            <span>WhatsApp is currently disconnected. Click to re-authenticate session.</span>
+            <span>WhatsApp session is initializing or disconnected. Click to launch or reconnect.</span>
           </div>
-          <a
-            href="/settings?tab=general"
-            className="flex items-center gap-1 font-bold underline hover:text-amber-300 transition-all"
+          <button
+            onClick={async () => {
+              try {
+                toastEvent.trigger('Launching WhatsApp login window...', 'info');
+                await apiClient.post('/messaging/login-window');
+              } catch (err: any) {
+                toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
+              }
+            }}
+            className="flex items-center gap-1 font-bold underline hover:text-amber-300 transition-all text-xs"
           >
-            <span>Go to Settings</span>
+            <span>Launch Login Window</span>
             <ExternalLink size={12} />
-          </a>
+          </button>
         </div>
       )}
 
-      {/* Main Chat Grid Interface */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
-        {/* Left: Chat List Panel (4 cols) */}
-        <div className="md:col-span-4 border-r border-border flex flex-col bg-bg3/40 min-h-0">
+      {/* Main Interface: Live WhatsApp Web vs CRM History */}
+      {viewMode === 'live_web' ? (
+        <div className="flex-1 min-h-0 bg-bg border border-border rounded-2xl overflow-hidden relative flex flex-col shadow-sm">
+          <iframe
+            src="https://web.whatsapp.com"
+            className="w-full h-full border-0 flex-1 min-h-[550px]"
+            title="Live WhatsApp Web Interface"
+            allow="camera; microphone; clipboard-read; clipboard-write; notifications"
+          />
+        </div>
+      ) : (
+        /* Main Chat Grid Interface */
+        <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
+          {/* Left: Chat List Panel (4 cols) */}
+          <div className="md:col-span-4 border-r border-border flex flex-col bg-bg3/40 min-h-0">
           <div className="p-3 border-b border-border flex items-center justify-between gap-2">
             <div className="relative flex-1">
               <Search size={14} className="absolute left-3 top-2.5 text-muted" />
@@ -910,6 +976,7 @@ const WhatsAppSection: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* Template Manager Modal */}
       {showManageModal && (

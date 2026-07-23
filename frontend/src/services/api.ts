@@ -170,10 +170,10 @@ export const setCompactInventoryCache = (data: any[]) => {
 
 interface SaleBillItem {
   inventory_id: number;
-  medicine_name: string;
+  medicine_name?: string;
   quantity: number;
   unit_price: number;
-  total_price: number;
+  total_price?: number;
   discount_percent?: number;
   batch_number?: string;
   expiry_date?: string | null;
@@ -189,6 +189,7 @@ interface SalePayload {
   doctor_id?: number | null;
   discount?: number;
   payment_mode?: string;
+  paymentMedium?: string;
   items: SaleBillItem[];
   invoice_no?: string;
 }
@@ -235,18 +236,20 @@ interface ReturnPayload {
 }
 
 interface CustomerReturnPayload {
-  invoice_no: string;
+  invoice_no?: string;
+  original_invoice_id?: number | string;
   patient_name?: string;
   patient_phone?: string;
   return_date?: string;
   reason?: string;
-  items: Array<{
+  items?: Array<{
     inventory_id: number;
-    medicine_name: string;
+    medicine_name?: string;
     quantity: number;
     unit_price: number;
   }>;
-  total_amount: number;
+  return_items?: any;
+  total_amount?: number;
 }
 
 interface AppSettings {

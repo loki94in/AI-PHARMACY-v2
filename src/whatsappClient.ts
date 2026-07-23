@@ -340,17 +340,19 @@ export async function initClient(): Promise<WAClient> {
           return;
         }
 
+        const msgId = msg.id?._serialized || msg.id?.id || `msg_${msg.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
         await db.run(
           `INSERT INTO whatsapp_messages (id, chat_id, body, from_me, timestamp, type, has_media)
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO NOTHING`,
           [
-            msg.id._serialized,
+            msgId,
             chatId,
             msg.body || '',
             msg.fromMe ? 1 : 0,
-            msg.timestamp,
-            msg.type,
+            msg.timestamp || Math.floor(Date.now() / 1000),
+            msg.type || 'text',
             msg.hasMedia ? 1 : 0
           ]
         );

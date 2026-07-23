@@ -148,7 +148,7 @@ client.on('message', async (msg) => {
     const from = chatId.split('@')[0];
     const timestamp = msg.timestamp;
     const bodyText = msg.body || '';
-    const msgId = msg.id._serialized || msg.id.id;
+    const msgId = msg.id?._serialized || msg.id?.id || `msg_${msg.timestamp || Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const hasMedia = msg.hasMedia ? 1 : 0;
     const msgType = msg.type || 'text';
 
