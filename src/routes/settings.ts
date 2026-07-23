@@ -172,25 +172,37 @@ router.post('/upload-signature', async (req, res) => {
   }
 });
 
-// Create a new distributor
+// Create or update a distributor
 router.post('/distributors', async (req, res) => {
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
   try {
     const db = await dbManager.getConnection();
+    const cleanName = name.trim();
+    const existing = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [cleanName]);
+    if (existing) {
+      await db.run(
+        `UPDATE distributors SET 
+          phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+          email = CASE WHEN ? != '' THEN ? ELSE email END,
+          address = CASE WHEN ? != '' THEN ? ELSE address END,
+          state_code = CASE WHEN ? != '' THEN ? ELSE state_code END
+         WHERE id = ?`,
+        [phone || '', phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', existing.id]
+      );
+      const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [existing.id]);
+      return res.json({ success: true, data: updated });
+    }
     const result = await db.run(
       `INSERT INTO distributors (name, phone, email, address, state_code) VALUES (?, ?, ?, ?, ?)`,
-      [name, phone || '', email || '', address || '', state_code || '']
+      [cleanName, phone || '', email || '', address || '', state_code || '']
     );
     const id = result.lastID;
     const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     res.json({ success: true, data: saved });
   } catch (error: any) {
-    console.error('Failed to create distributor:', error);
-    if (error && error.message && error.message.includes('UNIQUE constraint failed')) {
-      return res.status(400).json({ error: 'A distributor with this name already exists' });
-    }
-    res.status(500).json({ error: 'Failed to create distributor: ' + error.message });
+    console.error('Failed to save distributor:', error);
+    res.status(500).json({ error: 'Failed to save distributor: ' + error.message });
   }
 });
 // Update a distributor

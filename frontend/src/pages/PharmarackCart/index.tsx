@@ -368,7 +368,7 @@ export default function PharmarackCart() {
     });
   };
 
-  const handleSendWhatsAppOrder = async (dist: Distributor) => {
+  const handleSendWhatsAppOrder = (dist: Distributor) => {
     let phoneNum = customDistributorPhones[dist.storeId];
     if (!phoneNum) {
       const matched = findSavedDistributorMatch(dist.storeName);
@@ -381,28 +381,18 @@ export default function PharmarackCart() {
       handleOpenEditModal(dist);
       return;
     }
+    if (cleanPhone.length === 10) {
+      cleanPhone = `91${cleanPhone}`;
+    }
 
     const msg = buildDistributorOrderMessage(dist);
+    const encodedMsg = encodeURIComponent(msg);
+    const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-    setSendingWaDistributorId(dist.storeId);
-    toastEvent.trigger(`📤 Sending WhatsApp order to ${dist.storeName}...`, 'info');
-    try {
-      const res = await api.sendWhatsappMessage(cleanPhone, msg);
-      const isQueued = res?.message?.toLowerCase()?.includes('queue');
-      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: isQueued ? 'queued' : 'success' }));
-      toastEvent.trigger(
-        isQueued
-          ? `⏳ WhatsApp message queued for ${dist.storeName}!`
-          : `✅ WhatsApp order dispatched to ${dist.storeName}!`,
-        'success'
-      );
-    } catch (err: any) {
-      console.error(`WhatsApp send error for ${dist.storeName}:`, err);
-      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
-      toastEvent.trigger(`⚠️ Could not reach server for ${dist.storeName}. Check WhatsApp connection in CRM.`, 'error');
-    } finally {
-      setSendingWaDistributorId(null);
-    }
+    // Directly open WhatsApp Web window
+    window.open(waWebUrl, '_blank');
+    setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+    toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'success');
   };
 
   const handleSendAllWhatsAppOrders = async () => {
@@ -420,51 +410,44 @@ export default function PharmarackCart() {
     }
 
     setIsSendingBatchWhatsApp(true);
-    let sentCount = 0;
-    let failCount = 0;
+    let openedCount = 0;
 
     try {
-      // 1. Send all saved numbers directly in 1-click
       if (mapped.length > 0) {
-        toastEvent.trigger(`Sending WhatsApp stock orders to ${mapped.length} saved distributor(s)...`, 'info');
+        toastEvent.trigger(`Opening WhatsApp Web for ${mapped.length} saved distributor(s)...`, 'info');
         for (const dist of mapped) {
           let phoneNum = customDistributorPhones[dist.storeId];
           if (!phoneNum) {
-            const matched = savedDistributorsList.find(
-              (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
-            );
+            const matched = findSavedDistributorMatch(dist.storeName);
             phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
           }
           let cleanPhone = phoneNum.replace(/\D/g, '');
           if (!cleanPhone) continue;
+          if (cleanPhone.length === 10) {
+            cleanPhone = `91${cleanPhone}`;
+          }
 
           const msg = buildDistributorOrderMessage(dist);
+          const encodedMsg = encodeURIComponent(msg);
+          const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-          try {
-            await api.sendWhatsappMessage(cleanPhone, msg);
-            sentCount++;
-          } catch (e) {
-            console.error(`Failed to send silent WhatsApp to ${dist.storeName}:`, e);
-            failCount++;
-          }
+          window.open(waWebUrl, '_blank');
+          setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+          openedCount++;
         }
       }
 
-      if (sentCount > 0) {
-        toastEvent.trigger(`Successfully sent ${sentCount} order(s) via WhatsApp!`, 'success');
-      }
-      if (failCount > 0) {
-        toastEvent.trigger(`Failed to send WhatsApp message to ${failCount} distributor(s). Check WhatsApp connection.`, 'error');
+      if (openedCount > 0) {
+        toastEvent.trigger(`Opened ${openedCount} distributor order(s) in WhatsApp Web!`, 'success');
       }
 
-      // 2. If there are unsaved/unmapped distributors, prompt the user to add number or skip
       if (unmapped.length > 0) {
         toastEvent.trigger(`${unmapped.length} distributor(s) do not have saved WhatsApp numbers. Please add number or skip.`, 'info');
         handleOpenEditModal(unmapped[0]);
       }
     } catch (err: any) {
       console.error('Batch WhatsApp send error:', err);
-      toastEvent.trigger(err?.message || 'Failed to send WhatsApp messages', 'error');
+      toastEvent.trigger(err?.message || 'Failed to open WhatsApp Web', 'error');
     } finally {
       setIsSendingBatchWhatsApp(false);
     }
@@ -476,9 +459,7 @@ export default function PharmarackCart() {
 
     // Check if phone override exists or find matched saved distributor
     const custom = customDistributorPhones[dist.storeId];
-    const matched = savedDistributorsList.find(
-      (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
-    );
+    const matched = findSavedDistributorMatch(dist.storeName);
 
     if (custom) {
       setModalPhoneInput(custom);
