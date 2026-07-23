@@ -1,5 +1,5 @@
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,17 +17,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const UPLOADS_DIR = path.resolve(__dirname, '..', 'uploads');
 
+/** Helper to detect Puppeteer detached frame or destroyed context errors */
+export function isPuppeteerDetachedError(msg?: string): boolean {
+  if (!msg) return false;
+  const str = String(msg);
+  return (
+    str.includes('detached Frame') ||
+    str.includes('Execution context was destroyed') ||
+    str.includes('Session closed') ||
+    str.includes('Target closed') ||
+    str.includes('Protocol error') ||
+    str.includes('Page crashed') ||
+    str.includes('browser has disconnected')
+  );
+}
+
 // Catch and ignore Puppeteer/whatsapp-web.js internal detached frame and context
 // destroyed rejections so they don't crash the server process in dev or production.
 process.on('unhandledRejection', (reason: any) => {
   const msg = reason?.message || String(reason);
-  if (
-    msg.includes('detached Frame') ||
-    msg.includes('Execution context was destroyed') ||
-    msg.includes('Session closed. Most likely the page has been closed') ||
-    msg.includes('Target closed')
-  ) {
-    console.warn('[WhatsApp SafeGuard] Handled and suppressed internal Puppeteer/WA rejection:', msg);
+  if (isPuppeteerDetachedError(msg)) {
+    console.warn('[WhatsApp SafeGuard] Handled internal Puppeteer/WA rejection & resetting state:', msg);
+    isReady = false;
+    clientInstance = null;
+    if (activeClient) {
+      activeClient.destroy().catch(() => {});
+      activeClient = null;
+    }
     return;
   }
   console.error('[Unhandled Rejection]', reason);
@@ -149,7 +165,17 @@ async function syncWhatsappData(client: WAClient) {
       chats = await client.getChats();
     } catch (getChatsErr: any) {
       lastSyncFailureAt = Date.now();
-      console.warn(`[WhatsApp] getChats() failed (will retry after ${SYNC_RETRY_COOLDOWN_MS / 1000}s):`, getChatsErr?.message || getChatsErr);
+      const errMsg = getChatsErr?.message || String(getChatsErr);
+      console.warn(`[WhatsApp] getChats() failed (will retry after ${SYNC_RETRY_COOLDOWN_MS / 1000}s):`, errMsg);
+      if (isPuppeteerDetachedError(errMsg)) {
+        console.warn('[WhatsApp] Sync hit detached Frame/browser context. Invalidating client state...');
+        isReady = false;
+        clientInstance = null;
+        if (activeClient) {
+          activeClient.destroy().catch(() => {});
+          activeClient = null;
+        }
+      }
       return;
     }
     const db = await dbManager.getConnection();
@@ -586,16 +612,43 @@ export async function sendMessage(
         // message_create event will fire shortly after with the real WA message id and
         // update the DB record. We also write a provisional DB record here so the chat
         // list and thread panel update immediately without waiting for the event.
-        if (file && file.mimetype && file.data) {
-          const { MessageMedia } = await import('whatsapp-web.js');
-          const media = new MessageMedia(file.mimetype, file.data, file.filename || 'file');
-          await clientInstance!.sendMessage(chatId, media, { caption: caption ?? '' });
-        } else if (mediaPath) {
-          const { MessageMedia } = await import('whatsapp-web.js');
-          const media = MessageMedia.fromFilePath(mediaPath);
-          await clientInstance!.sendMessage(chatId, media, { caption: caption ?? '' });
-        } else {
-          await clientInstance!.sendMessage(chatId, caption ?? '');
+        const doSend = async (targetClient: WAClient) => {
+          if (file && file.mimetype && file.data) {
+            const media = new MessageMedia(file.mimetype, file.data, file.filename || 'file');
+            await targetClient.sendMessage(chatId, media, { caption: caption ?? '' });
+          } else if (mediaPath) {
+            const media = MessageMedia.fromFilePath(mediaPath);
+            await targetClient.sendMessage(chatId, media, { caption: caption ?? '' });
+          } else {
+            await targetClient.sendMessage(chatId, caption ?? '');
+          }
+        };
+
+        try {
+          await doSend(clientInstance!);
+        } catch (sendErr: any) {
+          const errMsg = sendErr?.message || String(sendErr);
+          if (isPuppeteerDetachedError(errMsg)) {
+            console.warn('[WhatsApp] Detached Frame or destroyed browser context detected during sendMessage. Invalidating stale client...');
+            isReady = false;
+            clientInstance = null;
+            if (activeClient) {
+              activeClient.destroy().catch(() => {});
+              activeClient = null;
+            }
+
+            console.log('[WhatsApp] Attempting automatic client re-initialization and retry...');
+            try {
+              const freshClient = await initClient();
+              await doSend(freshClient);
+              console.log('[WhatsApp] Automatic re-initialization and message send retry succeeded!');
+            } catch (retryErr: any) {
+              console.error('[WhatsApp] Send retry after client auto-reconnect failed:', retryErr);
+              throw new Error('WhatsApp connection lost (detached browser frame). Please scan the QR code in Settings to reconnect.');
+            }
+          } else {
+            throw sendErr;
+          }
         }
 
         // Provisional DB record — ensures chat + message appear immediately in UI.

@@ -1595,7 +1595,7 @@ const CustomerCreditSection: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
-            <p className="text-[11px] text-muted font-medium">Total Outstanding Dues</p>
+            <p className="text-[11px] text-muted font-medium">Total Medical Outstanding Dues</p>
             <h3 className="text-lg font-bold text-amber-400 mt-0.5">₹{totalDues.toFixed(2)}</h3>
           </div>
           <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -1605,8 +1605,8 @@ const CustomerCreditSection: React.FC = () => {
 
         <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
-            <p className="text-[11px] text-muted font-medium">Active Credit Accounts</p>
-            <h3 className="text-lg font-bold text-text mt-0.5">{customers.length} Lenders</h3>
+            <p className="text-[11px] text-muted font-medium">Active Credit Customers</p>
+            <h3 className="text-lg font-bold text-text mt-0.5">{customers.length} Customers</h3>
           </div>
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
             <Users size={18} />
@@ -1627,12 +1627,12 @@ const CustomerCreditSection: React.FC = () => {
 
       {/* Split-View Container */}
       <div className="flex-1 flex flex-col md:flex-row gap-3 overflow-hidden min-h-0">
-        {/* LEFT PANEL: Lender Accounts List */}
+        {/* LEFT PANEL: Customer Credit Accounts List */}
         <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
           <div className="p-3 border-b border-border bg-bg3/40 flex items-center justify-between">
             <h3 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
               <Users size={14} className="text-amber-400" />
-              Lenders / Credit Accounts
+              Credit Customers / Accounts
             </h3>
             <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-bold">
               {filtered.length}
@@ -1645,7 +1645,7 @@ const CustomerCreditSection: React.FC = () => {
               <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
               <input
                 type="text"
-                placeholder="Search lender name or mobile..."
+                placeholder="Search customer name or mobile..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="w-full pl-8 pr-2.5 py-1.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
@@ -1656,9 +1656,9 @@ const CustomerCreditSection: React.FC = () => {
           {/* Customer Cards List */}
           <div className="flex-1 overflow-y-auto divide-y divide-border/30">
             {loading && customers.length === 0 ? (
-              <div className="p-8 text-center text-xs text-muted">Loading lenders...</div>
+              <div className="p-8 text-center text-xs text-muted">Loading credit customers...</div>
             ) : filtered.length === 0 ? (
-              <div className="p-8 text-center text-xs text-muted">No credit accounts found.</div>
+              <div className="p-8 text-center text-xs text-muted">No credit customers found.</div>
             ) : (
               filtered.map(cust => {
                 const isSelected = selectedCustomer?.id === cust.id;
@@ -1914,7 +1914,7 @@ const CustomerCreditSection: React.FC = () => {
                 {loadingInvoices ? (
                   <div className="p-8 text-center text-xs text-muted">Loading purchase bills...</div>
                 ) : customerInvoices.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-muted">No credit purchase bills found for this lender.</div>
+                  <div className="p-8 text-center text-xs text-muted">No credit purchase bills found for this customer.</div>
                 ) : (
                   <div className="overflow-x-auto border border-border rounded-xl">
                     <table className="w-full text-left text-xs">
@@ -1974,7 +1974,7 @@ const CustomerCreditSection: React.FC = () => {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center p-8 text-muted text-xs">
-              Select a credit account / lender from the left panel to view purchase bills &amp; details.
+              Select a credit customer from the left panel to view purchase bills &amp; details.
             </div>
           )}
         </div>

@@ -22,6 +22,10 @@ import {
   X,
   QrCode,
   History,
+  BarChart3,
+  FileText,
+  Send,
+  Eye,
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { MobileConnectionModal } from '../../components/MobileConnectionModal';
@@ -82,6 +86,12 @@ interface SettingsData {
   whatsappPreferredSystem: string;
   backupFrequency: string;
   dataFetchControl: string;
+  monthlyReportEnabled: boolean;
+  monthlyReportPhone: string;
+  monthlyReportDeliveryFormat: string;
+  monthlyReportChartStyle: string;
+  ownerWhatsappNumber: string;
+  monthlyReportTemplateTheme: string;
 }
 
 const Settings = () => {
@@ -133,6 +143,12 @@ const Settings = () => {
     whatsappPreferredSystem: 'automated',
     backupFrequency: 'off',
     dataFetchControl: '{}',
+    monthlyReportEnabled: true,
+    monthlyReportPhone: '',
+    monthlyReportDeliveryFormat: 'text',
+    monthlyReportChartStyle: 'standard',
+    ownerWhatsappNumber: '',
+    monthlyReportTemplateTheme: 'executive',
   });
 
   // Transient UI states
@@ -210,6 +226,107 @@ const Settings = () => {
   const setWaBusinessWebhookVerifyToken = (val: string | ((p: string) => string)) => updateSetting('waBusinessWebhookVerifyToken', val);
   const setWhatsappPreferredSystem = (val: string | ((p: string) => string)) => updateSetting('whatsappPreferredSystem', val);
   const setBackupFrequency = (val: string | ((p: string) => string)) => updateSetting('backupFrequency', val);
+  const setMonthlyReportEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('monthlyReportEnabled', val);
+  const setMonthlyReportPhone = (val: string | ((p: string) => string)) => updateSetting('monthlyReportPhone', val);
+  const setMonthlyReportDeliveryFormat = (val: string | ((p: string) => string)) => updateSetting('monthlyReportDeliveryFormat', val);
+  const setMonthlyReportChartStyle = (val: string | ((p: string) => string)) => updateSetting('monthlyReportChartStyle', val);
+  const setOwnerWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('ownerWhatsappNumber', val);
+  const setMonthlyReportTemplateTheme = (val: string | ((p: string) => string)) => updateSetting('monthlyReportTemplateTheme', val);
+
+  // Transient state for Monthly Report Preview and manual triggers
+  const [reportPreview, setReportPreview] = useState<{ formattedText: string; periodLabel: string; targetPhone: string } | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [sendingReportType, setSendingReportType] = useState<string | null>(null);
+  const [isSendingSamples, setIsSendingSamples] = useState(false);
+
+  // Period Selection state
+  const [selectedPeriodType, setSelectedPeriodType] = useState<'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom'>('monthly');
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().split('T')[0];
+  });
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+
+  const handlePreviewReport = async (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
+    const pType = overrideType || selectedPeriodType;
+    setIsPreviewLoading(true);
+    try {
+      let q = `/reports/monthly-scheduled-preview?type=${pType}&style=${settings.monthlyReportChartStyle}&theme=${settings.monthlyReportTemplateTheme}`;
+      if (pType === 'custom') {
+        q += `&startDate=${customStartDate}&endDate=${customEndDate}`;
+      }
+      const { data } = await apiClient.get(q);
+      if (data.success) {
+        setReportPreview({
+          formattedText: data.formattedText,
+          periodLabel: data.data.periodLabel,
+          targetPhone: data.targetPhone
+        });
+      } else {
+        toastEvent.trigger('Failed to load report preview', 'error');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err.message || 'Error loading preview', 'error');
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handleSendReportNow = async (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
+    const pType = overrideType || selectedPeriodType;
+    setSendingReportType(pType);
+    try {
+      const { data } = await apiClient.post('/reports/send-monthly-scheduled', {
+        type: pType,
+        startDate: pType === 'custom' ? customStartDate : undefined,
+        endDate: pType === 'custom' ? customEndDate : undefined,
+        phone: settings.ownerWhatsappNumber || settings.monthlyReportPhone || settings.dineshWhatsappNumber || settings.phone,
+        deliveryFormat: settings.monthlyReportDeliveryFormat,
+        chartStyle: settings.monthlyReportChartStyle,
+        theme: settings.monthlyReportTemplateTheme,
+      });
+      if (data.success) {
+        toastEvent.trigger(data.message, 'success');
+      } else {
+        toastEvent.trigger(data.message || 'Failed to send report', 'error');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err.message || 'Error sending report', 'error');
+    } finally {
+      setSendingReportType(null);
+    }
+  };
+
+  const handleDownloadSamplePdf = (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
+    const pType = overrideType || selectedPeriodType;
+    let url = `/api/reports/monthly-scheduled-preview?type=${pType}&style=${settings.monthlyReportChartStyle}&theme=${settings.monthlyReportTemplateTheme}&download=pdf`;
+    if (pType === 'custom') {
+      url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
+    }
+    window.open(url, '_blank');
+  };
+
+  const handleSendAllTemplateSamples = async () => {
+    setIsSendingSamples(true);
+    try {
+      const targetNumber = settings.ownerWhatsappNumber || settings.monthlyReportPhone || settings.dineshWhatsappNumber || settings.phone;
+      const { data } = await apiClient.post('/reports/send-all-template-samples', {
+        phone: targetNumber
+      });
+      if (data.success) {
+        toastEvent.trigger(data.message, 'success');
+      } else {
+        toastEvent.trigger(data.message || 'Failed to send template samples', 'error');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err.message || 'Error sending template samples', 'error');
+    } finally {
+      setIsSendingSamples(false);
+    }
+  };
 
   // Destructure settings for transparent use in JSX and helper functions
   const {
@@ -258,6 +375,12 @@ const Settings = () => {
     waBusinessWebhookVerifyToken,
     whatsappPreferredSystem,
     backupFrequency,
+    monthlyReportEnabled,
+    monthlyReportPhone,
+    monthlyReportDeliveryFormat,
+    monthlyReportChartStyle,
+    ownerWhatsappNumber,
+    monthlyReportTemplateTheme,
   } = settings;
 
   const handleToggleDesktopNotifications = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -334,6 +457,12 @@ const Settings = () => {
         whatsappPreferredSystem: serverSettings.whatsapp_preferred_system || 'automated',
         backupFrequency: serverSettings.backup_frequency || 'off',
         dataFetchControl: serverSettings.data_fetch_control || '{}',
+        monthlyReportEnabled: serverSettings.monthly_report_enabled !== 'false',
+        monthlyReportPhone: serverSettings.monthly_report_phone || '',
+        monthlyReportDeliveryFormat: serverSettings.monthly_report_delivery_format || 'text',
+        monthlyReportChartStyle: serverSettings.monthly_report_chart_style || 'standard',
+        ownerWhatsappNumber: serverSettings.owner_whatsapp_number || '',
+        monthlyReportTemplateTheme: serverSettings.monthly_report_template_theme || 'executive',
       }));
     }
   }, [serverSettings]);
@@ -403,6 +532,12 @@ const Settings = () => {
       low_stock_threshold: lowStockThreshold.toString(),
       expiry_alert_days: expiryAlertDays.toString(),
       dinesh_whatsapp_number: dineshWhatsappNumber,
+      monthly_report_enabled: monthlyReportEnabled.toString(),
+      monthly_report_phone: monthlyReportPhone,
+      monthly_report_delivery_format: monthlyReportDeliveryFormat,
+      monthly_report_chart_style: monthlyReportChartStyle,
+      owner_whatsapp_number: ownerWhatsappNumber,
+      monthly_report_template_theme: monthlyReportTemplateTheme,
 
       telegram_enabled: telegramEnabled.toString(),
       telegram_token: telegramToken,
@@ -817,7 +952,7 @@ const Settings = () => {
 
           <div className="space-y-2">
             <label htmlFor="phone" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Phone
+              Pharmacy Store Phone
             </label>
             <input
               id="phone"
@@ -827,6 +962,21 @@ const Settings = () => {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="ownerWhatsappNumber" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Pharmacy Owner WhatsApp Number (Primary System Alerts)
+            </label>
+            <input
+              id="ownerWhatsappNumber"
+              type="text"
+              className="premium-input w-full bg-bg border border-border"
+              placeholder="e.g. 9876543210"
+              value={ownerWhatsappNumber}
+              onChange={(e) => setOwnerWhatsappNumber(e.target.value)}
+            />
+            <p className="text-[10px] text-muted">All automated billing, expiry warnings, OCR status, & monthly reports send here.</p>
           </div>
 
           <div className="space-y-2">
@@ -1022,6 +1172,306 @@ const Settings = () => {
             Save Preferences
           </button>
         </div>
+      </div>
+
+      {/* ─── Automated Monthly & 15th Scheduled Reports ─── */}
+      <div className="glass-panel p-6">
+        <h3 className="font-bold flex items-center gap-2 mb-2 text-text">
+          <BarChart3 size={18} className="text-emerald-500" />
+          Automated Monthly & 15th Scheduled Reports (WhatsApp)
+        </h3>
+        <p className="text-xs text-muted mb-6">
+          Automatically computes Purchase vs. Sales totals, Gross Profit, Profit Margin %, Top Selling Items, and visual trend bar chart graphs, sending them via WhatsApp to your saved phone number on the <strong>1st of every month</strong> (full previous month report) and <strong>15th of every month</strong> (mid-month report).
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
+          <div className="space-y-2 flex items-center justify-between p-3 rounded-lg border border-border bg-bg2">
+            <div>
+              <span className="text-sm font-semibold text-text block">
+                Auto-Send Monthly & 15th Reports
+              </span>
+              <span className="text-[11px] text-muted block">
+                Dispatches automatically via WhatsApp on 1st & 15th of the month past 8:00 AM.
+              </span>
+            </div>
+            <label className="relative cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={monthlyReportEnabled}
+                onChange={(e) => setMonthlyReportEnabled(e.target.checked)}
+              />
+              <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
+              <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="monthlyReportPhone" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Report Recipient WhatsApp / Phone Number
+            </label>
+            <input
+              id="monthlyReportPhone"
+              type="text"
+              className="premium-input w-full bg-bg border border-border"
+              placeholder="e.g. 9876543210 (Leave empty to use saved pharmacy phone)"
+              value={monthlyReportPhone}
+              onChange={(e) => setMonthlyReportPhone(e.target.value)}
+            />
+            <p className="text-[10px] text-muted">
+              Default fallback: Dinesh WhatsApp Number ({dineshWhatsappNumber || 'not set'}) or Main Pharmacy Phone ({phone || 'not set'}).
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="monthlyReportDeliveryFormat" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Report File / Delivery Format
+            </label>
+            <select
+              id="monthlyReportDeliveryFormat"
+              className="premium-input w-full bg-bg border border-border text-text font-medium"
+              value={monthlyReportDeliveryFormat}
+              onChange={(e) => setMonthlyReportDeliveryFormat(e.target.value)}
+            >
+              <option value="text">📱 WhatsApp Text with Bar Chart</option>
+              <option value="pdf">📄 PDF Document Report (Attached)</option>
+              <option value="combined">📬 WhatsApp Text + PDF Document (Combined)</option>
+              <option value="excel">📊 Excel Spreadsheet Report (Attached)</option>
+            </select>
+            <p className="text-[10px] text-muted">
+              Select whether scheduled reports should be delivered as text message, PDF attachment, both, or Excel sheet.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="monthlyReportChartStyle" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Chart Visual Style
+            </label>
+            <select
+              id="monthlyReportChartStyle"
+              className="premium-input w-full bg-bg border border-border text-text font-medium"
+              value={monthlyReportChartStyle}
+              onChange={(e) => setMonthlyReportChartStyle(e.target.value)}
+            >
+              <option value="standard">📈 Standard Progress Bar Graph</option>
+              <option value="trend">📉 Detailed Period Trend Breakdown</option>
+              <option value="minimal">💳 Minimal Financial Summary</option>
+            </select>
+            <p className="text-[10px] text-muted">
+              Determines graph detail level in WhatsApp messages and PDF document reports.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="monthlyReportTemplateTheme" className="text-xs font-bold text-muted uppercase tracking-wider">
+              PDF Template Design / Layout Theme
+            </label>
+            <select
+              id="monthlyReportTemplateTheme"
+              className="premium-input w-full bg-bg border border-border text-text font-medium"
+              value={monthlyReportTemplateTheme}
+              onChange={(e) => setMonthlyReportTemplateTheme(e.target.value)}
+            >
+              <option value="executive">✨ Executive Modern (Slate & Emerald Header)</option>
+              <option value="classic">🏛️ Corporate Classic (Navy & Royal Blue Header)</option>
+              <option value="minimalist">🖤 Minimalist High-Contrast (Charcoal & Indigo)</option>
+            </select>
+            <p className="text-[10px] text-muted">
+              Choose visual color branding theme for attached PDF report documents.
+            </p>
+          </div>
+
+          <div className="space-y-2 md:col-span-2 p-3 rounded-lg border border-border bg-bg2">
+            <label htmlFor="selectedPeriodType" className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">
+              Manual Report Generation Period
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <div>
+                <select
+                  id="selectedPeriodType"
+                  className="premium-input w-full bg-bg border border-border text-text font-medium text-xs"
+                  value={selectedPeriodType}
+                  onChange={(e) => setSelectedPeriodType(e.target.value as any)}
+                >
+                  <option value="monthly">📅 Monthly Report (Previous Month)</option>
+                  <option value="midmonth">🗓️ Mid-Month Report (1st - 15th)</option>
+                  <option value="quarterly">📊 Quarterly Report (Q1 / Q2 / Q3 / Q4)</option>
+                  <option value="yearly">📈 Yearly Annual Report</option>
+                  <option value="custom">⚙️ Custom Date Range</option>
+                </select>
+              </div>
+
+              {selectedPeriodType === 'custom' && (
+                <>
+                  <div>
+                    <label htmlFor="customStartDate" className="text-[10px] text-muted block mb-0.5">Start Date</label>
+                    <input
+                      id="customStartDate"
+                      type="date"
+                      className="premium-input w-full bg-bg text-xs border border-border"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="customEndDate" className="text-[10px] text-muted block mb-0.5">End Date</label>
+                    <input
+                      id="customEndDate"
+                      type="date"
+                      className="premium-input w-full bg-bg text-xs border border-border"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handlePreviewReport()}
+              disabled={isPreviewLoading}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Eye size={14} className="text-blue-400" />
+              {isPreviewLoading ? 'Loading Preview...' : 'Preview Report Text & Graph'}
+            </button>
+            <button
+              onClick={() => handleDownloadSamplePdf()}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Download size={14} className="text-emerald-400" />
+              Download PDF Report
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSendAllTemplateSamples}
+              disabled={isSendingSamples}
+              className="px-3 py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Send size={14} className="text-purple-400" />
+              {isSendingSamples ? 'Sending Samples...' : 'Send All 3 PDF Styles to Owner'}
+            </button>
+            <button
+              onClick={() => handleSendReportNow()}
+              disabled={sendingReportType !== null}
+              className="premium-btn bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
+            >
+              <Send size={14} />
+              {sendingReportType !== null ? 'Sending...' : 'Send Selected Report to Owner WhatsApp'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handlePreviewReport('monthly')}
+              disabled={isPreviewLoading}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Eye size={14} className="text-blue-400" />
+              {isPreviewLoading ? 'Loading Preview...' : 'Preview 1st Month Report'}
+            </button>
+            <button
+              onClick={() => handlePreviewReport('midmonth')}
+              disabled={isPreviewLoading}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Eye size={14} className="text-amber-400" />
+              {isPreviewLoading ? 'Loading Preview...' : 'Preview 15th Mid-Month Report'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleSendReportNow('monthly')}
+              disabled={sendingReportType === 'monthly'}
+              className="premium-btn bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
+            >
+              <Send size={14} />
+              {sendingReportType === 'monthly' ? 'Sending...' : 'Send 1st Month Report Now'}
+            </button>
+            <button
+              onClick={() => handleSendReportNow('midmonth')}
+              disabled={sendingReportType === 'midmonth'}
+              className="premium-btn bg-blue-600 text-white hover:bg-blue-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
+            >
+              <Send size={14} />
+              {sendingReportType === 'midmonth' ? 'Sending...' : 'Send 15th Mid-Month Report Now'}
+            </button>
+          </div>
+        </div>
+
+        {/* Quarterly & Yearly Quick Triggers */}
+        <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handlePreviewReport('quarterly')}
+              disabled={isPreviewLoading}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Eye size={14} className="text-purple-400" />
+              {isPreviewLoading ? 'Loading...' : 'Preview Quarterly Report'}
+            </button>
+            <button
+              onClick={() => handlePreviewReport('yearly')}
+              disabled={isPreviewLoading}
+              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Eye size={14} className="text-sky-400" />
+              {isPreviewLoading ? 'Loading...' : 'Preview Yearly Annual Report'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleSendReportNow('quarterly')}
+              disabled={sendingReportType === 'quarterly'}
+              className="premium-btn bg-purple-600 text-white hover:bg-purple-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
+            >
+              <Send size={14} />
+              {sendingReportType === 'quarterly' ? 'Sending...' : 'Send Quarterly Report Now'}
+            </button>
+            <button
+              onClick={() => handleSendReportNow('yearly')}
+              disabled={sendingReportType === 'yearly'}
+              className="premium-btn bg-sky-600 text-white hover:bg-sky-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
+            >
+              <Send size={14} />
+              {sendingReportType === 'yearly' ? 'Sending...' : 'Send Yearly Annual Report Now'}
+            </button>
+          </div>
+        </div>
+
+        {/* Live Report & Graph Preview Modal / Card */}
+        {reportPreview && (
+          <div className="mt-4 p-4 rounded-xl bg-bg border border-emerald-500/30 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                <FileText size={14} />
+                WhatsApp Message & Graph Preview — {reportPreview.periodLabel}
+              </span>
+              <button
+                onClick={() => setReportPreview(null)}
+                className="text-xs text-muted hover:text-text px-2 py-0.5 rounded border border-border"
+              >
+                Close Preview
+              </button>
+            </div>
+            <p className="text-[11px] text-muted">
+              Target Phone: <span className="font-mono text-text">{reportPreview.targetPhone || 'None set (will use saved default)'}</span>
+            </p>
+            <pre className="p-3 rounded-lg bg-bg2 border border-border text-xs font-mono text-text overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+              {reportPreview.formattedText}
+            </pre>
+          </div>
+        )}
       </div>
 
       {/* ─── Admin Remote Operations Mode ─── */}

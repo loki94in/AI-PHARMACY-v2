@@ -414,4 +414,78 @@ router.get('/product-trace', async (req, res) => {
   }
 });
 
+// Preview or download monthly/mid-month/quarterly/yearly/custom scheduled report & text message with graphs
+router.get('/monthly-scheduled-preview', async (req, res) => {
+  const periodType = (req.query.type ? String(req.query.type) : 'monthly') as 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom';
+  const chartStyle = req.query.style ? String(req.query.style) : 'standard';
+  const theme = req.query.theme ? String(req.query.theme) : 'executive';
+  const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+  const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+  const downloadFormat = req.query.download ? String(req.query.download).toLowerCase() : undefined;
+
+  try {
+    const { monthlyReportService } = await import('../services/monthlyReportService.js');
+    const data = await monthlyReportService.compileReportData(periodType, undefined, startDate, endDate);
+
+    if (downloadFormat === 'pdf') {
+      const pdfPath = await monthlyReportService.generateReportPdf(data, chartStyle, theme);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="Report_${theme}_${periodType}_${Date.now()}.pdf"`);
+      return res.sendFile(pdfPath);
+    }
+
+    if (downloadFormat === 'excel') {
+      const excelPath = await monthlyReportService.generateReportExcel(data);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="Report_${periodType}_${Date.now()}.xlsx"`);
+      return res.sendFile(excelPath);
+    }
+
+    const formattedText = monthlyReportService.formatReportMessage(data, chartStyle);
+    const targetPhone = await monthlyReportService.resolveRecipientPhone();
+
+    res.json({ success: true, data, formattedText, targetPhone });
+  } catch (err: any) {
+    console.error('Error generating monthly report preview:', err);
+    res.status(500).json({ error: 'Failed to generate report preview' });
+  }
+});
+
+// Send all 3 PDF template style samples directly to Owner WhatsApp
+router.post('/send-all-template-samples', async (req, res) => {
+  const customPhone = req.body.phone ? String(req.body.phone).trim() : undefined;
+  try {
+    const { monthlyReportService } = await import('../services/monthlyReportService.js');
+    const result = await monthlyReportService.sendAllTemplateSamples(customPhone);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error sending PDF template samples:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to send template samples' });
+  }
+});
+
+// Manually trigger or send monthly/quarterly/yearly/custom scheduled report to WhatsApp
+router.post('/send-monthly-scheduled', async (req, res) => {
+  const periodType = (req.body.type ? String(req.body.type) : 'monthly') as 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom';
+  const customPhone = req.body.phone ? String(req.body.phone).trim() : undefined;
+  const deliveryFormat = req.body.deliveryFormat ? String(req.body.deliveryFormat).trim() : undefined;
+  const chartStyle = req.body.chartStyle ? String(req.body.chartStyle).trim() : undefined;
+  const theme = req.body.theme ? String(req.body.theme).trim() : undefined;
+  const startDate = req.body.startDate ? String(req.body.startDate).trim() : undefined;
+  const endDate = req.body.endDate ? String(req.body.endDate).trim() : undefined;
+
+  try {
+    const { monthlyReportService } = await import('../services/monthlyReportService.js');
+    const result = await monthlyReportService.sendReport(periodType, customPhone, deliveryFormat, chartStyle, theme, startDate, endDate);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error triggering scheduled monthly report send:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to send report' });
+  }
+});
+
 export default router;
+
+
+
+

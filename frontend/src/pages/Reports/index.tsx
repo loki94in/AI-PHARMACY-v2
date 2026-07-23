@@ -21,9 +21,10 @@ import {
   HelpCircle,
   Undo2,
   Percent,
-  Users
+  Users,
+  Send
 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString } from '../../utils/date';
 
@@ -50,6 +51,54 @@ const Reports = () => {
   const [appliedTraceQuery, setAppliedTraceQuery] = useState('');
   const [traceData, setTraceData] = useState<{ purchases: any[]; sales: any[] }>({ purchases: [], sales: [] });
   const [loadingTrace, setLoadingTrace] = useState(false);
+
+  // WhatsApp & PDF Dispatch State
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+  const [sendingSamples, setSendingSamples] = useState(false);
+
+  const handleSendToWhatsapp = async (overrideFormat?: string) => {
+    setSendingWhatsapp(true);
+    try {
+      const res = await apiClient.post('/reports/send-monthly-scheduled', {
+        type: 'custom',
+        startDate: fromDate,
+        endDate: toDate,
+        deliveryFormat: overrideFormat || 'combined'
+      });
+      if (res.data?.success) {
+        alert(`Report successfully sent to Owner WhatsApp! (${res.data.recipientPhone || ''})`);
+      } else {
+        alert(res.data?.message || 'Failed to send report to WhatsApp');
+      }
+    } catch (err: any) {
+      console.error('Error sending report to WhatsApp:', err);
+      alert(err?.response?.data?.message || 'Failed to send report to WhatsApp');
+    } finally {
+      setSendingWhatsapp(false);
+    }
+  };
+
+  const handleSendAllStyles = async () => {
+    setSendingSamples(true);
+    try {
+      const res = await apiClient.post('/reports/send-all-template-samples', {});
+      if (res.data?.success) {
+        alert(res.data.message || 'All 3 PDF Template Styles sent to Owner WhatsApp!');
+      } else {
+        alert(res.data?.message || 'Failed to send sample PDFs');
+      }
+    } catch (err: any) {
+      console.error('Error sending sample PDFs:', err);
+      alert(err?.response?.data?.message || 'Failed to send sample PDFs');
+    } finally {
+      setSendingSamples(false);
+    }
+  };
+
+  const handleDownloadPdfReport = () => {
+    const url = `/api/reports/monthly-scheduled-preview?type=custom&startDate=${fromDate}&endDate=${toDate}&download=pdf`;
+    window.open(url, '_blank');
+  };
 
   useEffect(() => {
     if (!manualToDate) {
@@ -539,10 +588,39 @@ const Reports = () => {
           <button
             onClick={handleGenerate}
             className="bg-primary hover:bg-primary/95 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition-all active:scale-95 shadow-md shadow-primary/25 cursor-pointer shrink-0 h-9"
-            title="Generate Report"
+            title="Generate Report Data"
           >
             <BarChart3 size={13} />
             <span>Generate</span>
+          </button>
+
+          <button
+            onClick={() => handleSendToWhatsapp('combined')}
+            disabled={sendingWhatsapp}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
+            title="Send PDF & Graph Report to Owner WhatsApp"
+          >
+            <Send size={13} />
+            <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+          </button>
+
+          <button
+            onClick={handleDownloadPdfReport}
+            className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
+            title="Download Full PDF Document Report"
+          >
+            <Download size={13} />
+            <span>Download PDF</span>
+          </button>
+
+          <button
+            onClick={handleSendAllStyles}
+            disabled={sendingSamples}
+            className="bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
+            title="Send all 3 PDF Template Styles to Owner WhatsApp"
+          >
+            <Send size={13} />
+            <span>{sendingSamples ? 'Sending...' : 'Send 3 PDF Styles'}</span>
           </button>
         </div>
       </div>
@@ -613,6 +691,15 @@ const Reports = () => {
                 </h3>
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => handleSendToWhatsapp('combined')}
+                    disabled={sendingWhatsapp}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="Send Sales Report to Owner WhatsApp"
+                  >
+                    <Send size={12} />
+                    <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
+                  <button
                     onClick={() => handleExport('pdf')}
                     className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
@@ -677,6 +764,15 @@ const Reports = () => {
                   <span>Purchase Log Bills</span>
                 </h3>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleSendToWhatsapp('combined')}
+                    disabled={sendingWhatsapp}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="Send Purchase Log Report to Owner WhatsApp"
+                  >
+                    <Send size={12} />
+                    <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
                   <button
                     onClick={() => handleExport('pdf')}
                     className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
@@ -744,6 +840,15 @@ const Reports = () => {
                   <span>Valued Inventory Status</span>
                 </h3>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleSendToWhatsapp('combined')}
+                    disabled={sendingWhatsapp}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="Send Valued Inventory Report to Owner WhatsApp"
+                  >
+                    <Send size={12} />
+                    <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
                   <button
                     onClick={() => handleExport('pdf')}
                     className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
@@ -816,6 +921,15 @@ const Reports = () => {
                 </h3>
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => handleSendToWhatsapp('combined')}
+                    disabled={sendingWhatsapp}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="Send Expiry Report to Owner WhatsApp"
+                  >
+                    <Send size={12} />
+                    <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
+                  <button
                     onClick={() => handleExport('pdf')}
                     className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
@@ -885,6 +999,17 @@ const Reports = () => {
                   <PieChart size={15} className="text-purple-400" />
                   <span>Dormant / Non-Moving Stock (Inactive for {nonMovingDays} days)</span>
                 </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleSendToWhatsapp('combined')}
+                    disabled={sendingWhatsapp}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="Send Non-Moving Stock Report to Owner WhatsApp"
+                  >
+                    <Send size={12} />
+                    <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
+                </div>
               </div>
               <div className="flex-1 overflow-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse text-xs">

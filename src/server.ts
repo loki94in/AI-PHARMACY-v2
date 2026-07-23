@@ -361,6 +361,17 @@ app.listen(PORT, async () => {
             }
           })(),
 
+          // Step 4b: Monthly & Mid-Month Scheduled Reports (1st & 15th of month)
+          (async () => {
+            const { monthlyReportService } = await import('./services/monthlyReportService.js');
+            monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Boot] Monthly report check failed:', err));
+            // Check every 1 hour for 1st / 15th of month scheduled report dispatches
+            setInterval(() => {
+              monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Cron] Hourly monthly report check failed:', err));
+            }, 60 * 60 * 1000);
+          })(),
+
+
           // Step 5: Telegram Bot initialization (Deferred to T+8s to prevent blocking boot)
           new Promise<void>((resolve) => {
             setTimeout(async () => {

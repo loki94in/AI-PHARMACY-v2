@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady } from '../../services/api';
@@ -301,6 +301,12 @@ const POS = () => {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
+  const [lastSavedPatientName, setLastSavedPatientName] = useState('');
+  const [lastSavedPatientPhone, setLastSavedPatientPhone] = useState('');
+  const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
+  const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
+  const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
+  const pendingDirectSaveRef = useRef<boolean>(false);
   const [doctor, setDoctor] = useState(initialActiveTab.doctor || '');
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
   const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
@@ -1646,15 +1652,18 @@ const POS = () => {
     return sum + (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
   }, 0);
 
-  const hasValidItems = cart.some(item => !item.isEmptyRow && item.name && item.name.trim() !== '');
+  const hasValidItems = cart.some(item => !item.isEmptyRow && ((item.name && item.name.trim() !== '') || (item.medicine_name && item.medicine_name.trim() !== '')));
   const profitOrLoss = grandTotal - totalCost;
   const isLoss = hasValidItems && profitOrLoss < -0.001; // Loss greater than 0.1 paise
 
   const [showPhonePromptModal, setShowPhonePromptModal] = useState(false);
   const [promptPhoneValue, setPromptPhoneValue] = useState('');
 
-  const handleCompleteSale = async (overridePhone?: string) => {
-    if (!hasValidItems) return;
+  const handleCompleteSale = async (overridePhone?: string, isDirectSave: boolean = false) => {
+    if (!hasValidItems) {
+      alert('⚠️ CANNOT SAVE BILL:\n\nPlease add at least one valid medicine to the cart before saving the bill.');
+      return;
+    }
     const phoneToUse = overridePhone !== undefined ? overridePhone : patientPhone;
 
     if (isLoss) {
@@ -1669,6 +1678,7 @@ const POS = () => {
       }
       if (!phoneToUse.trim()) {
         setPromptPhoneValue('');
+        pendingDirectSaveRef.current = isDirectSave;
         setShowPhonePromptModal(true);
         return;
       }
@@ -1723,21 +1733,26 @@ const POS = () => {
     }
     
     try {
-      const salesItems = cart.filter(item => !item.isEmptyRow).map(item => {
+      const salesItems = cart.filter(item => {
+        if (item.isEmptyRow) return false;
+        const name = item.name || item.medicine_name || '';
+        return name.trim() !== '';
+      }).map(item => {
         const itemDiscount = item.discount || item.discountPer || 0;
         // Resolve unit price: prefer explicit unitPrice, then mrp, then 1 as absolute fallback
         const resolvedUnitPrice = Number(item.unitPrice || item.mrp || item.unit_price || 1);
+        const name = item.name || item.medicine_name || 'Medicine';
         return {
           inventory_id: typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined,
-          medicine_name: item.name,
-          batch_no: item.batch,
-          expiry_date: item.expiry,
+          medicine_name: name,
+          batch_no: item.batch || item.batch_no || 'N/A',
+          expiry_date: item.expiry || item.expiry_date || '',
           mrp: item.mrp || resolvedUnitPrice,
           quantity: Number(item.qty !== undefined ? item.qty : (item.quantity || 0)),
           unit_price: resolvedUnitPrice,
-          loose_qty: item.looseQty || 0,
+          loose_qty: item.looseQty || item.loose_qty || 0,
           discount_per: itemDiscount,
-          pack_size: item.packSize || 10
+          pack_size: item.packSize || item.pack_size || 10
         };
       });
 
@@ -1803,12 +1818,24 @@ const POS = () => {
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
       
+      const isWaSent = paymentMedium === 'CREDIT' || (sendWhatsApp && !!phoneToUse.trim());
+
       setLastSavedInvoiceNo(invoiceNo);
+      setLastSavedPatientName(patientName || 'Walk-in Customer');
+      setLastSavedPatientPhone(phoneToUse);
+      setLastSavedGrandTotal(grandTotal);
+      setLastSavedPaymentMedium(paymentMedium);
+      setLastSavedWasWhatsAppSent(isWaSent);
       setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
         name: item.name || item.medicine_name,
         batch: item.batch_number || item.batch_no || 'N/A'
       })));
-      setShowBarcodeModal(true);
+      
+      if (!isDirectSave) {
+        setShowBarcodeModal(true);
+      } else {
+        toastEvent.trigger(`Bill #${invoiceNo} saved successfully! ${isWaSent ? '(SMS dispatched)' : ''}`, 'success');
+      }
       
       // Clear cart and states
       updateCart([]);
@@ -3141,20 +3168,33 @@ const POS = () => {
                 </div>
               </div>
 
-              {/* Grand Total & Save Button */}
-              <div className="flex items-center gap-4 shrink-0">
-                <div className="flex items-baseline gap-2">
+              {/* Grand Total & Save Buttons */}
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-baseline gap-2 mr-1">
                   <span className="text-xs font-extrabold text-primary uppercase tracking-wider">Total:</span>
                   <span className="font-mono text-xl font-black text-primary">₹{grandTotal}</span>
                 </div>
 
                 <button 
-                  onClick={() => handleCompleteSale()}
+                  onClick={() => handleCompleteSale(undefined, true)}
                   disabled={cart.length === 0}
-                  className={`text-text py-2 px-5 text-xs flex items-center gap-2 font-bold uppercase tracking-wider rounded-xl transition-all h-9 ${
+                  title="Save bill directly without popup"
+                  className={`py-2 px-4 text-xs flex items-center gap-1.5 font-bold uppercase tracking-wider rounded-xl transition-all h-9 select-none ${
                     cart.length === 0 
                       ? 'bg-bg3 border border-border text-muted cursor-not-allowed' 
-                      : 'bg-green hover:bg-emerald-600 shadow-[0_4px_14px_rgba(16,185,129,0.25)] hover:-translate-y-0.5'
+                      : 'bg-sky text-text hover:bg-sky/90 shadow-[0_4px_14px_rgba(14,165,233,0.25)] hover:-translate-y-0.5'
+                  }`}
+                >
+                  <Zap size={14} /> Direct Save
+                </button>
+
+                <button 
+                  onClick={() => handleCompleteSale(undefined, false)}
+                  disabled={cart.length === 0}
+                  className={`py-2 px-4 text-xs flex items-center gap-1.5 font-bold uppercase tracking-wider rounded-xl transition-all h-9 select-none ${
+                    cart.length === 0 
+                      ? 'bg-bg3 border border-border text-muted cursor-not-allowed' 
+                      : 'bg-green text-text hover:bg-emerald-600 shadow-[0_4px_14px_rgba(16,185,129,0.25)] hover:-translate-y-0.5'
                   }`}
                 >
                   <CheckCircle size={14} /> Save Bill (Ctrl+S)
@@ -3225,7 +3265,7 @@ const POS = () => {
                     if (!val) { alert('Please enter a WhatsApp contact number'); return; }
                     setPatientPhone(val);
                     setShowPhonePromptModal(false);
-                    handleCompleteSale(val);
+                    handleCompleteSale(val, pendingDirectSaveRef.current);
                   }
                 }}
               />
@@ -3243,7 +3283,7 @@ const POS = () => {
                   if (!val) { alert('Please enter a WhatsApp contact number'); return; }
                   setPatientPhone(val);
                   setShowPhonePromptModal(false);
-                  handleCompleteSale(val);
+                  handleCompleteSale(val, pendingDirectSaveRef.current);
                 }}
                 className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-md"
               >
@@ -3499,74 +3539,100 @@ const POS = () => {
         document.body
       )}
 
-      {/* Barcode Print Prompt Modal */}
+      {/* Post-Sale Saved Bill Confirmation Modal */}
       {showBarcodeModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md fade-in">
-          <div className="bg-bg border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col p-6 space-y-6">
+          <div className="bg-bg border border-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col p-6 space-y-5">
             <div className="text-center space-y-2">
-              <div className="inline-flex p-3 rounded-full bg-green/10 border border-green/20 text-green mb-2">
+              <div className="inline-flex p-3 rounded-full bg-green/10 border border-green/20 text-green mb-1">
                 <CheckCircle size={32} className="animate-bounce" />
               </div>
               <h3 className="text-lg font-bold text-text">Sale Saved Successfully!</h3>
-              <p className="text-xs text-muted">Invoice No: <span className="font-mono text-sky font-semibold">{lastSavedInvoiceNo}</span></p>
+              <p className="text-xs text-muted">Invoice No: <span className="font-mono text-sky font-semibold">#{lastSavedInvoiceNo}</span></p>
             </div>
 
-            <div className="bg-bg2/60 border border-border/40 p-4 rounded-xl space-y-3">
-              <p className="text-xs text-center text-text font-medium leading-relaxed">
-                Would you like to print unique barcode/QR code labels for the medicines in this bill, or generate a single barcode for the bill itself?
-              </p>
+            <div className="bg-bg2/60 border border-border/40 p-4 rounded-xl space-y-2.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-muted font-medium">Customer:</span>
+                <span className="font-bold text-text">{lastSavedPatientName}</span>
+              </div>
+              {lastSavedPatientPhone && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-muted font-medium">Contact Phone:</span>
+                  <span className="font-mono text-text font-semibold">{lastSavedPatientPhone}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
+                <span className="text-muted font-medium">Total Amount:</span>
+                <span className="font-mono font-black text-primary text-sm">₹{lastSavedGrandTotal}</span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5">
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await api.generateMedicineBarcodes(lastSavedItems);
-                    if (res && res.success && res.pdfUrl) {
-                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                      window.open(`${backendUrl}${res.pdfUrl}`, '_blank');
-                    } else {
-                      alert('Failed to generate barcodes');
+            {/* SMS Status / Manual Dispatch option */}
+            <div className="p-3.5 rounded-xl border text-xs flex items-center gap-3 bg-bg3/50 border-border/50">
+              <MessageSquare size={18} className={lastSavedWasWhatsAppSent ? "text-green shrink-0" : "text-muted shrink-0"} />
+              <div className="flex-1 min-w-0">
+                {lastSavedPaymentMedium === 'CREDIT' ? (
+                  <p className="font-semibold text-amber-500 text-[11px] leading-tight">
+                    ⚡ Credit Sale: Instant SMS/WhatsApp message sent automatically
+                  </p>
+                ) : lastSavedWasWhatsAppSent ? (
+                  <p className="font-semibold text-green text-[11px] leading-tight">
+                    ✅ SMS/WhatsApp message sent to customer
+                  </p>
+                ) : lastSavedPatientPhone ? (
+                  <p className="text-muted text-[11px] leading-tight">
+                    SMS message not sent (WA toggle was OFF).
+                  </p>
+                ) : (
+                  <p className="text-muted text-[11px] italic leading-tight">
+                    No phone number saved for this sale.
+                  </p>
+                )}
+              </div>
+              {!lastSavedWasWhatsAppSent && lastSavedPatientPhone && lastSavedInvoiceNo && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await api.sendWhatsappMessage(
+                        lastSavedPatientPhone,
+                        `Dear ${lastSavedPatientName},\n\n📄 *Sale Invoice: #${lastSavedInvoiceNo}*\nAmount Paid: ₹${lastSavedGrandTotal}\nThank you for your purchase!\n— AI Pharmacy OS`
+                      );
+                      if (res && res.success !== false) {
+                        setLastSavedWasWhatsAppSent(true);
+                        alert('SMS/WhatsApp message sent successfully!');
+                      } else {
+                        alert('Failed to send SMS message.');
+                      }
+                    } catch (err) {
+                      console.error(err);
+                      alert('Error sending SMS message');
                     }
-                  } catch (err) {
-                    console.error(err);
-                    alert('Error generating medicine barcodes');
-                  }
-                  setShowBarcodeModal(false);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-green text-text hover:bg-green/90 transition-all shadow-[0_4px_12px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2"
-              >
-                Create Medicine Barcodes
-              </button>
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold uppercase bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all shrink-0"
+                >
+                  Send SMS
+                </button>
+              )}
+            </div>
 
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
               <button
-                onClick={async () => {
-                  try {
-                    const res = await api.generateBillBarcode(lastSavedInvoiceNo);
-                    if (res && res.success && res.pdfUrl) {
-                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                      window.open(`${backendUrl}${res.pdfUrl}`, '_blank');
-                    } else {
-                      alert('Failed to generate bill barcode');
-                    }
-                  } catch (err) {
-                    console.error(err);
-                    alert('Error generating bill barcode');
-                  }
-                  setShowBarcodeModal(false);
+                onClick={() => {
+                  window.print();
                 }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-sky text-text hover:bg-sky/90 transition-all shadow-[0_4px_12px_rgba(14,165,233,0.2)] flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-primary text-white hover:bg-primary/90 transition-all shadow-[0_4px_12px_rgba(59,130,246,0.2)] flex items-center justify-center gap-2"
               >
-                Create Bill Barcode
+                <Printer size={14} /> Print Bill
               </button>
 
               <button
                 onClick={() => {
                   setShowBarcodeModal(false);
                 }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-bg2 border border-border text-muted hover:text-text hover:bg-bg3 transition-all"
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-bg2 border border-border text-muted hover:text-text hover:bg-bg3 transition-all flex items-center justify-center gap-2"
               >
-                No / Skip
+                <CheckCircle size={14} /> Done / Close
               </button>
             </div>
           </div>
