@@ -1481,6 +1481,7 @@ const CustomerCreditSection: React.FC = () => {
   const [newDueDate, setNewDueDate] = useState('');
   const [payingId, setPayingId] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState('');
+  const [collectingPayment, setCollectingPayment] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [viewInvoice, setViewInvoice] = useState<any | null>(null);
 
@@ -1535,7 +1536,7 @@ const CustomerCreditSection: React.FC = () => {
   const handleSendManualReminder = async (cust: CreditCustomerItem) => {
     setSendingId(cust.id);
     try {
-      await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`);
+      await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`, {});
       toastEvent.trigger(`Manual credit reminder sent to ${cust.name}`, 'success', '/crm');
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to send WhatsApp reminder', 'error', '/crm');
@@ -1550,14 +1551,30 @@ const CustomerCreditSection: React.FC = () => {
       toastEvent.trigger('Enter a valid payment amount', 'error', '/crm');
       return;
     }
+    setCollectingPayment(true);
     try {
-      await apiClient.post('/crm/ledger/pay', { amount: amt, customer_id: id });
-      toastEvent.trigger(`Collected ₹${amt.toFixed(2)} payment`, 'success', '/crm');
+      const res = await apiClient.post('/crm/ledger/pay', { amount: amt, customer_id: id });
+      const successMsg = res.data?.message || `Collected ₹${amt.toFixed(2)} payment`;
+      toastEvent.trigger(successMsg, 'success', '/crm');
       setPayingId(null);
       setPayAmount('');
       await loadCreditCustomers();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to process payment', 'error', '/crm');
+    } finally {
+      setCollectingPayment(false);
+    }
+  };
+
+  const handleClearCredit = async (id: number, name: string) => {
+    if (!window.confirm(`Are you sure you want to clear/remove credit entry for ${name}?`)) return;
+    try {
+      await apiClient.post(`/crm/credit-customers/${id}/clear`);
+      toastEvent.trigger(`Cleared credit entry for ${name}`, 'success', '/crm');
+      setSelectedCustomer(null);
+      await loadCreditCustomers();
     } catch {
-      toastEvent.trigger('Failed to process payment', 'error', '/crm');
+      toastEvent.trigger('Failed to clear customer credit', 'error', '/crm');
     }
   };
 
@@ -1703,32 +1720,25 @@ const CustomerCreditSection: React.FC = () => {
                     <div className="text-base font-extrabold text-amber-400">₹{(selectedCustomer.credit_balance || 0).toFixed(2)}</div>
                   </div>
 
-                  {/* Collect Payment Action */}
-                  {payingId === selectedCustomer.id ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        placeholder="Amount (₹)"
-                        value={payAmount}
-                        onChange={e => setPayAmount(e.target.value)}
-                        className="w-24 px-2 py-1 bg-bg border border-border rounded-lg text-xs text-text focus:outline-none"
-                      />
-                      <button
-                        onClick={() => handlePayBalance(selectedCustomer.id)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-600"
-                      >
-                        Collect
-                      </button>
-                      <button onClick={() => setPayingId(null)} className="px-1.5 text-muted hover:text-text text-xs">✕</button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => { setPayingId(selectedCustomer.id); setPayAmount(String(selectedCustomer.credit_balance)); }}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-bold transition-all"
-                    >
-                      Collect Payment
-                    </button>
-                  )}
+                  {/* Collect Payment Action Toggle */}
+                  <button
+                    onClick={() => {
+                      if (payingId === selectedCustomer.id) {
+                        setPayingId(null);
+                      } else {
+                        setPayingId(selectedCustomer.id);
+                        setPayAmount(String(selectedCustomer.credit_balance || 0));
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      payingId === selectedCustomer.id
+                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                    }`}
+                  >
+                    <Zap size={14} className={payingId === selectedCustomer.id ? 'animate-pulse' : ''} />
+                    <span>{payingId === selectedCustomer.id ? 'Cancel Payment' : 'Collect Payment'}</span>
+                  </button>
 
                   {/* WhatsApp Reminder Button */}
                   <button
@@ -1740,8 +1750,130 @@ const CustomerCreditSection: React.FC = () => {
                     <Send size={12} className={sendingId === selectedCustomer.id ? 'animate-pulse' : ''} />
                     <span>Send WhatsApp Message</span>
                   </button>
+
+                  {/* Clear Credit Entry Button */}
+                  <button
+                    onClick={() => handleClearCredit(selectedCustomer.id, selectedCustomer.name || 'Customer')}
+                    className="px-3 py-1.5 rounded-xl bg-red-500/10 text-red border border-red-500/30 hover:bg-red-500/20 text-xs font-bold transition-all"
+                    title="Clear credit balance and remove entry from CRM credit list"
+                  >
+                    Clear Entry
+                  </button>
                 </div>
               </div>
+
+              {/* LIVE ANIMATED PAYMENT CALCULATION & AUTO-RECEIPT PANEL */}
+              {payingId === selectedCustomer.id && (() => {
+                const originalBal = selectedCustomer.credit_balance || 0;
+                const enteredPay = parseFloat(payAmount) || 0;
+                const liveRemaining = Math.max(0, originalBal - enteredPay);
+                const payPercent = Math.min(100, Math.max(0, (enteredPay / (originalBal || 1)) * 100));
+                const isFullPay = enteredPay >= originalBal && originalBal > 0;
+
+                return (
+                  <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 via-bg3 to-bg2 border-b border-emerald-500/30 flex flex-col gap-2.5 transition-all duration-300 ease-out animate-in fade-in slide-in-from-top-1 shrink-0">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      {/* Input & Quick Percent Chips */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                          <Zap size={14} className="text-emerald-400 animate-bounce" />
+                          Collect Amount:
+                        </span>
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-xs font-bold text-muted">₹</span>
+                          <input
+                            type="number"
+                            placeholder="0.00"
+                            value={payAmount}
+                            onChange={e => setPayAmount(e.target.value)}
+                            className="w-32 pl-6 pr-2.5 py-1.5 bg-bg border border-emerald-500/40 rounded-xl text-xs font-bold text-text focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-inner"
+                            autoFocus
+                          />
+                        </div>
+
+                        {/* Quick preset chips */}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount(String(originalBal))}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${isFullPay ? 'bg-emerald-500 text-white shadow-sm' : 'bg-bg3 text-muted hover:text-text border border-border'}`}
+                          >
+                            100% Full (₹{originalBal.toFixed(2)})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount(String((originalBal * 0.5).toFixed(2)))}
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-bg3 text-muted hover:text-text border border-border transition-all"
+                          >
+                            50% (₹{(originalBal * 0.5).toFixed(2)})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount(String((originalBal * 0.25).toFixed(2)))}
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-bg3 text-muted hover:text-text border border-border transition-all"
+                          >
+                            25% (₹{(originalBal * 0.25).toFixed(2)})
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Action Button */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handlePayBalance(selectedCustomer.id)}
+                          disabled={collectingPayment || enteredPay <= 0}
+                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50"
+                        >
+                          <CheckCircle2 size={14} className={collectingPayment ? 'animate-spin' : ''} />
+                          <span>{collectingPayment ? 'Collecting & Sending Receipt...' : `Confirm & Collect ₹${enteredPay.toFixed(2)}`}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPayingId(null)}
+                          className="px-2.5 py-1.5 rounded-xl bg-bg3 border border-border text-muted hover:text-text text-xs font-semibold transition-all"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Live Calculation Preview Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-border/40 text-xs">
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-bg/50 border border-border/50">
+                        <span className="text-muted text-[11px]">Original Dues:</span>
+                        <span className="font-bold text-amber-400">₹{originalBal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                        <span className="text-emerald-400 text-[11px] font-medium">Paying Now:</span>
+                        <span className="font-extrabold text-emerald-400">– ₹{enteredPay.toFixed(2)}</span>
+                      </div>
+                      <div className={`flex items-center justify-between p-2 rounded-xl border transition-all duration-300 ${liveRemaining === 0 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-bg/50 border-border/50 text-text'}`}>
+                        <span className="text-[11px] font-medium">New Remaining Dues:</span>
+                        <span className="font-extrabold text-xs transition-all duration-300">
+                          {liveRemaining === 0 ? '✨ Fully Cleared (₹0.00)' : `₹${liveRemaining.toFixed(2)}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Live Progress Bar & WhatsApp Auto Notice */}
+                    <div className="w-full">
+                      <div className="flex justify-between text-[10px] text-muted mb-1 font-medium">
+                        <span>Dues Cleared: {payPercent.toFixed(0)}%</span>
+                        <span className="text-emerald-400 font-semibold">
+                          {selectedCustomer.phone ? '📱 Auto WhatsApp Receipt Will Be Sent' : 'No phone saved for WhatsApp'}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-bg rounded-full overflow-hidden border border-border/40 p-0.5">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500 ease-out shadow-sm"
+                          style={{ width: `${payPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Due Date Management Bar */}
               <div className="px-4 py-2 bg-bg border-b border-border flex items-center justify-between text-xs shrink-0">

@@ -145,15 +145,25 @@ router.post('/', async (req, res) => {
 
     // Resolve or auto-create customer/patient
     let customerId = patient_id || null;
-    if (patient_name) {
-      const cleanPhone = patient_phone || '';
-      const existing = await db.get('SELECT id FROM customers WHERE name = ? AND phone = ?', [patient_name, cleanPhone]);
+    if (!customerId && (patient_phone || patient_name)) {
+      const cleanPhone = (patient_phone || '').trim();
+      const cleanName = (patient_name || 'Customer').trim();
+      let existing = null;
+      if (cleanPhone) {
+        existing = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+      }
+      if (!existing && cleanName) {
+        existing = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?) LIMIT 1', [cleanName]);
+      }
       if (existing) {
         customerId = existing.id;
+        if (cleanPhone) {
+          await db.run('UPDATE customers SET phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ?', [cleanPhone, customerId]);
+        }
       } else {
         const custResult = await db.run(
           'INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)',
-          [patient_name, cleanPhone, patient_address || '']
+          [cleanName, cleanPhone, patient_address || '']
         );
         customerId = custResult.lastID;
       }
@@ -338,15 +348,50 @@ router.post('/', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Trigger WhatsApp invoice sending if requested or if credit transaction
+    // Trigger WhatsApp notification — same mechanism as CRM page (dynamic import + direct sendMessage)
     if (sendWhatsApp || paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID') {
-      import('../services/whatsappInvoiceService.js')
-        .then(({ whatsappInvoiceService }) => {
-          whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId).catch(err => {
-            console.error(`Error in async WhatsApp dispatch for invoice ${invoice_no}:`, err);
-          });
-        })
-        .catch(err => console.error('Failed to load whatsappInvoiceService:', err));
+      const phoneForWA = (patient_phone || '').trim();
+      const nameForWA = (patient_name || 'Customer').trim();
+      if (phoneForWA) {
+        // Fire-and-forget: does NOT block the API response
+        (async () => {
+          try {
+            const { sendMessage } = await import('../whatsappClient.js');
+            // Fetch fresh credit balance after the DB update above
+            let totalDues = total;
+            if (customerId) {
+              const custRow = await db.get('SELECT credit_balance FROM customers WHERE id = ?', [customerId]);
+              totalDues = custRow?.credit_balance ?? total;
+            }
+            const isCredit = paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID';
+            let waMsg = `Dear ${nameForWA},\n\n`;
+            if (isCredit) {
+              waMsg += `📌 *Credit Purchase Bill: #${invoice_no}*\n`;
+              waMsg += `Bill Amount: *₹${total.toFixed(2)}*\n`;
+              waMsg += `Total Outstanding Dues: *₹${Number(totalDues).toFixed(2)}*\n\n`;
+              waMsg += `This bill has been posted to your credit ledger account.\n\n`;
+            } else {
+              waMsg += `📄 *Sale Invoice: #${invoice_no}*\n`;
+              waMsg += `Bill Amount Paid: *₹${total.toFixed(2)}*\n\n`;
+              waMsg += `Thank you for your purchase!\n\n`;
+            }
+            waMsg += `— AI Pharmacy OS`;
+
+            await sendMessage(phoneForWA, undefined, waMsg);
+            console.log(`[POS WhatsApp] Sent credit bill notification for ${invoice_no} to ${phoneForWA}`);
+
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              ['pos_credit_invoice', nameForWA, phoneForWA, waMsg, 'sent', `invoice_${invoiceId}`]
+            );
+          } catch (waErr: any) {
+            console.error(`[POS WhatsApp] Failed to send notification for ${invoice_no}:`, waErr);
+          }
+        })();
+      } else {
+        console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} — skipping WhatsApp dispatch.`);
+      }
     }
 
     res.json({ success: true, invoice_no, total, tax });
@@ -1487,8 +1532,23 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
     await db.run('DELETE FROM sales_invoices WHERE id = ?', [id]);
 
+    // Recalculate customer credit balance if invoice was associated with a customer
+    if (existing.customer_id) {
+      const unpaidRow = await db.get(
+        `SELECT COALESCE(SUM(total_amount), 0) as total 
+         FROM sales_invoices 
+         WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
+        [existing.customer_id]
+      );
+      const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
+      await db.run(
+        'UPDATE customers SET credit_balance = ? WHERE id = ?',
+        [newBalance, existing.customer_id]
+      );
+    }
+
     inventoryCache.invalidate();
-        res.json({ success: true, message: 'Invoice deleted, stock restored' });
+    res.json({ success: true, message: 'Invoice deleted, stock restored, credit balance updated' });
   } catch (error) {
     const err = error as Error;
     console.error(JSON.stringify({ message: 'Failed to delete sale', error: err.message, timestamp: new Date().toISOString() }));

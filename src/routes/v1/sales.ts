@@ -732,8 +732,23 @@ router.delete('/:id', asyncHandler(async (req: express.Request, res: express.Res
   await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
   await db.run('DELETE FROM sales_invoices WHERE id = ?', [id]);
 
+  // Recalculate customer credit balance if invoice was associated with a customer
+  if (existing.customer_id) {
+    const unpaidRow = await db.get(
+      `SELECT COALESCE(SUM(total_amount), 0) as total 
+       FROM sales_invoices 
+       WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
+      [existing.customer_id]
+    );
+    const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
+    await db.run(
+      'UPDATE customers SET credit_balance = ? WHERE id = ?',
+      [newBalance, existing.customer_id]
+    );
+  }
+
   await dbManager.close();
-  res.json({ success: true, message: 'Invoice deleted, stock restored' });
+  res.json({ success: true, message: 'Invoice deleted, stock restored, credit balance updated' });
 }));
 
 export default router;

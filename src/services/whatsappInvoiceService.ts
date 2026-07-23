@@ -17,100 +17,76 @@ export class WhatsappInvoiceService {
       db = await dbManager.getConnection();
       
       const invoice = await db.get(
-        `SELECT si.invoice_no, si.total_amount, si.payment_medium, si.payment_status,
-                c.name as customer_name, c.phone as customer_phone
+        `SELECT si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
+                c.name as customer_name, c.phone as customer_phone, c.credit_balance
          FROM sales_invoices si
          LEFT JOIN customers c ON si.customer_id = c.id
          WHERE si.id = ?`,
         [invoiceId]
       );
 
-      
       if (!invoice) {
         console.error(`Invoice ID ${invoiceId} not found for WhatsApp dispatch`);
         return false;
       }
 
-      const phone = invoice.customer_phone;
+      let phone = (invoice.customer_phone || '').trim();
+      if (!phone && invoice.customer_id) {
+        const custRow = await db.get('SELECT phone FROM customers WHERE id = ?', [invoice.customer_id]);
+        phone = (custRow?.phone || '').trim();
+      }
+
       if (!phone) {
         console.warn(`No phone number available for customer in Invoice ID ${invoiceId}. Skipping WhatsApp.`);
         return false;
       }
 
-      // Generate invoice PDF file path
-      const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
-      const pdfPath = path.join(UPLOADS_DIR, pdfFilename);
-
-      // Make sure uploads folder exists
-      if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-      }
-
-      // Generate PDF
-      await pdfInvoiceService.generateInvoicePdf(invoiceId, pdfPath);
-
-      // Create WhatsApp message caption
+      // Format instant WhatsApp text message
       let caption = `Dear ${invoice.customer_name || 'Customer'},\n\n`;
-      if (invoice.payment_medium === 'CREDIT') {
-        caption += `📄 Credit purchase of ₹${(invoice.total_amount || 0).toFixed(2)} recorded successfully.\n`;
-        caption += `Total bill amount is posted to your credit account and will be due on your salary day.\n\n`;
+      if (invoice.payment_medium === 'CREDIT' || invoice.payment_status === 'UNPAID') {
+        const totalDues = (invoice.credit_balance || invoice.total_amount || 0);
+        caption += `📌 *Credit Purchase Bill: #${invoice.invoice_no}*\n`;
+        caption += `Bill Amount: *₹${(invoice.total_amount || 0).toFixed(2)}*\n`;
+        caption += `Total Outstanding Dues: *₹${totalDues.toFixed(2)}*\n\n`;
+        caption += `This bill has been posted to your credit ledger account.\n\n`;
       } else {
-        caption += `📄 Purchase of ₹${(invoice.total_amount || 0).toFixed(2)} completed successfully.\n`;
-        caption += `Thank you for your payment.\n\n`;
+        caption += `📄 *Sale Invoice: #${invoice.invoice_no}*\n`;
+        caption += `Bill Amount Paid: *₹${(invoice.total_amount || 0).toFixed(2)}*\n\n`;
+        caption += `Thank you for your purchase!\n\n`;
       }
-      caption += `Please find attached your digitally stamped PDF bill.\n\n— AI Pharmacy OS`;
+      caption += `— AI Pharmacy OS`;
 
-      // Dispatch via WhatsApp (if WhatsApp client is active and logged in)
-      if (!isReady) {
-        console.warn(`WhatsApp Web client is not logged in / ready. Trying WhatsApp Business API...`);
-        
-        // Try WhatsApp Business API as fallback
-        try {
-          const { whatsappBusinessService } = await import('./whatsappBusinessService.js');
-          const config = await whatsappBusinessService.getConfig();
-          if (config.enabled && config.phoneNumberId && config.accessToken) {
-            const bizResult = await whatsappBusinessService.sendDocument(phone, pdfPath, caption, `Invoice_${invoice.invoice_no}.pdf`);
-            if (bizResult.success) {
-              console.log(`Successfully dispatched invoice ${invoice.invoice_no} to ${phone} via WhatsApp Business API`);
-              return true;
-            }
-            console.warn(`WhatsApp Business API send also failed: ${bizResult.error}. Queueing for retry.`);
-          }
-        } catch (bizErr) {
-          console.warn('WhatsApp Business API fallback failed:', bizErr);
-        }
-        
-        const { whatsappQueue } = await import('./whatsappQueue.js');
-        await whatsappQueue.queueJob(invoiceId, phone, pdfPath, caption);
-        return false;
-      }
-
+      // 1. Send Instant Text Message immediately (identical mechanism to CRM page)
+      let textSent = false;
       try {
-        await sendMessage(phone, pdfPath, caption);
-        console.log(`Successfully dispatched invoice ${invoice.invoice_no} to ${phone} via WhatsApp`);
-        return true;
-      } catch (sendErr) {
-        console.error(`Failed to send invoice ${invoice.invoice_no} via WhatsApp Web. Trying Business API...`, sendErr);
-        
-        // Try WhatsApp Business API as fallback before queueing
-        try {
-          const { whatsappBusinessService } = await import('./whatsappBusinessService.js');
-          const config = await whatsappBusinessService.getConfig();
-          if (config.enabled && config.phoneNumberId && config.accessToken) {
-            const bizResult = await whatsappBusinessService.sendDocument(phone, pdfPath, caption, `Invoice_${invoice.invoice_no}.pdf`);
-            if (bizResult.success) {
-              console.log(`Successfully dispatched invoice ${invoice.invoice_no} to ${phone} via WhatsApp Business API (fallback)`);
-              return true;
-            }
-          }
-        } catch (bizErr) {
-          console.warn('WhatsApp Business API fallback failed:', bizErr);
-        }
-
-        const { whatsappQueue } = await import('./whatsappQueue.js');
-        await whatsappQueue.queueJob(invoiceId, phone, pdfPath, caption);
-        return false;
+        await sendMessage(phone, undefined, caption);
+        console.log(`Successfully dispatched instant text WhatsApp notification for invoice ${invoice.invoice_no} to ${phone}`);
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['credit_sale_invoice', invoice.customer_name || 'Customer', phone, caption, 'sent', `invoice_${invoiceId}`]
+        );
+        textSent = true;
+      } catch (textErr: any) {
+        console.error(`Failed to send instant text WhatsApp notification for invoice ${invoice.invoice_no}:`, textErr);
       }
+
+      // 2. Asynchronously attempt to generate and send PDF attachment if PDF service is available
+      try {
+        if (!fs.existsSync(UPLOADS_DIR)) {
+          fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        }
+        const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
+        const pdfPath = path.join(UPLOADS_DIR, pdfFilename);
+        await pdfInvoiceService.generateInvoicePdf(invoiceId, pdfPath);
+        const pdfCaption = `📄 Attached PDF Bill for Invoice #${invoice.invoice_no}`;
+        await sendMessage(phone, pdfPath, pdfCaption);
+        console.log(`Successfully dispatched PDF attachment for invoice ${invoice.invoice_no} to ${phone}`);
+      } catch (pdfErr) {
+        console.warn(`PDF invoice attachment dispatch skipped/failed for invoice ${invoice.invoice_no}:`, pdfErr);
+      }
+
+      return textSent;
     } catch (err) {
       console.error(`Error sending invoice ${invoiceId} via WhatsApp:`, err);
       return false;

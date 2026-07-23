@@ -104,18 +104,25 @@ export class InvoiceService {
     return await dbManager.transaction(async (db) => {
       // Resolve or create customer/patient
       let customerId = data.patientId;
-      if (data.patientName) {
-        const cleanPhone = data.patientPhone || '';
-        const existing = await db.get(
-          'SELECT id FROM customers WHERE name = ? AND phone = ?',
-          [data.patientName, cleanPhone]
-        );
+      if (!customerId && (data.patientPhone || data.patientName)) {
+        const cleanPhone = (data.patientPhone || '').trim();
+        const cleanName = (data.patientName || 'Customer').trim();
+        let existing = null;
+        if (cleanPhone) {
+          existing = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+        }
+        if (!existing && cleanName) {
+          existing = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?) LIMIT 1', [cleanName]);
+        }
         if (existing) {
           customerId = existing.id;
+          if (cleanPhone) {
+            await db.run('UPDATE customers SET phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ?', [cleanPhone, customerId]);
+          }
         } else {
           const custResult = await db.run(
             'INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)',
-            [data.patientName, cleanPhone, data.patientAddress || '']
+            [cleanName, cleanPhone, data.patientAddress || '']
           );
           customerId = custResult.lastID;
         }

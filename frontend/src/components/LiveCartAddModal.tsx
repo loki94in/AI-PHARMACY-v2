@@ -694,6 +694,14 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
               company: item.company
             });
           });
+
+          // Sort mapped items first, then non-mapped items
+          mergedList.sort((a, b) => {
+            if (a.isErrorMessage || b.isErrorMessage) return 0;
+            if (a.mapped && !b.mapped) return -1;
+            if (!a.mapped && b.mapped) return 1;
+            return 0;
+          });
         }
 
         setSuggestions(mergedList);

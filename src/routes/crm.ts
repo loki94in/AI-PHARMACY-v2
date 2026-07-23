@@ -281,14 +281,13 @@ router.get('/credit-customers', async (req, res) => {
     const db = await dbManager.getConnection();
     const rows = await db.all(
       `SELECT c.id, c.name, c.phone, c.address, 
-              CASE WHEN c.credit_balance = 0 AND (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) > 0
-                   THEN (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID'))
-                   ELSE c.credit_balance END as credit_balance,
+              COALESCE(c.credit_balance, (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID'), 0) as credit_balance,
               c.credit_due_date, c.credit_enabled,
-              (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) as unpaid_bills_count,
+              (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') as unpaid_bills_count,
               (SELECT MAX(date) FROM sales_invoices si WHERE si.customer_id = c.id) as last_sale_date
        FROM customers c
-       WHERE c.credit_balance > 0 OR c.credit_enabled = 1 OR (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID')) > 0
+       WHERE c.credit_balance > 0
+          OR (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') > 0
        ORDER BY credit_balance DESC`
     );
     res.json(rows);
@@ -298,12 +297,33 @@ router.get('/credit-customers', async (req, res) => {
   }
 });
 
-
+// Clear / Remove Customer Credit entry manually
+router.post('/credit-customers/:id/clear', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+    await db.run('UPDATE customers SET credit_balance = 0, credit_enabled = 0 WHERE id = ?', [id]);
+    await db.run(
+      "UPDATE sales_invoices SET payment_status = 'PAID' WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')",
+      [id]
+    );
+    await db.run('COMMIT');
+    res.json({ success: true, message: 'Customer credit cleared successfully' });
+  } catch (error: any) {
+    console.error('Failed to clear customer credit:', error);
+    try {
+      const db = await dbManager.getConnection();
+      await db.run('ROLLBACK');
+    } catch {}
+    res.status(500).json({ error: 'Failed to clear credit: ' + error.message });
+  }
+});
 
 // Update Customer Due Date
 router.put('/credit-customers/:id/due-date', async (req, res) => {
   const { id } = req.params;
-  const { due_date } = req.body;
+  const { due_date } = req.body || {};
   try {
     const db = await dbManager.getConnection();
     await db.run('UPDATE customers SET credit_due_date = ? WHERE id = ?', [due_date || null, id]);
@@ -317,7 +337,7 @@ router.put('/credit-customers/:id/due-date', async (req, res) => {
 // Send Manual Credit WhatsApp Reminder to Patient
 router.post('/credit-customers/:id/send-reminder', async (req, res) => {
   const { id } = req.params;
-  const { custom_message } = req.body;
+  const { custom_message } = req.body || {};
   try {
     const db = await dbManager.getConnection();
     const customer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
@@ -350,22 +370,86 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
   }
 });
 
-// Pay ledger balance
+// Pay ledger balance & automatically send WhatsApp receipt
 router.post('/ledger/pay', async (req, res) => {
-  const { customer_id, amount } = req.body;
-  if (!customer_id || !amount) {
-    return res.status(400).json({ error: 'Customer ID and amount are required' });
+  const { customer_id, amount } = req.body || {};
+  const payAmt = parseFloat(amount);
+  if (!customer_id || isNaN(payAmt) || payAmt <= 0) {
+    return res.status(400).json({ error: 'Customer ID and valid payment amount are required' });
   }
   try {
     const db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
     await db.run(
-      'UPDATE customers SET credit_balance = MAX(0, credit_balance - ?) WHERE id = ?',
-      [amount, customer_id]
+      'UPDATE customers SET credit_balance = MAX(0, COALESCE(credit_balance, 0) - ?) WHERE id = ?',
+      [payAmt, customer_id]
     );
-    res.json({ success: true, message: `Paid ₹${amount} successfully` });
-  } catch (error) {
+
+    const unpaidInvoices = await db.all(
+      `SELECT id, total_amount FROM sales_invoices
+       WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'
+       ORDER BY id ASC`,
+      [customer_id]
+    );
+
+    let remaining = payAmt;
+    for (const inv of unpaidInvoices) {
+      if (remaining <= 0) break;
+      await db.run(
+        "UPDATE sales_invoices SET payment_status = 'PAID' WHERE id = ?",
+        [inv.id]
+      );
+      remaining -= (inv.total_amount || 0);
+    }
+
+    await db.run('COMMIT');
+
+    // Fetch updated customer info to send automated WhatsApp payment receipt
+    const customer = await db.get('SELECT name, phone, credit_balance FROM customers WHERE id = ?', [customer_id]);
+    let whatsappSent = false;
+    let whatsappError = '';
+
+    if (customer && customer.phone) {
+      try {
+        const { sendMessage } = await import('../whatsappClient.js');
+        const remainingBal = (customer.credit_balance || 0);
+        const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        const message = `Dear ${customer.name || 'Customer'},\n\n` +
+          `✅ *Payment Received Receipt*\n` +
+          `Amount Received: *₹${payAmt.toFixed(2)}*\n` +
+          `Remaining Dues: *₹${remainingBal.toFixed(2)}*\n` +
+          `Date: *${dateStr}*\n\n` +
+          `Thank you for your payment!\n— AI Pharmacy OS`;
+
+        await sendMessage(customer.phone, undefined, message);
+
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['credit_payment_receipt', customer.name, customer.phone, message, 'sent', `customer_${customer_id}`]
+        );
+        whatsappSent = true;
+      } catch (waErr: any) {
+        console.error('Failed to send automated WhatsApp payment receipt:', waErr);
+        whatsappError = waErr.message || 'WhatsApp message dispatch failed';
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Collected ₹${payAmt.toFixed(2)} payment successfully${whatsappSent ? ' & WhatsApp receipt sent to customer' : ''}`,
+      whatsapp_sent: whatsappSent,
+      whatsapp_error: whatsappError || undefined
+    });
+  } catch (error: any) {
     console.error('Failed to pay ledger:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    try {
+      const db = await dbManager.getConnection();
+      await db.run('ROLLBACK');
+    } catch {}
+    res.status(500).json({ error: 'Failed to process payment: ' + error.message });
   }
 });
 

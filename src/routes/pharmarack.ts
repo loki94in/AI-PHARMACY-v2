@@ -258,7 +258,7 @@ router.get('/search', async (req, res) => {
             distributor: p.StoreName || '',
             rate: p.PTR !== undefined ? p.PTR : null,
             mrp: p.MRP !== undefined ? p.MRP : null,
-            mapped: p.IsMapped === 1,
+            mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === '1' || String(p.Ismapped) === '1',
             stock: p.Stock !== undefined ? String(p.Stock) : 'High',
             scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
             productId: p.ProductId || p.PrProductId || p.ProductCode,
@@ -379,7 +379,7 @@ router.get('/distributors', async (req, res) => {
     const stores = data.data.Stores.map((s: any) => ({
       storeId: s.StoreId,
       storeName: s.StoreName || 'Unknown Store',
-      isMapped: s.Ismapped === 1,
+      isMapped: s.Ismapped === 1 || s.IsMapped === 1 || s.isMapped === true || s.isMapped === 1 || String(s.Ismapped) === '1' || String(s.IsMapped) === '1',
       partyCode: s.PartyCode || '',
       address: s.Address1 || '',
       city: s.City || '',

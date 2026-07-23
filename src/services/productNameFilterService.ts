@@ -169,8 +169,8 @@ export function enhancedSimilarity(s1: string, s2: string): number {
   let score = (levSim * 0.5) + (phoneSim * 0.3) + (ngramSim * 0.2);
 
   // Strength & Number alignment check (e.g. 500mg vs 200mg)
-  const nums1 = norm1.match(/\b\d+\b/g) || [];
-  const nums2 = norm2.match(/\b\d+\b/g) || [];
+  const nums1: string[] = norm1.match(/\b\d+\b/g) || [];
+  const nums2: string[] = norm2.match(/\b\d+\b/g) || [];
 
   if (nums1.length > 0) {
     const matchingNums = nums1.filter(n => nums2.includes(n));
