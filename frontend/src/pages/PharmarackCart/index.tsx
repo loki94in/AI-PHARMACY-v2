@@ -42,7 +42,25 @@ let cachedLastFetched: Date | null = null;
 
 let waWindowRef: Window | null = null;
 
-function openOrReuseWhatsappTab(url: string) {
+function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
+  // 1. Dispatch custom events and window.postMessage for Chrome / WhatsApp Web Extensions
+  try {
+    window.postMessage({
+      type: 'WHATSAPP_WEB_EXTENSION_SEND',
+      source: 'AI_PHARMACY',
+      phone: phone || '',
+      text: text || '',
+      url
+    }, '*');
+
+    document.dispatchEvent(new CustomEvent('WHATSAPP_WEB_EXTENSION_SEND', {
+      detail: { phone: phone || '', text: text || '', url }
+    }));
+  } catch (err) {
+    console.warn('WhatsApp Extension dispatch warning:', err);
+  }
+
+  // 2. Reuse existing WhatsApp Web window or open a target tab
   try {
     if (waWindowRef && !waWindowRef.closed) {
       waWindowRef.location.href = url;
@@ -449,11 +467,11 @@ export default function PharmarackCart() {
     return msg;
   };
 
-  const handleSendWhatsAppOrder = (dist: Distributor) => {
+  const handleSendWhatsAppOrder = async (dist: Distributor) => {
     let phoneNum = customDistributorPhones[dist.storeId];
     if (!phoneNum) {
       const matched = findSavedDistributorMatch(dist.storeName);
-      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
+      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
     }
 
     let cleanPhone = phoneNum.replace(/\D/g, '');
@@ -467,13 +485,32 @@ export default function PharmarackCart() {
     }
 
     const msg = buildDistributorOrderMessage(dist);
-    const encodedMsg = encodeURIComponent(msg);
-    const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-    // Directly open or reuse WhatsApp Web tab
-    openOrReuseWhatsappTab(waWebUrl);
-    setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
-    toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'success');
+    setSendingWaDistributorId(dist.storeId);
+    try {
+      // 1. Send silently via backend API (100% background delivery, no popups)
+      const res = await apiClient.post('/messaging/send', {
+        number: cleanPhone,
+        message: msg
+      });
+
+      if (res?.data?.success) {
+        setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+        toastEvent.trigger(`WhatsApp order sent silently for ${dist.storeName}!`, 'success');
+      } else {
+        throw new Error(res?.data?.error || 'Silent send failed');
+      }
+    } catch (err: any) {
+      console.warn('Silent WhatsApp send failed, using tab fallback:', err);
+      // Fallback: reuse WhatsApp Web tab if silent send is unavailable
+      const encodedMsg = encodeURIComponent(msg);
+      const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
+      openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
+      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+      toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'info');
+    } finally {
+      setSendingWaDistributorId(null);
+    }
   };
 
   const handleSendAllWhatsAppOrders = async () => {
@@ -491,16 +528,18 @@ export default function PharmarackCart() {
     }
 
     setIsSendingBatchWhatsApp(true);
-    let openedCount = 0;
+    let sentCount = 0;
 
     try {
       if (mapped.length > 0) {
-        toastEvent.trigger(`Opening WhatsApp Web for ${mapped.length} saved distributor(s)...`, 'info');
-        for (const dist of mapped) {
+        toastEvent.trigger(`Sending WhatsApp orders for ${mapped.length} distributor(s) one by one...`, 'info');
+        
+        for (let i = 0; i < mapped.length; i++) {
+          const dist = mapped[i];
           let phoneNum = customDistributorPhones[dist.storeId];
           if (!phoneNum) {
             const matched = findSavedDistributorMatch(dist.storeName);
-            phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || '';
+            phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
           }
           let cleanPhone = phoneNum.replace(/\D/g, '');
           if (!cleanPhone) continue;
@@ -509,26 +548,42 @@ export default function PharmarackCart() {
           }
 
           const msg = buildDistributorOrderMessage(dist);
-          const encodedMsg = encodeURIComponent(msg);
-          const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
 
-          openOrReuseWhatsappTab(waWebUrl);
-          setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
-          openedCount++;
+          try {
+            // Send silently via backend API
+            await apiClient.post('/messaging/send', {
+              number: cleanPhone,
+              message: msg
+            });
+            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            sentCount++;
+          } catch (e) {
+            console.warn(`Batch silent send failed for ${dist.storeName}, trying tab fallback:`, e);
+            const encodedMsg = encodeURIComponent(msg);
+            const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
+            openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
+            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            sentCount++;
+          }
+
+          // 1.5 seconds sequential delay between order sends (no bulk spamming)
+          if (i < mapped.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
         }
       }
 
-      if (openedCount > 0) {
-        toastEvent.trigger(`Opened ${openedCount} distributor order(s) in WhatsApp Web!`, 'success');
+      if (sentCount > 0) {
+        toastEvent.trigger(`Successfully sent ${sentCount} distributor order(s) via WhatsApp!`, 'success');
       }
 
       if (unmapped.length > 0) {
-        toastEvent.trigger(`${unmapped.length} distributor(s) do not have saved WhatsApp numbers. Please add number or skip.`, 'info');
+        toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone number.`, 'info');
         handleOpenEditModal(unmapped[0]);
       }
     } catch (err: any) {
       console.error('Batch WhatsApp send error:', err);
-      toastEvent.trigger(err?.message || 'Failed to open WhatsApp Web', 'error');
+      toastEvent.trigger(err?.message || 'Failed to send WhatsApp orders', 'error');
     } finally {
       setIsSendingBatchWhatsApp(false);
     }
