@@ -428,12 +428,12 @@ app.listen(PORT, async () => {
         // WhatsApp Queue Worker (started always, lazy-loaded)
         import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
 
-        // Eagerly initialize WhatsApp client so session is restored before first send
+        // Eagerly initialize WhatsApp client immediately so session is active silently in background
         setTimeout(() => {
           import('./whatsappClient.js').then(m => m.initClient()).catch(err =>
             console.warn('[Boot] WhatsApp client eager-init skipped (non-fatal):', err?.message || err)
           );
-        }, 8000); // 8s delay to let other boot steps finish first
+        }, 2000);
 
         // Push notification event listener (lazy-loaded)
         import('./services/pushNotificationService.js').catch(err => console.error('[Boot] Push service load failed:', err));

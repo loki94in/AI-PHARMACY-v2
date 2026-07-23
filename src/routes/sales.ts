@@ -202,6 +202,14 @@ router.post('/', async (req, res) => {
       throw new Error('Failed to retrieve inserted invoice ID.');
     }
 
+    // Update customer credit balance automatically if payment medium is CREDIT or status is PENDING/UNPAID
+    if (customerId && (paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'PENDING' || paymentStatus?.toUpperCase() === 'UNPAID')) {
+      await db.run(
+        'UPDATE customers SET credit_balance = COALESCE(credit_balance, 0) + ?, credit_enabled = 1 WHERE id = ?',
+        [total, customerId]
+      );
+    }
+
     // Insert line items and update inventory
     for (const item of items) {
       let { inventory_id, quantity, unit_price, loose_qty = 0, medicine_name, batch_no, expiry_date, mrp } = item;

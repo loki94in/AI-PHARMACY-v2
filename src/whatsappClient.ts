@@ -221,9 +221,12 @@ export async function initClient(): Promise<WAClient> {
   if (clientInstance) return clientInstance;
   if (initializing) {
     return new Promise<WAClient>((resolve, reject) => {
+      let attempts = 0;
       const check = () => {
+        attempts++;
         if (clientInstance) resolve(clientInstance);
-        else if (!initializing) reject(new Error('Initialization failed'));
+        else if (!initializing && attempts > 10) reject(new Error('WhatsApp client initialization failed'));
+        else if (attempts > 300) reject(new Error('WhatsApp client initialization timed out (15s)'));
         else setTimeout(check, 50);
       };
       check();
@@ -259,7 +262,7 @@ export async function initClient(): Promise<WAClient> {
     ];
 
     const client = new Client({
-      authStrategy: new LocalAuth(),
+      authStrategy: new LocalAuth({ dataPath: path.resolve(process.cwd(), '.wwebjs_auth') }),
       puppeteer: execPath
         ? { executablePath: execPath, headless: true, args: puppeteerArgs }
         : { headless: true, args: puppeteerArgs }
@@ -693,7 +696,7 @@ export async function getChats(): Promise<any[]> {
         const likePattern = `%${last10}%`;
 
         // 1. Check customers
-        const cust = await db.get('SELECT name FROM customers WHERE mobile LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
+        const cust = await db.get('SELECT name FROM customers WHERE phone LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
         if (cust?.name) {
           r.name = cust.name;
           continue;
@@ -707,21 +710,28 @@ export async function getChats(): Promise<any[]> {
         }
 
         // 3. Check delivery boys
-        const deliv = await db.get('SELECT name FROM delivery_boys WHERE (whatsapp_number LIKE ? OR mobile LIKE ?) AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern, likePattern]);
+        const deliv = await db.get('SELECT name FROM delivery_boys WHERE whatsapp_number LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
         if (deliv?.name) {
           r.name = deliv.name;
           continue;
         }
 
         // 4. Check doctors
-        const doc = await db.get('SELECT name FROM doctors WHERE mobile LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
+        const doc = await db.get('SELECT name FROM doctors WHERE phone LIKE ? AND name IS NOT NULL AND name != "" LIMIT 1', [likePattern]);
         if (doc?.name) {
           r.name = doc.name;
           continue;
         }
 
-        // 5. Check sales invoices
-        const sale = await db.get('SELECT customer_name FROM sales_invoices WHERE customer_phone LIKE ? AND customer_name IS NOT NULL AND customer_name != "" LIMIT 1', [likePattern]);
+        // 5. Check sales invoices via joined customer record
+        const sale = await db.get(
+          `SELECT c.name as customer_name
+           FROM sales_invoices si
+           JOIN customers c ON si.customer_id = c.id
+           WHERE c.phone LIKE ? AND c.name IS NOT NULL AND c.name != ""
+           LIMIT 1`,
+          [likePattern]
+        );
         if (sale?.customer_name) {
           r.name = sale.customer_name;
         }
