@@ -106,7 +106,7 @@ export async function recordPlacedOrder(
   }
 }
 
-async function buildBatchMessage(db: any, orders: any[], isLate = false): Promise<string> {
+async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = false): Promise<{ distMessages: { distName: string; message: string }[]; summaryMessage: string }> {
   const today = todayIST();
   const [, mm, dd] = today.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -132,37 +132,42 @@ async function buildBatchMessage(db: any, orders: any[], isLate = false): Promis
     distPhonesMap[distName] = dRow?.phone || 'No phone set';
   }
 
-  const prefix = isLate ? `📅 TODAY ORDERS (LATE ADDITION) — ` : `📅 TODAY ORDERS SUMMARY — `;
-  let msg = `${prefix}${dateLabel}\n\n`;
-
+  const prefix = isLate ? `📅 TODAY ORDER (LATE ADDITION) — ` : `📅 TODAY DISTRIBUTOR ORDER — `;
+  const distMessages: { distName: string; message: string }[] = [];
   const summaryLines: string[] = [];
 
+  let distIndex = 1;
   for (const [distName, items] of Object.entries(grouped)) {
     const distPhone = distPhonesMap[distName] || 'N/A';
+    let msg = `${prefix}${dateLabel}\n\n`;
     msg += `🏬 *${distName.toUpperCase()}*\n`;
-    msg += `📞 Contact: ${distPhone}\n`;
-    msg += `📦 Medicines:\n`;
-    for (const item of items) {
+    msg += `📞 Contact: ${distPhone}\n\n`;
+    msg += `📦 *Medicines List:*\n`;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       const name = item.productName || item.name || 'Unknown';
       const qty = item.qty || item.Quantity || item.quantity || 1;
       const pack = item.packaging ? ` (${item.packaging})` : '';
-      msg += `  • ${name}${pack} — Qty: ${qty}\n`;
+      msg += `${i + 1}. *${name}*${pack} — Qty: *${qty}*\n`;
     }
-    msg += `📊 Items Count: ${items.length}\n\n`;
-    summaryLines.push(`• *${distName}*: ${distPhone} (${items.length} items)`);
+    msg += `\n📊 *Total Items:* ${items.length}`;
+
+    distMessages.push({ distName, message: msg.trim() });
+    summaryLines.push(`${distIndex}. *${distName}*: ${distPhone} (${items.length} items)`);
+    distIndex++;
   }
 
   const totalDists = Object.keys(grouped).length;
   const totalItems = Object.values(grouped).reduce((acc, items) => acc + items.length, 0);
 
-  msg += `==================================\n`;
-  msg += `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS*\n`;
-  msg += summaryLines.join('\n') + `\n\n`;
-  msg += `🚚 *Total Today Distributors:* ${totalDists}\n`;
-  msg += `📦 *Total Today Order Items:* ${totalItems}\n`;
-  msg += `==================================`;
+  let summaryMsg = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+  summaryMsg += summaryLines.join('\n') + `\n\n`;
+  summaryMsg += `==================================\n`;
+  summaryMsg += `🚚 *Total Today Distributors:* ${totalDists}\n`;
+  summaryMsg += `📦 *Total Today Order Items:* ${totalItems}\n`;
+  summaryMsg += `==================================`;
 
-  return msg.trim();
+  return { distMessages, summaryMessage: summaryMsg.trim() };
 }
 
 async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name: string; phone: string }[]> {
@@ -187,7 +192,7 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
          WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(name) = LOWER(?)) AND is_active = 1`,
         [`%${name}%`, name]
       );
-      const rawPhone = dbBoy?.whatsapp_number || '';
+      const rawPhone = dbBoy?.whatsapp_number || (person.phone || person.whatsapp || '');
       const phones = rawPhone
         .split(/[\s,;]+/)
         .map((n: string) => n.replace(/\D/g, ''))
@@ -200,13 +205,46 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
       }
     }
   }
+
+  // Fallback to all active delivery boys from database if order array had no explicit names
+  if (result.length === 0) {
+    const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
+    for (const boy of activeBoys) {
+      if (!boy.whatsapp_number) continue;
+      const clean = boy.whatsapp_number.replace(/\D/g, '');
+      if (clean.length >= 10) {
+        const formatted = clean.length === 10 ? `91${clean}` : clean;
+        result.push({ name: boy.name, phone: formatted });
+      }
+    }
+
+    // Fallback to settings delivery boy phone numbers if table was empty
+    if (result.length === 0) {
+      const setting1 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp'");
+      const setting2 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp_2'");
+      const setting3 = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
+
+      const numbers = [setting1?.value, setting2?.value, setting3?.value]
+        .filter(Boolean)
+        .map(num => String(num).replace(/\D/g, ''))
+        .filter(num => num.length >= 10);
+
+      const uniqueNumbers = Array.from(new Set(numbers));
+      for (let i = 0; i < uniqueNumbers.length; i++) {
+        const num = uniqueNumbers[i];
+        const formatted = num.length === 10 ? `91${num}` : num;
+        result.push({ name: `Delivery Staff ${i + 1}`, phone: formatted });
+      }
+    }
+  }
+
   return result;
 }
 
 async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): Promise<void> {
   if (orders.length === 0) return;
 
-  const message = await buildBatchMessage(db, orders, isLate);
+  const { distMessages, summaryMessage } = await buildSeparateDispatchMessages(db, orders, isLate);
   const boys = await resolveDeliveryBoyPhones(db, orders);
 
   if (boys.length === 0) {
@@ -219,21 +257,36 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
 
   for (const boy of boys) {
     try {
-      await sendMessage(boy.phone, undefined, message);
+      // 1. Send individual distributor order messages
+      for (const distObj of distMessages) {
+        await sendMessage(boy.phone, undefined, distObj.message);
+        await db.run(
+          `INSERT INTO automation_notifications
+             (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['pharmarack_daily_batch', boy.name, boy.phone, distObj.message, 'sent', `batch_${todayIST()}_${distObj.distName}`]
+        );
+        // Brief 1-2s gap between separate messages
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      // 2. Send separate final summary message
+      await sendMessage(boy.phone, undefined, summaryMessage);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['pharmarack_daily_batch', boy.name, boy.phone, message, 'sent', `batch_${todayIST()}`]
+        ['pharmarack_daily_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${todayIST()}`]
       );
-      console.log(`[PharmarackBatch] Sent to ${boy.name} (${boy.phone})`);
+
+      console.log(`[PharmarackBatch] Sent ${distMessages.length} separate distributor messages + 1 summary message to ${boy.name} (${boy.phone})`);
     } catch (err: any) {
       console.error(`[PharmarackBatch] Failed to send to ${boy.name}:`, err.message);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ['pharmarack_daily_batch', boy.name, boy.phone, message, 'failed', err.message, `batch_${todayIST()}`]
+        ['pharmarack_daily_batch', boy.name, boy.phone, 'Failed sending batch', 'failed', err.message, `batch_${todayIST()}`]
       );
     }
   }
