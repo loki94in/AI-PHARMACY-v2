@@ -14,6 +14,30 @@ router.get('/distributors', async (req, res) => {
   }
 });
 
+// Update distributor details including preferred email invoice format
+router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, phone, email, preferred_file_format, gstin, address } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(
+      `UPDATE distributors 
+       SET name = COALESCE(?, name),
+           phone = COALESCE(?, phone),
+           email = COALESCE(?, email),
+           preferred_file_format = COALESCE(?, preferred_file_format),
+           gstin = COALESCE(?, gstin),
+           address = COALESCE(?, address)
+       WHERE id = ?`,
+      [name, phone, email, preferred_file_format, gstin, address, id]
+    );
+    res.json({ success: true, message: 'Distributor details updated successfully' });
+  } catch (error) {
+    console.error('Failed to update distributor:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/purchases', async (req, res) => {
   const { distributor, invoice_no, total_amount } = req.body;
   try {

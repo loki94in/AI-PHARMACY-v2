@@ -463,8 +463,15 @@ export async function initClient(): Promise<WAClient> {
         // Route inbound customer messages through the existing WhatsApp intent service
         if (!msg.fromMe) {
           import('./services/whatsappIntentService.js')
-            .then(({ whatsappIntentService }) => whatsappIntentService.handleInbound(msg))
-            .catch(err => console.error('[WhatsApp] Intent service error:', err));
+            .then(mod => {
+              const handler = mod.handleInbound || mod.whatsappIntentService?.handleInbound || mod.default?.handleInbound;
+              if (handler) {
+                handler(msg).catch(err => console.error('[WhatsApp] Intent service execution error:', err));
+              } else {
+                console.error('[WhatsApp] Could not resolve handleInbound from whatsappIntentService module.');
+              }
+            })
+            .catch(err => console.error('[WhatsApp] Intent service import error:', err));
         }
       } catch (err) {
         console.error('[WhatsApp] Error in message_create event handler:', err);
@@ -591,6 +598,11 @@ export async function sendMessage(
       chatId = `${cleanPhone}@c.us`;
     }
     const cleanPhone = chatId.split('@')[0];
+    const rawCleanDigits = cleanPhone.replace(/\D/g, '');
+    if (!rawCleanDigits || rawCleanDigits.length < 10) {
+      console.warn(`[WhatsApp] Invalid phone number passed to sendMessage: "${recipient}" (${rawCleanDigits.length} digits). Skipping.`);
+      throw new Error(`Invalid phone number: "${recipient}" (must contain at least 10 digits).`);
+    }
 
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -613,14 +625,33 @@ export async function sendMessage(
         // update the DB record. We also write a provisional DB record here so the chat
         // list and thread panel update immediately without waiting for the event.
         const doSend = async (targetClient: WAClient) => {
+          let targetChatId = chatId;
+
+          // Attempt to resolve contact & LID via getNumberId to populate Store and prevent "No LID for user" errors
+          if (!chatId.includes('@g.us') && !chatId.includes('@broadcast') && !chatId.includes('-')) {
+            try {
+              const numberDetails = await targetClient.getNumberId(cleanPhone);
+              if (numberDetails && numberDetails._serialized) {
+                targetChatId = numberDetails._serialized;
+              } else {
+                throw new Error(`Phone number ${cleanPhone} is not registered on WhatsApp.`);
+              }
+            } catch (numErr: any) {
+              if (numErr.message?.includes('not registered')) {
+                throw numErr;
+              }
+              console.warn(`[WhatsApp] getNumberId check skipped/failed for ${cleanPhone}, trying direct JID ${chatId}:`, numErr?.message || numErr);
+            }
+          }
+
           if (file && file.mimetype && file.data) {
             const media = new MessageMedia(file.mimetype, file.data, file.filename || 'file');
-            await targetClient.sendMessage(chatId, media, { caption: caption ?? '' });
+            await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
           } else if (mediaPath) {
             const media = MessageMedia.fromFilePath(mediaPath);
-            await targetClient.sendMessage(chatId, media, { caption: caption ?? '' });
+            await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
           } else {
-            await targetClient.sendMessage(chatId, caption ?? '');
+            await targetClient.sendMessage(targetChatId, caption ?? '');
           }
         };
 
@@ -788,6 +819,8 @@ async function drainSendQueue(): Promise<void> {
         console.log(`[WhatsApp] Queued message sent to ${row.number}`);
       } catch (err: any) {
         console.warn(`[WhatsApp] Failed to send queued message to ${row.number}:`, err?.message);
+        // Mark failed queue items so bad numbers do not re-try endlessly
+        await db.run('UPDATE whatsapp_send_queue SET sent_at = -1 WHERE id = ?', [row.id]);
       }
     }
   } catch (err: any) {

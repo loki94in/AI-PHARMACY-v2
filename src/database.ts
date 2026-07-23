@@ -296,6 +296,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE distributors ADD COLUMN dl_no TEXT`,
     `ALTER TABLE distributors ADD COLUMN phone TEXT`,
     `ALTER TABLE distributors ADD COLUMN state_code TEXT`,
+    `ALTER TABLE distributors ADD COLUMN preferred_file_format TEXT DEFAULT NULL`,
     `ALTER TABLE doctors ADD COLUMN send_daily_summary INTEGER DEFAULT 0`,
     // Customers extra columns
     `ALTER TABLE customers ADD COLUMN legacy_id TEXT`,

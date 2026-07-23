@@ -41,13 +41,22 @@ async function runScan(item: QueueItem): Promise<void> {
     );
 
     // Broadcast to admin UI
-    eventService.broadcast('ocr_scan_complete', {
+    const scanPayload = {
       msgId: item.msgId,
       phone: item.meta.phone,
       chatId: item.meta.chatId,
       messageBody: item.meta.messageBody,
       ocrResult: result
-    });
+    };
+    eventService.broadcast('ocr_scan_complete', scanPayload);
+
+    // Directly trigger handleOcrComplete so intent matching & catalog lookup always run
+    try {
+      const { handleOcrComplete } = await import('./whatsappIntentService.js');
+      handleOcrComplete(scanPayload);
+    } catch (ocrErr) {
+      console.warn('[OCR Queue] Direct handleOcrComplete invocation failed:', ocrErr);
+    }
 
     console.log(`[OCR Queue] Scan complete for ${item.msgId}: "${result?.text?.substring(0, 60)}..."`);
   } catch (err) {

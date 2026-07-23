@@ -41,11 +41,17 @@ let cachedDeliveryBoys: DeliveryBoy[] | null = null;
 const Dispatch = () => {
   const [orders, setOrders] = useState<DispatchOrder[]>(cachedOrders || []);
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>(cachedDeliveryBoys || []);
+  const [allBoys, setAllBoys] = useState<DeliveryBoy[]>([]);
   const [loading, setLoading] = useState(!cachedOrders);
   const [showModal, setShowModal] = useState(false);
+  const [showBoysModal, setShowBoysModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
+  // New delivery boy form states
+  const [newBoyName, setNewBoyName] = useState('');
+  const [newBoyPhone, setNewBoyPhone] = useState('');
+  const [addingBoy, setAddingBoy] = useState(false);
 
   const showNotif = (msg: string, type: 'success' | 'error' = 'success') => {
     toastEvent.trigger(msg, type, '/dispatch');
@@ -59,11 +65,13 @@ const Dispatch = () => {
         api.getDeliveryBoys(),
       ]);
       const ordersArr = Array.isArray(ordersData) ? ordersData : [];
-      const boysArr = Array.isArray(boysData) ? boysData.filter((b: DeliveryBoy) => b.is_active) : [];
+      const rawBoys = Array.isArray(boysData) ? boysData : [];
+      const activeBoysArr = rawBoys.filter((b: DeliveryBoy) => b.is_active);
       cachedOrders = ordersArr;
-      cachedDeliveryBoys = boysArr;
+      cachedDeliveryBoys = activeBoysArr;
       setOrders(ordersArr);
-      setDeliveryBoys(boysArr);
+      setAllBoys(rawBoys);
+      setDeliveryBoys(activeBoysArr);
     } catch (err) {
       console.error('Dispatch fetch error:', err);
     } finally {
@@ -72,6 +80,42 @@ const Dispatch = () => {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const handleAddDeliveryBoy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBoyName.trim()) { showNotif('Delivery boy name is required', 'error'); return; }
+    setAddingBoy(true);
+    try {
+      await api.addDeliveryBoy({
+        name: newBoyName.trim(),
+        whatsapp_number: newBoyPhone.trim() || undefined,
+        is_active: 1,
+      });
+      showNotif(`Delivery boy "${newBoyName}" added successfully!`);
+      setNewBoyName('');
+      setNewBoyPhone('');
+      fetchAll();
+    } catch { showNotif('Failed to add delivery boy', 'error'); }
+    finally { setAddingBoy(false); }
+  };
+
+  const handleToggleBoyActive = async (boy: DeliveryBoy) => {
+    try {
+      const newActive = boy.is_active ? 0 : 1;
+      await api.updateDeliveryBoy(boy.id, { is_active: newActive });
+      showNotif(`Delivery boy "${boy.name}" ${newActive ? 'activated' : 'deactivated'}`);
+      fetchAll();
+    } catch { showNotif('Failed to update status', 'error'); }
+  };
+
+  const handleDeleteBoy = async (id: number, name: string) => {
+    if (!confirm(`Delete delivery boy "${name}"?`)) return;
+    try {
+      await api.deleteDeliveryBoy(id);
+      showNotif(`Delivery boy "${name}" deleted`);
+      fetchAll();
+    } catch { showNotif('Failed to delete delivery boy', 'error'); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,11 +166,17 @@ const Dispatch = () => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-extrabold tracking-tight mb-1">Dispatch & Delivery</h2>
-          <p className="text-muted text-sm">Manage and track home delivery assignments.</p>
+          <p className="text-muted text-sm">Manage and track home delivery assignments & delivery personnel.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={fetchAll} className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 text-muted">
+          <button onClick={fetchAll} className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 text-muted" title="Refresh">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={() => setShowBoysModal(true)}
+            className="premium-btn bg-sky/20 border border-sky/30 text-sky hover:bg-sky/30 text-xs flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition-all"
+          >
+            <User size={15} /> Delivery Boys ({allBoys.length})
           </button>
           <button
             onClick={() => setShowModal(true)}
@@ -307,6 +357,107 @@ const Dispatch = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Delivery Boys Management Modal */}
+      {showBoysModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+          <div className="glass-panel p-6 w-full max-w-lg space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between shrink-0 border-b border-glass-border pb-3">
+              <h3 className="font-bold flex items-center gap-2 text-sm text-text">
+                <User size={18} className="text-sky" /> Delivery Boys Management
+              </h3>
+              <button onClick={() => setShowBoysModal(false)} className="text-muted hover:text-white transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Add New Delivery Boy Form */}
+            <form onSubmit={handleAddDeliveryBoy} className="p-3 bg-bg2 rounded-xl border border-glass-border space-y-2 shrink-0">
+              <p className="text-xs font-bold text-sky uppercase tracking-wider">Add New Delivery Boy</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Delivery Boy Name *"
+                  className="premium-input w-full text-xs"
+                  value={newBoyName}
+                  onChange={e => setNewBoyName(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="WhatsApp Phone (e.g. 9876543210)"
+                  className="premium-input w-full text-xs font-mono"
+                  value={newBoyPhone}
+                  onChange={e => setNewBoyPhone(e.target.value)}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={addingBoy}
+                className="w-full premium-btn bg-sky hover:bg-sky-400 text-white text-xs font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+              >
+                <Plus size={14} /> {addingBoy ? 'Adding...' : 'Add Delivery Boy'}
+              </button>
+            </form>
+
+            {/* Delivery Boys List */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              <p className="text-xs font-bold text-muted uppercase tracking-wider">All Delivery Personnel ({allBoys.length})</p>
+              {allBoys.length === 0 ? (
+                <div className="p-6 text-center text-muted text-xs border border-dashed border-glass-border rounded-xl">
+                  No delivery personnel added yet. Use the form above to add one.
+                </div>
+              ) : (
+                allBoys.map(boy => (
+                  <div key={boy.id} className="flex items-center justify-between p-3 rounded-xl bg-bg border border-glass-border hover:border-sky/40 transition-all">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-text">{boy.name}</span>
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                          boy.is_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                        }`}>
+                          {boy.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-mono text-muted">
+                        📞 {boy.whatsapp_number || 'No phone set'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleToggleBoyActive(boy)}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                          boy.is_active
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                        }`}
+                      >
+                        {boy.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteBoy(boy.id, boy.name)}
+                        className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 border border-transparent hover:border-rose-500/30 transition-all"
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-2 shrink-0 border-t border-glass-border flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBoysModal(false)}
+                className="premium-btn bg-white/5 border border-glass-border text-xs text-muted hover:bg-white/10 px-4 py-2"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>,
         document.body

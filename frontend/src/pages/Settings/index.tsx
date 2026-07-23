@@ -92,6 +92,7 @@ interface SettingsData {
   monthlyReportChartStyle: string;
   ownerWhatsappNumber: string;
   monthlyReportTemplateTheme: string;
+  distributorInvoiceFileFormat: string;
 }
 
 const Settings = () => {
@@ -149,6 +150,7 @@ const Settings = () => {
     monthlyReportChartStyle: 'standard',
     ownerWhatsappNumber: '',
     monthlyReportTemplateTheme: 'executive',
+    distributorInvoiceFileFormat: 'CSV',
   });
 
   // Transient UI states
@@ -232,6 +234,7 @@ const Settings = () => {
   const setMonthlyReportChartStyle = (val: string | ((p: string) => string)) => updateSetting('monthlyReportChartStyle', val);
   const setOwnerWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('ownerWhatsappNumber', val);
   const setMonthlyReportTemplateTheme = (val: string | ((p: string) => string)) => updateSetting('monthlyReportTemplateTheme', val);
+  const setDistributorInvoiceFileFormat = (val: string | ((p: string) => string)) => updateSetting('distributorInvoiceFileFormat', val);
 
   // Transient state for Monthly Report Preview and manual triggers
   const [reportPreview, setReportPreview] = useState<{ formattedText: string; periodLabel: string; targetPhone: string } | null>(null);
@@ -381,6 +384,7 @@ const Settings = () => {
     monthlyReportChartStyle,
     ownerWhatsappNumber,
     monthlyReportTemplateTheme,
+    distributorInvoiceFileFormat,
   } = settings;
 
   const handleToggleDesktopNotifications = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -463,6 +467,7 @@ const Settings = () => {
         monthlyReportChartStyle: serverSettings.monthly_report_chart_style || 'standard',
         ownerWhatsappNumber: serverSettings.owner_whatsapp_number || '',
         monthlyReportTemplateTheme: serverSettings.monthly_report_template_theme || 'executive',
+        distributorInvoiceFileFormat: serverSettings.distributor_invoice_file_format || 'CSV',
       }));
     }
   }, [serverSettings]);
@@ -532,6 +537,7 @@ const Settings = () => {
       low_stock_threshold: lowStockThreshold.toString(),
       expiry_alert_days: expiryAlertDays.toString(),
       dinesh_whatsapp_number: dineshWhatsappNumber,
+      distributor_invoice_file_format: distributorInvoiceFileFormat,
       monthly_report_enabled: monthlyReportEnabled.toString(),
       monthly_report_phone: monthlyReportPhone,
       monthly_report_delivery_format: monthlyReportDeliveryFormat,
@@ -1160,6 +1166,40 @@ const Settings = () => {
               onChange={(e) => setDineshWhatsappNumber(e.target.value)}
             />
             <p className="text-[10px] text-muted">Daily morning notification (at 9:00 AM) summarizing missing bills or bounced medicines will be sent to this number.</p>
+          </div>
+
+          <div className="space-y-2 md:col-span-2 border-t border-border/50 pt-4 mt-2">
+            <label htmlFor="distributorInvoiceFileFormat" className="text-xs font-bold text-muted uppercase tracking-wider flex items-center justify-between">
+              <span>Preferred Distributor Email Invoice File Formats</span>
+              <span className="text-[10px] text-emerald-400 font-normal">Included in WhatsApp Dispatch Templates</span>
+            </label>
+            <div className="flex flex-wrap gap-2 mb-1">
+              {['CSV', 'CSV Only', 'CSV & PDF', 'CSV, Excel (.xlsx), PDF'].map((fmt) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => setDistributorInvoiceFileFormat(fmt)}
+                  className={`text-[11px] px-2.5 py-1 rounded border transition-all ${
+                    distributorInvoiceFileFormat === fmt
+                      ? 'bg-sky/20 border-sky text-sky font-semibold shadow-sm'
+                      : 'bg-bg2 border-border text-muted hover:text-text'
+                  }`}
+                >
+                  {fmt}
+                </button>
+              ))}
+            </div>
+            <input
+              id="distributorInvoiceFileFormat"
+              type="text"
+              className="premium-input w-full bg-bg border border-border"
+              placeholder="e.g. CSV or CSV (.csv)"
+              value={distributorInvoiceFileFormat}
+              onChange={(e) => setDistributorInvoiceFileFormat(e.target.value)}
+            />
+            <p className="text-[10px] text-muted">
+              Distributors & delivery boys receive this format requirement in daily WhatsApp orders so they attach supported invoice copies (PDF, Excel, CSV) when emailing bills.
+            </p>
           </div>
         </div>
 

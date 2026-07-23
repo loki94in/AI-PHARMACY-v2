@@ -122,27 +122,50 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
     } catch { /* skip malformed */ }
   }
 
-  // Fetch distributor phone numbers from DB
+  // Fetch distributor phone numbers and per-distributor preferred file format from DB
   const distPhonesMap: Record<string, string> = {};
+  const distFormatsMap: Record<string, string> = {};
   for (const distName of Object.keys(grouped)) {
     const dRow = await db.get(
-      `SELECT phone FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
+      `SELECT phone, preferred_file_format FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
       [distName, `%${distName}%`]
     );
     distPhonesMap[distName] = dRow?.phone || 'No phone set';
+    if (dRow?.preferred_file_format) {
+      distFormatsMap[distName] = dRow.preferred_file_format;
+    }
   }
+
+  // Fetch global default preferred invoice format and pharmacy email from app_settings
+  const globalFormatRow = await db.get("SELECT value FROM app_settings WHERE key = 'distributor_invoice_file_format'");
+  const globalFormat = globalFormatRow?.value || 'CSV';
+  const emailRow = await db.get("SELECT value FROM app_settings WHERE key = 'email'");
+  const pharmacyEmail = emailRow?.value || '';
 
   const prefix = isLate ? `📅 TODAY ORDER (LATE ADDITION) — ` : `📅 TODAY DISTRIBUTOR ORDER — `;
   const distMessages: { distName: string; message: string }[] = [];
   const summaryLines: string[] = [];
 
+  // Resolve assigned delivery boys for today's dispatch batch
+  let deliveryBoysStr = '';
+  try {
+    const boys = await resolveDeliveryBoyPhones(db, orders);
+    if (boys.length > 0) {
+      deliveryBoysStr = boys.map(b => `${b.name} (${b.phone.replace(/^91/, '')})`).join(', ');
+    }
+  } catch { /* skip */ }
+
   let distIndex = 1;
   for (const [distName, items] of Object.entries(grouped)) {
     const distPhone = distPhonesMap[distName] || 'N/A';
+    const distFormat = distFormatsMap[distName] || globalFormat;
     let msg = `${prefix}${dateLabel}\n\n`;
     msg += `🏬 *${distName.toUpperCase()}*\n`;
-    msg += `📞 Contact: ${distPhone}\n\n`;
-    msg += `📦 *Medicines List:*\n`;
+    msg += `📞 Contact: ${distPhone}\n`;
+    if (deliveryBoysStr) {
+      msg += `🚚 *Delivery Boy / Pickup Person:* ${deliveryBoysStr}\n`;
+    }
+    msg += `\n📦 *Medicines List:*\n`;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const name = item.productName || item.name || 'Unknown';
@@ -150,7 +173,11 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
       const pack = item.packaging ? ` (${item.packaging})` : '';
       msg += `${i + 1}. *${name}*${pack} — Qty: *${qty}*\n`;
     }
-    msg += `\n📊 *Total Items:* ${items.length}`;
+    msg += `\n📊 *Total Items:* ${items.length}\n`;
+    msg += `📄 *Preferred Email Invoice Format:* ${distFormat}`;
+    if (pharmacyEmail) {
+      msg += `\n📩 *Please email bill copies to:* ${pharmacyEmail}`;
+    }
 
     distMessages.push({ distName, message: msg.trim() });
     summaryLines.push(`${distIndex}. *${distName}*: ${distPhone} (${items.length} items)`);

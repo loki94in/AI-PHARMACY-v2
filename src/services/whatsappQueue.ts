@@ -68,11 +68,12 @@ export class WhatsappQueue {
           // Delete on success
           await db.run('DELETE FROM pending_whatsapp_jobs WHERE id = ?', [job.id]);
           console.log(`Successfully sent queued WhatsApp bill for invoice ${job.invoice_id}`);
-        } catch (jobErr) {
-          console.error(`Failed to send queued WhatsApp job ${job.id}:`, jobErr);
+        } catch (jobErr: any) {
+          console.error(`Failed to send queued WhatsApp job ${job.id}:`, jobErr?.message || jobErr);
           
-          if (job.retries >= 5) {
-            console.error(`Max retries reached for queued WhatsApp job ${job.id}. Deleting job to prevent lockups.`);
+          const isInvalidNumber = jobErr?.message?.includes('Invalid phone number') || jobErr?.message?.includes('not registered') || jobErr?.message?.includes('No LID');
+          if (job.retries >= 5 || isInvalidNumber) {
+            console.error(`Max retries reached or invalid number for queued WhatsApp job ${job.id}. Deleting job to prevent lockups.`);
             await db.run('DELETE FROM pending_whatsapp_jobs WHERE id = ?', [job.id]);
           } else {
             await db.run('UPDATE pending_whatsapp_jobs SET retries = retries + 1 WHERE id = ?', [job.id]);

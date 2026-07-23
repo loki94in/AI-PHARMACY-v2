@@ -466,14 +466,26 @@ async function searchAndBroadcast(opts: {
  */
 export function handleOcrComplete(data: any): void {
   const { phone, chatId, messageBody, ocrResult, msgId } = data;
-  if (!ocrResult?.medicineInfo?.potentialName) return;
+  if (!ocrResult) return;
 
-  const medicineName = ocrResult.medicineInfo.potentialName;
-  const dosageForm = ocrResult.medicineInfo.dosageForm;
-  const mrp = ocrResult.medicineInfo.mrp;
+  let medicineName = ocrResult.medicineInfo?.potentialName;
+  const dosageForm = ocrResult.medicineInfo?.dosageForm;
+  const mrp = ocrResult.medicineInfo?.mrp;
 
   // Parse any text from the message body too
   const textParsed = parseMessage(messageBody || '');
+
+  // Fallback: If OCR potentialName is empty, attempt to extract candidate medicine lines from raw OCR text
+  if (!medicineName && ocrResult.text) {
+    const lines = String(ocrResult.text)
+      .split(/[\r\n]+/)
+      .map(l => l.trim())
+      .filter(l => l.length >= 3);
+    const candidate = lines.find(l => isPlausibleMedicineName(l)) || lines[0] || '';
+    if (candidate) {
+      medicineName = candidate;
+    }
+  }
 
   // Use OCR medicine name, but prefer text-parsed name if OCR is weak.
   // The OCR fallback can be a raw first line (batch number, price) — apply the
@@ -541,4 +553,5 @@ export function handleOcrComplete(data: any): void {
   });
 }
 
-export const whatsappIntentService = { handleInbound, handleOcrComplete };
+export const whatsappIntentService = { handleInbound, handleOcrComplete, searchAndBroadcast };
+export default whatsappIntentService;
