@@ -168,6 +168,44 @@ const Settings = () => {
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  // Session Refresh Audit Logs state
+  const [sessionLogs, setSessionLogs] = useState<{ id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [reauthLoading, setReauthLoading] = useState(false);
+
+  const fetchSessionLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const res = await api.getSessionRefreshLogs();
+      if (res && res.success && Array.isArray(res.logs)) {
+        setSessionLogs(res.logs);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch session refresh logs:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSessionLogs();
+  }, []);
+
+  const handleManualReauth = async () => {
+    setReauthLoading(true);
+    try {
+      const res = await api.triggerManualReauth();
+      if (res && res.success) {
+        toastEvent.trigger('Manual session re-authentication initiated. Refreshing token...', 'info');
+        setTimeout(fetchSessionLogs, 3000);
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.message || 'Failed to trigger re-auth', 'error');
+    } finally {
+      setReauthLoading(false);
+    }
+  };
+
   // Generic helper to update settings fields
   const updateSetting = <K extends keyof SettingsData>(key: K, value: SettingsData[K] | ((prevVal: SettingsData[K]) => SettingsData[K])) => {
     setSettings(prev => ({
@@ -1035,6 +1073,107 @@ const Settings = () => {
             <Save size={16} />
             Save Details
           </button>
+        </div>
+      </div>
+
+      {/* ─── Pharmarack Live Cart & Session Refresh History (60 Days) ─── */}
+      <div className="glass-panel p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-glass-border pb-4">
+          <div>
+            <h3 className="font-bold text-base flex items-center gap-2 text-text">
+              <History size={18} className="text-emerald-400" />
+              Pharmarack Session & Randomized Refresh History (60 Days)
+            </h3>
+            <p className="text-xs text-muted mt-1">
+              Refreshes automatically at a randomized interval between <strong>40 and 60 minutes</strong> (never a fixed time). Retains up to 60 days of audit logs.
+            </p>
+          </div>
+          <button
+            onClick={handleManualReauth}
+            disabled={reauthLoading}
+            className="premium-btn bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={reauthLoading ? "animate-spin" : ""} />
+            <span>{reauthLoading ? 'Triggering...' : 'Refresh Session Now'}</span>
+          </button>
+        </div>
+
+        {/* Stats Summary row */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Refresh Strategy</span>
+            <span className="text-sm font-black text-emerald-400">Randomized (40-60 min)</span>
+          </div>
+          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Logs Retained (60 Days)</span>
+            <span className="text-sm font-black text-text">{sessionLogs.length} Records</span>
+          </div>
+          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Last Attempt</span>
+            <span className="text-sm font-bold text-text truncate">
+              {sessionLogs.length > 0 ? new Date(sessionLogs[0].timestamp).toLocaleString() : 'No attempts logged'}
+            </span>
+          </div>
+        </div>
+
+        {/* Audit Log Table */}
+        <div className="overflow-hidden rounded-xl border border-glass-border bg-bg/40">
+          <div className="max-h-64 overflow-y-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-bg2 border-b border-glass-border text-muted font-bold uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                <tr>
+                  <th className="py-2.5 px-4">Date & Time</th>
+                  <th className="py-2.5 px-4">Trigger Type</th>
+                  <th className="py-2.5 px-4">Next Window</th>
+                  <th className="py-2.5 px-4">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-glass-border/40 font-medium">
+                {logsLoading ? (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-muted">Loading audit log...</td>
+                  </tr>
+                ) : sessionLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-muted">No session refresh attempts logged in the last 60 days.</td>
+                  </tr>
+                ) : (
+                  sessionLogs.map(log => (
+                    <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="py-2.5 px-4 whitespace-nowrap text-text/90">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 px-4 capitalize">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                          log.trigger_type === 'manual_reauth'
+                            ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                            : log.trigger_type === 'monthly_autosync'
+                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        }`}>
+                          {log.trigger_type === 'background_random' ? 'Random (40-60m)' : log.trigger_type.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-muted">
+                        {log.next_scheduled_minutes ? `${log.next_scheduled_minutes} mins` : 'Immediate'}
+                      </td>
+                      <td className="py-2.5 px-4">
+                        {log.status === 'success' ? (
+                          <span className="text-emerald-400 font-bold flex items-center gap-1">
+                            ✓ Success
+                          </span>
+                        ) : (
+                          <span className="text-rose-400 font-bold flex items-center gap-1" title={log.error_message || 'Failed'}>
+                            ⚠ Failed ({log.error_message || 'Error'})
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

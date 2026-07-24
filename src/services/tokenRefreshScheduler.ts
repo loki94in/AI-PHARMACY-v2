@@ -107,40 +107,86 @@ export class TokenRefreshScheduler {
     return TokenRefreshScheduler.instance;
   }
 
+  private timeoutId: NodeJS.Timeout | null = null;
+  private nextScheduledMinutes: number | null = null;
+
+  public async logSessionRefresh(
+    triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot',
+    nextScheduledMinutes: number | null,
+    status: 'success' | 'failed',
+    errorMessage: string | null = null
+  ) {
+    try {
+      const db = await dbManager.getConnection();
+      const now = Date.now();
+      await db.run(
+        `INSERT INTO session_refresh_logs (timestamp, trigger_type, next_scheduled_minutes, status, error_message)
+         VALUES (?, ?, ?, ?, ?)`,
+        [now, triggerType, nextScheduledMinutes, status, errorMessage]
+      );
+
+      // Auto-prune logs older than 60 days
+      const sixtyDaysAgo = now - 60 * 86400 * 1000;
+      await db.run("DELETE FROM session_refresh_logs WHERE timestamp < ?", [sixtyDaysAgo]);
+    } catch (err: any) {
+      console.warn('[TokenRefreshScheduler] Failed to record refresh log:', err.message);
+    }
+  }
+
   public getStatus() {
     return {
       isRefreshing: this.isRefreshing,
       isLoginWindowActive: this.isLoginWindowActive,
       lastCapturedAt: this.lastCapturedAt,
-      lastError: this.lastError
+      lastError: this.lastError,
+      nextScheduledMinutes: this.nextScheduledMinutes
     };
   }
 
-  public async triggerImmediateCheck() {
-    return this.refreshIfNeeded();
+  public async triggerImmediateCheck(triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot' = 'manual_reauth') {
+    return this.refreshIfNeeded(triggerType);
   }
 
   public start() {
-    if (this.intervalId) return;
-    console.log('[TokenRefreshScheduler] Starting background token refresh job (every 20 minutes)...');
-    // Run immediately on boot
-    this.refreshIfNeeded();
-    // Then every 20 minutes
-    this.intervalId = setInterval(() => {
-      this.refreshIfNeeded();
-    }, 20 * 60 * 1000);
+    if (this.timeoutId) return;
+    console.log('[TokenRefreshScheduler] Starting randomized background token refresh scheduler (40-60 min window)...');
+    // Run initial check on boot
+    this.refreshIfNeeded('boot');
+    // Schedule next randomized execution
+    this.scheduleNextRun();
+  }
+
+  private scheduleNextRun() {
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+    // Pick a random interval between 40 and 60 minutes
+    const randomMinutes = Math.floor(Math.random() * 21) + 40;
+    this.nextScheduledMinutes = randomMinutes;
+    const delayMs = randomMinutes * 60 * 1000;
+
+    console.log(`[TokenRefreshScheduler] Next background session refresh scheduled in ${randomMinutes} minutes.`);
+
+    this.timeoutId = setTimeout(() => {
+      this.refreshIfNeeded('background_random');
+      this.scheduleNextRun();
+    }, delayMs);
   }
 
   public stop() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
     }
   }
 
-  public async refreshIfNeeded() {
+  public async refreshIfNeeded(triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot' = 'background_random') {
     if (this.isRefreshing || this.isLoginWindowActive) return;
     this.isRefreshing = true;
+
+    let resToken: string | null = null;
+    let errorMsg: string | null = null;
 
     try {
       const { getBackendFetchMode } = await import('./dataFetchControl.js');
@@ -160,18 +206,24 @@ export class TokenRefreshScheduler {
       const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
       const token = tokenRow ? tokenRow.value : '';
 
-      if (!token) {
+      if (!token && triggerType !== 'manual_reauth') {
         console.log('[TokenRefreshScheduler] No token found in app_settings. Skipping auto-refresh.');
         this.isRefreshing = false;
         return;
       }
 
-      console.log('[TokenRefreshScheduler] Running scheduled token refresh check...');
-      await this.executeRefresh();
+      console.log(`[TokenRefreshScheduler] Running token refresh check (trigger=${triggerType})...`);
+      resToken = await this.executeRefresh();
+      if (!resToken) {
+        errorMsg = this.lastError || 'Token capture failed';
+      }
     } catch (err: any) {
       console.error('[TokenRefreshScheduler] Error during refresh check:', err.message);
+      errorMsg = err.message || 'Refresh error';
     } finally {
       this.isRefreshing = false;
+      const status = resToken ? 'success' : 'failed';
+      await this.logSessionRefresh(triggerType, this.nextScheduledMinutes, status, errorMsg);
     }
   }
 

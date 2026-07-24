@@ -721,4 +721,11 @@ export const api = {
       whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number; hasQr: boolean };
     };
   }>('/system/services-status').then(res => res.data),
+
+  // Pharmarack Session Logs & Re-auth
+  getSessionRefreshLogs: () => apiClient.get<{
+    success: boolean;
+    logs: { id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[];
+  }>('/pharmarack/session-logs').then(res => res.data),
+  triggerManualReauth: () => apiClient.post<{ success: boolean; message: string }>('/pharmarack/trigger-reauth').then(res => res.data),
 };

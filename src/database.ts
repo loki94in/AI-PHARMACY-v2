@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 17;
+const CURRENT_SCHEMA_VERSION = 18;
 
 /**
  * Ensure required SQLite tables exist.
@@ -524,6 +524,16 @@ export async function ensureSchema(dbPath: string) {
       schedule_type TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS session_refresh_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      trigger_type TEXT NOT NULL,
+      next_scheduled_minutes INTEGER,
+      status TEXT NOT NULL,
+      error_message TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_refresh_logs_ts ON session_refresh_logs(timestamp);
 
     -- Migration: Purchase line items
     CREATE TABLE IF NOT EXISTS purchase_items (

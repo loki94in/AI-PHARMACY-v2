@@ -1837,5 +1837,37 @@ router.get('/auto-refill-suggestions', async (_req, res) => {
   }
 });
 
+// GET /api/pharmarack/session-logs
+router.get('/session-logs', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const sixtyDaysAgo = Date.now() - 60 * 86400 * 1000;
+    const logs = await db.all(
+      `SELECT id, timestamp, trigger_type, next_scheduled_minutes, status, error_message
+       FROM session_refresh_logs
+       WHERE timestamp >= ?
+       ORDER BY timestamp DESC
+       LIMIT 100`,
+      [sixtyDaysAgo]
+    );
+    res.json({ success: true, logs });
+  } catch (err: any) {
+    console.error('Error fetching session refresh logs:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/pharmarack/trigger-reauth
+router.post('/trigger-reauth', async (_req, res) => {
+  try {
+    // Run background headless login trigger asynchronously
+    tokenRefreshScheduler.triggerImmediateCheck('manual_reauth').catch(() => {});
+    res.json({ success: true, message: 'Manual re-authentication refresh initiated.' });
+  } catch (err: any) {
+    console.error('Error triggering re-auth:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
 
