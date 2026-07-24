@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown } from 'lucide-react';
+import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown, Send } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 
@@ -79,7 +79,18 @@ const Dispatch = () => {
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  // Edit delivery boy state
+  const [editingBoyId, setEditingBoyId] = useState<number | null>(null);
+  const [editBoyName, setEditBoyName] = useState('');
+  const [editBoyPhone, setEditBoyPhone] = useState('');
+  const [savingBoyEdit, setSavingBoyEdit] = useState(false);
+
+  useEffect(() => {
+    fetchAll();
+    const handlePhoneUpdate = () => fetchAll();
+    window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
+    return () => window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
+  }, [fetchAll]);
 
   const handleAddDeliveryBoy = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,9 +105,26 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${newBoyName}" added successfully!`);
       setNewBoyName('');
       setNewBoyPhone('');
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
     } catch { showNotif('Failed to add delivery boy', 'error'); }
     finally { setAddingBoy(false); }
+  };
+
+  const handleSaveBoyEdit = async (id: number) => {
+    if (!editBoyName.trim()) { showNotif('Delivery boy name is required', 'error'); return; }
+    setSavingBoyEdit(true);
+    try {
+      await api.updateDeliveryBoy(id, {
+        name: editBoyName.trim(),
+        whatsapp_number: editBoyPhone.trim() || undefined,
+      });
+      showNotif(`Delivery boy updated successfully!`);
+      setEditingBoyId(null);
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      fetchAll();
+    } catch { showNotif('Failed to update delivery boy', 'error'); }
+    finally { setSavingBoyEdit(false); }
   };
 
   const handleToggleBoyActive = async (boy: DeliveryBoy) => {
@@ -104,6 +132,7 @@ const Dispatch = () => {
       const newActive = boy.is_active ? 0 : 1;
       await api.updateDeliveryBoy(boy.id, { is_active: newActive });
       showNotif(`Delivery boy "${boy.name}" ${newActive ? 'activated' : 'deactivated'}`);
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
     } catch { showNotif('Failed to update status', 'error'); }
   };
@@ -113,6 +142,7 @@ const Dispatch = () => {
     try {
       await api.deleteDeliveryBoy(id);
       showNotif(`Delivery boy "${name}" deleted`);
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
     } catch { showNotif('Failed to delete delivery boy', 'error'); }
   };
@@ -151,6 +181,35 @@ const Dispatch = () => {
     } catch { showNotif('Failed to delete', 'error'); }
   };
 
+  const handleSendAllViaWhatsApp = async () => {
+    const activeOrders = orders.filter(o => o.status === 'Pending' || o.status === 'In Transit');
+    if (activeOrders.length === 0) {
+      showNotif('No active dispatch orders to send', 'error');
+      return;
+    }
+
+    const targetBoy = deliveryBoys.find(b => b.whatsapp_number) || allBoys.find(b => b.whatsapp_number);
+    let targetPhone = targetBoy?.whatsapp_number;
+    
+    if (!targetPhone) {
+      const input = prompt('Enter Delivery Boy WhatsApp Phone Number (e.g. 919876543210):');
+      if (!input) return;
+      targetPhone = input.trim();
+    }
+
+    try {
+      const orderIds = activeOrders.map(o => o.id);
+      const res = await api.enqueueDistributorCollection({
+        orderIds,
+        deliveryBoyPhone: targetPhone,
+        deliveryBoyName: targetBoy?.name
+      });
+      showNotif(res.message || `Enqueued ${orderIds.length} collection messages for 8s-12s paced sending!`, 'success');
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || 'Failed to enqueue WhatsApp messages', 'error');
+    }
+  };
+
   const pending = orders.filter(o => o.status === 'Pending').length;
   const inTransit = orders.filter(o => o.status === 'In Transit').length;
   const deliveredToday = orders.filter(o => {
@@ -171,6 +230,13 @@ const Dispatch = () => {
         <div className="flex items-center gap-2">
           <button onClick={fetchAll} className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 text-muted" title="Refresh">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={handleSendAllViaWhatsApp}
+            className="premium-btn bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30 text-xs flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition-all"
+            title="Send all active collection orders via WhatsApp with 8s-12s pacing"
+          >
+            <Send size={15} /> Send All via WhatsApp
           </button>
           <button
             onClick={() => setShowBoysModal(true)}
@@ -411,39 +477,88 @@ const Dispatch = () => {
                 </div>
               ) : (
                 allBoys.map(boy => (
-                  <div key={boy.id} className="flex items-center justify-between p-3 rounded-xl bg-bg border border-glass-border hover:border-sky/40 transition-all">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-text">{boy.name}</span>
-                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                          boy.is_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                        }`}>
-                          {boy.is_active ? 'Active' : 'Inactive'}
-                        </span>
+                  <div key={boy.id} className="p-3 rounded-xl bg-bg border border-glass-border hover:border-sky/40 transition-all">
+                    {editingBoyId === boy.id ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={editBoyName}
+                            onChange={e => setEditBoyName(e.target.value)}
+                            placeholder="Delivery Boy Name"
+                            className="premium-input w-full text-xs font-bold"
+                          />
+                          <input
+                            type="text"
+                            value={editBoyPhone}
+                            onChange={e => setEditBoyPhone(e.target.value)}
+                            placeholder="WhatsApp Number"
+                            className="premium-input w-full text-xs font-mono"
+                          />
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleSaveBoyEdit(boy.id)}
+                            disabled={savingBoyEdit}
+                            className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg flex items-center gap-1 transition-all"
+                          >
+                            <Check size={12} /> {savingBoyEdit ? 'Saving...' : 'Save Phone Number'}
+                          </button>
+                          <button
+                            onClick={() => setEditingBoyId(null)}
+                            className="px-3 py-1 bg-white/5 border border-glass-border text-muted hover:text-white text-xs rounded-lg flex items-center gap-1 transition-all"
+                          >
+                            <X size={12} /> Cancel
+                          </button>
+                        </div>
                       </div>
-                      <p className="text-[11px] font-mono text-muted">
-                        📞 {boy.whatsapp_number || 'No phone set'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleToggleBoyActive(boy)}
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
-                          boy.is_active
-                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                        }`}
-                      >
-                        {boy.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteBoy(boy.id, boy.name)}
-                        className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 border border-transparent hover:border-rose-500/30 transition-all"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-text">{boy.name}</span>
+                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                              boy.is_active ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            }`}>
+                              {boy.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] font-mono text-muted">
+                            📞 {boy.whatsapp_number || 'No phone set'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingBoyId(boy.id);
+                              setEditBoyName(boy.name);
+                              setEditBoyPhone(boy.whatsapp_number || '');
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-sky-500/20 text-sky-400 border border-transparent hover:border-sky-500/30 transition-all"
+                            title="Edit Phone / Details"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleToggleBoyActive(boy)}
+                            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                              boy.is_active
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                            }`}
+                          >
+                            {boy.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBoy(boy.id, boy.name)}
+                            className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 border border-transparent hover:border-rose-500/30 transition-all"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

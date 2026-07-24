@@ -888,6 +888,15 @@ const POS = () => {
       } catch (e) {
         // Patient may already exist, ignore duplicate errors
       }
+      try {
+        await api.saveContact({
+          name: patientName.trim(),
+          type: 'customer',
+          phone: patientPhone.trim()
+        });
+        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+        window.dispatchEvent(new CustomEvent('contacts-updated'));
+      } catch (e) {}
     }
     setShowPatientModal(false);
   };
@@ -1913,6 +1922,16 @@ const POS = () => {
         clinic_name: newDoctorClinic,
         reg_no: newDoctorRegNo
       });
+      try {
+        await api.saveContact({
+          name: docName,
+          type: 'doctor',
+          phone: newDoctorPhone,
+          address: newDoctorClinic || undefined
+        });
+        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+        window.dispatchEvent(new CustomEvent('contacts-updated'));
+      } catch (e) {}
       // Refresh doctors list
       queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
       setDoctor(docName);

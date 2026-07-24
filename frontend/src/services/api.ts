@@ -728,4 +728,30 @@ export const api = {
     logs: { id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[];
   }>('/pharmarack/session-logs').then(res => res.data),
   triggerManualReauth: () => apiClient.post<{ success: boolean; message: string }>('/pharmarack/trigger-reauth').then(res => res.data),
+
+  // Resilient WhatsApp Queue & Live Control
+  getWhatsAppQueueStatus: () => apiClient.get<{
+    isProcessing: boolean;
+    isOnline: boolean;
+    nextDispatchCountdownMs: number;
+    nextDispatchTimestamp: number | null;
+    currentPacingMinMs: number;
+    currentPacingMaxMs: number;
+    currentSendingItemId: number | null;
+    activeTargetName?: string | null;
+    counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
+    recentItems: any[];
+  }>('/whatsapp/queue/status').then(res => res.data),
+  enqueueDistributorCollection: (data: { orderIds: number[]; deliveryBoyPhone: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-distributor-collection', data).then(res => res.data),
+  enqueuePharmarackBatch: (data: { orders: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[]; deliveryBoyPhone?: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-pharmarack-batch', data).then(res => res.data),
+  flushWhatsAppQueue: () => apiClient.post<{ success: boolean; message: string }>('/whatsapp/queue/flush').then(res => res.data),
+  retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
+  updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.put<{ success: boolean; minSec: number; maxSec: number; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
+  updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
+
+  // Unified Contacts Management API
+  getContacts: (type?: string, search?: string) => apiClient.get<{ success: boolean; count: number; data: any[] }>('/contacts', { params: { type, search } }).then(res => res.data),
+  saveContact: (data: { name: string; type: string; phone?: string; email?: string; address?: string; gstin?: string; notes?: string; alias_names?: string; is_active?: number }) => apiClient.post<{ success: boolean; message: string; data: any }>('/contacts', data).then(res => res.data),
+  updateContact: (id: number, data: Partial<{ name: string; type: string; phone: string; email: string; address: string; gstin: string; notes: string; alias_names: string; is_active: number }>) => apiClient.put<{ success: boolean; message: string; data: any }>(`/contacts/${id}`, data).then(res => res.data),
+  deleteContact: (id: number) => apiClient.delete<{ success: boolean; message: string }>(`/contacts/${id}`).then(res => res.data),
 };

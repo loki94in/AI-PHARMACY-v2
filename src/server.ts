@@ -185,8 +185,10 @@ app.use('/api', lazyRoute('./routes/medicines.js'));
 app.use('/api', lazyRoute('./routes/enrichment.js'));
 app.use('/api', lazyRoute('./routes/distributors.js'));
 app.use('/api', lazyRoute('./routes/notifications.js'));
+app.use('/api/whatsapp/queue', lazyRoute('./routes/whatsappQueue.js'));
 app.use('/api/investigation', lazyRoute('./routes/investigation.js'));
 app.use('/api', lazyRoute('./routes/medicineAvailability.js'));
+app.use('/api/contacts', lazyRoute('./routes/contacts.js'));
 
 
 

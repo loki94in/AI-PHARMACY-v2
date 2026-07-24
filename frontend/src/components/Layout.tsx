@@ -57,6 +57,7 @@ import { toastEvent, quickOrderEvent, liveCartAddEvent } from '../services/event
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
+import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { api, apiClient } from '../services/api';
@@ -602,6 +603,7 @@ const Topbar = ({
   onMarkRead,
   onOpenStagedReview,
   onOpenConnectModal,
+  onOpenWaQueue,
   onMenuClick,
 }: {
   theme: string;
@@ -614,6 +616,7 @@ const Topbar = ({
   onMarkRead: (id: number) => void;
   onOpenStagedReview: () => void;
   onOpenConnectModal: () => void;
+  onOpenWaQueue?: () => void;
   onMenuClick?: () => void;
 }) => {
   const location = useLocation();
@@ -742,12 +745,27 @@ const Topbar = ({
     whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number };
   } | null>(null);
 
+  const [waQueueDetail, setWaQueueDetail] = useState<{
+    isProcessing: boolean;
+    activeTargetName?: string | null;
+    counts: { pending: number; sending: number; sent: number };
+  } | null>(null);
+
   const fetchServicesStatus = useCallback(async () => {
     try {
       const { api } = await import('../services/api.js');
       const res = await api.getServicesStatus();
       if (res && res.success && res.services) {
         setServicesStatus(res.services);
+      }
+      // Also fetch detailed queue worker state for live header progress
+      const qData = await api.getWhatsAppQueueStatus();
+      if (qData) {
+        setWaQueueDetail({
+          isProcessing: qData.isProcessing,
+          activeTargetName: qData.activeTargetName,
+          counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
+        });
       }
     } catch (err) {
       console.warn('[Layout] Failed to fetch services status:', err);
@@ -756,9 +774,12 @@ const Topbar = ({
 
   useEffect(() => {
     fetchServicesStatus();
-    const interval = setInterval(fetchServicesStatus, 10000);
+    // Poll faster (every 3s) when queue has pending/sending items, otherwise 8s
+    const activeQueue = (waQueueDetail?.counts?.pending || 0) > 0 || waQueueDetail?.isProcessing;
+    const intervalMs = activeQueue ? 3000 : 8000;
+    const interval = setInterval(fetchServicesStatus, intervalMs);
     return () => clearInterval(interval);
-  }, [fetchServicesStatus]);
+  }, [fetchServicesStatus, waQueueDetail?.counts?.pending, waQueueDetail?.isProcessing]);
 
   useEffect(() => {
     fetchDevices();
@@ -958,28 +979,45 @@ const Topbar = ({
             </span>
           </Link>
 
-          {/* WhatsApp Connection & Queue Status */}
-          <Link
-            to="/crm"
+          {/* WhatsApp Connection & Background Queue Status (Live Header Pill) */}
+          <button
+            type="button"
+            onClick={onOpenWaQueue}
             className={`
-              hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
-              ${servicesStatus?.whatsapp?.connected
-                ? servicesStatus.whatsapp.pendingQueueCount > 0
-                  ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
-                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}
+              hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
+              ${(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0)
+                ? 'bg-sky-500/15 border-sky-500/30 text-sky-400 hover:bg-sky-500/25 shadow-lg shadow-sky-500/10'
+                : servicesStatus?.whatsapp?.connected
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                : 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'}
             `}
-            title={servicesStatus?.whatsapp?.connected ? `WhatsApp Online (${servicesStatus.whatsapp.pendingQueueCount} queued)` : "WhatsApp Connecting/Offline"}
+            title={servicesStatus?.whatsapp?.connected ? `WhatsApp Live Queue Controller (${(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} queued)` : "WhatsApp Connecting/Offline"}
           >
-            <MessageSquareIcon size={13} className={!servicesStatus?.whatsapp?.connected ? "animate-pulse" : ""} />
-            <span>
-              {servicesStatus?.whatsapp?.connected
-                ? servicesStatus.whatsapp.pendingQueueCount > 0
-                  ? `${servicesStatus.whatsapp.pendingQueueCount} Q`
-                  : 'WA Online'
-                : 'WA Sync'}
+            {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0) ? (
+              <RefreshCw size={13} className="animate-spin text-sky-400 shrink-0" />
+            ) : (
+              <MessageSquareIcon size={13} className={!servicesStatus?.whatsapp?.connected ? "animate-pulse shrink-0" : "shrink-0"} />
+            )}
+            <span className="flex items-center gap-1.5">
+              {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0) ? (
+                <>
+                  <span className="font-mono text-white font-bold">{waQueueDetail?.counts?.sent || 0} Sent</span>
+                  <span className="opacity-40">•</span>
+                  <span className="font-mono text-sky-300 font-bold">{(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} Pending</span>
+                  {waQueueDetail?.activeTargetName && (
+                    <>
+                      <span className="opacity-40">•</span>
+                      <span className="text-emerald-300 font-bold truncate max-w-[130px]">▶ {waQueueDetail.activeTargetName}</span>
+                    </>
+                  )}
+                </>
+              ) : servicesStatus?.whatsapp?.connected ? (
+                'WA Online'
+              ) : (
+                'WA Sync'
+              )}
             </span>
-          </Link>
+          </button>
 
           {/* Quick Order Shortcut Button */}
           <button
@@ -1346,6 +1384,7 @@ export const Layout = ({
 
   const [showStagedReview, setShowStagedReview] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
+  const [showWaQueuePopover, setShowWaQueuePopover] = useState(false);
   const [pendingStagedSalesCount, setPendingStagedSalesCount] = useState(0);
   const [pendingStagedPurchasesCount, setPendingStagedPurchasesCount] = useState(0);
   const [showQuickOrder, setShowQuickOrder] = useState(false);
@@ -1609,6 +1648,7 @@ export const Layout = ({
           onMarkRead={handleMarkRead}
           onOpenStagedReview={() => setShowStagedReview(true)}
           onOpenConnectModal={() => setShowConnectModal(true)}
+          onOpenWaQueue={() => setShowWaQueuePopover(true)}
           onMenuClick={() => setMobileNavOpen(true)}
         />
         <div className="flex-1 flex flex-row overflow-hidden relative">
@@ -1657,6 +1697,12 @@ export const Layout = ({
         {showConnectModal && (
           <MobileConnectionModal
             onClose={() => setShowConnectModal(false)}
+          />
+        )}
+
+        {showWaQueuePopover && (
+          <WhatsAppQueuePopover
+            onClose={() => setShowWaQueuePopover(false)}
           />
         )}
 

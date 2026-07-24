@@ -280,6 +280,18 @@ const Learning: React.FC = () => {
         email: newDistEmail.trim()
       });
       if (res.data && res.data.success) {
+        // Also save to unified contacts master table & notify all components
+        try {
+          await api.saveContact({
+            name: newDistName.trim(),
+            type: 'distributor',
+            phone: newDistPhone.trim(),
+            email: newDistEmail.trim()
+          });
+        } catch (_) {}
+
+        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+        window.dispatchEvent(new CustomEvent('contacts-updated'));
         toastEvent.trigger('Distributor added successfully', 'success');
         setShowAddDistModal(false);
         setNewDistName('');
@@ -488,6 +500,18 @@ const Learning: React.FC = () => {
         send_daily_summary: newDocSendSummary
       });
       if (res.data && res.data.success) {
+        // Also save to unified contacts master table & notify all components
+        try {
+          await api.saveContact({
+            name: newDocName.trim(),
+            type: 'doctor',
+            phone: newDocPhone.trim(),
+            address: newDocHospital.trim() || undefined
+          });
+        } catch (_) {}
+
+        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+        window.dispatchEvent(new CustomEvent('contacts-updated'));
         toastEvent.trigger('Doctor added successfully', 'success');
         setShowAddDocModal(false);
         setNewDocName('');

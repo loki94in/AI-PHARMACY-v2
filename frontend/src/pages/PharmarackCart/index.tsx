@@ -292,23 +292,26 @@ export default function PharmarackCart() {
     fetchSavedDistributors();
     fetchStoreInfo();
     fetchDeliveryBoys();
+
+    // Listen to global phone-numbers-updated event to update contacts instantly without page reload
+    const handlePhoneUpdate = () => {
+      fetchSavedDistributors();
+      fetchStoreInfo();
+      fetchDeliveryBoys();
+    };
+    window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
+    return () => window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
   }, []);
 
-  // Custom phone number override map by storeId (persisted to localStorage)
-  const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>(() => {
-    try {
-      const saved = localStorage.getItem('custom_distributor_phones');
-      return saved ? JSON.parse(saved) : {};
-    } catch (_) {
-      return {};
-    }
-  });
+  // Session custom phone number override map by storeId (transient in-memory fallback)
+  const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>({});
 
   useEffect(() => {
+    // Permanently purge stale localStorage phone overrides so latest database numbers are always used
     try {
-      localStorage.setItem('custom_distributor_phones', JSON.stringify(customDistributorPhones));
+      localStorage.removeItem('custom_distributor_phones');
     } catch (_) { }
-  }, [customDistributorPhones]);
+  }, []);
 
   const isValidPhoneNumber = (rawPhone: string): boolean => {
     if (!rawPhone) return false;
@@ -412,12 +415,21 @@ export default function PharmarackCart() {
     });
   };
 
-  const isDistributorMapped = (dist: Distributor) => {
-    const custom = customDistributorPhones[dist.storeId];
-    if (custom && custom.trim().length > 0) return true;
-
+  const getDistributorPhoneNumber = (dist: Distributor): string => {
+    // 1. Primary source: Central Database (distributors table) — ALWAYS returns latest saved phone number
     const matched = findSavedDistributorMatch(dist.storeName);
-    const phone = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+    const dbPhone = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+    if (dbPhone && dbPhone.trim().length > 0) return dbPhone.trim();
+
+    // 2. Fallback to transient memory session override if set in current view
+    const custom = customDistributorPhones[dist.storeId];
+    if (custom && custom.trim().length > 0) return custom.trim();
+
+    return '';
+  };
+
+  const isDistributorMapped = (dist: Distributor) => {
+    const phone = getDistributorPhoneNumber(dist);
     return Boolean(phone && phone.trim().length > 0);
   };
 
@@ -783,11 +795,7 @@ export default function PharmarackCart() {
       return;
     }
 
-    let phoneNum = customDistributorPhones[dist.storeId];
-    if (!phoneNum) {
-      const matched = findSavedDistributorMatch(dist.storeName);
-      phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
-    }
+    let phoneNum = getDistributorPhoneNumber(dist);
 
     let cleanPhone = phoneNum.replace(/\D/g, '');
     if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
@@ -894,19 +902,12 @@ export default function PharmarackCart() {
     }
 
     setIsSendingBatchWhatsApp(true);
-    let sentCount = 0;
-    const successfullySentOrders: { storeName: string; storeId: number; phone?: string; items: any[]; deliveryPersons: any[] }[] = [];
 
     try {
-      toastEvent.trigger(`Starting WhatsApp batch delivery for ${mapped.length} distributor(s) with 30-45s safe delay...`, 'info');
+      const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
 
-      for (let i = 0; i < mapped.length; i++) {
-        const dist = mapped[i];
-        let phoneNum = customDistributorPhones[dist.storeId];
-        if (!phoneNum) {
-          const matched = findSavedDistributorMatch(dist.storeName);
-          phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
-        }
+      for (const dist of mapped) {
+        let phoneNum = getDistributorPhoneNumber(dist);
         let cleanPhone = phoneNum.replace(/\D/g, '');
         if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
           setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
@@ -919,92 +920,59 @@ export default function PharmarackCart() {
         }
 
         const msg = buildDistributorOrderMessage(dist);
-        setSendingWaDistributorId(dist.storeId);
-
-        try {
-          // Send silently via backend API
-          const res = await apiClient.post('/messaging/send', {
-            number: cleanPhone,
-            message: msg
-          });
-
-          if (res?.data?.success) {
-            const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
-            setLastSentWaTimeMap(prev => {
-              const next = { ...prev, [dist.storeId]: timeNow };
-              try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
-              return next;
-            });
-            toastEvent.trigger(`[${i + 1}/${mapped.length}] WhatsApp order sent for ${dist.storeName}!`, 'success');
-            sentCount++;
-            // Collect for consolidated delivery boy notification
-            successfullySentOrders.push({
-              storeName: dist.storeName,
-              storeId: dist.storeId,
-              phone: cleanPhone,
-              items: dist.items,
-              deliveryPersons: dist.deliveryPersons
-            });
-          } else {
-            throw new Error(res?.data?.error || 'Silent send failed');
-          }
-        } catch (e: any) {
-          console.warn(`Batch silent send failed for ${dist.storeName}, trying tab fallback:`, e);
-          try {
-            const encodedMsg = encodeURIComponent(msg);
-            const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
-            openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
-            const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
-            setLastSentWaTimeMap(prev => {
-              const next = { ...prev, [dist.storeId]: timeNow };
-              try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
-              return next;
-            });
-            toastEvent.trigger(`[${i + 1}/${mapped.length}] Opened WhatsApp Web tab for ${dist.storeName}`, 'info');
-            sentCount++;
-            successfullySentOrders.push({
-              storeName: dist.storeName,
-              storeId: dist.storeId,
-              phone: cleanPhone,
-              items: dist.items,
-              deliveryPersons: dist.deliveryPersons
-            });
-          } catch (tabErr) {
-            setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
-            toastEvent.trigger(`Failed to send order for ${dist.storeName}`, 'error');
-          }
-        } finally {
-          setSendingWaDistributorId(null);
-        }
-
-        // 30–45 second safe randomized delay between distributor orders
-        if (i < mapped.length - 1) {
-          const delaySec = Math.floor(Math.random() * 16) + 30; // Random 30 to 45 seconds
-          for (let sec = delaySec; sec > 0; sec--) {
-            setBatchCountdownSec(sec);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-          setBatchCountdownSec(null);
-        }
+        ordersPayload.push({
+          storeName: dist.storeName,
+          storeId: dist.storeId,
+          phone: cleanPhone,
+          message: msg,
+          lineTotal: dist.lineTotal,
+          items: dist.items
+        });
       }
 
-      if (sentCount > 0) {
+      if (ordersPayload.length === 0) {
+        toastEvent.trigger('No valid distributor phone numbers found to enqueue.', 'error');
+        return;
+      }
+
+      // Resolve primary delivery boy details
+      const primaryBoy = deliveryBoysList.find(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
+      const deliveryBoyPhone = primaryBoy?.whatsapp_number || storeInfo.deliveryBoyPhone || storeInfo.adminPhone || '';
+      const deliveryBoyName = primaryBoy?.name || 'Delivery Staff';
+
+      // ENQUEUE ALL MESSAGES INSTANTLY TO BACKGROUND QUEUE WORKER
+      const res = await api.enqueuePharmarackBatch({
+        orders: ordersPayload,
+        deliveryBoyPhone,
+        deliveryBoyName
+      });
+
+      if (res && res.success) {
         const batchTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastBatchSentTime(batchTimeStr);
         try { localStorage.setItem('pharmarack_last_batch_sent_time', batchTimeStr); } catch (_) {}
-        toastEvent.trigger(`Batch complete! Successfully sent ${sentCount} distributor order(s) via WhatsApp at ${batchTimeStr}!`, 'success');
 
-        // Send ONE consolidated delivery boy notification with ALL sent orders
-        try {
-          await apiClient.post('/pharmarack/cart/notify-delivery-boys-batch', {
-            orders: successfullySentOrders
-          });
-          toastEvent.trigger(`Delivery boy notified with all ${successfullySentOrders.length} order(s)!`, 'success');
-        } catch (batchNotifErr) {
-          console.warn('Could not send consolidated delivery boy batch notification:', batchNotifErr);
-        }
+        // Mark all mapped distributors as queued/sent in local status map
+        const statusUpdates: Record<number, 'success'> = {};
+        const timeUpdates: Record<number, string> = {};
+        mapped.forEach(d => {
+          statusUpdates[d.storeId] = 'success';
+          timeUpdates[d.storeId] = batchTimeStr;
+        });
+
+        setSentWaStatusMap(prev => ({ ...prev, ...statusUpdates }));
+        setLastSentWaTimeMap(prev => {
+          const next = { ...prev, ...timeUpdates };
+          try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+          return next;
+        });
+
+        toastEvent.trigger(
+          `⚡ WhatsApp Queue started in background! Enqueued 1 Delivery Boy + ${ordersPayload.length} Distributor orders. Track live header status!`,
+          'success'
+        );
+      } else {
+        throw new Error(res?.message || 'Failed to enqueue WhatsApp batch orders');
       }
 
       if (unmapped.length > 0) {
@@ -1074,9 +1042,19 @@ export default function PharmarackCart() {
             phone: cleanPhone
           });
         }
+        // Save to unified contacts master table
+        try {
+          await api.saveContact({
+            name: distName,
+            type: 'distributor',
+            phone: cleanPhone
+          });
+        } catch (_) {}
       }
 
-      // 3. Silently update saved distributors list in background
+      // 3. Broadcast real-time update events & refresh saved distributors list
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      window.dispatchEvent(new CustomEvent('contacts-updated'));
       await fetchSavedDistributors();
     } catch (err: any) {
       console.warn('Background save distributor contact error:', err);

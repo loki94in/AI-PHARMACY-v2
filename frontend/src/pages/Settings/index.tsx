@@ -606,7 +606,21 @@ const Settings = () => {
 
     try {
       await apiClient.post('/settings/save', payload);
+      if (ownerWhatsappNumber) {
+        try {
+          await api.saveContact({
+            name: storeName || 'Pharmacy Owner',
+            type: 'owner',
+            phone: ownerWhatsappNumber,
+            email: storeEmail || undefined,
+            address: storeAddress || undefined,
+            gstin: storeGstin || undefined
+          });
+        } catch (_) {}
+      }
       toastEvent.trigger('Settings saved successfully', 'success');
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      window.dispatchEvent(new CustomEvent('contacts-updated'));
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to save settings', error);
@@ -628,12 +642,12 @@ const Settings = () => {
       dataFetchControl: modesString
     }));
 
-    localStorage.setItem('data_fetch_control', modesString);
-
+    // Save exclusively to SQLite app_settings database table
     try {
       await apiClient.post('/settings/save', {
         data_fetch_control: modesString
       });
+      window.dispatchEvent(new CustomEvent('settings-updated'));
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       toastEvent.trigger('Fetch mode updated successfully', 'success');
     } catch (error) {

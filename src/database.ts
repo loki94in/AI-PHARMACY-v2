@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 
 /**
  * Ensure required SQLite tables exist.
@@ -1238,16 +1238,48 @@ export async function ensureSchema(dbPath: string) {
     console.warn('[Database Healing] Non-critical warning, failed to run database healing checks:', healErr);
   }
 
-  // WhatsApp silent-send queue: holds messages to be retried once the client is ready
+  // WhatsApp silent-send queue with status, pacing, and retry tracking
   await db.run(`
     CREATE TABLE IF NOT EXISTS whatsapp_send_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       number TEXT NOT NULL,
       message TEXT NOT NULL,
+      type TEXT DEFAULT 'distributor_collection',
+      status TEXT DEFAULT 'pending',
+      retry_count INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
-      sent_at INTEGER
+      sent_at INTEGER,
+      error_message TEXT,
+      target_name TEXT
     )
   `);
+
+  // Ensure columns exist for upgraded schemas
+  try {
+    const queueCols = await db.all("PRAGMA table_info(whatsapp_send_queue)");
+    const colNames = queueCols.map((c: any) => c.name);
+    if (!colNames.includes('type')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN type TEXT DEFAULT 'distributor_collection'");
+    }
+    if (!colNames.includes('status')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN status TEXT DEFAULT 'pending'");
+    }
+    if (!colNames.includes('retry_count')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN retry_count INTEGER DEFAULT 0");
+    }
+    if (!colNames.includes('error_message')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN error_message TEXT");
+    }
+    if (!colNames.includes('target_name')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN target_name TEXT");
+    }
+  } catch (colErr) {
+    console.warn('[Database Schema] Column check warning for whatsapp_send_queue:', colErr);
+  }
+
+  // Pacing settings default (min 5s, max 8s)
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_min', '5000')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_max', '8000')");
 
   // WhatsApp message templates for quick CRM sending
   await db.run(`
@@ -1277,6 +1309,69 @@ export async function ensureSchema(dbPath: string) {
         [t.name, t.category, t.body, now, now]
       );
     }
+  }
+
+  // Unified Contact Management Master Table
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT CHECK(type IN ('distributor', 'delivery_boy', 'doctor', 'customer', 'owner', 'admin')) NOT NULL,
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      gstin TEXT,
+      alias_names TEXT,
+      is_active INTEGER DEFAULT 1,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.run("CREATE INDEX IF NOT EXISTS idx_contacts_type_name ON contacts (type, name)");
+  await db.run("CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts (phone)");
+
+  // Seed initial contacts from legacy domain tables if empty
+  try {
+    const contactCount = await db.get("SELECT COUNT(*) as count FROM contacts");
+    if (!contactCount || contactCount.count === 0) {
+      // Seed distributors
+      const dists = await db.all("SELECT * FROM distributors");
+      for (const d of dists) {
+        await db.run(
+          "INSERT OR IGNORE INTO contacts (name, type, phone, email, address, gstin) VALUES (?, 'distributor', ?, ?, ?, ?)",
+          [d.name, d.phone || d.contact || null, d.email || null, d.address || null, d.gstin || null]
+        );
+      }
+      // Seed delivery boys
+      const boys = await db.all("SELECT * FROM delivery_boys");
+      for (const b of boys) {
+        await db.run(
+          "INSERT OR IGNORE INTO contacts (name, type, phone, is_active) VALUES (?, 'delivery_boy', ?, ?)",
+          [b.name, b.whatsapp_number || null, b.is_active ?? 1]
+        );
+      }
+      // Seed doctors
+      const docs = await db.all("SELECT * FROM doctors");
+      for (const doc of docs) {
+        await db.run(
+          "INSERT OR IGNORE INTO contacts (name, type, phone, address) VALUES (?, 'doctor', ?, ?)",
+          [doc.name, doc.phone || null, doc.address || null]
+        );
+      }
+      // Seed customers
+      const custs = await db.all("SELECT * FROM customers");
+      for (const c of custs) {
+        await db.run(
+          "INSERT OR IGNORE INTO contacts (name, type, phone, address, notes) VALUES (?, 'customer', ?, ?, ?)",
+          [c.name, c.phone || null, c.address || null, c.notes || null]
+        );
+      }
+      console.log('[Boot] Unified contacts master table populated from domain tables.');
+    }
+  } catch (seedErr) {
+    console.warn('[Boot] Contacts seed warning:', seedErr);
   }
 
   // Stamp schema version so subsequent boots skip all DDL
