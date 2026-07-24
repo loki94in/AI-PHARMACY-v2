@@ -570,6 +570,10 @@ export const api = {
   // Purchase PDF
   getPurchasePDF: (id: number) => apiClient.get(`/purchases/${id}/pdf`, { responseType: 'blob' }).then(res => res.data),
 
+  // Distributors
+  addDistributor: (data: { name: string; phone?: string; email?: string; address?: string; contact?: string }) =>
+    apiClient.post('/settings/distributors', { name: data.name, phone: data.phone || data.contact, email: data.email, address: data.address }).then(res => res.data),
+
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
@@ -698,4 +702,9 @@ export const api = {
 
   // Database Force Unlock
   unlockDatabase: () => apiClient.post('/utilities/db/unlock').then(res => res.data),
+
+  // Pharmarack Sent Orders History
+  getPharmarackSentDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/pharmarack/sent-orders/dates').then(res => res.data),
+  getPharmarackSentOrders: (date?: string) => apiClient.get<{ success: boolean; date: string; orders: any[] }>('/pharmarack/sent-orders', { params: { date } }).then(res => res.data),
+  logPharmarackPlacedOrder: (data: { store_id?: number; store_name: string; items: any[]; delivery_persons?: any[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
 };

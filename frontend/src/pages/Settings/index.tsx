@@ -1062,9 +1062,14 @@ const Settings = () => {
                 <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
                 <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
               </div>
-              <span className="text-sm font-semibold group-hover:text-white transition-colors">
-                Enable WhatsApp Notifications
-              </span>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold group-hover:text-text transition-colors">
+                  Enable WhatsApp Notifications
+                </span>
+                <span className="text-[11px] text-muted font-normal mt-0.5">
+                  Enabling background WhatsApp integration launches a headless Chromium process (~100MB+ RAM, active CPU threads).
+                </span>
+              </div>
             </label>
           </div>
 

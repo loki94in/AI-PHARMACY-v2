@@ -1,5 +1,6 @@
 import './database/sqlitePatch.js';
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -63,6 +64,7 @@ if (process.env.SKIP_AUTH === 'true') {
 // ────────────────────────────────────────────────────────────────────
 
 const app = express();
+app.use(compression());
 
 app.use((req, res, next) => {
   // Don't treat status polling or background worker queries as blocking activity

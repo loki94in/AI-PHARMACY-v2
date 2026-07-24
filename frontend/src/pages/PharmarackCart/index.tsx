@@ -90,9 +90,86 @@ export default function PharmarackCart() {
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills'>('requests');
+  const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills' | 'history'>('requests');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
+
+  const [sentDates, setSentDates] = useState<string[]>([]);
+  const [selectedSentDate, setSelectedSentDate] = useState<string>('');
+  const [sentOrders, setSentOrders] = useState<any[]>([]);
+  const [sentOrdersLoading, setSentOrdersLoading] = useState<boolean>(false);
+  const [readdingSentItems, setReaddingSentItems] = useState<boolean>(false);
+
+  const loadSentDates = async () => {
+    try {
+      const res = await api.getPharmarackSentDates();
+      if (res && res.success && Array.isArray(res.dates)) {
+        setSentDates(res.dates);
+        if (res.dates.length > 0 && !selectedSentDate) {
+          setSelectedSentDate(res.dates[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load sent dates:', err);
+    }
+  };
+
+  const loadSentOrdersForDate = async (dateStr: string) => {
+    if (!dateStr) return;
+    setSentOrdersLoading(true);
+    try {
+      const res = await api.getPharmarackSentOrders(dateStr);
+      if (res && res.success && Array.isArray(res.orders)) {
+        setSentOrders(res.orders);
+      }
+    } catch (err) {
+      console.error('Failed to load sent orders for date:', err);
+    } finally {
+      setSentOrdersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sidebarTab === 'history') {
+      loadSentDates();
+    }
+  }, [sidebarTab]);
+
+  useEffect(() => {
+    if (sidebarTab === 'history' && selectedSentDate) {
+      loadSentOrdersForDate(selectedSentDate);
+    }
+  }, [sidebarTab, selectedSentDate]);
+
+  const handleCopySentItemsToCart = async (items: any[]) => {
+    if (!items || items.length === 0) return;
+    setReaddingSentItems(true);
+    let addedCount = 0;
+    try {
+      for (const item of items) {
+        const prodName = item.productName || item.product || item.name;
+        const qty = item.qty || item.quantity || 1;
+        if (!prodName) continue;
+        await apiClient.post('/pharmarack/cart/add', {
+          productName: prodName,
+          qty,
+          productCode: item.productCode || '',
+          company: item.company || '',
+          packaging: item.packaging || '',
+          ptr: item.ptr || 0,
+          mrp: item.mrp || 0
+        });
+        addedCount++;
+      }
+      toastEvent.trigger(`Successfully re-added ${addedCount} item(s) to active cart!`, 'success');
+      fetchCart();
+    } catch (err: any) {
+      console.error('Error re-adding sent items to cart:', err);
+      toastEvent.trigger('Failed to re-add items: ' + (err.message || 'Server error'), 'error');
+    } finally {
+      setReaddingSentItems(false);
+    }
+  };
 
   const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
@@ -571,6 +648,18 @@ export default function PharmarackCart() {
       } else {
         throw new Error(res?.data?.error || 'Silent send failed');
       }
+
+      // Log placed order to DB history
+      try {
+        await api.logPharmarackPlacedOrder({
+          store_id: dist.storeId,
+          store_name: dist.storeName,
+          items: dist.items,
+          delivery_persons: dist.deliveryPersons
+        });
+      } catch (logErr) {
+        console.warn('Could not log placed order:', logErr);
+      }
     } catch (err: any) {
       console.warn('Silent WhatsApp send failed, using tab fallback:', err);
       // Fallback: reuse WhatsApp Web tab if silent send is unavailable
@@ -579,6 +668,18 @@ export default function PharmarackCart() {
       openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
       setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
       toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'info');
+
+      // Log placed order to DB history even on tab fallback
+      try {
+        await api.logPharmarackPlacedOrder({
+          store_id: dist.storeId,
+          store_name: dist.storeName,
+          items: dist.items,
+          delivery_persons: dist.deliveryPersons
+        });
+      } catch (logErr) {
+        console.warn('Could not log placed order:', logErr);
+      }
     } finally {
       setSendingWaDistributorId(null);
     }
@@ -930,7 +1031,7 @@ export default function PharmarackCart() {
       <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
         <button
           onClick={() => setSearchParams({ tab: 'cart' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'cart'
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'cart' || !currentTab
               ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
               : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
             }`}
@@ -938,6 +1039,18 @@ export default function PharmarackCart() {
           <ShoppingCart size={14} />
           Pharmarack Cart
         </button>
+
+        <button
+          onClick={() => setSearchParams({ tab: 'sent-history' })}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'sent-history'
+              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            }`}
+        >
+          <Send size={14} />
+          Sent Orders History
+        </button>
+
         <button
           onClick={() => setSearchParams({ tab: 'non-mapped' })}
           className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'non-mapped'
@@ -953,6 +1066,96 @@ export default function PharmarackCart() {
       {currentTab === 'non-mapped' ? (
         <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
           <NonMappedDistributors />
+        </div>
+      ) : currentTab === 'sent-history' ? (
+        /* ── Full-Width Sent Orders History View ── */
+        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl p-6 space-y-5 min-h-0">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-glass-border/40 pb-4">
+            <div>
+              <h3 className="text-base font-bold text-text uppercase tracking-wide flex items-center gap-2">
+                <Send size={18} className="text-primary" />
+                Sent Orders History
+              </h3>
+              <p className="text-xs text-muted mt-1">
+                View all historical order dispatches grouped by date and distributor store
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="text-xs font-extrabold text-muted uppercase tracking-wider flex items-center gap-1.5">
+                <Clock size={14} className="text-primary" /> Order Date:
+              </label>
+              <select
+                value={selectedSentDate}
+                onChange={(e) => setSelectedSentDate(e.target.value)}
+                className="text-xs font-bold px-4 py-2 rounded-xl bg-bg border border-glass-border text-text focus:outline-none focus:border-primary shadow-sm min-w-[180px]"
+              >
+                {sentDates.length === 0 ? (
+                  <option value="">No past sent orders found</option>
+                ) : (
+                  sentDates.map(d => (
+                    <option key={d} value={d}>
+                      {d} {d === new Date().toISOString().split('T')[0] ? '(Today)' : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+            {sentOrdersLoading ? (
+              <div className="text-center py-12 text-xs text-muted font-bold tracking-wider uppercase animate-pulse">
+                Loading sent order history for {selectedSentDate}…
+              </div>
+            ) : sentOrders.length === 0 ? (
+              <div className="text-center py-16 text-xs text-muted italic select-none">
+                No order dispatches found for date {selectedSentDate || 'selected'}.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {sentOrders.map((order: any) => (
+                  <div key={order.id} className="p-4 rounded-2xl border border-glass-border/60 bg-bg/40 flex flex-col justify-between gap-3 shadow-md">
+                    <div>
+                      <div className="flex items-center justify-between pb-2 border-b border-glass-border/30">
+                        <span className="text-sm font-extrabold text-text truncate" title={order.store_name}>
+                          {order.store_name}
+                        </span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${order.batch_sent ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>
+                          {order.batch_sent ? '● Sent' : '○ Pending'}
+                        </span>
+                      </div>
+
+                      {/* Items List */}
+                      <div className="space-y-1.5 mt-3">
+                        {Array.isArray(order.items) && order.items.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-xs text-text bg-bg2/30 p-2 rounded-lg border border-glass-border/20">
+                            <span className="truncate pr-2 font-semibold">{item.productName || item.product || item.name}</span>
+                            <span className="font-mono font-bold shrink-0 text-primary">x{item.qty || item.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Footer Info & Action */}
+                    <div className="flex items-center justify-between mt-2 text-[10px] text-muted pt-2 border-t border-glass-border/20">
+                      <span className="font-mono">
+                        Sent at: {order.placed_at ? new Date(order.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                      </span>
+                      <button
+                        onClick={() => handleCopySentItemsToCart(order.items)}
+                        disabled={readdingSentItems}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                        title="Copy these items back into current active cart"
+                      >
+                        <Plus size={12} /> Re-add to Active Cart
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
@@ -1029,23 +1232,33 @@ export default function PharmarackCart() {
                 <div className="flex border-b border-glass-border/40 bg-bg3/10 shrink-0 select-none">
                   <button
                     onClick={() => setSidebarTab('requests')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1.5 ${sidebarTab === 'requests'
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'requests'
                         ? 'border-primary text-primary bg-primary/5'
                         : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
-                    <Clock size={12} />
+                    <Clock size={11} />
                     Requests ({pendingOrders.length})
                   </button>
                   <button
                     onClick={() => setSidebarTab('refills')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1.5 ${sidebarTab === 'refills'
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'refills'
                         ? 'border-primary text-primary bg-primary/5'
                         : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
-                    <ShoppingCart size={12} />
+                    <ShoppingCart size={11} />
                     Refills ({pendingRefills.length})
+                  </button>
+                  <button
+                    onClick={() => setSidebarTab('missing_phone' as any)}
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === ('missing_phone' as any)
+                        ? 'border-amber-500 text-amber-400 bg-amber-500/5'
+                        : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      }`}
+                  >
+                    <Phone size={11} />
+                    Missing Phone
                   </button>
                 </div>
 
@@ -1096,7 +1309,7 @@ export default function PharmarackCart() {
                         );
                       })
                     )
-                  ) : (
+                  ) : sidebarTab === 'refills' ? (
                     pendingRefills.length === 0 ? (
                       <div className="text-center py-8 text-[11px] text-muted italic select-none">
                         No pending out-of-stock refill medicines due.
@@ -1143,6 +1356,65 @@ export default function PharmarackCart() {
                         );
                       })
                     )
+                  ) : (
+                    /* ── Missing Phone Distributors in Cart ── */
+                    (() => {
+                      const missingPhoneDistributors = distributors.filter(dist => {
+                        let phoneNum = customDistributorPhones[dist.storeId];
+                        if (!phoneNum) {
+                          const matched = findSavedDistributorMatch(dist.storeName);
+                          phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+                        }
+                        const cleanPhone = (phoneNum || '').replace(/\D/g, '');
+                        return !cleanPhone || !isValidPhoneNumber(cleanPhone);
+                      });
+
+                      return missingPhoneDistributors.length === 0 ? (
+                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
+                          All cart distributors have valid saved phone numbers!
+                        </div>
+                      ) : (
+                        missingPhoneDistributors.map(dist => (
+                          <div key={dist.storeId} className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col gap-2 shadow-sm">
+                            <div className="flex justify-between items-start">
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-extrabold text-amber-400 truncate" title={dist.storeName}>
+                                  {dist.storeName}
+                                </span>
+                                <span className="text-[9px] text-muted mt-0.5">
+                                  Phone Number Missing / Invalid
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-1.5 mt-1">
+                              <input
+                                type="text"
+                                placeholder="10-digit mobile..."
+                                value={customDistributorPhones[dist.storeId] || ''}
+                                onChange={(e) => setCustomDistributorPhones(prev => ({ ...prev, [dist.storeId]: e.target.value }))}
+                                className="flex-1 text-xs px-2.5 py-1.5 rounded-lg bg-bg border border-glass-border text-text focus:outline-none focus:border-primary font-mono"
+                              />
+                              <button
+                                onClick={() => {
+                                  const val = customDistributorPhones[dist.storeId];
+                                  if (val) {
+                                    api.addDistributor({ name: dist.storeName, contact: val }).then(() => {
+                                      toastEvent.trigger(`Saved phone for ${dist.storeName}!`, 'success');
+                                    }).catch(() => {
+                                      toastEvent.trigger('Failed to save phone', 'error');
+                                    });
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/30 text-emerald-400 text-[10px] font-extrabold transition-all active:scale-95 shrink-0"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      );
+                    })()
                   )}
                 </div>
               </div>

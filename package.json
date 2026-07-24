@@ -16,12 +16,14 @@
     "build:exe": "npm run build && pkg . --targets node18-win-x64 --output dist/PharmacyOS.exe"
   },
   "dependencies": {
+    "@types/compression": "^1.8.1",
     "adm-zip": "^0.5.17",
     "aws-sdk": "^2.1693.0",
     "axios": "^1.16.1",
     "better-sqlite3": "^12.11.1",
     "canvas": "^3.2.3",
     "chokidar": "^3.6.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "csv-parse": "^5.5.2",
     "csv-parser": "^3.2.1",

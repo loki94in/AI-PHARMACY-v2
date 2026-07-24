@@ -305,18 +305,19 @@ class AICameraService {
     if (isONNXAvailable) {
       try {
         const ocrResult = await onnxOcrService.scanImage(processedBuffer);
-        if (ocrResult && ocrResult.success) {
+        if (ocrResult && ocrResult.success && ocrResult.text && ocrResult.text.trim().length > 0) {
           localOcrResult = {
             text: ocrResult.text || '',
             confidence: ocrResult.confidence || 0,
             words: ocrResult.words || []
           };
+          fallbackUsed = false;
         } else {
-          console.warn('ONNX OCR failed, falling back to Tesseract:', ocrResult?.error);
+          console.warn('ONNX OCR returned empty or failed result:', ocrResult?.error);
           fallbackUsed = true;
         }
       } catch (err) {
-        console.error('Error executing ONNX OCR, falling back to Tesseract:', err);
+        console.error('Error executing ONNX OCR:', err);
         fallbackUsed = true;
       }
     } else {

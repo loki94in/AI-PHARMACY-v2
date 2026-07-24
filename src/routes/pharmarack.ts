@@ -1471,5 +1471,110 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/pharmarack/sent-orders/dates
+ * Returns a distinct list of all historical dates (order_date) where orders were sent.
+ */
+router.get('/sent-orders/dates', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      'SELECT DISTINCT order_date FROM pharmarack_placed_orders WHERE order_date IS NOT NULL AND order_date <> "" ORDER BY order_date DESC'
+    );
+    const dates = rows.map(r => r.order_date);
+    res.json({ success: true, dates });
+  } catch (err: any) {
+    console.error('Error fetching Pharmarack sent order dates:', err);
+    res.status(500).json({ error: 'Failed to fetch sent order dates: ' + err.message });
+  }
+});
+
+/**
+ * GET /api/pharmarack/sent-orders
+ * Query param: ?date=YYYY-MM-DD
+ * Returns all placed orders for the specified date (or latest date if unspecified).
+ */
+router.get('/sent-orders', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    let targetDate = (req.query.date as string || '').trim();
+
+    if (!targetDate) {
+      const latestRow = await db.get(
+        'SELECT order_date FROM pharmarack_placed_orders WHERE order_date IS NOT NULL ORDER BY order_date DESC LIMIT 1'
+      );
+      targetDate = latestRow ? latestRow.order_date : '';
+    }
+
+    if (!targetDate) {
+      return res.json({ success: true, date: '', orders: [] });
+    }
+
+    const rows = await db.all(
+      'SELECT * FROM pharmarack_placed_orders WHERE order_date = ? ORDER BY placed_at DESC',
+      [targetDate]
+    );
+
+    const parsedOrders = rows.map(r => {
+      let items = [];
+      let deliveryPersons = [];
+      try { items = JSON.parse(r.items_json || '[]'); } catch (_) {}
+      try { deliveryPersons = JSON.parse(r.delivery_persons_json || '[]'); } catch (_) {}
+
+      return {
+        id: r.id,
+        order_date: r.order_date,
+        store_id: r.store_id,
+        store_name: r.store_name,
+        items,
+        delivery_persons: deliveryPersons,
+        placed_at: r.placed_at,
+        batch_sent: r.batch_sent === 1,
+        batch_sent_at: r.batch_sent_at
+      };
+    });
+
+    res.json({ success: true, date: targetDate, orders: parsedOrders });
+  } catch (err: any) {
+    console.error('Error fetching Pharmarack sent orders:', err);
+    res.status(500).json({ error: 'Failed to fetch sent orders: ' + err.message });
+  }
+});
+
+/**
+ * POST /api/pharmarack/log-placed-order
+ * Saves a placed/sent order into pharmarack_placed_orders table.
+ */
+router.post('/log-placed-order', async (req, res) => {
+  try {
+    const { store_id, store_name, items, delivery_persons } = req.body;
+    if (!store_name || !items) {
+      return res.status(400).json({ error: 'store_name and items are required' });
+    }
+    const db = await dbManager.getConnection();
+    const today = new Date().toISOString().split('T')[0];
+    const placedAt = Date.now();
+
+    await db.run(
+      `INSERT INTO pharmarack_placed_orders (order_date, store_id, store_name, items_json, delivery_persons_json, placed_at, batch_sent, batch_sent_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      [
+        today,
+        store_id || null,
+        store_name,
+        JSON.stringify(items),
+        delivery_persons ? JSON.stringify(delivery_persons) : null,
+        placedAt,
+        placedAt
+      ]
+    );
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error logging placed order:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
 
