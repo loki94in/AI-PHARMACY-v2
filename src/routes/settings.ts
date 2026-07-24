@@ -44,7 +44,7 @@ router.get('/:key', async (req, res) => {
   const { key } = req.params;
   try {
     const db = await dbManager.getConnection();
-    const row = await db.get('SELECT value FROM settings WHERE key = ?', key);
+    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', key);
     if (!row) return res.status(404).json({ error: 'Setting not found' });
     res.json({ key, value: row.value });
   } catch (error) {

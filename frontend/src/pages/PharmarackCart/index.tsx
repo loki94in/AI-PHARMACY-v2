@@ -43,6 +43,17 @@ let cachedLastFetched: Date | null = null;
 let waWindowRef: Window | null = null;
 
 function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
+  // Convert web.whatsapp.com/send to api.whatsapp.com/send for 100% reliable loading
+  let targetUrl = url;
+  if (phone) {
+    let cleanDigits = phone.replace(/\D/g, '');
+    if (cleanDigits.length === 10) cleanDigits = `91${cleanDigits}`;
+    const encodedText = encodeURIComponent(text || '');
+    targetUrl = `https://api.whatsapp.com/send?phone=${cleanDigits}&text=${encodedText}`;
+  } else if (url.includes('web.whatsapp.com/send')) {
+    targetUrl = url.replace('web.whatsapp.com/send', 'api.whatsapp.com/send');
+  }
+
   // 1. Dispatch custom events and window.postMessage for Chrome / WhatsApp Web Extensions
   try {
     window.postMessage({
@@ -50,31 +61,35 @@ function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
       source: 'AI_PHARMACY',
       phone: phone || '',
       text: text || '',
-      url
+      url: targetUrl
     }, '*');
 
     document.dispatchEvent(new CustomEvent('WHATSAPP_WEB_EXTENSION_SEND', {
-      detail: { phone: phone || '', text: text || '', url }
+      detail: { phone: phone || '', text: text || '', url: targetUrl }
     }));
   } catch (err) {
     console.warn('WhatsApp Extension dispatch warning:', err);
   }
 
-  // 2. Reuse existing WhatsApp Web window or open a target tab
+  // 2. Reuse existing WhatsApp Web window or open a target tab reliably
   try {
     if (waWindowRef && !waWindowRef.closed) {
-      waWindowRef.location.href = url;
+      waWindowRef.location.href = targetUrl;
       waWindowRef.focus();
       return;
     }
   } catch (err) {
     console.warn('Could not navigate existing WhatsApp Web window handle:', err);
   }
-  waWindowRef = window.open(url, 'whatsapp_web_tab');
+  
+  waWindowRef = window.open(targetUrl, '_blank');
   if (waWindowRef) {
     try {
       waWindowRef.focus();
     } catch (_) {}
+  } else {
+    // Fallback if browser blocked popups: direct navigate current tab
+    window.location.href = targetUrl;
   }
 }
 
@@ -198,7 +213,6 @@ export default function PharmarackCart() {
   }, [sentWaStatusMap]);
 
   // Saved distributor contacts and store settings
-  const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
   const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; deliveryBoyPhone: string; deliveryBoyPhone2: string }>({
     name: 'AI Pharmacy',
     phone: '',
@@ -207,6 +221,43 @@ export default function PharmarackCart() {
     deliveryBoyPhone: '',
     deliveryBoyPhone2: ''
   });
+
+  const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
+
+  const fetchSavedDistributors = async () => {
+    try {
+      const res = await apiClient.get('/distributors');
+      if (res.data && Array.isArray(res.data)) {
+        setSavedDistributorsList(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to load saved distributors list:', err);
+    }
+  };
+
+  const fetchStoreInfo = async () => {
+    try {
+      const res = await apiClient.get('/settings');
+      if (res.data) {
+        const s = res.data;
+        setStoreInfo({
+          name: s.pharmacy_name || s.store_name || s.name || 'AI Pharmacy',
+          phone: s.phone || s.whatsapp_number || s.owner_whatsapp_number || '',
+          address: s.address || s.store_address || '',
+          email: s.email || '',
+          deliveryBoyPhone: s.delivery_boy_whatsapp || s.delivery_boy_phone || s.dinesh_whatsapp_number || '',
+          deliveryBoyPhone2: s.delivery_boy_whatsapp_2 || ''
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load store settings for WhatsApp template:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSavedDistributors();
+    fetchStoreInfo();
+  }, []);
 
   // Custom phone number override map by storeId (persisted to localStorage)
   const [customDistributorPhones, setCustomDistributorPhones] = useState<Record<number, string>>(() => {
@@ -664,7 +715,7 @@ export default function PharmarackCart() {
       console.warn('Silent WhatsApp send failed, using tab fallback:', err);
       // Fallback: reuse WhatsApp Web tab if silent send is unavailable
       const encodedMsg = encodeURIComponent(msg);
-      const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
+      const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
       openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
       setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
       toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'info');
@@ -745,7 +796,7 @@ export default function PharmarackCart() {
           console.warn(`Batch silent send failed for ${dist.storeName}, trying tab fallback:`, e);
           try {
             const encodedMsg = encodeURIComponent(msg);
-            const waWebUrl = `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
+            const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
             openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
             toastEvent.trigger(`[${i + 1}/${mapped.length}] Opened WhatsApp Web tab for ${dist.storeName}`, 'info');
@@ -825,7 +876,7 @@ export default function PharmarackCart() {
         let saveSuccess = false;
         if (selectedSavedDistId) {
           try {
-            await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
+            await apiClient.put(`/distributors/${selectedSavedDistId}`, {
               name: distName,
               phone: cleanPhone
             });
@@ -835,7 +886,7 @@ export default function PharmarackCart() {
           }
         }
         if (!saveSuccess) {
-          await apiClient.post('/settings/distributors', {
+          await apiClient.post('/distributors', {
             name: distName,
             phone: cleanPhone
           });
@@ -843,16 +894,7 @@ export default function PharmarackCart() {
       }
 
       // 3. Silently update saved distributors list in background
-      try {
-        const refreshList = await api.getDistributors();
-        if (Array.isArray(refreshList)) {
-          setSavedDistributorsList(refreshList);
-        } else if (Array.isArray(refreshList?.data)) {
-          setSavedDistributorsList(refreshList.data);
-        }
-      } catch (e) {
-        console.warn('Silent refresh of saved distributors failed:', e);
-      }
+      await fetchSavedDistributors();
     } catch (err: any) {
       console.warn('Background save distributor contact error:', err);
     }

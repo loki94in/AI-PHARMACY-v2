@@ -14,6 +14,39 @@ router.get('/distributors', async (req, res) => {
   }
 });
 
+// Create or update distributor details
+router.post('/distributors', async (req, res) => {
+  const { name, phone, email, address, gstin } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: 'Distributor name is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const existing = await db.get('SELECT id FROM distributors WHERE name = ? OR name LIKE ?', [name, `%${name}%`]);
+    if (existing) {
+      await db.run(
+        `UPDATE distributors 
+         SET phone = COALESCE(?, phone),
+             email = COALESCE(?, email),
+             address = COALESCE(?, address),
+             gstin = COALESCE(?, gstin)
+         WHERE id = ?`,
+        [phone, email, address, gstin, existing.id]
+      );
+      res.json({ success: true, message: 'Distributor updated', id: existing.id });
+    } else {
+      const result = await db.run(
+        `INSERT INTO distributors (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)`,
+        [name, phone, email, address, gstin]
+      );
+      res.json({ success: true, message: 'Distributor created', id: result.lastID });
+    }
+  } catch (error: any) {
+    console.error('Failed to create/update distributor:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update distributor details including preferred email invoice format
 router.put('/:id', async (req, res) => {
   const { id } = req.params;

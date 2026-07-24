@@ -570,6 +570,8 @@ export async function forceReconnect(): Promise<void> {
   });
 }
 
+const recentSendsCache = new Map<string, number>();
+
 /** Send a media or text message using the WhatsApp Business API or the live WhatsApp Web client, and log it to SQLite */
 export async function sendMessage(
   to: string,
@@ -603,6 +605,15 @@ export async function sendMessage(
       console.warn(`[WhatsApp] Invalid phone number passed to sendMessage: "${recipient}" (${rawCleanDigits.length} digits). Skipping.`);
       throw new Error(`Invalid phone number: "${recipient}" (must contain at least 10 digits).`);
     }
+
+    // Anti-duplicate protection: prevent identical sends to same recipient within 30s
+    const sendKey = `${cleanPhone}:${(caption || '').trim().slice(0, 60)}`;
+    const nowTs = Date.now();
+    if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey)! < 30000) {
+      console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 30s.`);
+      return;
+    }
+    recentSendsCache.set(sendKey, nowTs);
 
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -906,6 +917,16 @@ export async function getChats(): Promise<any[]> {
         );
         if (sale?.customer_name) {
           r.name = sale.customer_name;
+          continue;
+        }
+
+        // 6. Check distributors table (learned from OCR / AI Learning page)
+        const dist = await db.get(
+          'SELECT name FROM distributors WHERE (phone LIKE ? OR phone = ?) AND name IS NOT NULL AND name != "" LIMIT 1',
+          [likePattern, last10]
+        );
+        if (dist?.name) {
+          r.name = dist.name;
         }
       }
     }

@@ -353,10 +353,22 @@ const AutomationCenter = () => {
       setManualSendNotification(null);
       queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
 
+      // Use built-in WhatsApp client — same as CRM WhatsApp tab
       const phone = notification.recipient_phone;
-      const text = encodeURIComponent(notification.message);
-      const url = `https://wa.me/${phone}?text=${text}`;
-      window.open(url, '_blank');
+      try {
+        let cleanPhone = String(phone).replace(/\D/g, '');
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        await apiClient.post('/messaging/send', {
+          number: cleanPhone,
+          message: notification.message
+        });
+        showToast('Message sent via built-in WhatsApp!', 'success');
+      } catch (waErr: any) {
+        // Fallback: open wa.me if built-in WhatsApp is not connected
+        const url = `https://wa.me/${phone}?text=${encodeURIComponent(notification.message)}`;
+        window.open(url, '_blank');
+        showToast('WhatsApp client not connected — opened in browser.', 'info');
+      }
     } catch (err) {
       console.error('Failed to mark sent manually:', err);
       showToast('Failed to update message status.', 'error');

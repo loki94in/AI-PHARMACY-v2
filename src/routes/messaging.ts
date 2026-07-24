@@ -427,9 +427,40 @@ router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
 router.get('/templates', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const rows = await db.all(
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS whatsapp_message_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+
+    let rows = await db.all(
       'SELECT id, name, category, body, created_at as createdAt, updated_at as updatedAt FROM whatsapp_message_templates ORDER BY category ASC, name ASC'
     );
+
+    if (!rows || rows.length === 0) {
+      const now = Date.now();
+      const seedTemplates = [
+        { name: 'Refill Reminder', category: 'Patients', body: 'Hello {{name}}, this is a friendly reminder from AI Pharmacy that your prescription for {{medicine}} is due for refill. Reply to confirm order delivery.' },
+        { name: 'Payment Dues Reminder', category: 'Patients', body: 'Dear {{name}}, your bill invoice #{{invoice}} of ₹{{amount}} is due. Kindly let us know if you need assistance with payment.' },
+        { name: 'Stock Availability Inquiry', category: 'Distributors', body: 'Dear {{distributor}}, please check stock availability and rate for: {{medicines}}. Thank you.' },
+        { name: 'General Reply', category: 'General', body: 'Hello! Thank you for contacting AI Pharmacy. How can we help you today?' }
+      ];
+      for (const t of seedTemplates) {
+        await db.run(
+          'INSERT INTO whatsapp_message_templates (name, category, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+          [t.name, t.category, t.body, now, now]
+        );
+      }
+      rows = await db.all(
+        'SELECT id, name, category, body, created_at as createdAt, updated_at as updatedAt FROM whatsapp_message_templates ORDER BY category ASC, name ASC'
+      );
+    }
+
     res.json(rows);
   } catch (err: any) {
     console.error('Failed to fetch message templates:', err);

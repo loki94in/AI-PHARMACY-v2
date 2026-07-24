@@ -1229,36 +1229,40 @@ router.get('/cart', async (req, res) => {
       return res.status(503).json({ error: `Pharmarack API returned ${response.status}` });
     }
 
-    const cartData: any = await response.json();
+    const cartData: any = await response.json().catch(() => null);
 
-    if (!cartData || cartData.StatusCode !== 200 || !Array.isArray(cartData.IList)) {
-      return res.status(503).json({ error: 'Unexpected cart response shape' });
-    }
+    const rawList = Array.isArray(cartData?.IList) 
+      ? cartData.IList 
+      : Array.isArray(cartData?.data) 
+      ? cartData.data 
+      : Array.isArray(cartData?.items) 
+      ? cartData.items 
+      : [];
 
-    // Parse IList → lineItems structure (grouped by distributor)
-    const distributors = cartData.IList.map((store: any) => ({
-      storeId: store.StoreId,
-      storeName: store.StoreName,
-      lineTotal: store.lineTotal || 0,
-      deliveryPersons: (store.DeliveryPersonList || []).map((d: any) => ({
-        name: d.SalesmanName || '', code: d.SalesmanCode || ''
+    // Parse rawList → lineItems structure (grouped by distributor)
+    const distributors = rawList.map((store: any) => ({
+      storeId: store.StoreId || store.storeId || 0,
+      storeName: store.StoreName || store.storeName || 'Unknown Distributor',
+      lineTotal: store.lineTotal || store.LineTotal || 0,
+      deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || []).map((d: any) => ({
+        name: d.SalesmanName || d.name || '', code: d.SalesmanCode || d.code || ''
       })),
-      items: (store.lineItems || []).map((item: any) => ({
-        productId: item.ProductId,
-        storeId: item.StoreId,
-        productCode: item.ProductCode || '',
-        productName: item.ProductName || 'Unknown Product',
-        company: item.Company || '',
-        packaging: item.Packing || '',
-        qty: item.Quantity || 1,
-        ptr: item.PTR || item.HiddenPTR || 0,
-        mrp: item.MRP ? parseFloat(item.MRP) : 0,
-        scheme: item.Scheme || '',
-        stock: item.Stock ?? null,
-        amount: item.ProductWiseAmount || 0,
-        cartSource: item.CartSource || '',
-        isChecked: item.IsProductChecked === 1,
-        createdDate: item.CreatedDate || '',
+      items: (store.lineItems || store.items || []).map((item: any) => ({
+        productId: item.ProductId || item.productId,
+        storeId: item.StoreId || item.storeId,
+        productCode: item.ProductCode || item.productCode || '',
+        productName: item.ProductName || item.productName || 'Unknown Product',
+        company: item.Company || item.company || '',
+        packaging: item.Packing || item.packaging || '',
+        qty: item.Quantity || item.qty || 1,
+        ptr: item.PTR || item.ptr || item.HiddenPTR || 0,
+        mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
+        scheme: item.Scheme || item.scheme || '',
+        stock: item.Stock ?? item.stock ?? null,
+        amount: item.ProductWiseAmount || item.amount || 0,
+        cartSource: item.CartSource || item.cartSource || '',
+        isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+        createdDate: item.CreatedDate || item.createdDate || '',
       }))
     }));
 
@@ -1573,6 +1577,220 @@ router.post('/log-placed-order', async (req, res) => {
   } catch (err: any) {
     console.error('Error logging placed order:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/pharmarack/check-overstock
+ * Cross-checks requested quantity against local inventory stock, active cart items, and purchase/sales frequency.
+ * Returns overstock alerts, current inventory stock, cart quantity, and recommended purchase limit.
+ */
+router.post('/check-overstock', async (req, res) => {
+  try {
+    const { productName, company, packaging, distributorStoreId, requestedQty = 1 } = req.body;
+    if (!productName || typeof productName !== 'string') {
+      return res.status(400).json({ error: 'productName is required' });
+    }
+
+    const db = await dbManager.getConnection();
+
+    // 1. Clean product name for search
+    const { cleaned } = cleanSearchQuery(productName);
+    const searchPattern = `%${cleaned.toLowerCase()}%`;
+
+    // 2. Find matching medicine in unified local inventory
+    let localMed = await db.get(
+      `SELECT id, name, generic_name, max_stock_level FROM medicines 
+       WHERE LOWER(name) = ? OR LOWER(generic_name) = ?
+       LIMIT 1`,
+      [productName.toLowerCase(), productName.toLowerCase()]
+    );
+
+    if (!localMed && cleaned.length >= 2) {
+      localMed = await db.get(
+        `SELECT id, name, generic_name, max_stock_level FROM medicines 
+         WHERE LOWER(name) LIKE ? OR LOWER(generic_name) LIKE ?
+         ORDER BY LENGTH(name) ASC LIMIT 1`,
+        [searchPattern, searchPattern]
+      );
+    }
+
+    // Also check medicine_reference mapping if not found directly
+    if (!localMed && cleaned.length >= 2) {
+      const refRow = await db.get(
+        `SELECT name FROM medicine_reference WHERE LOWER(name) LIKE ? LIMIT 1`,
+        [searchPattern]
+      );
+      if (refRow) {
+        localMed = await db.get(
+          `SELECT id, name, generic_name, max_stock_level FROM medicines WHERE LOWER(name) = ? LIMIT 1`,
+          [refRow.name.toLowerCase()]
+        );
+      }
+    }
+
+    let currentStock = 0;
+    let maxStockLevel: number | null = null;
+    let sales30d = 0;
+    let matchedName = localMed ? localMed.name : productName;
+
+    if (localMed) {
+      maxStockLevel = localMed.max_stock_level;
+
+      // Calculate total current stock
+      const stockRow = await db.get(
+        `SELECT COALESCE(SUM(quantity), 0) as total_qty, MAX(max_stock_level) as inv_max 
+         FROM inventory_master WHERE medicine_id = ?`,
+        [localMed.id]
+      );
+      if (stockRow) {
+        currentStock = Number(stockRow.total_qty || 0);
+        if (maxStockLevel === null && stockRow.inv_max !== null) {
+          maxStockLevel = Number(stockRow.inv_max);
+        }
+      }
+
+      // Calculate 30-day sales volume (frequency velocity)
+      const salesRow = await db.get(
+        `SELECT COALESCE(SUM(si.quantity), 0) as sales_qty 
+         FROM sale_items si
+         JOIN sales_invoices inv ON si.invoice_id = inv.id
+         WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = ?)
+         AND inv.date >= datetime('now', '-30 days')`,
+        [localMed.id]
+      );
+      if (salesRow) {
+        sales30d = Number(salesRow.sales_qty || 0);
+      }
+    }
+
+    // 3. Determine Dynamic Max Limit based on sales frequency or manual max_stock_level
+    let maxLimit = 30; // default cap fallback
+    if (maxStockLevel !== null && maxStockLevel > 0) {
+      maxLimit = maxStockLevel;
+    } else if (sales30d > 0) {
+      // Limit to 1.25x monthly sales velocity (minimum 10)
+      maxLimit = Math.max(10, Math.ceil(sales30d * 1.25));
+    }
+
+    // 4. Calculate existing cart quantity across distributors (check recent placed orders or session cart)
+    let cartQty = 0;
+    try {
+      const settings = await getPharmarackSettings();
+      const token = settings['pharmarack_session_token'] || '';
+      if (token) {
+        // Fetch current active cart from Pharmarack live API
+        const cartRes = await fetchPharmarack('https://pharmretail-api.pharmarack.com/order/api/v2/cart-list', {
+          method: 'GET',
+          signal: AbortSignal.timeout(4000)
+        });
+        if (cartRes.ok) {
+          const cartData: any = await cartRes.json();
+          if (cartData && cartData.data && Array.isArray(cartData.data)) {
+            for (const store of cartData.data) {
+              if (Array.isArray(store.items)) {
+                for (const item of store.items) {
+                  const itemTitle = (item.productName || item.ProductFullName || '').toLowerCase();
+                  if (itemTitle.includes(cleaned.toLowerCase()) || (localMed && itemTitle.includes(localMed.name.toLowerCase()))) {
+                    cartQty += Number(item.qty || item.quantity || 0);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Non-blocking fallback if cart API fetch times out
+    }
+
+    const totalInHandAndCart = currentStock + cartQty;
+    const reqQtyNum = Number(requestedQty) || 1;
+    const recommendedQty = Math.max(0, maxLimit - totalInHandAndCart);
+    const isOverstock = (totalInHandAndCart + reqQtyNum) > maxLimit;
+    const isDuplicateInCart = cartQty > 0;
+    const isExistingInStock = currentStock > 0;
+
+    return res.json({
+      success: true,
+      matchedLocalMedicineName: matchedName,
+      currentStock,
+      cartQty,
+      sales30d,
+      maxLimit,
+      recommendedQty,
+      isOverstock,
+      isDuplicateInCart,
+      isExistingInStock,
+      warningMessage: isOverstock
+        ? `Overstock Notice: You already have ${currentStock} in stock and ${cartQty} in cart. Based on sales velocity (${sales30d}/mo), recommended cap is ${maxLimit} units.`
+        : (isExistingInStock || isDuplicateInCart)
+        ? `In Stock: ${currentStock} units | Already in Cart: ${cartQty} units`
+        : null
+    });
+  } catch (err: any) {
+    console.error('Error in /api/pharmarack/check-overstock:', err);
+    return res.status(500).json({ error: 'Failed to check overstock status: ' + err.message });
+  }
+});
+
+/**
+ * GET /api/pharmarack/auto-refill-suggestions
+ * Detects high-frequency medicines with low stock (<= 5 units or <= reorder_level)
+ * that have positive 30-day/90-day sales velocity.
+ * Returns suggested items for the Auto-Refill Queue in Pharmarack Cart.
+ */
+router.get('/auto-refill-suggestions', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+
+    // Query medicines with low current stock (<= 5) and positive sales history in last 30 days
+    const rows = await db.all(`
+      SELECT 
+        m.id as medicine_id,
+        m.name as medicine_name,
+        m.manufacturer,
+        m.packaging,
+        COALESCE(SUM(inv.quantity), 0) as current_stock,
+        MAX(inv.reorder_level) as reorder_level,
+        MAX(m.max_stock_level) as max_stock_level,
+        (
+          SELECT COALESCE(SUM(si.quantity), 0)
+          FROM sale_items si
+          JOIN sales_invoices sinv ON si.invoice_id = sinv.id
+          WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = m.id)
+          AND sinv.date >= datetime('now', '-30 days')
+        ) as sales_30d
+      FROM medicines m
+      LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
+      GROUP BY m.id
+      HAVING current_stock <= 5 AND sales_30d > 0
+      ORDER BY sales_30d DESC
+      LIMIT 25
+    `);
+
+    const suggestions = rows.map(r => {
+      const sales30d = Number(r.sales_30d || 0);
+      const stock = Number(r.current_stock || 0);
+      const cap = r.max_stock_level ? Number(r.max_stock_level) : Math.max(10, Math.ceil(sales30d * 1.25));
+      const recQty = Math.max(1, cap - stock);
+
+      return {
+        medicine_id: r.medicine_id,
+        medicine_name: r.medicine_name,
+        manufacturer: r.manufacturer || '',
+        packaging: r.packaging || '',
+        current_stock: stock,
+        sales_30d: sales30d,
+        reorder_level: r.reorder_level || 5,
+        recommended_qty: recQty
+      };
+    });
+
+    res.json({ success: true, suggestions });
+  } catch (err: any) {
+    console.error('Error fetching auto refill suggestions:', err);
+    res.status(500).json({ error: 'Failed to fetch auto-refill suggestions: ' + err.message });
   }
 });
 

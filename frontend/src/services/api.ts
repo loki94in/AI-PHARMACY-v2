@@ -507,6 +507,9 @@ export const api = {
     apiClient.post('/pharmarack/cart/notify-manual', data).then(res => res.data),
   getPharmarackDistributors: () => apiClient.get('/pharmarack/distributors').then(res => res.data),
   checkPharmarackSession: () => apiClient.get('/pharmarack/session-status').then(res => res.data),
+  checkPharmarackOverstock: (data: { productName: string; company?: string; packaging?: string; distributorStoreId?: number; requestedQty?: number }) =>
+    apiClient.post('/pharmarack/check-overstock', data).then(res => res.data),
+  getPharmarackAutoRefillSuggestions: () => apiClient.get('/pharmarack/auto-refill-suggestions').then(res => res.data),
   launchPharmarackLoginWindow: () => apiClient.post('/pharmarack/login-window').then(res => res.data),
   
   // Composition Enrichment

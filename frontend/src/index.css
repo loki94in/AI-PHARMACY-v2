@@ -591,3 +591,21 @@ input[type="date"]:focus {
   animation: softToastLifecycle 4.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* ──────────────────────────────────────────────
+   PHARMARACK OVERSTOCK & DUPLICATE PULSE GLOW
+   ────────────────────────────────────────────── */
+@keyframes pulseAmberGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4), 0 0 12px rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.0), 0 0 20px rgba(245, 158, 11, 0.4);
+    border-color: rgba(245, 158, 11, 0.9);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseAmberGlow 2s ease-in-out infinite;
+}
+

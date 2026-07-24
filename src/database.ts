@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 15;
+const CURRENT_SCHEMA_VERSION = 17;
 
 /**
  * Ensure required SQLite tables exist.
@@ -224,9 +224,11 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE inventory_master ADD COLUMN unit_price REAL DEFAULT 0`,
     `ALTER TABLE inventory_master ADD COLUMN cost_price REAL DEFAULT 0`,
     `ALTER TABLE inventory_master ADD COLUMN reorder_level INTEGER DEFAULT 10`,
+    `ALTER TABLE inventory_master ADD COLUMN max_stock_level INTEGER DEFAULT NULL`,
     `ALTER TABLE inventory_master ADD COLUMN mrp REAL DEFAULT 0`,
     `ALTER TABLE inventory_master ADD COLUMN legacy_batch_id TEXT`,
     `ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
+    `ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL`,
     `ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN hsn_code TEXT`,
     `ALTER TABLE medicines ADD COLUMN schedule_type TEXT DEFAULT 'None'`,
@@ -363,6 +365,13 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE medicines ADD COLUMN source TEXT DEFAULT 'manual'`,
     `ALTER TABLE medicines ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL`,
     `ALTER TABLE staged_medicine_reviews ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL`,
+    // Expand distributors table — was created with only (id, name, contact)
+    `ALTER TABLE distributors ADD COLUMN phone TEXT DEFAULT ''`,
+    `ALTER TABLE distributors ADD COLUMN email TEXT DEFAULT ''`,
+    `ALTER TABLE distributors ADD COLUMN address TEXT DEFAULT ''`,
+    `ALTER TABLE distributors ADD COLUMN gstin TEXT DEFAULT ''`,
+    `ALTER TABLE distributors ADD COLUMN state_code TEXT DEFAULT ''`,
+    `ALTER TABLE distributors ADD COLUMN preferred_file_format TEXT DEFAULT 'excel'`,
   ];
   for (const stmt of alterStatements) {
     try {

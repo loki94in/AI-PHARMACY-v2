@@ -481,6 +481,8 @@ const WhatsAppSection: React.FC = () => {
   const [attachedFile, setAttachedFile] = useState<{ filename: string; mimetype: string; data: string } | null>(null);
 
   const [isReady, setIsReady] = useState(true);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [qrMessage, setQrMessage] = useState<string>('');
   const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
   const [showTemplatePopover, setShowTemplatePopover] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
@@ -556,13 +558,16 @@ const WhatsAppSection: React.FC = () => {
   const activeChatRef = useRef<WaChatItem | null>(null);
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
-  // Load WhatsApp status
+  // Load WhatsApp status + QR code
   const checkStatus = useCallback(async () => {
     try {
-      const res = await apiClient.get<{ isReady: boolean }>('/messaging/qr');
+      const res = await apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string }>('/messaging/qr');
       setIsReady(res.data.isReady);
+      setQrUrl(res.data.qrUrl || null);
+      setQrMessage(res.data.message || '');
     } catch {
       setIsReady(false);
+      setQrUrl(null);
     }
   }, []);
 
@@ -594,10 +599,13 @@ const WhatsAppSection: React.FC = () => {
     loadChats();
     loadTemplates();
 
-    // Live polling: refresh chat list every 30 s
-    const chatPollId = setInterval(loadChats, 30_000);
-    return () => clearInterval(chatPollId);
-  }, [checkStatus, loadChats, loadTemplates]);
+    // Poll status every 5s when not ready (for QR), every 30s when ready (for chat list)
+    const pollId = setInterval(() => {
+      checkStatus();
+      if (isReady) loadChats();
+    }, 5_000);
+    return () => clearInterval(pollId);
+  }, [checkStatus, loadChats, loadTemplates, isReady]);
 
   // Load Thread Messages when activeChat changes
   useEffect(() => {
@@ -901,31 +909,59 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
         </div>
       </div>
 
-      {/* WhatsApp Disconnected Banner */}
-      {!isReady && (
-        <div className="flex items-center justify-between p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xs shrink-0">
-          <div className="flex items-center gap-2">
-            <AlertCircle size={15} />
-            <span>WhatsApp session is initializing or disconnected. Click to launch or reconnect.</span>
+      {/* ── WhatsApp Not-Connected: full QR setup screen ── */}
+      {!isReady ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 bg-bg2 border border-border rounded-2xl">
+          <div className="text-center space-y-1">
+            <h2 className="text-sm font-bold text-text flex items-center justify-center gap-2">
+              <MessageCircle size={18} className="text-emerald-400" />
+              Connect WhatsApp
+            </h2>
+            <p className="text-xs text-muted max-w-xs">
+              {qrMessage || 'Scan the QR code below with your phone to connect WhatsApp. The QR refreshes automatically.'}
+            </p>
           </div>
-          <button
-            onClick={async () => {
-              try {
-                toastEvent.trigger('Launching WhatsApp login window...', 'info');
-                await apiClient.post('/messaging/login-window');
-              } catch (err: any) {
-                toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
-              }
-            }}
-            className="flex items-center gap-1 font-bold underline hover:text-amber-300 transition-all text-xs"
-          >
-            <span>Launch Login Window</span>
-            <ExternalLink size={12} />
-          </button>
-        </div>
-      )}
 
-      {/* Main Interface: Resizable Native Chat Panel */}
+          {/* QR Code */}
+          {qrUrl ? (
+            <div className="p-4 bg-white rounded-2xl shadow-lg border border-border">
+              <img src={qrUrl} alt="WhatsApp QR Code" className="w-56 h-56" />
+            </div>
+          ) : (
+            <div className="w-64 h-64 bg-bg3 border border-border rounded-2xl flex flex-col items-center justify-center gap-3 text-muted">
+              <RefreshCw size={28} className="animate-spin text-emerald-400" />
+              <p className="text-xs">Generating QR code…</p>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <button
+              onClick={checkStatus}
+              className="flex items-center gap-2 px-4 py-2 bg-bg3 border border-border rounded-xl text-xs font-bold text-text hover:bg-bg transition-all active:scale-95"
+            >
+              <RefreshCw size={13} /> Refresh QR
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  toastEvent.trigger('Launching WhatsApp login window…', 'info');
+                  await apiClient.post('/messaging/login-window');
+                } catch (err: any) {
+                  toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+            >
+              <ExternalLink size={13} /> Open Live Chrome Window
+            </button>
+          </div>
+
+          <p className="text-[10px] text-muted text-center max-w-xs">
+            Open WhatsApp on your phone → Linked Devices → Link a Device → scan the QR above.
+          </p>
+        </div>
+      ) : (
+      /* ── Main Interface: Resizable Native Chat Panel ── */
       <div className="flex-1 min-h-0 flex bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
         {/* Left: Chat List Panel (Resizable Width) */}
         <div
@@ -1268,6 +1304,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
           )}
         </div>
       </div>
+      )} {/* end isReady ternary */}
 
       {/* Template Manager Modal */}
       {showManageModal && (

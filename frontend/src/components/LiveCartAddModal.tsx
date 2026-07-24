@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock } from 'lucide-react';
+import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent, liveCartAddEvent } from '../services/events';
 
@@ -128,6 +128,57 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
   const [selectedPackaging, setSelectedPackaging] = useState('');
   const [selectedMedicineName, setSelectedMedicineName] = useState('');
 
+  // Overstock & Duplicate Check State
+  const [overstockInfo, setOverstockInfo] = useState<{
+    matchedLocalMedicineName: string;
+    currentStock: number;
+    cartQty: number;
+    sales30d: number;
+    maxLimit: number;
+    recommendedQty: number;
+    isOverstock: boolean;
+    isDuplicateInCart: boolean;
+    isExistingInStock: boolean;
+    warningMessage: string | null;
+  } | null>(null);
+  const [checkingOverstock, setCheckingOverstock] = useState(false);
+
+  const triggerOverstockCheck = async (name: string, requestedQuantity: number) => {
+    if (!name || name.trim().length < 2) {
+      setOverstockInfo(null);
+      return;
+    }
+    setCheckingOverstock(true);
+    try {
+      const res = await api.checkPharmarackOverstock({
+        productName: name,
+        requestedQty: requestedQuantity
+      });
+      if (res && res.success) {
+        setOverstockInfo(res);
+      } else {
+        setOverstockInfo(null);
+      }
+    } catch (err) {
+      console.warn('Overstock check error:', err);
+      setOverstockInfo(null);
+    } finally {
+      setCheckingOverstock(false);
+    }
+  };
+
+  useEffect(() => {
+    const targetName = selectedMedicineName || product.replace(/\s*\([^)]*\)$/, '').trim();
+    if (targetName && targetName.length >= 2) {
+      const timer = setTimeout(() => {
+        triggerOverstockCheck(targetName, qty);
+      }, 200);
+      return () => clearTimeout(timer);
+    } else {
+      setOverstockInfo(null);
+    }
+  }, [selectedMedicineName, product, qty]);
+
   // Suggestions Search
   const [suggestions, setSuggestions] = useState<SuggestionMedicine[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -155,6 +206,102 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
   const [distributorPickerReconIdx, setDistributorPickerReconIdx] = useState<number | null>(null);
   const [distributorPickerReconMedicine, setDistributorPickerReconMedicine] = useState<string>('');
   const [addedReconMedicines, setAddedReconMedicines] = useState<Record<number, string[]>>({});
+
+  // High-Frequency Low Stock Auto-Refills State
+  const [autoRefillItems, setAutoRefillItems] = useState<Array<{
+    medicine_id: number;
+    medicine_name: string;
+    manufacturer: string;
+    packaging: string;
+    current_stock: number;
+    sales_30d: number;
+    reorder_level: number;
+    recommended_qty: number;
+  }>>([]);
+  const [distributorPickerAutoRefillId, setDistributorPickerAutoRefillId] = useState<number | null>(null);
+  const [addingAutoRefillId, setAddingAutoRefillId] = useState<number | null>(null);
+
+  const fetchAutoRefillItems = async () => {
+    try {
+      const data = await api.getPharmarackAutoRefillSuggestions();
+      if (data && data.success && Array.isArray(data.suggestions)) {
+        setAutoRefillItems(data.suggestions);
+      }
+    } catch (err) {
+      console.error('Failed to fetch auto refill suggestions:', err);
+    }
+  };
+
+  const handleSearchDistributorsForAutoRefill = async (item: any) => {
+    setDistributorPickerAutoRefillId(item.medicine_id);
+    setDistributorPickerResults([]);
+    setDistributorPickerLoading(true);
+    try {
+      const searchResults = await api.searchPharmarack(item.medicine_name);
+      if (!searchResults || searchResults.length === 0) {
+        toastEvent.trigger(`No Pharmarack matches found for "${item.medicine_name}"`, 'error');
+        setDistributorPickerAutoRefillId(null);
+        return;
+      }
+      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((resItem) => ({
+        medicine_name: resItem.name,
+        mrp: resItem.mrp,
+        isPharmarack: true,
+        distributor: resItem.distributor,
+        rate: resItem.rate,
+        mapped: resItem.mapped,
+        packaging: resItem.packaging,
+        stock: resItem.stock,
+        scheme: resItem.scheme,
+        productId: resItem.productId,
+        storeId: resItem.storeId,
+        productCode: resItem.productCode,
+        company: resItem.company
+      }));
+      setDistributorPickerResults(mapped);
+    } catch (err: any) {
+      console.error('Failed to search distributors for auto refill:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
+      setDistributorPickerAutoRefillId(null);
+    } finally {
+      setDistributorPickerLoading(false);
+    }
+  };
+
+  const handleConfirmAutoRefillDistributor = async (item: any, picked: SuggestionMedicine) => {
+    setAddingAutoRefillId(item.medicine_id);
+    try {
+      const payload = [{
+        productId: picked.productId!,
+        storeId: picked.storeId!,
+        qty: item.recommended_qty || 10,
+        rate: picked.rate || undefined,
+        scheme: picked.scheme || undefined,
+        productCode: picked.productCode,
+        company: picked.company,
+        productName: `${picked.medicine_name} (${picked.packaging})`,
+        storeName: picked.distributor,
+        packaging: picked.packaging,
+        mapped: picked.mapped === false ? false : true
+      }];
+
+      const res = await api.addPharmarackCart(payload);
+      if (res && res.success) {
+        toastEvent.trigger(`Added "${picked.medicine_name}" (${item.recommended_qty} units) to Pharmarack cart!`, 'success');
+        setDistributorPickerAutoRefillId(null);
+        setDistributorPickerResults([]);
+        await fetchCart();
+        await fetchAutoRefillItems();
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
+      }
+    } catch (err: any) {
+      console.error('Failed to confirm auto refill distributor:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
+    } finally {
+      setAddingAutoRefillId(null);
+    }
+  };
 
   // Distributor Picker States (for Orders & Refills)
   const [distributorPickerOrderId, setDistributorPickerOrderId] = useState<number | null>(null);
@@ -594,6 +741,7 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
         fetchPendingOrders(),
         fetchPendingRefills(),
         fetchReconOrders(),
+        fetchAutoRefillItems(),
         api.checkPharmarackSession().then(data => setPrMode(data.mode || 'Live')).catch(() => setPrMode('Live'))
       ]);
     }
@@ -606,7 +754,8 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
           fetchCart(),
           fetchPendingOrders(),
           fetchPendingRefills(),
-          fetchReconOrders()
+          fetchReconOrders(),
+          fetchAutoRefillItems()
         ]);
       }
     };
@@ -917,7 +1066,7 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
             <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30">
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                  Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length})
+                  Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length + autoRefillItems.length})
                 </span>
                 <button
                   type="button"
@@ -929,7 +1078,8 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
                   + Req
                 </button>
               </div>
-              <div className="flex gap-1 text-[8px] font-bold uppercase">
+              <div className="flex gap-1 text-[8px] font-bold uppercase flex-wrap">
+                <span className="px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{autoRefillItems.length} Auto</span>
                 <span className="px-1 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">{pendingOrders.length} Ord</span>
                 <span className="px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{pendingRefills.length} Refill</span>
                 <span className="px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">{reconOrders.length} Recon</span>
@@ -983,7 +1133,7 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
 
             {/* Table */}
             <div className="flex-1 overflow-y-auto scrollbar-thin mt-1">
-              {(pendingOrders.length + pendingRefills.length + reconOrders.length) === 0 ? (
+              {(pendingOrders.length + pendingRefills.length + reconOrders.length + autoRefillItems.length) === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-8 text-center text-muted">
                   <Clock size={28} className="opacity-20 mb-2" />
                   <p className="text-xs font-bold">All Clear</p>
@@ -1273,6 +1423,71 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
                       );
                     })}
 
+                    {/* High-Velocity Low Stock Auto-Refills */}
+                    {autoRefillItems.map((item) => {
+                      const isPickingForAuto = distributorPickerAutoRefillId === item.medicine_id;
+                      return (
+                        <React.Fragment key={`auto-refill-${item.medicine_id}`}>
+                          <tr className={`transition-colors ${isPickingForAuto ? 'bg-emerald-500/10' : 'hover:bg-bg3/40'}`}>
+                            <td className="py-2 px-1">
+                              <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
+                            </td>
+                            <td className="py-2 px-1 min-w-0">
+                              <div className="font-semibold truncate max-w-[130px] text-text" title={item.medicine_name}>
+                                {item.medicine_name}
+                              </div>
+                              <div className="text-emerald-400 text-[9px] font-mono">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
+                            </td>
+                            <td className="py-2 px-1 text-right text-muted font-mono">{item.recommended_qty}</td>
+                            <td className="py-2 px-1 text-right">
+                              {isPickingForAuto ? (
+                                <button type="button" onClick={() => { setDistributorPickerAutoRefillId(null); setDistributorPickerResults([]); }}
+                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
+                              ) : (
+                                <button type="button"
+                                  onClick={() => handleSearchDistributorsForAutoRefill(item)}
+                                  disabled={addingAutoRefillId === item.medicine_id || distributorPickerLoading}
+                                  className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition-colors">
+                                  {addingAutoRefillId === item.medicine_id ? '...' : 'Add'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {/* Distributor Picker Row for Auto Refill */}
+                          {isPickingForAuto && (
+                            <tr>
+                              <td colSpan={4} className="pb-2 px-1">
+                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2 space-y-1">
+                                  {distributorPickerLoading ? (
+                                    <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
+                                      <Loader2 size={10} className="animate-spin text-emerald-400" />
+                                      Searching distributors...
+                                    </div>
+                                  ) : distributorPickerResults.length === 0 ? (
+                                    <p className="text-[10px] text-muted py-1">No distributors found.</p>
+                                  ) : distributorPickerResults.map((dist, idx) => (
+                                    <button key={idx} type="button"
+                                      onClick={() => handleConfirmAutoRefillDistributor(item, dist)}
+                                      disabled={addingAutoRefillId === item.medicine_id}
+                                      className="w-full text-left px-2 py-1.5 rounded-lg bg-bg3/50 hover:bg-emerald-500/10 border border-border hover:border-emerald-500/40 transition-all flex items-center justify-between gap-2 group disabled:opacity-50">
+                                      <div className="flex flex-col min-w-0">
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-[10px] font-semibold text-text truncate group-hover:text-emerald-400">{dist.distributor || 'Unknown'}</span>
+                                          {dist.stock && <span className={`text-[7px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
+                                        </div>
+                                        {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
+                                      </div>
+                                      {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
+                                    </button>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+
                   </tbody>
                 </table>
               )}
@@ -1495,6 +1710,69 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
                     </button>
                   </div>
                 </div>
+
+                {/* Overstock & Duplicate Inventory Cross-Check Card */}
+                {overstockInfo && (overstockInfo.isOverstock || overstockInfo.isExistingInStock || overstockInfo.isDuplicateInCart) && (
+                  <div className={`p-3 rounded-xl border text-xs text-text shadow-md transition-all duration-300 animate-in fade-in slide-in-from-top-2 ${
+                    overstockInfo.isOverstock 
+                      ? 'bg-amber-500/10 border-amber-500/50 animate-pulse-glow' 
+                      : 'bg-blue-500/10 border-blue-500/30'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px] text-amber-400">
+                        <AlertCircle size={14} className={overstockInfo.isOverstock ? 'text-amber-400 animate-bounce' : 'text-blue-400'} />
+                        <span>{overstockInfo.isOverstock ? '⚠️ Overstock Warning' : 'ℹ️ Inventory Stock & Cart Cross-Check'}</span>
+                      </div>
+                      {overstockInfo.matchedLocalMedicineName && (
+                        <span className="text-[9px] bg-bg3 text-muted border border-border px-1.5 py-0.5 rounded font-mono truncate max-w-[150px]" title={overstockInfo.matchedLocalMedicineName}>
+                          Matched: {overstockInfo.matchedLocalMedicineName}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center py-1.5 my-1 bg-bg/40 rounded-lg border border-border/30 font-mono text-[10px]">
+                      <div className="p-1">
+                        <div className="text-muted text-[9px] uppercase">In Store Stock</div>
+                        <div className={`font-bold text-xs ${overstockInfo.currentStock > 0 ? 'text-emerald-400' : 'text-muted'}`}>
+                          {overstockInfo.currentStock} units
+                        </div>
+                      </div>
+                      <div className="p-1 border-x border-border/30">
+                        <div className="text-muted text-[9px] uppercase">In Cart</div>
+                        <div className={`font-bold text-xs ${overstockInfo.cartQty > 0 ? 'text-purple-400' : 'text-muted'}`}>
+                          {overstockInfo.cartQty} units
+                        </div>
+                      </div>
+                      <div className="p-1">
+                        <div className="text-muted text-[9px] uppercase">Rec. Cap</div>
+                        <div className="font-bold text-xs text-amber-400">
+                          {overstockInfo.maxLimit} units
+                        </div>
+                      </div>
+                    </div>
+
+                    {overstockInfo.warningMessage && (
+                      <p className="text-[10px] text-text/80 my-1 leading-tight">
+                        {overstockInfo.warningMessage}
+                      </p>
+                    )}
+
+                    {overstockInfo.isOverstock && overstockInfo.recommendedQty !== qty && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetQty = overstockInfo.recommendedQty > 0 ? overstockInfo.recommendedQty : 1;
+                          setQty(targetQty);
+                          toastEvent.trigger(`Adjusted order quantity to recommended cap (${targetQty} units)`, 'success');
+                        }}
+                        className="w-full mt-2 py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                      >
+                        <Sparkles size={12} className="text-amber-400" />
+                        ✨ Adjust Qty to Recommended ({overstockInfo.recommendedQty > 0 ? overstockInfo.recommendedQty : 1} units)
+                      </button>
+                    )}
+                  </div>
+                )}
               </form>
             </div>
 

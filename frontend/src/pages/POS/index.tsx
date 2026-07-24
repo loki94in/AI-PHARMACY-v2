@@ -2324,6 +2324,20 @@ const POS = () => {
                       {searchResults.map((med) => {
                         const renderMedicineItem = (item: any, isAlt = false) => {
                           const isHighlighted = !isAlt && searchHighlightIndex === searchResults.indexOf(item);
+                          const packSize = item.pack_size || 10;
+                          const totalUnits = (item.quantity || 0) * packSize + (item.loose_quantity || 0);
+                          const cartUnits = cart.reduce((sum, c) => {
+                            const isSameMed = c.medicine_id === item.medicine_id || 
+                              (c.name || c.medicine_name || '').toLowerCase().trim() === (item.medicine_name || '').toLowerCase().trim();
+                            if (isSameMed && !c.isEmptyRow) {
+                              return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
+                            }
+                            return sum;
+                          }, 0);
+                          const remainingUnits = Math.max(0, totalUnits - cartUnits);
+                          const remainingPacks = Math.floor(remainingUnits / packSize);
+                          const isLowStockAlert = remainingPacks <= 3;
+
                           return (
                             <button
                               key={item.inventory_id || `item_${item.medicine_id}_${Math.random()}`}
@@ -2335,32 +2349,31 @@ const POS = () => {
                                 setSearchResults([]);
                                 setShowSearchDropdown(false);
                               }}
-                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group ${isAlt ? 'pl-8 bg-sky/5' : ''} ${isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group ${
+                                isAlt ? 'pl-8 bg-sky/5' : ''
+                              } ${
+                                isLowStockAlert ? 'bg-amber-500/5 hover:bg-amber-500/10 border-l-2 border-amber-500' : ''
+                              } ${
+                                isHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''
+                              }`}
                             >
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {isAlt && <span className="text-[13px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
                                   <span className="font-semibold text-text group-hover:text-primary transition-all">{item.medicine_name}</span>
+                                  {isLowStockAlert && (
+                                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 uppercase tracking-wider">
+                                      ⚠️ Low Stock ({remainingPacks} Left • Refill Needed)
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[13px] text-muted">
                                   Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
                                   {item.quantity !== undefined && (() => {
-                                    const packSize = item.pack_size || 10;
-                                    const totalUnits = (item.quantity || 0) * packSize + (item.loose_quantity || 0);
-                                    const cartUnits = cart.reduce((sum, c) => {
-                                      const isSameMed = c.medicine_id === item.medicine_id || 
-                                        (c.name || c.medicine_name || '').toLowerCase().trim() === (item.medicine_name || '').toLowerCase().trim();
-                                      if (isSameMed && !c.isEmptyRow) {
-                                        return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
-                                      }
-                                      return sum;
-                                    }, 0);
-                                    const remainingUnits = Math.max(0, totalUnits - cartUnits);
-                                    const remainingPacks = Math.floor(remainingUnits / packSize);
                                     const remainingLoose = remainingUnits % packSize;
                                     const hasLoose = (item.loose_quantity !== undefined && item.loose_quantity > 0) || remainingLoose > 0;
                                     return (
-                                      <span className="ml-3 font-mono font-semibold text-primary">
+                                      <span className={`ml-3 font-mono font-semibold ${isLowStockAlert ? 'text-amber-400' : 'text-primary'}`}>
                                         Stock: {remainingPacks} Str
                                         {hasLoose && ` / ${remainingLoose} Tab`}
                                       </span>
