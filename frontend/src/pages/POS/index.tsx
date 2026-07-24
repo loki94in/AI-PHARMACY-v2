@@ -265,28 +265,56 @@ const POS = () => {
   // Hydrate POS cart from router state parameter for refills panel handoff
   useEffect(() => {
     if (location.state && (location.state as any).prefill) {
-      const { patientName: name, patientPhone: phone, medicineId, quantity } = (location.state as any).prefill;
+      const prefill = (location.state as any).prefill;
+      const { patientName: name, patientPhone: phone } = prefill;
       if (name) setPatientName(name);
       if (phone) setPatientPhone(phone);
-      
+
       const fetchAndAdd = async () => {
         try {
-          const matched = await api.getQuickEditMedicine(Number(medicineId));
-          if (matched) {
-            const cartItem = {
-              id: matched.id,
-              name: matched.name,
-              batch: matched.batch_no || matched.batch_number || 'AUTO',
-              expiry: matched.expiry_date || '12/28',
-              mrp: matched.mrp || 100,
-              qty: Number(quantity) || 10,
-              quantity: Number(quantity) || 10,
-              unitPrice: matched.unit_price || matched.mrp || 100,
-              looseQty: 0,
-              discount: 0,
-              packSize: matched.pack_size || 10
-            };
-            setCart([cartItem]);
+          // Multi-medicine array from CRM "Bill Now → POS"
+          if (Array.isArray(prefill.medicines) && prefill.medicines.length > 0) {
+            const cartItems: any[] = [];
+            for (const med of prefill.medicines) {
+              try {
+                const matched = await api.searchMedicine(med.medicineName || med.medicine_name || '');
+                if (matched && matched.length > 0) {
+                  const m = matched[0];
+                  cartItems.push({
+                    id: m.id,
+                    name: m.name,
+                    batch: m.batch_no || m.batch_number || 'AUTO',
+                    expiry: m.expiry_date || '12/28',
+                    mrp: m.mrp || 100,
+                    qty: Number(med.quantity_needed) || 10,
+                    quantity: Number(med.quantity_needed) || 10,
+                    unitPrice: m.unit_price || m.mrp || 100,
+                    looseQty: 0,
+                    discount: 0,
+                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 10
+                  });
+                }
+              } catch { /* skip individual medicine resolution errors */ }
+            }
+            if (cartItems.length > 0) setCart(cartItems);
+          } else if (prefill.medicineId) {
+            // Legacy single-medicine path
+            const matched = await api.getQuickEditMedicine(Number(prefill.medicineId));
+            if (matched) {
+              setCart([{
+                id: matched.id,
+                name: matched.name,
+                batch: matched.batch_no || matched.batch_number || 'AUTO',
+                expiry: matched.expiry_date || '12/28',
+                mrp: matched.mrp || 100,
+                qty: Number(prefill.quantity) || 10,
+                quantity: Number(prefill.quantity) || 10,
+                unitPrice: matched.unit_price || matched.mrp || 100,
+                looseQty: 0,
+                discount: 0,
+                packSize: matched.pack_size || 10
+              }]);
+            }
           }
         } catch (err) {
           console.error('Failed to prefill POS from state:', err);

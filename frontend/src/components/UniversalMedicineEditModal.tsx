@@ -240,6 +240,17 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, onClose,
       });
   }, [medicineId]);
 
+  useEffect(() => {
+    if (!medicineId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [medicineId, onClose]);
+
   // Reactive Effect to Auto-Compile Medicine Name
   useEffect(() => {
     if (loading) return;

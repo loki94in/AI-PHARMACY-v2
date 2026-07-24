@@ -295,6 +295,17 @@ export default function PharmarackCart() {
   const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
 
+  useEffect(() => {
+    if (!editingDistributor) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditingDistributor(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingDistributor]);
+
   const normalizeDistName = (rawName: string): string => {
     if (!rawName) return '';
     return rawName
@@ -1926,7 +1937,7 @@ export default function PharmarackCart() {
 
       {/* ── Edit Distributor Contact Modal ── */}
       {editingDistributor && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             {/* Modal Header */}
             <div className="bg-bg3/80 px-6 py-4 border-b border-glass-border flex items-center justify-between">

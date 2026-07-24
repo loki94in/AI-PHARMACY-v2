@@ -94,7 +94,11 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
     const stores = storeData.data.Stores;
     const db = await dbManager.getConnection();
 
-    for (const store of stores) {
+    // Prioritize mapped stores to avoid 355 unmapped error spam on boot
+    const targetStores = stores.filter((s: any) => s.Ismapped === 1);
+    const storesToSync = targetStores.length > 0 ? targetStores : stores.slice(0, 20);
+
+    for (const store of storesToSync) {
       const storeId = store.StoreId;
       const storeName = store.StoreName || 'Unknown';
       const isMapped = store.Ismapped === 1;

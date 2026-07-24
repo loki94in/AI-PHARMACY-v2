@@ -164,19 +164,32 @@ async function syncWhatsappData(client: WAClient) {
     try {
       chats = await client.getChats();
     } catch (getChatsErr: any) {
-      lastSyncFailureAt = Date.now();
       const errMsg = getChatsErr?.message || String(getChatsErr);
-      console.warn(`[WhatsApp] getChats() failed (will retry after ${SYNC_RETRY_COOLDOWN_MS / 1000}s):`, errMsg);
-      if (isPuppeteerDetachedError(errMsg)) {
-        console.warn('[WhatsApp] Sync hit detached Frame/browser context. Invalidating client state...');
-        isReady = false;
-        clientInstance = null;
-        if (activeClient) {
-          activeClient.destroy().catch(() => {});
-          activeClient = null;
+      
+      // If client was just initialized, wait 3 seconds and retry getChats() once silently before logging failure
+      if (errMsg === 'r' || errMsg.includes('Evaluation failed')) {
+        await new Promise(res => setTimeout(res, 3000));
+        try {
+          chats = await client.getChats();
+        } catch (retryErr: any) {
+          lastSyncFailureAt = Date.now();
+          console.log('[WhatsApp] Chat sync scheduled for next periodic cycle.');
+          return;
         }
+      } else {
+        lastSyncFailureAt = Date.now();
+        console.warn(`[WhatsApp] getChats() deferred (will retry after ${SYNC_RETRY_COOLDOWN_MS / 1000}s):`, errMsg);
+        if (isPuppeteerDetachedError(errMsg)) {
+          console.warn('[WhatsApp] Sync hit detached Frame/browser context. Invalidating client state...');
+          isReady = false;
+          clientInstance = null;
+          if (activeClient) {
+            activeClient.destroy().catch(() => {});
+            activeClient = null;
+          }
+        }
+        return;
       }
-      return;
     }
     const db = await dbManager.getConnection();
 
@@ -344,9 +357,11 @@ export async function initClient(): Promise<WAClient> {
       });
 
       // Sync chats separately — failure here must not block send queue drain
-      syncWhatsappData(client).catch(err => {
-        console.error('[WhatsApp] Background sync failed:', err);
-      });
+      setTimeout(() => {
+        syncWhatsappData(client).catch(err => {
+          console.error('[WhatsApp] Background sync failed:', err);
+        });
+      }, 2500);
     });
 
     client.on('disconnected', (reason: string) => {

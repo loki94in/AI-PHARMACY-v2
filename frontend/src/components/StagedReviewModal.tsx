@@ -47,6 +47,16 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     loadStagedData();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handleSelectTx = (tx: any, type: 'sales' | 'purchases') => {
     setSelectedTx({ ...tx, type });
     try {

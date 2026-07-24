@@ -751,6 +751,18 @@ const Topbar = ({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Listen to Escape key to close open header panels
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowPanel(false);
+        setShowDevicesPopover(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Listen for toast events — show flash AND add to panel
   useEffect(() => {
     return toastEvent.subscribe((detail) => {

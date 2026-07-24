@@ -437,6 +437,57 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
   }
 });
 
+// Send WhatsApp reminder immediately regardless of stock status
+router.post('/send-reminder-now', async (req, res) => {
+  const { patient_phone } = req.body;
+  if (!patient_phone) {
+    return res.status(400).json({ error: 'patient_phone is required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+
+    const rows = await db.all(
+      `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+       JOIN medicines m ON pr.medicine_id = m.id
+       WHERE pr.patient_phone = ? AND pr.is_active = 1 AND pr.status != 'notified'
+       ORDER BY pr.next_refill_date ASC`,
+      [patient_phone]
+    );
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'No active refills found for this patient' });
+    }
+
+    const patientName = rows[0].patient_name;
+    const medicineNames = rows.map((r: any) => r.medicine_name).join(', ');
+    const refillDate = rows[0].next_refill_date
+      ? new Date(rows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      : 'soon';
+
+    let medicalName = 'XYZ MEDICAL';
+    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
+    if (nameRow?.value) medicalName = nameRow.value;
+
+    const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
+
+    const { messagingQueue } = await import('../services/messagingQueue.js');
+    await messagingQueue.queueMessage(
+      'refill_reminder',
+      patientName,
+      patient_phone,
+      msg,
+      String(rows[0].id)
+    );
+
+    res.json({ success: true, message: 'Refill reminder queued via WhatsApp' });
+  } catch (err: any) {
+    console.error('Failed to send immediate reminder:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Delete/Cancel a refill schedule
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;

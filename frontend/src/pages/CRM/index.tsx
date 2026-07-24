@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 
@@ -70,12 +70,69 @@ const TABS = [
 // REFILLS SECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ─── Add-Refill form types ────────────────────────────────────────────────────
+
+interface MedicineSuggestion {
+  id: number;
+  name: string;
+  manufacturer?: string;
+  mrp?: number;
+  in_stock_qty?: number;
+}
+
+interface MedicineRow {
+  medicineId: number | null;
+  medicineName: string;
+  manufacturer?: string;
+  mrp?: number;
+  inStockQty?: number;
+  quantity_needed: number;
+  searchTerm: string;
+  suggestions: MedicineSuggestion[];
+  isOpen: boolean;
+  loadingSuggestions?: boolean;
+}
+
+const emptyRow = (): MedicineRow => ({
+  medicineId: null,
+  medicineName: '',
+  quantity_needed: 10,
+  searchTerm: '',
+  suggestions: [],
+  isOpen: false,
+  loadingSuggestions: false
+});
+
 const RefillsSection: React.FC = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<RefillPatient[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState<string | null>(null);
   const [runningCheck, setRunningCheck] = useState(false);
+
+  // ── Add Refill modal state ─────────────────────────────────────────────────
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addPatientName, setAddPatientName] = useState('');
+  const [addPatientPhone, setAddPatientPhone] = useState('');
+  
+  // Frequency state: preset vs custom
+  const [freqMode, setFreqMode] = useState<'preset' | 'custom'>('preset');
+  const [addInterval, setAddInterval] = useState(30);
+  const [customValue, setCustomValue] = useState(15);
+  const [customUnit, setCustomUnit] = useState<'days' | 'weeks' | 'months'>('days');
+
+  const [medicineRows, setMedicineRows] = useState<MedicineRow[]>([emptyRow()]);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Effective interval calculation helper
+  const getEffectiveIntervalDays = useCallback(() => {
+    if (freqMode === 'preset') return addInterval;
+    const val = Math.max(1, Number(customValue) || 1);
+    if (customUnit === 'weeks') return val * 7;
+    if (customUnit === 'months') return val * 30;
+    return val;
+  }, [freqMode, addInterval, customValue, customUnit]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +145,17 @@ const RefillsSection: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!showAddModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAddModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal]);
+
   const handleCheck = async () => {
     setRunningCheck(true);
     try {
@@ -98,13 +166,174 @@ const RefillsSection: React.FC = () => {
     finally { setRunningCheck(false); }
   };
 
-  const handleSendReminder = async (phone: string) => {
+  // ── Remind Now: always-active, calls new endpoint ─────────────────────────
+  const handleRemindNow = async (phone: string) => {
     setSending(phone);
     try {
-      await apiClient.post('/refills/send-tomorrow-reminder', { patient_phone: phone });
-      toastEvent.trigger(`Reminder sent to ${phone}`, 'success', '/crm');
-    } catch { toastEvent.trigger('Failed to send reminder', 'error', '/crm'); }
-    finally { setSending(null); }
+      await apiClient.post('/refills/send-reminder-now', { patient_phone: phone });
+      toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to send reminder', 'error', '/crm');
+    } finally { setSending(null); }
+  };
+
+  // ── Bill Now → POS ────────────────────────────────────────────────────────
+  const handleBillNow = (patient: RefillPatient) => {
+    navigate('/pos', {
+      state: {
+        prefill: {
+          patientName: patient.patient_name,
+          patientPhone: patient.patient_phone,
+          medicines: patient.medicines.map(m => ({
+            medicine_name: m.medicine_name,
+            medicineName: m.medicine_name,
+            quantity_needed: m.quantity_needed || 10
+          }))
+        }
+      }
+    });
+  };
+
+  // ── Medicine row search & inventory dropdown ──────────────────────────────
+  const fetchSuggestions = async (idx: number, term: string) => {
+    setMedicineRows(prev => {
+      const updated = [...prev];
+      if (updated[idx]) {
+        updated[idx] = { ...updated[idx], loadingSuggestions: true, isOpen: true };
+      }
+      return updated;
+    });
+
+    try {
+      let suggestions: MedicineSuggestion[] = [];
+      const clean = term.trim();
+      if (!clean) {
+        const res = await apiClient.get<any[]>('/medicines/compact');
+        const list = Array.isArray(res.data) ? res.data : [];
+        suggestions = list.slice(0, 15).map(m => ({
+          id: m.id || m.medicine_id,
+          name: m.name || m.medicine_name,
+          manufacturer: m.manufacturer,
+          mrp: m.mrp,
+          in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
+        }));
+      } else {
+        const res = await apiClient.get<any[]>(`/sales/search-medicine?q=${encodeURIComponent(clean)}`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (list.length > 0) {
+          suggestions = list.slice(0, 15).map(m => ({
+            id: m.medicine_id || m.id,
+            name: m.medicine_name || m.name,
+            manufacturer: m.manufacturer,
+            mrp: m.mrp,
+            in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
+          }));
+        } else {
+          const fallback = await apiClient.get<any[]>(`/medicines/search?q=${encodeURIComponent(clean)}&limit=10`);
+          const fbList = Array.isArray(fallback.data) ? fallback.data : [];
+          suggestions = fbList.map(m => ({
+            id: m.id || m.medicine_id,
+            name: m.name || m.medicine_name,
+            manufacturer: m.manufacturer,
+            mrp: m.mrp,
+            in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
+          }));
+        }
+      }
+
+      setMedicineRows(prev => {
+        const updated = [...prev];
+        if (updated[idx]) {
+          updated[idx] = { ...updated[idx], suggestions, loadingSuggestions: false, isOpen: true };
+        }
+        return updated;
+      });
+    } catch {
+      setMedicineRows(prev => {
+        const updated = [...prev];
+        if (updated[idx]) {
+          updated[idx] = { ...updated[idx], loadingSuggestions: false };
+        }
+        return updated;
+      });
+    }
+  };
+
+  const handleMedicineSearch = (idx: number, term: string) => {
+    setMedicineRows(prev => {
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        searchTerm: term,
+        medicineName: term,
+        medicineId: null,
+        isOpen: true
+      };
+      return updated;
+    });
+    fetchSuggestions(idx, term);
+  };
+
+  const selectMedicine = (idx: number, s: MedicineSuggestion) => {
+    setMedicineRows(prev => {
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        medicineId: s.id,
+        medicineName: s.name,
+        manufacturer: s.manufacturer,
+        mrp: s.mrp,
+        inStockQty: s.in_stock_qty,
+        searchTerm: s.name,
+        suggestions: [],
+        isOpen: false
+      };
+      return updated;
+    });
+  };
+
+  const updateQty = (idx: number, qty: number) => {
+    setMedicineRows(prev => {
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], quantity_needed: Math.max(1, qty) };
+      return updated;
+    });
+  };
+
+  // ── Submit Add Refill ─────────────────────────────────────────────────────
+  const handleAddRefill = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addPatientName.trim() || !addPatientPhone.trim()) {
+      toastEvent.trigger('Patient name and phone are required', 'error');
+      return;
+    }
+    const validRows = medicineRows.filter(r => r.medicineId);
+    if (validRows.length === 0) {
+      toastEvent.trigger('Please select at least one medicine from the inventory dropdown', 'error');
+      return;
+    }
+    const intervalDays = getEffectiveIntervalDays();
+    setSubmitting(true);
+    try {
+      for (const row of validRows) {
+        await apiClient.post('/refills', {
+          patient_name: addPatientName.trim(),
+          patient_phone: addPatientPhone.trim(),
+          medicine_id: row.medicineId,
+          refill_interval_days: intervalDays
+        });
+      }
+      toastEvent.trigger(`Refill registered for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+      setShowAddModal(false);
+      setAddPatientName('');
+      setAddPatientPhone('');
+      setAddInterval(30);
+      setFreqMode('preset');
+      setMedicineRows([emptyRow()]);
+      await load();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to add refill', 'error', '/crm');
+    } finally { setSubmitting(false); }
   };
 
   const filtered = data.filter(p =>
@@ -118,7 +347,7 @@ const RefillsSection: React.FC = () => {
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
         <div className="relative flex-1 max-w-xs">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -129,9 +358,16 @@ const RefillsSection: React.FC = () => {
           />
         </div>
         <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors"
+        >
+          <Plus size={14} />
+          Add Refill
+        </button>
+        <button
           onClick={handleCheck}
           disabled={runningCheck}
-          className="flex items-center gap-2 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-2 bg-bg2 border border-border text-muted rounded-lg text-sm font-medium hover:bg-bg3 transition-colors disabled:opacity-50"
         >
           <RefreshCw size={14} className={runningCheck ? 'animate-spin' : ''} />
           {runningCheck ? 'Checking…' : 'Run Check'}
@@ -167,7 +403,7 @@ const RefillsSection: React.FC = () => {
               className={`bg-bg2 border rounded-xl p-4 transition-all ${isOverdue ? 'border-red-500/30' : 'border-border'}`}
             >
               {/* Patient header */}
-              <div className="flex items-start justify-between mb-3">
+              <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-3">
                   <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${isOverdue ? 'bg-red-500/15 text-red-400' : 'bg-primary/15 text-primary'}`}>
                     {patient.patient_name?.[0]?.toUpperCase() || '?'}
@@ -179,18 +415,29 @@ const RefillsSection: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${isOverdue ? 'bg-red-500/15 text-red-400' : 'bg-accent/15 text-accent'}`}>
                     <Calendar size={10} />
                     {isOverdue ? 'Overdue · ' : 'Due · '}{formatDate(patient.next_refill_date)}
                   </div>
+                  {/* Remind Now — always active */}
                   <button
-                    onClick={() => handleSendReminder(patient.patient_phone)}
+                    onClick={() => handleRemindNow(patient.patient_phone)}
                     disabled={sending === patient.patient_phone}
+                    title="Send WhatsApp reminder now"
                     className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-50"
                   >
                     <Send size={11} className={sending === patient.patient_phone ? 'animate-pulse' : ''} />
-                    {sending === patient.patient_phone ? 'Sending…' : 'Remind'}
+                    {sending === patient.patient_phone ? 'Sending…' : 'Remind Now'}
+                  </button>
+                  {/* Bill Now → POS */}
+                  <button
+                    onClick={() => handleBillNow(patient)}
+                    title="Open POS with this patient's medicines pre-loaded"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary rounded-lg text-xs font-medium hover:bg-primary/20 transition-colors"
+                  >
+                    <Package size={11} />
+                    Bill Now → POS
                   </button>
                 </div>
               </div>
@@ -224,9 +471,364 @@ const RefillsSection: React.FC = () => {
           );
         })}
       </div>
+
+      {/* ── Add Refill Modal ─────────────────────────────────────────────────── */}
+      {showAddModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-border rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-border flex items-center justify-between flex-shrink-0 bg-bg3/40">
+              <div>
+                <h3 className="text-sm font-bold text-text flex items-center gap-2">
+                  <Repeat2 size={18} className="text-primary" />
+                  Add New Patient Refill
+                </h3>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Select medication directly from inventory & set flexible refill frequency
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleAddRefill} className="p-5 space-y-5 overflow-y-auto flex-1">
+              {/* Patient Details */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                  <Users size={11} className="text-primary" />
+                  Patient Details
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={addPatientName}
+                      onChange={e => setAddPatientName(e.target.value)}
+                      placeholder="Patient Full Name *"
+                      required
+                      className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={addPatientPhone}
+                      onChange={e => setAddPatientPhone(e.target.value)}
+                      placeholder="Phone / WhatsApp (10 digits) *"
+                      required
+                      className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Flexible Frequency Manager */}
+              <div className="bg-bg3/30 border border-border rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                    <Sliders size={11} className="text-accent" />
+                    Flexible Frequency Manager
+                  </label>
+                  {/* Mode Toggle Tabs */}
+                  <div className="flex items-center bg-bg border border-border rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setFreqMode('preset')}
+                      className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${
+                        freqMode === 'preset' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-text'
+                      }`}
+                    >
+                      Presets
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFreqMode('custom')}
+                      className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${
+                        freqMode === 'custom' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-text'
+                      }`}
+                    >
+                      Custom Interval
+                    </button>
+                  </div>
+                </div>
+
+                {freqMode === 'preset' ? (
+                  <div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {[
+                        { days: 7, label: '7 Days (Weekly)' },
+                        { days: 10, label: '10 Days' },
+                        { days: 15, label: '15 Days (Fortnightly)' },
+                        { days: 30, label: '30 Days (Monthly)' },
+                        { days: 45, label: '45 Days' },
+                        { days: 60, label: '60 Days (2 Months)' },
+                        { days: 90, label: '90 Days (3 Months)' }
+                      ].map(opt => (
+                        <button
+                          key={opt.days}
+                          type="button"
+                          onClick={() => setAddInterval(opt.days)}
+                          className={`px-2.5 py-2 rounded-xl text-xs text-center border font-medium transition-all ${
+                            addInterval === opt.days
+                              ? 'bg-primary/15 border-primary text-primary font-bold shadow-sm'
+                              : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted">Repeat every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={customValue}
+                      onChange={e => setCustomValue(Math.max(1, Number(e.target.value)))}
+                      className="w-20 px-3 py-2 bg-bg border border-border rounded-xl text-xs text-text text-center font-semibold focus:outline-none focus:border-primary"
+                    />
+                    <select
+                      value={customUnit}
+                      onChange={e => setCustomUnit(e.target.value as any)}
+                      className="px-3 py-2 bg-bg border border-border rounded-xl text-xs text-text font-medium focus:outline-none focus:border-primary"
+                    >
+                      <option value="days">Days</option>
+                      <option value="weeks">Weeks</option>
+                      <option value="months">Months</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Dynamic Due Date Banner */}
+                {(() => {
+                  const effDays = getEffectiveIntervalDays();
+                  const d = new Date();
+                  d.setDate(d.getDate() + effDays);
+                  const formattedDate = d.toLocaleDateString('en-IN', {
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  });
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-accent/10 border border-accent/20 rounded-xl text-xs text-accent">
+                      <Calendar size={13} className="flex-shrink-0" />
+                      <span>
+                        Calculated Next Due Date: <strong>{formattedDate}</strong> ({effDays} day interval cycle)
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Inventory Medicine Selector */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                    <Package size={11} className="text-primary" />
+                    Medicines & Inventory Selection *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setMedicineRows(prev => [...prev, emptyRow()])}
+                    className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                  >
+                    <Plus size={12} /> Add Another Medicine
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {medicineRows.map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-bg border border-border rounded-xl p-3 space-y-2 shadow-xs hover:border-border/80 transition-all"
+                    >
+                      <div className="flex items-start gap-2">
+                        {/* Medicine Dropdown Input */}
+                        <div className="relative flex-1">
+                          <div className="relative">
+                            <Search size={13} className="absolute left-3 top-3 text-muted" />
+                            <input
+                              type="text"
+                              value={row.searchTerm}
+                              onFocus={() => {
+                                if (row.suggestions.length === 0) {
+                                  fetchSuggestions(idx, row.searchTerm);
+                                } else {
+                                  setMedicineRows(prev => {
+                                    const updated = [...prev];
+                                    updated[idx] = { ...updated[idx], isOpen: true };
+                                    return updated;
+                                  });
+                                }
+                              }}
+                              onChange={e => handleMedicineSearch(idx, e.target.value)}
+                              placeholder="Click or type to select from inventory stock…"
+                              className="w-full pl-9 pr-8 py-2.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
+                            />
+                            <ChevronDown
+                              size={14}
+                              className="absolute right-3 top-3 text-muted pointer-events-none"
+                            />
+                          </div>
+
+                          {/* Dropdown Suggestions List */}
+                          {row.isOpen && (
+                            <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-bg2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                              {row.loadingSuggestions && (
+                                <div className="p-3 text-center text-xs text-muted flex items-center justify-center gap-2">
+                                  <RefreshCw size={12} className="animate-spin" /> Fetching inventory…
+                                </div>
+                              )}
+                              {!row.loadingSuggestions && row.suggestions.length === 0 && (
+                                <div className="p-3 text-center text-xs text-muted">
+                                  No matching inventory item found
+                                </div>
+                              )}
+                              {!row.loadingSuggestions && row.suggestions.map(s => {
+                                const inStock = (s.in_stock_qty || 0) > 0;
+                                return (
+                                  <div
+                                    key={s.id}
+                                    onClick={() => selectMedicine(idx, s)}
+                                    className="px-3.5 py-2.5 hover:bg-bg3 cursor-pointer border-b border-border/40 last:border-none flex items-center justify-between gap-3 transition-colors"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-semibold text-text truncate">{s.name}</p>
+                                      {s.manufacturer && (
+                                        <p className="text-[10px] text-muted truncate">{s.manufacturer}</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      {s.mrp ? (
+                                        <span className="text-[11px] font-medium text-text">₹{s.mrp}</span>
+                                      ) : null}
+                                      <span
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                          inStock
+                                            ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                                            : 'bg-red-500/15 text-red-400 border border-red-500/30'
+                                        }`}
+                                      >
+                                        {inStock ? `${s.in_stock_qty} in stock` : 'Out of Stock'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Quantity Counter */}
+                        <div className="flex items-center border border-border rounded-xl bg-bg2 overflow-hidden flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateQty(idx, row.quantity_needed - 1)}
+                            className="px-2.5 py-2 text-muted hover:text-text hover:bg-bg3 transition-colors text-xs font-bold"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={row.quantity_needed}
+                            onChange={e => updateQty(idx, Number(e.target.value))}
+                            className="w-12 text-center bg-transparent text-xs font-bold text-text focus:outline-none"
+                            title="Required refill quantity"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateQty(idx, row.quantity_needed + 1)}
+                            className="px-2.5 py-2 text-muted hover:text-text hover:bg-bg3 transition-colors text-xs font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {/* Remove Row Button */}
+                        {medicineRows.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setMedicineRows(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-2.5 text-muted hover:text-red-400 transition-colors rounded-xl hover:bg-bg3"
+                            title="Remove medication"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Stock Status Badge for Selected Medicine */}
+                      {row.medicineId && (
+                        <div className="flex items-center justify-between text-[11px] pt-1 px-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-text">{row.medicineName}</span>
+                            {row.mrp && <span className="text-muted">· ₹{row.mrp}</span>}
+                          </div>
+                          <div
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              (row.inStockQty || 0) >= row.quantity_needed
+                                ? 'bg-green-500/15 text-green-400'
+                                : (row.inStockQty || 0) > 0
+                                ? 'bg-yellow-500/15 text-yellow-400'
+                                : 'bg-red-500/15 text-red-400'
+                            }`}
+                          >
+                            {(row.inStockQty || 0) >= row.quantity_needed ? (
+                              <><Check size={10} /> In Stock ({row.inStockQty} available)</>
+                            ) : (row.inStockQty || 0) > 0 ? (
+                              <><AlertCircle size={10} /> Low Stock ({row.inStockQty} available)</>
+                            ) : (
+                              <><AlertCircle size={10} /> Out of Stock (Auto-holds for stock)</>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:bg-bg3 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submitting ? (
+                    <><RefreshCw size={13} className="animate-spin" /> Registering…</>
+                  ) : (
+                    <><Plus size={13} /> Register Refill Schedule</>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DISTRIBUTOR MESSAGES SECTION
@@ -713,6 +1315,20 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
       eventSource.close();
     };
   }, [activeChat, loadChats]);
+
+  // Handle ESC key to close modals
+  useEffect(() => {
+    if (!showManageModal && !showNewChatModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowManageModal(false);
+        setShowNewChatModal(false);
+        setNewChatNumber('');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showManageModal, showNewChatModal]);
 
   // Handle Send Message
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -1308,7 +1924,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
 
       {/* Template Manager Modal */}
       {showManageModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-bg2 border border-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h3 className="text-sm font-bold text-text flex items-center gap-2">
@@ -1430,7 +2046,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
 
       {/* New Chat Modal */}
       {showNewChatModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-bg2 border border-border rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col">
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h3 className="text-sm font-bold text-text flex items-center gap-2">
@@ -1508,6 +2124,7 @@ interface CreditCustomerItem {
 }
 
 const CustomerCreditSection: React.FC = () => {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<CreditCustomerItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomerItem | null>(null);
   const [customerInvoices, setCustomerInvoices] = useState<any[]>([]);
@@ -1533,6 +2150,18 @@ const CustomerCreditSection: React.FC = () => {
       setLoadingInvoices(false);
     }
   }, []);
+
+  // Handle ESC key to close viewInvoice modal
+  useEffect(() => {
+    if (!viewInvoice) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setViewInvoice(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewInvoice]);
 
   const loadCreditCustomers = useCallback(async () => {
     setLoading(true);
@@ -1795,6 +2424,23 @@ const CustomerCreditSection: React.FC = () => {
                     title="Clear credit balance and remove entry from CRM credit list"
                   >
                     Clear Entry
+                  </button>
+
+                  {/* New Sale → POS Button */}
+                  <button
+                    onClick={() => navigate('/pos', {
+                      state: {
+                        prefill: {
+                          patientName: selectedCustomer.name,
+                          patientPhone: selectedCustomer.phone
+                        }
+                      }
+                    })}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-bold transition-all flex items-center gap-1.5"
+                    title="Open POS with this patient pre-filled"
+                  >
+                    <Package size={13} />
+                    New Sale → POS
                   </button>
                 </div>
               </div>

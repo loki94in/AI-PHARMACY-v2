@@ -883,7 +883,7 @@ router.post('/cart/add', async (req, res) => {
     if (!cartSuccess) {
       const chromePath = findChromePath();
       if (chromePath) {
-        console.log('API cart requests failed. Initiating headless browser fallback...');
+        console.log('[Pharmarack] Initiating browser UI automation fallback...');
         const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
         let browser;
         let tempProfilePathToDelete = '';
