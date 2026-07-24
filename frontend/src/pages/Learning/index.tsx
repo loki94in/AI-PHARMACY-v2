@@ -210,13 +210,29 @@ const Learning: React.FC = () => {
   }, [serverSettings]);
 
   useEffect(() => {
+    if (profiles.length > 0 && selectedProfileId === null) {
+      setSelectedProfileId(profiles[0].distributor_id);
+    }
+  }, [profiles, selectedProfileId]);
+
+  useEffect(() => {
     if (serverProfileDetail) {
       setSelectedProfile(serverProfileDetail);
       
-      // Populate manual rules form
-      const rules = serverProfileDetail.profile?.file_mapping_rules 
-        ? JSON.parse(serverProfileDetail.profile.file_mapping_rules) 
-        : {};
+      // Populate manual rules form safely
+      let rules: any = {};
+      const rawRules = serverProfileDetail.profile?.file_mapping_rules;
+      if (rawRules) {
+        if (typeof rawRules === 'object') {
+          rules = rawRules;
+        } else if (typeof rawRules === 'string') {
+          try {
+            rules = JSON.parse(rawRules);
+          } catch (_) {
+            rules = {};
+          }
+        }
+      }
       
       setMappingRules({
         name: rules.name || '',
@@ -1106,7 +1122,7 @@ const Learning: React.FC = () => {
 
             {/* Right Column: Profile details form */}
             <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
-              {hasSelected ? (
+              {selectedProfileId !== null ? (
                 loadingDetail ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3">
                     <RefreshCw className="animate-spin text-sky" size={24} />

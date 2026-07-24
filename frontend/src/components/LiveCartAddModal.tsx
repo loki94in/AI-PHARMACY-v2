@@ -103,6 +103,14 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
   return (qty * rate) / totalItems;
 };
 
+// Module-Level Variable Cache (Preserved across mounts for <5ms instant rendering)
+let cachedCartDistributors: Distributor[] = [];
+let cachedPendingOrders: SpecialOrder[] = [];
+let cachedPendingRefills: Refill[] = [];
+let cachedReconOrders: any[] = [];
+let cachedAutoRefillItems: any[] = [];
+let cachedPrMode: 'Live' | 'Unknown' = 'Live';
+
 export interface LiveCartAddModalProps {
   initialSearch?: string;
   initialQty?: number;
@@ -200,23 +208,23 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [searchLoading, setSearchLoading] = useState(false);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Unknown');
+  const [prMode, setPrMode] = useState<'Live' | 'Unknown'>(cachedPrMode);
 
-  // Cart Preview States
-  const [cartDistributors, setCartDistributors] = useState<Distributor[]>([]);
-  const [cartLoading, setCartLoading] = useState(false);
+  // Cart Preview States (Hydrated instantly from module cache)
+  const [cartDistributors, setCartDistributors] = useState<Distributor[]>(cachedCartDistributors);
+  const [cartLoading, setCartLoading] = useState(cachedCartDistributors.length === 0);
   const [cartError, setCartError] = useState<string | null>(null);
 
   // Pending Orders States and Functions
-  const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
 
   // Pending Refills States and Functions
-  const [pendingRefills, setPendingRefills] = useState<Refill[]>([]);
+  const [pendingRefills, setPendingRefills] = useState<Refill[]>(cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
 
   // Reconcile Orders (unreconciled distributor email orders)
-  const [reconOrders, setReconOrders] = useState<any[]>([]);
+  const [reconOrders, setReconOrders] = useState<any[]>(cachedReconOrders);
   const [distributorPickerReconIdx, setDistributorPickerReconIdx] = useState<number | null>(null);
   const [distributorPickerReconMedicine, setDistributorPickerReconMedicine] = useState<string>('');
   const [addedReconMedicines, setAddedReconMedicines] = useState<Record<number, string[]>>({});
@@ -231,7 +239,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     sales_30d: number;
     reorder_level: number;
     recommended_qty: number;
-  }>>([]);
+  }>>(cachedAutoRefillItems);
   const [distributorPickerAutoRefillId, setDistributorPickerAutoRefillId] = useState<number | null>(null);
   const [addingAutoRefillId, setAddingAutoRefillId] = useState<number | null>(null);
 
@@ -239,6 +247,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const data = await api.getPharmarackAutoRefillSuggestions();
       if (data && data.success && Array.isArray(data.suggestions)) {
+        cachedAutoRefillItems = data.suggestions;
         setAutoRefillItems(data.suggestions);
       }
     } catch (err) {
@@ -367,6 +376,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const data = await api.getOrders();
       if (Array.isArray(data)) {
         const filtered = data.filter(o => o.status === 'Pending' || o.status === 'Ordered');
+        cachedPendingOrders = filtered;
         setPendingOrders(filtered);
       }
     } catch (err) {
@@ -383,6 +393,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           r.status === 'pending' && 
           r.hold_for_stock === 1
         );
+        cachedPendingRefills = filtered;
         setPendingRefills(filtered);
       }
     } catch (err) {
@@ -395,7 +406,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const data = await api.getReconciliationList();
       if (Array.isArray(data)) {
         // Only show unresolved / missing reconcile items
-        setReconOrders(data.filter((r: any) => !r.is_saved && r.status !== 'Matched'));
+        const filtered = data.filter((r: any) => !r.is_saved && r.status !== 'Matched');
+        cachedReconOrders = filtered;
+        setReconOrders(filtered);
       }
     } catch (err) {
       console.error('Failed to fetch reconcile orders in modal:', err);
@@ -730,19 +743,27 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   }, [suggestions, qty]);
 
   // fetchCart logic
-  const fetchCart = async () => {
-    setCartLoading(true);
+  const fetchCart = async (silent?: boolean | any) => {
+    const isSilent = typeof silent === 'boolean' ? silent : false;
+    if (!isSilent && cachedCartDistributors.length === 0) {
+      setCartLoading(true);
+    }
     setCartError(null);
     try {
       const data = await api.getPharmarackCart();
       if (data && data.success) {
-        setCartDistributors(data.distributors || []);
+        cachedCartDistributors = data.distributors || [];
+        setCartDistributors(cachedCartDistributors);
       } else {
-        setCartError('Failed to retrieve cart details.');
+        if (cachedCartDistributors.length === 0) {
+          setCartError('Failed to retrieve cart details.');
+        }
       }
     } catch (err: any) {
       console.error('Failed to fetch Pharmarack cart in modal:', err);
-      setCartError(err?.response?.data?.error || err?.message || 'Error fetching cart');
+      if (cachedCartDistributors.length === 0) {
+        setCartError(err?.response?.data?.error || err?.message || 'Error fetching cart');
+      }
     } finally {
       setCartLoading(false);
     }
@@ -750,13 +771,17 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      const hasCache = cachedCartDistributors.length > 0;
       Promise.allSettled([
-        fetchCart(),
+        fetchCart(hasCache),
         fetchPendingOrders(),
         fetchPendingRefills(),
         fetchReconOrders(),
         fetchAutoRefillItems(),
-        api.checkPharmarackSession().then(data => setPrMode(data.mode || 'Live')).catch(() => setPrMode('Live'))
+        api.checkPharmarackSession().then(data => {
+          cachedPrMode = data.mode || 'Live';
+          setPrMode(cachedPrMode);
+        }).catch(() => setPrMode('Live'))
       ]);
     }
   }, [isOpen]);
@@ -765,7 +790,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const handleRefresh = () => {
       if (isOpen) {
         Promise.allSettled([
-          fetchCart(),
+          fetchCart(true),
           fetchPendingOrders(),
           fetchPendingRefills(),
           fetchReconOrders(),
@@ -777,11 +802,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     return () => window.removeEventListener('refresh-pharmarack-cart', handleRefresh);
   }, [isOpen]);
 
-  // Autofocus on mount
+  // Instant Autofocus on mount (<10ms)
   useEffect(() => {
-    setTimeout(() => {
+    productInputRef.current?.focus();
+    const timer = setTimeout(() => {
       productInputRef.current?.focus();
-    }, 100);
+    }, 10);
+    return () => clearTimeout(timer);
   }, []);
 
   // Listen to Escape key to close
@@ -1081,7 +1108,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         {/* Refresh Button */}
         <button 
           type="button"
-          onClick={fetchCart}
+          onClick={() => fetchCart()}
           disabled={cartLoading}
           className="absolute top-4 right-4 md:right-[33.33%] md:mr-2.5 p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all flex items-center justify-center disabled:opacity-50"
           title="Refresh Cart"
