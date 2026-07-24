@@ -229,7 +229,7 @@ const RefillsSection: React.FC = () => {
             in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
           }));
         } else {
-          const fallback = await apiClient.get<any[]>(`/medicines/search?q=${encodeURIComponent(clean)}&limit=10`);
+          const fallback = await apiClient.get<any[]>(`/medicines/search-fast?q=${encodeURIComponent(clean)}&limit=10`);
           const fbList = Array.isArray(fallback.data) ? fallback.data : [];
           suggestions = fbList.map(m => ({
             id: m.id || m.medicine_id,

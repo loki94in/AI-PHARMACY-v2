@@ -21,20 +21,19 @@ export class BouncedAlertService {
         return false;
       }
 
-      // 2. Fetch recipient phone (Dinesh)
-      const phoneSetting = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
-      if (phoneSetting && phoneSetting.value && phoneSetting.value.trim() !== '') {
-        recipientPhone = phoneSetting.value.trim();
+      // 2. Fetch recipient phone (Active delivery staff or Admin)
+      const deliveryBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
+      if (deliveryBoy && deliveryBoy.whatsapp_number) {
+        recipientPhone = deliveryBoy.whatsapp_number.trim();
       } else {
-        // Fallback: search delivery_boys table for "Dinesh"
-        const dineshBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE name LIKE '%Dinesh%' AND is_active = 1 LIMIT 1");
-        if (dineshBoy && dineshBoy.whatsapp_number) {
-          recipientPhone = dineshBoy.whatsapp_number.trim();
+        const phoneSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+        if (phoneSetting && phoneSetting.value && phoneSetting.value.trim() !== '') {
+          recipientPhone = phoneSetting.value.trim();
         }
       }
 
       if (!recipientPhone) {
-        console.warn('[BouncedAlert] Dinesh WhatsApp number not configured in Settings or Delivery Boys. Skipping notification.');
+        console.warn('[BouncedAlert] WhatsApp recipient number not configured in Delivery Boys or Settings. Skipping notification.');
         return false;
       }
 

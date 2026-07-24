@@ -276,10 +276,10 @@ export default function PharmarackCart() {
           address: s.address || s.shop_address || s.store_address || '',
           email: s.email || '',
           adminPhone: s.admin_whatsapp || s.admin_phone || s.owner_whatsapp_number || '',
-          deliveryBoyName1: s.delivery_boy_name || s.delivery_boy_1_name || '',
-          deliveryBoyPhone: s.delivery_boy_whatsapp || s.delivery_boy_phone || s.dinesh_whatsapp_number || '',
-          deliveryBoyName2: s.delivery_boy_name_2 || s.delivery_boy_2_name || '',
-          deliveryBoyPhone2: s.delivery_boy_whatsapp_2 || '',
+          deliveryBoyName1: deliveryBoysList[0]?.name || '',
+          deliveryBoyPhone: deliveryBoysList[0]?.whatsapp_number || '',
+          deliveryBoyName2: deliveryBoysList[1]?.name || '',
+          deliveryBoyPhone2: deliveryBoysList[1]?.whatsapp_number || '',
           invoiceFileFormat: s.distributor_invoice_file_format || 'CSV File Format'
         });
       }
@@ -444,34 +444,8 @@ export default function PharmarackCart() {
     return distributors;
   }, [distributorFilterTab, successDistributors, failedDistributors, unmappedDistributors, distributors]);
 
-  useEffect(() => {
-    // Fetch saved distributor directory (with phone numbers)
-    api.getDistributors().then((res: any) => {
-      if (Array.isArray(res)) {
-        setSavedDistributorsList(res);
-      } else if (Array.isArray(res?.data)) {
-        setSavedDistributorsList(res.data);
-      }
-    }).catch(e => console.error('Failed to load saved distributors for WhatsApp matching:', e));
-
-    // Fetch pharmacy settings (store name, phone, address, email, delivery boy whatsapp)
-    apiClient.get('/settings').then(res => {
-      if (res?.data) {
-        setStoreInfo({
-          name: res.data.shop_name || res.data.store_name || res.data.pharmacy_name || 'AI Pharmacy',
-          phone: res.data.shop_phone || res.data.store_phone || res.data.pharmacy_phone || res.data.phone || '',
-          address: res.data.shop_address || res.data.store_address || res.data.address || '',
-          email: res.data.email || '',
-          adminPhone: res.data.admin_whatsapp || res.data.admin_phone || res.data.owner_whatsapp_number || '',
-          deliveryBoyName1: res.data.delivery_boy_name || res.data.delivery_boy_1_name || '',
-          deliveryBoyPhone: res.data.delivery_boy_whatsapp || res.data.dinesh_whatsapp_number || '',
-          deliveryBoyName2: res.data.delivery_boy_name_2 || res.data.delivery_boy_2_name || '',
-          deliveryBoyPhone2: res.data.delivery_boy_whatsapp_2 || res.data.admin_whatsapp || '',
-          invoiceFileFormat: res.data.distributor_invoice_file_format || 'CSV File Format'
-        });
-      }
-    }).catch(e => console.error('Failed to load store info:', e));
-  }, []);
+  // ponytail: delivery boy data comes exclusively from /dispatch/delivery-boys (delivery_boys table)
+  // Store info (name, phone, address) comes from /settings. No delivery boy keys read from app_settings.
 
   const fetchPendingRefills = async () => {
     try {
@@ -724,21 +698,7 @@ export default function PharmarackCart() {
       });
     }
 
-    // Fallback if no delivery_boys table entries exist
-    if (addedContacts.size === 0) {
-      const del1 = formatPhone(storeInfo.deliveryBoyPhone);
-      const del2 = formatPhone(storeInfo.deliveryBoyPhone2);
-      const name1 = storeInfo.deliveryBoyName1 || 'Delivery Staff 1';
-      const name2 = storeInfo.deliveryBoyName2 || 'Delivery Staff 2';
-
-      if (del1) {
-        msg += `• ${name1}: *${del1}*\n`;
-        addedContacts.add(del1);
-      }
-      if (del2) {
-        msg += `• ${name2}: *${del2}*\n`;
-        addedContacts.add(del2);
-      }
+    // ponytail: no app_settings fallback — delivery boys come exclusively from delivery_boys table
     }
 
     // Fallback to Admin contact if user skipped or no delivery boys exist
@@ -785,11 +745,7 @@ export default function PharmarackCart() {
         whatsapp_number: quickBoyPhone.trim(),
         is_active: 1
       });
-      // Sync settings so single DB source and settings remain in sync
-      await apiClient.post('/settings/save', {
-        delivery_boy_name: quickBoyName.trim(),
-        delivery_boy_whatsapp: quickBoyPhone.trim()
-      });
+      // ponytail: no dual-write to app_settings — delivery_boys table is single source of truth
       toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
       await Promise.all([fetchDeliveryBoys(), fetchStoreInfo()]);
       setShowMissingBoyModal(false);
@@ -871,7 +827,7 @@ export default function PharmarackCart() {
 
       // Also trigger backend notification to Delivery Boys
       try {
-        await apiClient.post('/pharmarack/notify-cart-order', {
+        await apiClient.post('/pharmarack/cart/notify-manual', {
           storeId: dist.storeId,
           storeName: dist.storeName,
           deliveryPersons: dist.deliveryPersons,
@@ -985,7 +941,7 @@ export default function PharmarackCart() {
 
             // Trigger backend notification to Delivery Boys
             try {
-              await apiClient.post('/pharmarack/notify-cart-order', {
+              await apiClient.post('/pharmarack/cart/notify-manual', {
                 storeId: dist.storeId,
                 storeName: dist.storeName,
                 deliveryPersons: dist.deliveryPersons,
@@ -1090,7 +1046,7 @@ export default function PharmarackCart() {
         let saveSuccess = false;
         if (selectedSavedDistId) {
           try {
-            await apiClient.put(`/distributors/${selectedSavedDistId}`, {
+            await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
               name: distName,
               phone: cleanPhone
             });
@@ -1100,7 +1056,7 @@ export default function PharmarackCart() {
           }
         }
         if (!saveSuccess) {
-          await apiClient.post('/distributors', {
+          await apiClient.post('/settings/distributors', {
             name: distName,
             phone: cleanPhone
           });

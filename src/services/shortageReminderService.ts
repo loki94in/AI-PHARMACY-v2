@@ -35,17 +35,17 @@ export async function trackMedicineRequest(req: {
 
   // Prevent duplicate open requests for the same medicine & customer/distributor in the last 23 hours
   const existing = await db.get(
-    `SELECT id FROM pending_shortage_requests 
-     WHERE LOWER(medicine_name) = LOWER(?) AND status = 'pending'
-     AND datetime(created_at) >= datetime('now', '-23 hours')`,
+    `SELECT id FROM special_orders 
+     WHERE LOWER(product) = LOWER(?) AND status = 'Pending'
+     AND datetime(date) >= datetime('now', '-23 hours')`,
     [name]
   );
 
   if (existing) {
-    // Update quantity or timestamp if needed
+    // Update quantity if needed
     await db.run(
-      `UPDATE pending_shortage_requests 
-       SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP
+      `UPDATE special_orders 
+       SET qty = qty + ?
        WHERE id = ?`,
       [qty, existing.id]
     );
@@ -53,10 +53,10 @@ export async function trackMedicineRequest(req: {
   }
 
   const result = await db.run(
-    `INSERT INTO pending_shortage_requests 
-     (medicine_name, distributor_name, quantity, customer_phone, customer_name, source, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-    [name, dist, qty, req.customer_phone || '', req.customer_name || '', source]
+    `INSERT INTO special_orders 
+     (product, requester, phone, qty, priority, status, source)
+     VALUES (?, ?, ?, ?, 'Normal', 'Pending', ?)`,
+    [name, req.customer_name || 'Walk-in Customer', req.customer_phone || '', qty, source]
   );
 
   return result.lastID || 0;
@@ -72,9 +72,9 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
   
   // Fetch pending requests created > 23 hours ago
   const pendingRequests = await connection.all(
-    `SELECT * FROM pending_shortage_requests
-     WHERE status = 'pending'
-     AND datetime(created_at) <= datetime('now', '-23 hours')`
+    `SELECT * FROM special_orders
+     WHERE status = 'Pending'
+     AND datetime(date) <= datetime('now', '-23 hours')`
   );
 
   if (!pendingRequests || pendingRequests.length === 0) {
@@ -84,7 +84,8 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
   let notifiedCount = 0;
 
   for (const item of pendingRequests) {
-    const medName = item.medicine_name;
+    const medName = item.product || '';
+    if (!medName) continue;
     const cleanName = medName.trim().toLowerCase();
 
     // 1. Check if exact or similar medicine/brand exists in active inventory
@@ -97,10 +98,10 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
     );
 
     if (inventoryMatch) {
-      // Medicine is now available in inventory! Mark as inventory_found
+      // Medicine is now available in inventory! Mark as Fulfilled
       await connection.run(
-        `UPDATE pending_shortage_requests
-         SET status = 'inventory_found', updated_at = CURRENT_TIMESTAMP
+        `UPDATE special_orders
+         SET status = 'Fulfilled', notes = 'Inventory found in stock'
          WHERE id = ?`,
         [item.id]
       );
@@ -118,10 +119,10 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
     );
 
     if (aliasMatch) {
-      // Alias match found in active inventory! Mark as inventory_found
+      // Alias match found in active inventory! Mark as Fulfilled
       await connection.run(
-        `UPDATE pending_shortage_requests
-         SET status = 'inventory_found', updated_at = CURRENT_TIMESTAMP
+        `UPDATE special_orders
+         SET status = 'Fulfilled', notes = 'Alias inventory found in stock'
          WHERE id = ?`,
         [item.id]
       );
@@ -147,8 +148,8 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
       if (compMatch) {
         // Similar composition exists in stock
         await connection.run(
-          `UPDATE pending_shortage_requests
-           SET status = 'inventory_found', updated_at = CURRENT_TIMESTAMP
+          `UPDATE special_orders
+           SET status = 'Fulfilled', notes = 'Composition substitute found in stock'
            WHERE id = ?`,
           [item.id]
         );
@@ -158,21 +159,24 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
 
     // 3. Medicine / similar medicine NOT shown in inventory for > 23 hours!
     // Generate order alert message for Admin WhatsApp
-    const distName = item.distributor_name || 'Preferred Distributor';
-    const qtyNeeded = item.quantity || 1;
+    const distName = item.pharmarack_distributor || 'Preferred Distributor';
+    const qtyNeeded = item.qty || 1;
 
     const adminMessage = `🚨 *ADMIN ORDER REMINDER (>23 Hours Unavailable)*\n\n` +
       `The requested medicine has not been added to inventory for over 23 hours.\n\n` +
       `📦 *Medicine:* ${medName}\n` +
       `🏭 *Distributor Name:* ${distName}\n` +
       `🔢 *Suggested Qty:* ${qtyNeeded}\n` +
-      `📅 *Requested On:* ${new Date(item.created_at).toLocaleString('en-IN')}\n\n` +
+      `📅 *Requested On:* ${new Date(item.date).toLocaleString('en-IN')}\n\n` +
       `👉 *Action Required:* Please add this item to today's order for ${distName}.`;
 
-    // Send WhatsApp notification to Admin number
+    // Send WhatsApp notification to Admin number or active delivery boys
     const adminPhoneRow = await connection.get("SELECT value FROM app_settings WHERE key = 'admin_whatsapp_number'");
-    const shopPhoneRow = await connection.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
-    const adminPhone = (adminPhoneRow?.value || shopPhoneRow?.value || '').replace(/\D/g, '');
+    const shopPhoneRow = await connection.get("SELECT value FROM app_settings WHERE key = 'shop_phone'");
+    const dineshBoy = await connection.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 LIMIT 1");
+    
+    const rawAdminPhone = adminPhoneRow?.value || shopPhoneRow?.value || dineshBoy?.whatsapp_number || '';
+    const adminPhone = rawAdminPhone.replace(/\D/g, '');
 
     if (adminPhone && adminPhone.length >= 10) {
       const formattedPhone = adminPhone.length === 10 ? `91${adminPhone}` : adminPhone;
@@ -196,13 +200,13 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
         );
       }
     } else {
-      console.warn('[ShortageReminder] Admin WhatsApp number not set in app_settings.');
+      console.warn('[ShortageReminder] Admin WhatsApp number not configured.');
     }
 
-    // Mark as notified_admin to avoid duplicate spamming
+    // Mark as Ordered (notified) to avoid duplicate spamming
     await connection.run(
-      `UPDATE pending_shortage_requests
-       SET status = 'notified_admin', notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      `UPDATE special_orders
+       SET status = 'Ordered', notes = 'Admin notified via WhatsApp reminder'
        WHERE id = ?`,
       [item.id]
     );

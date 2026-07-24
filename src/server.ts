@@ -171,6 +171,7 @@ app.use('/api/dashboard', lazyRoute('./routes/dashboard.js'));
 app.use('/api/purchases', lazyRoute('./routes/purchases.js'));
 app.use('/api/returns', lazyRoute('./routes/returns.js'));
 app.use('/api/customer-returns', lazyRoute('./routes/customerReturns.js'));
+app.use('/api/credit-notes', lazyRoute('./routes/creditNotes.js'));
 app.use('/api/orders', lazyRoute('./routes/orders.js'));
 app.use('/api/expiry', lazyRoute('./routes/expiry.js'));
 app.use('/api/reports', lazyRoute('./routes/reports.js'));

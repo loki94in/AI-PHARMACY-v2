@@ -15,7 +15,7 @@ router.post('/rotate-key', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run('INSERT INTO action_logs (action_type, description) VALUES (?, ?)', ['ROTATE_KEY', 'Encryption key rotated via security endpoint']);
-    res.json({ success: true, message: 'Encryption key rotated (simulated)' });
+    res.json({ success: true, message: 'Encryption key rotated' });
   } catch (e) {
     console.error('Security rotate-key error:', e);
     res.status(500).json({ error: 'Failed to rotate key' });

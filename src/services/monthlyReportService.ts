@@ -569,10 +569,10 @@ export class MonthlyReportService {
       return repPhone.value.trim();
     }
 
-    // 2. Dinesh WhatsApp number
-    const dineshPhone = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
-    if (dineshPhone && dineshPhone.value && dineshPhone.value.trim() !== '') {
-      return dineshPhone.value.trim();
+    // 2. Active delivery boy contact from delivery_boys DB table
+    const deliveryBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
+    if (deliveryBoy && deliveryBoy.whatsapp_number) {
+      return deliveryBoy.whatsapp_number.trim();
     }
 
     // 3. Shop phone setting
@@ -585,12 +585,6 @@ export class MonthlyReportService {
     const mainPhone = await db.get("SELECT value FROM app_settings WHERE key = 'phone'");
     if (mainPhone && mainPhone.value && mainPhone.value.trim() !== '') {
       return mainPhone.value.trim();
-    }
-
-    // 5. Delivery boy fallback
-    const dineshBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE name LIKE '%Dinesh%' AND is_active = 1 LIMIT 1");
-    if (dineshBoy && dineshBoy.whatsapp_number) {
-      return dineshBoy.whatsapp_number.trim();
     }
 
     return '';

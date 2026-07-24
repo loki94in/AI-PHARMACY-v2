@@ -31,13 +31,7 @@ import { toastEvent } from '../../services/events';
 import { MobileConnectionModal } from '../../components/MobileConnectionModal';
 import { DATA_FETCH_REGISTRY, getRegistryByPage, type FetchMode } from '../../services/dataFetchControl';
 
-interface DeliveryBoy {
-  id: number;
-  name: string;
-  whatsapp_number?: string;
-  telegram_chat_id?: string;
-  is_active: number;
-}
+
 
 interface SettingsData {
   pharmacyName: string;
@@ -468,6 +462,10 @@ const Settings = () => {
         ownerWhatsappNumber: serverSettings.owner_whatsapp_number || '',
         monthlyReportTemplateTheme: serverSettings.monthly_report_template_theme || 'executive',
         distributorInvoiceFileFormat: serverSettings.distributor_invoice_file_format || 'CSV',
+        prUsername: serverSettings.pharmarack_username || '',
+        prPassword: serverSettings.pharmarack_password || '',
+        prToken: serverSettings.pharmarack_session_token || '',
+        prMode: serverSettings.pharmarack_mode || 'Live',
       }));
     }
   }, [serverSettings]);
@@ -512,6 +510,7 @@ const Settings = () => {
       email: email,
       
       gmail_user: gmailUser,
+      gmail_pass: gmailPass || serverSettings?.gmail_pass || '',
       google_client_id: googleClientId,
       google_client_secret: googleClientSecret,
       google_search_daily_limit: googleSearchDailyLimit.toString(),
@@ -559,11 +558,11 @@ const Settings = () => {
       wa_business_webhook_verify_token: waBusinessWebhookVerifyToken,
       whatsapp_preferred_system: whatsappPreferredSystem,
 
-      // Pharmarack Settings
-      pharmarack_username: prUsername,
-      pharmarack_password: prPassword,
-      pharmarack_session_token: prToken,
-      pharmarack_mode: prMode,
+      // Pharmarack Settings (preserve existing server credentials if state is empty)
+      pharmarack_username: prUsername || serverSettings?.pharmarack_username || '',
+      pharmarack_password: prPassword || serverSettings?.pharmarack_password || '',
+      pharmarack_session_token: prToken || serverSettings?.pharmarack_session_token || '',
+      pharmarack_mode: prMode || serverSettings?.pharmarack_mode || 'Live',
       data_fetch_control: settings.dataFetchControl,
     };
 

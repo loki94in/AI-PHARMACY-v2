@@ -365,7 +365,7 @@ router.get('/search', async (req, res) => {
     }
 
   } catch (err: any) {
-    console.error('Pharmarack search simulator error:', err);
+    console.error('Pharmarack search error:', err);
     res.status(500).json({ error: 'Failed to search Pharmarack catalog' });
   }
 });

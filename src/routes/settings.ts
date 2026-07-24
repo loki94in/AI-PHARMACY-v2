@@ -59,7 +59,7 @@ router.post('/', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'key required' });
   try {
     const db = await dbManager.getConnection();
-    await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value ?? '']);
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, value ?? '']);
     res.json({ success: true, message: 'Setting saved' });
   } catch (error) {
     console.error('Settings save error:', error);
@@ -75,7 +75,14 @@ router.post('/save', async (req, res) => {
     const db = await dbManager.getConnection();
     await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
     const entries = Object.entries(payload);
+    const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token'];
+
     for (const [k, v] of entries) {
+      const valStr = v !== undefined && v !== null ? String(v).trim() : '';
+      if (protectedKeys.includes(k) && valStr === '') {
+        const existing = await db.get("SELECT value FROM app_settings WHERE key = ? AND value IS NOT NULL AND value != ''", [k]);
+        if (existing) continue;
+      }
       await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [k, v ?? '']);
     }
 

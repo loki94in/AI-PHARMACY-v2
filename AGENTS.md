@@ -284,3 +284,17 @@ To prevent excessive network traffic, database load, and background resource usa
 2. **Idle-Gating**: Background sync tasks, backups, near-expiry scans, catalog updates, and periodic polling jobs must query `activityTracker.isIdle()`. If the user is inactive for >30 minutes, execution must be paused/skipped under `manual` or gated configurations.
 3. **No Mount Saturation**: Avoid launching large fetch operations synchronously on page component mount. Utilize local caching, hover-prefetch gating, and on-focus lazily loaded inputs (e.g. Doctor select).
 4. **Silent Refresh on Write**: Mutations from sales (POS), purchases, customer returns, or inventory edits must trigger background updates to the client-side cache without blocking user interaction.
+
+---
+
+## Page Feature Ownership & Migration Contract
+
+To prevent regressions, legacy fallback loops, and developer/AI confusion when features are moved to new pages:
+
+1. **Single Source of Truth**: All feature paths, page responsibilities, API endpoints, and database tables are documented in `docs/PROJECT_PAGE_AUDIT_DIRECTORY.md`.
+2. **Strict Route Ownership Rules**:
+   - **Delivery Boy Management**: MUST ONLY be read/written via `/dispatch` (`Dispatch/index.tsx`) using the `delivery_boys` database table (`GET/POST /api/dispatch/delivery-boys`). **NEVER** read/write delivery boy details from `Settings`, `Learning`, or `app_settings`.
+   - **Special Shortage Orders**: MUST ONLY be managed via `/orders` (`Orders/index.tsx`) using the `special_orders` database table (`GET/POST /api/orders`). **NEVER** introduce parallel logic pointing to `pending_shortage_requests`.
+   - **OCR Correction & Alias Learning**: MUST ONLY be managed via `/learning` (`Learning/index.tsx`) using `ocr_corrections` and `medicine_aliases` tables.
+   - **Core Pharmacy Configuration**: `Settings` (`/settings`) is strictly reserved for store metadata (Name, Address, GSTIN, License, Tax Rate, Invoice Prefix, DataFetchControl). Feature-specific configurations belong on their respective domain pages.
+

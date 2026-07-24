@@ -295,7 +295,4 @@ export const getRegistryByPage = (): Record<string, FetchControlEntry[]> => {
   }, {} as Record<string, FetchControlEntry[]>);
 };
 
-export const isExternal = (key: string): boolean => {
-  const entry = DATA_FETCH_REGISTRY.find(e => e.key === key);
-  return entry ? entry.external : false;
-};
+

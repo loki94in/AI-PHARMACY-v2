@@ -411,40 +411,15 @@ export class NotificationService {
           }
         }
 
-        // Fallback to saved delivery boy phone numbers from settings
+        // Fallback to Admin / Pharmacy owner number if no delivery boy number exists
         if (resolvedDeliveryBoys.length === 0) {
-          const setting1 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp'");
-          const setting2 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp_2'");
-          const setting3 = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
-
-          const boysToMap = [
-            { name: 'Dinesh', val: setting3?.value },
-            { name: 'Delivery Staff 1', val: setting1?.value },
-            { name: 'Delivery Staff 2', val: setting2?.value }
-          ];
-
-          for (const item of boysToMap) {
-            if (!item.val) continue;
-            const clean = String(item.val).replace(/\D/g, '');
+          const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+          if (adminSetting?.value) {
+            const clean = String(adminSetting.value).replace(/\D/g, '');
             if (clean.length >= 10) {
               const formatted = clean.length === 10 ? `91${clean}` : clean;
-              if (!resolvedDeliveryBoys.some(b => b.phone === formatted)) {
-                resolvedDeliveryBoys.push({ name: item.name, phone: formatted });
-                deliveryBoysText += `${item.name}\nMobile: ${formatted}\n\n`;
-              }
-            }
-          }
-
-          // Fallback to Admin / Pharmacy owner number if no delivery boy number exists
-          if (resolvedDeliveryBoys.length === 0) {
-            const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
-            if (adminSetting?.value) {
-              const clean = String(adminSetting.value).replace(/\D/g, '');
-              if (clean.length >= 10) {
-                const formatted = clean.length === 10 ? `91${clean}` : clean;
-                resolvedDeliveryBoys.push({ name: 'Admin (Delivery Fallback)', phone: formatted });
-                deliveryBoysText += `Admin (Delivery Contact)\nMobile: ${formatted}\n\n`;
-              }
+              resolvedDeliveryBoys.push({ name: 'Admin (Delivery Fallback)', phone: formatted });
+              deliveryBoysText += `Admin (Delivery Contact)\nMobile: ${formatted}\n\n`;
             }
           }
         }
