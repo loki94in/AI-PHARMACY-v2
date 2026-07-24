@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
-import { toastEvent } from '../../services/events';
+import { toastEvent, liveCartAddEvent } from '../../services/events';
 import { useSearchParams } from 'react-router-dom';
 import NonMappedDistributors from '../NonMappedDistributors';
 
@@ -81,12 +81,12 @@ function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
   } catch (err) {
     console.warn('Could not navigate existing WhatsApp Web window handle:', err);
   }
-  
+
   waWindowRef = window.open(targetUrl, '_blank');
   if (waWindowRef) {
     try {
       waWindowRef.focus();
-    } catch (_) {}
+    } catch (_) { }
   } else {
     // Fallback if browser blocked popups: direct navigate current tab
     window.location.href = targetUrl;
@@ -188,7 +188,7 @@ export default function PharmarackCart() {
 
   const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
-  
+
   // Persistent WhatsApp sent status map by storeId (preserves history across reloads & sessions)
   const [sentWaStatusMap, setSentWaStatusMap] = useState<Record<number, 'success' | 'queued' | 'error'>>(() => {
     try {
@@ -199,7 +199,7 @@ export default function PharmarackCart() {
           return parsed.data;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return {};
   });
 
@@ -209,19 +209,38 @@ export default function PharmarackCart() {
         timestamp: Date.now(),
         data: sentWaStatusMap
       }));
-    } catch (_) {}
+    } catch (_) { }
   }, [sentWaStatusMap]);
 
-  // Saved distributor contacts and store settings
-  const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; deliveryBoyPhone: string; deliveryBoyPhone2: string }>({
+  // Saved distributor contacts, delivery boys, and store settings
+  const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; adminPhone: string; deliveryBoyName1: string; deliveryBoyPhone: string; deliveryBoyName2: string; deliveryBoyPhone2: string; invoiceFileFormat: string }>({
     name: 'AI Pharmacy',
     phone: '',
     address: '',
     email: '',
+    adminPhone: '',
+    deliveryBoyName1: '',
     deliveryBoyPhone: '',
-    deliveryBoyPhone2: ''
+    deliveryBoyName2: '',
+    deliveryBoyPhone2: '',
+    invoiceFileFormat: 'CSV File Format'
   });
 
+  // Track last sent WhatsApp message timestamps
+  const [lastBatchSentTime, setLastBatchSentTime] = useState<string>(() => {
+    try {
+      return localStorage.getItem('pharmarack_last_batch_sent_time') || '';
+    } catch (_) { return ''; }
+  });
+
+  const [lastSentWaTimeMap, setLastSentWaTimeMap] = useState<Record<number, string>>(() => {
+    try {
+      const saved = localStorage.getItem('pharmarack_last_sent_wa_time_map');
+      return saved ? JSON.parse(saved) : {};
+    } catch (_) { return {}; }
+  });
+
+  const [deliveryBoysList, setDeliveryBoysList] = useState<{ id?: number; name: string; whatsapp_number: string; is_active?: number }[]>([]);
   const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
 
   const fetchSavedDistributors = async () => {
@@ -235,18 +254,33 @@ export default function PharmarackCart() {
     }
   };
 
+  const fetchDeliveryBoys = async () => {
+    try {
+      const res = await apiClient.get('/dispatch/delivery-boys');
+      if (Array.isArray(res.data)) {
+        setDeliveryBoysList(res.data.filter((b: any) => b.is_active !== 0));
+      }
+    } catch (err) {
+      console.warn('Failed to load delivery boys list for WhatsApp template:', err);
+    }
+  };
+
   const fetchStoreInfo = async () => {
     try {
       const res = await apiClient.get('/settings');
       if (res.data) {
         const s = res.data;
         setStoreInfo({
-          name: s.pharmacy_name || s.store_name || s.name || 'AI Pharmacy',
-          phone: s.phone || s.whatsapp_number || s.owner_whatsapp_number || '',
-          address: s.address || s.store_address || '',
+          name: s.pharmacy_name || s.shop_name || s.store_name || s.name || 'AI Pharmacy',
+          phone: s.phone || s.shop_phone || s.store_phone || s.whatsapp_number || s.owner_whatsapp_number || '',
+          address: s.address || s.shop_address || s.store_address || '',
           email: s.email || '',
+          adminPhone: s.admin_whatsapp || s.admin_phone || s.owner_whatsapp_number || '',
+          deliveryBoyName1: s.delivery_boy_name || s.delivery_boy_1_name || '',
           deliveryBoyPhone: s.delivery_boy_whatsapp || s.delivery_boy_phone || s.dinesh_whatsapp_number || '',
-          deliveryBoyPhone2: s.delivery_boy_whatsapp_2 || ''
+          deliveryBoyName2: s.delivery_boy_name_2 || s.delivery_boy_2_name || '',
+          deliveryBoyPhone2: s.delivery_boy_whatsapp_2 || '',
+          invoiceFileFormat: s.distributor_invoice_file_format || 'CSV File Format'
         });
       }
     } catch (err) {
@@ -257,6 +291,7 @@ export default function PharmarackCart() {
   useEffect(() => {
     fetchSavedDistributors();
     fetchStoreInfo();
+    fetchDeliveryBoys();
   }, []);
 
   // Custom phone number override map by storeId (persisted to localStorage)
@@ -272,7 +307,7 @@ export default function PharmarackCart() {
   useEffect(() => {
     try {
       localStorage.setItem('custom_distributor_phones', JSON.stringify(customDistributorPhones));
-    } catch (_) {}
+    } catch (_) { }
   }, [customDistributorPhones]);
 
   const isValidPhoneNumber = (rawPhone: string): boolean => {
@@ -294,6 +329,22 @@ export default function PharmarackCart() {
   const [modalPhoneInput, setModalPhoneInput] = useState('');
   const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
+
+  // Missing delivery boy validation prompt state
+  const [showMissingBoyModal, setShowMissingBoyModal] = useState(false);
+  const [pendingTargetDistributor, setPendingTargetDistributor] = useState<Distributor | 'ALL' | null>(null);
+  const [quickBoyName, setQuickBoyName] = useState('');
+  const [quickBoyPhone, setQuickBoyPhone] = useState('');
+  const [isSavingQuickBoy, setIsSavingQuickBoy] = useState(false);
+
+  const hasDeliveryBoyContacts = () => {
+    const hasActiveBoys = deliveryBoysList.some(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
+    const hasSettingsBoys = Boolean(
+      (storeInfo.deliveryBoyPhone && storeInfo.deliveryBoyPhone.trim().length > 0) ||
+      (storeInfo.deliveryBoyPhone2 && storeInfo.deliveryBoyPhone2.trim().length > 0)
+    );
+    return hasActiveBoys || hasSettingsBoys;
+  };
 
   useEffect(() => {
     if (!editingDistributor) return;
@@ -411,8 +462,12 @@ export default function PharmarackCart() {
           phone: res.data.shop_phone || res.data.store_phone || res.data.pharmacy_phone || res.data.phone || '',
           address: res.data.shop_address || res.data.store_address || res.data.address || '',
           email: res.data.email || '',
+          adminPhone: res.data.admin_whatsapp || res.data.admin_phone || res.data.owner_whatsapp_number || '',
+          deliveryBoyName1: res.data.delivery_boy_name || res.data.delivery_boy_1_name || '',
           deliveryBoyPhone: res.data.delivery_boy_whatsapp || res.data.dinesh_whatsapp_number || '',
-          deliveryBoyPhone2: res.data.delivery_boy_whatsapp_2 || res.data.admin_whatsapp || ''
+          deliveryBoyName2: res.data.delivery_boy_name_2 || res.data.delivery_boy_2_name || '',
+          deliveryBoyPhone2: res.data.delivery_boy_whatsapp_2 || res.data.admin_whatsapp || '',
+          invoiceFileFormat: res.data.distributor_invoice_file_format || 'CSV File Format'
         });
       }
     }).catch(e => console.error('Failed to load store info:', e));
@@ -624,7 +679,7 @@ export default function PharmarackCart() {
 
   const buildDistributorOrderMessage = (dist: Distributor) => {
     const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
-    
+
     const formatPhone = (raw: string) => {
       if (!raw) return '';
       let clean = raw.replace(/\D/g, '');
@@ -633,29 +688,67 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    const del1 = formatPhone((deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || storeInfo.deliveryBoyPhone);
-    const del2 = formatPhone(storeInfo.deliveryBoyPhone2);
-
-    let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
+    let msg = `🏬 *NEW STOCK ORDER — ${storeInfo.name.toUpperCase()}*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
     msg += `• Store: *${storeInfo.name}*\n`;
-    msg += `• Phone: *${storeInfo.phone || 'N/A'}*\n`;
+    msg += `• Phone: *${storeInfo.phone ? formatPhone(storeInfo.phone) : 'N/A'}*\n`;
+    if (storeInfo.adminPhone && storeInfo.adminPhone !== storeInfo.phone) {
+      msg += `• Admin Contact: *${formatPhone(storeInfo.adminPhone)}*\n`;
+    }
     msg += `• Address: *${storeInfo.address || 'N/A'}*\n`;
     if (storeInfo.email) msg += `• Email: *${storeInfo.email}*\n`;
+    msg += `• Requested File Format: *${storeInfo.invoiceFileFormat || 'CSV File Format'}*\n`;
 
-    // Delivery Boy Contacts section
-    msg += `\n🛵 *Delivery Contact:*\n`;
+    // Dynamic Delivery Boy & Pickup Staff Contacts section
+    msg += `\n🛵 *Delivery & Pickup Contacts:*\n`;
+
+    // Set to avoid duplicate entries
+    const addedContacts = new Set<string>();
+
     if (deliveryStaff?.name) {
-      msg += `• Staff: *${deliveryStaff.name}*\n`;
+      const staffPhone = formatPhone((deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || '');
+      msg += `• Staff: *${deliveryStaff.name}*${staffPhone ? ` (${staffPhone})` : ''}\n`;
+      if (staffPhone) addedContacts.add(staffPhone);
     }
-    if (del1) {
-      msg += `• Delivery Boy 1: *${del1}*\n`;
+
+    // Dynamic rendering of ALL registered delivery boys with actual names and numbers from DB
+    if (deliveryBoysList.length > 0) {
+      deliveryBoysList.forEach(boy => {
+        if (boy.name && boy.whatsapp_number) {
+          const formatted = formatPhone(boy.whatsapp_number);
+          if (!addedContacts.has(formatted)) {
+            msg += `• ${boy.name}: *${formatted}*\n`;
+            addedContacts.add(formatted);
+          }
+        }
+      });
     }
-    if (del2) {
-      msg += `• Delivery Boy 2: *${del2}*\n`;
+
+    // Fallback if no delivery_boys table entries exist
+    if (addedContacts.size === 0) {
+      const del1 = formatPhone(storeInfo.deliveryBoyPhone);
+      const del2 = formatPhone(storeInfo.deliveryBoyPhone2);
+      const name1 = storeInfo.deliveryBoyName1 || 'Delivery Staff 1';
+      const name2 = storeInfo.deliveryBoyName2 || 'Delivery Staff 2';
+
+      if (del1) {
+        msg += `• ${name1}: *${del1}*\n`;
+        addedContacts.add(del1);
+      }
+      if (del2) {
+        msg += `• ${name2}: *${del2}*\n`;
+        addedContacts.add(del2);
+      }
     }
-    if (!del1 && !del2) {
-      msg += `• Phone: *${storeInfo.phone ? formatPhone(storeInfo.phone) : 'N/A'}*\n`;
+
+    // Fallback to Admin contact if user skipped or no delivery boys exist
+    if (addedContacts.size === 0) {
+      const adminNum = formatPhone(storeInfo.adminPhone || storeInfo.phone);
+      if (adminNum) {
+        msg += `• Delivery Contact (Admin): *${adminNum}* (Call directly for delivery info)\n`;
+      } else {
+        msg += `• Contact Phone: *N/A*\n`;
+      }
     }
 
     msg += `\n----------------------------------\n`;
@@ -675,7 +768,66 @@ export default function PharmarackCart() {
     return msg;
   };
 
-  const handleSendWhatsAppOrder = async (dist: Distributor) => {
+  const handleSaveQuickDeliveryBoy = async () => {
+    if (!quickBoyName.trim()) {
+      toastEvent.trigger('Delivery boy name is required.', 'error');
+      return;
+    }
+    if (!quickBoyPhone.trim() || !isValidPhoneNumber(quickBoyPhone)) {
+      toastEvent.trigger('Please enter a valid 10-digit WhatsApp phone number.', 'error');
+      return;
+    }
+
+    setIsSavingQuickBoy(true);
+    try {
+      await apiClient.post('/dispatch/delivery-boys', {
+        name: quickBoyName.trim(),
+        whatsapp_number: quickBoyPhone.trim(),
+        is_active: 1
+      });
+      // Sync settings so single DB source and settings remain in sync
+      await apiClient.post('/settings/save', {
+        delivery_boy_name: quickBoyName.trim(),
+        delivery_boy_whatsapp: quickBoyPhone.trim()
+      });
+      toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
+      await Promise.all([fetchDeliveryBoys(), fetchStoreInfo()]);
+      setShowMissingBoyModal(false);
+      const distTarget = pendingTargetDistributor;
+      setQuickBoyName('');
+      setQuickBoyPhone('');
+
+      if (distTarget === 'ALL') {
+        handleSendAllWhatsAppOrders(true);
+      } else if (distTarget) {
+        handleSendWhatsAppOrder(distTarget, true);
+      }
+    } catch (err: any) {
+      console.error('Failed to add delivery boy:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to save delivery boy.', 'error');
+    } finally {
+      setIsSavingQuickBoy(false);
+    }
+  };
+
+  const handleSkipMissingBoyAndUseAdmin = () => {
+    setShowMissingBoyModal(false);
+    toastEvent.trigger('Using Admin Contact as delivery boy fallback for order.', 'info');
+    const distTarget = pendingTargetDistributor;
+    if (distTarget === 'ALL') {
+      handleSendAllWhatsAppOrders(true);
+    } else if (distTarget) {
+      handleSendWhatsAppOrder(distTarget, true);
+    }
+  };
+
+  const handleSendWhatsAppOrder = async (dist: Distributor, bypassMissingBoyCheck = false) => {
+    if (!bypassMissingBoyCheck && !hasDeliveryBoyContacts()) {
+      setPendingTargetDistributor(dist);
+      setShowMissingBoyModal(true);
+      return;
+    }
+
     let phoneNum = customDistributorPhones[dist.storeId];
     if (!phoneNum) {
       const matched = findSavedDistributorMatch(dist.storeName);
@@ -705,10 +857,28 @@ export default function PharmarackCart() {
       });
 
       if (res?.data?.success) {
+        const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+        setLastSentWaTimeMap(prev => {
+          const next = { ...prev, [dist.storeId]: timeNow };
+          try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+          return next;
+        });
         toastEvent.trigger(`WhatsApp order sent silently for ${dist.storeName}!`, 'success');
       } else {
         throw new Error(res?.data?.error || 'Silent send failed');
+      }
+
+      // Also trigger backend notification to Delivery Boys
+      try {
+        await apiClient.post('/pharmarack/notify-cart-order', {
+          storeId: dist.storeId,
+          storeName: dist.storeName,
+          deliveryPersons: dist.deliveryPersons,
+          items: dist.items
+        });
+      } catch (distErr) {
+        console.warn('Could not notify delivery boys via backend route:', distErr);
       }
 
       // Log placed order to DB history
@@ -747,7 +917,13 @@ export default function PharmarackCart() {
     }
   };
 
-  const handleSendAllWhatsAppOrders = async () => {
+  const handleSendAllWhatsAppOrders = async (bypassMissingBoyCheck = false) => {
+    if (!bypassMissingBoyCheck && !hasDeliveryBoyContacts()) {
+      setPendingTargetDistributor('ALL');
+      setShowMissingBoyModal(true);
+      return;
+    }
+
     const mapped = distributors.filter(d => isDistributorMapped(d));
     const unmapped = distributors.filter(d => !isDistributorMapped(d));
 
@@ -767,7 +943,7 @@ export default function PharmarackCart() {
 
     try {
       toastEvent.trigger(`Starting WhatsApp batch delivery for ${mapped.length} distributor(s) with 30-45s safe delay...`, 'info');
-      
+
       for (let i = 0; i < mapped.length; i++) {
         const dist = mapped[i];
         let phoneNum = customDistributorPhones[dist.storeId];
@@ -797,9 +973,27 @@ export default function PharmarackCart() {
           });
 
           if (res?.data?.success) {
+            const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            setLastSentWaTimeMap(prev => {
+              const next = { ...prev, [dist.storeId]: timeNow };
+              try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+              return next;
+            });
             toastEvent.trigger(`[${i + 1}/${mapped.length}] WhatsApp order sent for ${dist.storeName}!`, 'success');
             sentCount++;
+
+            // Trigger backend notification to Delivery Boys
+            try {
+              await apiClient.post('/pharmarack/notify-cart-order', {
+                storeId: dist.storeId,
+                storeName: dist.storeName,
+                deliveryPersons: dist.deliveryPersons,
+                items: dist.items
+              });
+            } catch (distErr) {
+              console.warn('Could not notify delivery boys via backend route in batch:', distErr);
+            }
           } else {
             throw new Error(res?.data?.error || 'Silent send failed');
           }
@@ -809,7 +1003,13 @@ export default function PharmarackCart() {
             const encodedMsg = encodeURIComponent(msg);
             const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
             openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
+            const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            setLastSentWaTimeMap(prev => {
+              const next = { ...prev, [dist.storeId]: timeNow };
+              try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+              return next;
+            });
             toastEvent.trigger(`[${i + 1}/${mapped.length}] Opened WhatsApp Web tab for ${dist.storeName}`, 'info');
             sentCount++;
           } catch (tabErr) {
@@ -832,7 +1032,10 @@ export default function PharmarackCart() {
       }
 
       if (sentCount > 0) {
-        toastEvent.trigger(`Batch complete! Successfully sent ${sentCount} distributor order(s) via WhatsApp!`, 'success');
+        const batchTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastBatchSentTime(batchTimeStr);
+        try { localStorage.setItem('pharmarack_last_batch_sent_time', batchTimeStr); } catch (_) {}
+        toastEvent.trigger(`Batch complete! Successfully sent ${sentCount} distributor order(s) via WhatsApp at ${batchTimeStr}!`, 'success');
       }
 
       if (unmapped.length > 0) {
@@ -1085,8 +1288,8 @@ export default function PharmarackCart() {
         <button
           onClick={() => setSearchParams({ tab: 'cart' })}
           className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'cart' || !currentTab
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
             }`}
         >
           <ShoppingCart size={14} />
@@ -1096,8 +1299,8 @@ export default function PharmarackCart() {
         <button
           onClick={() => setSearchParams({ tab: 'sent-history' })}
           className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'sent-history'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
             }`}
         >
           <Send size={14} />
@@ -1107,8 +1310,8 @@ export default function PharmarackCart() {
         <button
           onClick={() => setSearchParams({ tab: 'non-mapped' })}
           className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'non-mapped'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
             }`}
         >
           <Building2 size={14} />
@@ -1244,7 +1447,7 @@ export default function PharmarackCart() {
               </button>
 
               <button
-                onClick={handleSendAllWhatsAppOrders}
+                onClick={() => handleSendAllWhatsAppOrders()}
                 disabled={isSendingBatchWhatsApp || distributors.length === 0}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 font-bold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm"
                 title="Send order messages silently to all saved distributor WhatsApp numbers with 30-45s safe delay"
@@ -1258,10 +1461,17 @@ export default function PharmarackCart() {
                   {batchCountdownSec !== null
                     ? `Next send in ${batchCountdownSec}s…`
                     : isSendingBatchWhatsApp
-                    ? 'Sending orders…'
-                    : `Send All via WhatsApp (${mappedDistributors.length})`}
+                      ? 'Sending orders…'
+                      : `Send All via WhatsApp (${mappedDistributors.length})`}
                 </span>
               </button>
+
+              {lastBatchSentTime && (
+                <span className="text-[10px] text-emerald-400 font-extrabold px-2.5 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-1 shrink-0">
+                  <Clock size={11} className="text-emerald-400" />
+                  Last Batch: {lastBatchSentTime}
+                </span>
+              )}
 
               <a
                 href="https://retailers.pharmarack.com/cart"
@@ -1286,8 +1496,8 @@ export default function PharmarackCart() {
                   <button
                     onClick={() => setSidebarTab('requests')}
                     className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'requests'
-                        ? 'border-primary text-primary bg-primary/5'
-                        : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      ? 'border-primary text-primary bg-primary/5'
+                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
                     <Clock size={11} />
@@ -1296,8 +1506,8 @@ export default function PharmarackCart() {
                   <button
                     onClick={() => setSidebarTab('refills')}
                     className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'refills'
-                        ? 'border-primary text-primary bg-primary/5'
-                        : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      ? 'border-primary text-primary bg-primary/5'
+                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
                     <ShoppingCart size={11} />
@@ -1306,8 +1516,8 @@ export default function PharmarackCart() {
                   <button
                     onClick={() => setSidebarTab('missing_phone' as any)}
                     className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === ('missing_phone' as any)
-                        ? 'border-amber-500 text-amber-400 bg-amber-500/5'
-                        : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      ? 'border-amber-500 text-amber-400 bg-amber-500/5'
+                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
                     <Phone size={11} />
@@ -1328,13 +1538,17 @@ export default function PharmarackCart() {
                           <div
                             key={order.id}
                             className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
-                                ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                                : 'bg-red/10 border-red/20 text-red'
+                              ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
+                              : 'bg-red/10 border-red/20 text-red'
                               }`}
                           >
                             <div className="flex justify-between items-start">
-                              <div className="flex flex-col min-w-0">
-                                <span className={`text-[11px] font-bold truncate ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`} title={order.product}>
+                              <div 
+                                className="flex flex-col min-w-0 cursor-pointer group"
+                                onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
+                                title="Click to search in Pharmarack and add to cart"
+                              >
+                                <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
                                   {order.product}
                                 </span>
                                 <span className="text-[9px] text-muted mt-0.5 truncate">
@@ -1350,11 +1564,12 @@ export default function PharmarackCart() {
                                 </span>
                               ) : (
                                 <button
-                                  onClick={() => handleAddPendingToCart(order)}
-                                  disabled={addingOrderId === order.id}
-                                  className="shrink-0 text-[9px] font-bold bg-red/20 hover:bg-red/35 border border-red/30 px-2 py-0.5 rounded-md transition-all active:scale-95 text-red disabled:opacity-50 font-sans"
+                                  onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
+                                  className="shrink-0 text-[9px] font-bold bg-primary/20 hover:bg-primary/35 border border-primary/30 px-2 py-1 rounded-md transition-all active:scale-95 text-primary font-sans flex items-center gap-1 cursor-pointer"
+                                  title="Open Medicine Search & Add to Pharmarack Live Cart"
                                 >
-                                  {addingOrderId === order.id ? 'Adding...' : 'Add'}
+                                  <Search size={10} />
+                                  <span>Search & Add</span>
                                 </button>
                               )}
                             </div>
@@ -1375,13 +1590,17 @@ export default function PharmarackCart() {
                           <div
                             key={refill.id}
                             className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
-                                ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                              ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
+                              : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
                               }`}
                           >
                             <div className="flex justify-between items-start">
-                              <div className="flex flex-col min-w-0">
-                                <span className={`text-[11px] font-bold truncate ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`} title={medName}>
+                              <div 
+                                className="flex flex-col min-w-0 cursor-pointer group"
+                                onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                title="Click to search in Pharmarack and add to cart"
+                              >
+                                <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
                                   {medName}
                                 </span>
                                 <span className="text-[9px] text-muted mt-0.5 truncate">
@@ -1397,11 +1616,12 @@ export default function PharmarackCart() {
                                 </span>
                               ) : (
                                 <button
-                                  onClick={() => handleAddRefillToCart(refill)}
-                                  disabled={addingRefillId === refill.id}
-                                  className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-0.5 rounded-md transition-all active:scale-95 text-amber-500 disabled:opacity-50 font-sans"
+                                  onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                  className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-1 rounded-md transition-all active:scale-95 text-amber-400 font-sans flex items-center gap-1 cursor-pointer"
+                                  title="Open Medicine Search & Add to Pharmarack Live Cart"
                                 >
-                                  {addingRefillId === refill.id ? 'Adding...' : 'Add'}
+                                  <Search size={10} />
+                                  <span>Search & Add</span>
                                 </button>
                               )}
                             </div>
@@ -1537,8 +1757,8 @@ export default function PharmarackCart() {
                       <button
                         onClick={() => setDistributorFilterTab('all')}
                         className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'all'
-                            ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
-                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <Building2 size={13} />
@@ -1551,8 +1771,8 @@ export default function PharmarackCart() {
                       <button
                         onClick={() => setDistributorFilterTab('success')}
                         className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'success'
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
-                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <Check size={13} className="text-emerald-400" />
@@ -1565,8 +1785,8 @@ export default function PharmarackCart() {
                       <button
                         onClick={() => setDistributorFilterTab('failed')}
                         className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'failed'
-                            ? 'bg-red/20 text-red border border-red/30 shadow-sm'
-                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          ? 'bg-red/20 text-red border border-red/30 shadow-sm'
+                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <AlertCircle size={13} className="text-red" />
@@ -1579,8 +1799,8 @@ export default function PharmarackCart() {
                       <button
                         onClick={() => setDistributorFilterTab('unmapped')}
                         className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'unmapped'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
-                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
+                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
                           }`}
                       >
                         <Phone size={13} className="text-amber-400" />
@@ -1656,8 +1876,8 @@ export default function PharmarackCart() {
                                 <button
                                   onClick={() => handleOpenEditModal(dist)}
                                   className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 ${activePhone
-                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                      : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
                                     }`}
                                   title="Search saved distributors & edit WhatsApp phone number"
                                 >
@@ -1740,16 +1960,23 @@ export default function PharmarackCart() {
                                     {isSending
                                       ? 'Sending...'
                                       : status === 'success'
-                                      ? 'Sent!'
-                                      : status === 'queued'
-                                      ? 'Queued'
-                                      : status === 'error'
-                                      ? 'Retry WhatsApp'
-                                      : 'Send via WhatsApp'}
+                                        ? 'Sent!'
+                                        : status === 'queued'
+                                          ? 'Queued'
+                                          : status === 'error'
+                                            ? 'Retry WhatsApp'
+                                            : 'Send via WhatsApp'}
                                   </span>
                                 </button>
                               );
                             })()}
+
+                            {lastSentWaTimeMap[dist.storeId] && (
+                              <span className="text-[9px] text-emerald-400 font-mono font-extrabold flex items-center gap-1 shrink-0 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">
+                                <Clock size={10} />
+                                Sent at {lastSentWaTimeMap[dist.storeId]}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -2026,6 +2253,86 @@ export default function PharmarackCart() {
                   <Check size={14} />
                 )}
                 <span>Save Contact</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Missing Delivery Boy Confirmation Modal */}
+      {showMissingBoyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-scale-up">
+            <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between bg-bg3/40">
+              <div className="flex items-center gap-2.5">
+                <Truck className="text-amber-400" size={20} />
+                <div>
+                  <h3 className="font-extrabold text-text text-sm">Delivery Boy Details Missing</h3>
+                  <p className="text-[11px] text-muted">No delivery boy contacts found in database</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMissingBoyModal(false)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300">
+                <p className="font-semibold mb-1 font-bold">Notice:</p>
+                No delivery boy phone numbers were found in your database. Would you like to fill in the Delivery Boy details now, or proceed using the <strong>Admin Contact Number ({storeInfo.adminPhone || storeInfo.phone || 'Admin'})</strong> as the delivery contact so distributors can reach you directly?
+              </div>
+
+              {/* Form to add quick delivery boy */}
+              <div className="space-y-3 pt-1">
+                <p className="text-xs font-bold text-text">Fill Delivery Boy Details:</p>
+                <div>
+                  <label className="block text-[11px] font-bold text-muted mb-1">Delivery Boy Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dinesh"
+                    value={quickBoyName}
+                    onChange={(e) => setQuickBoyName(e.target.value)}
+                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-muted mb-1">WhatsApp Phone Number</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 9876543210"
+                    value={quickBoyPhone}
+                    onChange={(e) => setQuickBoyPhone(e.target.value)}
+                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text font-mono focus:outline-none focus:border-amber-500 font-bold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={handleSaveQuickDeliveryBoy}
+                disabled={isSavingQuickBoy || !quickBoyName.trim() || !quickBoyPhone.trim()}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all shadow-md active:scale-95"
+              >
+                {isSavingQuickBoy ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Check size={14} />
+                )}
+                <span>Save Delivery Boy & Send Order</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSkipMissingBoyAndUseAdmin}
+                className="w-full bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text text-xs font-bold py-2.5 rounded-xl transition-all"
+              >
+                Skip & Use Admin Number ({storeInfo.adminPhone || storeInfo.phone || 'Admin'})
               </button>
             </div>
           </div>

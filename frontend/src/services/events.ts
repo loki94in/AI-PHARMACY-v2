@@ -37,13 +37,16 @@ export const quickOrderEvent = {
 
 export interface LiveCartAddEventDetail {
   search?: string;
+  qty?: number;
+  sourceOrderId?: number;
+  sourceRefillId?: number;
 }
 
 export const liveCartAddEvent = {
-  triggerOpen: (search?: string) => {
+  triggerOpen: (search?: string, qty?: number, sourceOrderId?: number, sourceRefillId?: number) => {
     window.dispatchEvent(
       new CustomEvent<LiveCartAddEventDetail>('app-open-live-cart-add', {
-        detail: { search },
+        detail: { search, qty, sourceOrderId, sourceRefillId },
       })
     );
   },

@@ -28,7 +28,8 @@ import {
   Play,
   Stethoscope,
   Search,
-  Truck
+  Truck,
+  Check
 } from 'lucide-react';
 import { apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -1012,10 +1013,88 @@ const Learning: React.FC = () => {
 
         {/* Tab: Dispatch / Delivery */}
         {activeTab === 'dispatch' && (
-          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            <Dispatch />
+          <div className="flex-1 flex flex-col overflow-y-auto space-y-4 pr-1 custom-scrollbar min-h-0">
+            {/* Delivery Boy Contacts & Route Settings Card */}
+            {settingsData && (
+              <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4 shrink-0 text-left">
+                <div className="flex justify-between items-center border-b border-glass-border/40 pb-3">
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-text flex items-center gap-2">
+                      <Truck size={14} className="text-emerald-400" />
+                      Delivery Boy Contacts & Route Settings
+                    </h4>
+                    <p className="text-[10px] text-muted">
+                      Configure Delivery Boy names & WhatsApp numbers to automatically sync to single database source and embed in order templates.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleSaveConfig()}
+                    className="px-3 py-1.5 bg-green hover:bg-emerald-600 text-white font-bold text-xs rounded-xl active:scale-95 transition-all shadow-md shadow-green/10 flex items-center gap-1 shrink-0"
+                  >
+                    <Check size={12} />
+                    Save Delivery Contacts
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">Delivery Boy 1</p>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-1">Delivery Boy Name 1</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs font-semibold"
+                        placeholder="e.g. Dinesh"
+                        value={settingsData.delivery_boy_name || ''}
+                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-1">WhatsApp Number 1</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs font-mono font-bold"
+                        placeholder="e.g. +919876543210"
+                        value={settingsData.delivery_boy_whatsapp || ''}
+                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">Delivery Boy 2</p>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-1">Delivery Boy Name 2</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs font-semibold"
+                        placeholder="e.g. Ramesh"
+                        value={settingsData.delivery_boy_name_2 || ''}
+                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_name_2: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-muted uppercase block mb-1">WhatsApp Number 2</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs font-mono font-bold"
+                        placeholder="e.g. +919876543210"
+                        value={settingsData.delivery_boy_whatsapp_2 || ''}
+                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp_2: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Live Dispatch Orders & Management */}
+            <div className="flex-1 flex flex-col min-h-[500px]">
+              <Dispatch />
+            </div>
           </div>
         )}
+
 
         {/* Tab 2: Distributor Layout Learning */}
         {activeTab === 'distributors' && (
@@ -1966,35 +2045,63 @@ const Learning: React.FC = () => {
                   <div className="space-y-1">
                     <h4 className="text-xs font-bold text-text flex items-center gap-2">
                       <Truck size={14} className="text-emerald-400" />
-                      Delivery Boy Contact Numbers
+                      Delivery Boy Contacts & Names
                     </h4>
                     <p className="text-[10px] text-muted">
-                      Configure Delivery Boy 1 and 2 WhatsApp numbers to automatically embed in order templates.
+                      Configure Delivery Boy 1 and 2 names & WhatsApp numbers to automatically sync to database and embed in order templates.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-glass-border/40">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Boy Number 1</label>
-                      <input
-                        type="text"
-                        className="premium-input w-full text-xs font-mono font-bold"
-                        placeholder="e.g. +919876543210"
-                        value={settingsData.delivery_boy_whatsapp || ''}
-                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp: e.target.value })}
-                      />
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">Delivery Boy 1</p>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-1">Delivery Boy Name 1</label>
+                        <input
+                          type="text"
+                          className="premium-input w-full text-xs font-semibold"
+                          placeholder="e.g. Dinesh"
+                          value={settingsData.delivery_boy_name || ''}
+                          onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_name: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-1">WhatsApp Number 1</label>
+                        <input
+                          type="text"
+                          className="premium-input w-full text-xs font-mono font-bold"
+                          placeholder="e.g. +919876543210"
+                          value={settingsData.delivery_boy_whatsapp || ''}
+                          onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp: e.target.value })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-muted uppercase">Delivery Boy Number 2</label>
-                      <input
-                        type="text"
-                        className="premium-input w-full text-xs font-mono font-bold"
-                        placeholder="e.g. +919876543210"
-                        value={settingsData.delivery_boy_whatsapp_2 || ''}
-                        onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp_2: e.target.value })}
-                      />
+
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">Delivery Boy 2</p>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-1">Delivery Boy Name 2</label>
+                        <input
+                          type="text"
+                          className="premium-input w-full text-xs font-semibold"
+                          placeholder="e.g. Ramesh"
+                          value={settingsData.delivery_boy_name_2 || ''}
+                          onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_name_2: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-muted uppercase block mb-1">WhatsApp Number 2</label>
+                        <input
+                          type="text"
+                          className="premium-input w-full text-xs font-mono font-bold"
+                          placeholder="e.g. +919876543210"
+                          value={settingsData.delivery_boy_whatsapp_2 || ''}
+                          onChange={(e) => setSettingsData({ ...settingsData, delivery_boy_whatsapp_2: e.target.value })}
+                        />
+                      </div>
                     </div>
                   </div>
+
 
                   <div className="border-t border-glass-border/40 pt-4 flex items-center justify-between">
                     <div className="space-y-0.5">

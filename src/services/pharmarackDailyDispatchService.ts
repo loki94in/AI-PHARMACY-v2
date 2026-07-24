@@ -45,7 +45,7 @@ export async function getOrInitWindow(db: any): Promise<number> {
     windowOffset = Math.floor(Math.random() * MAX_OFFSET_MINUTES);
     await setSetting(db, 'pharmarack_batch_cycle_start', today);
     await setSetting(db, 'pharmarack_batch_window_offset', String(windowOffset));
-    console.log(`[PharmarackBatch] Initialized cycle. Window: 11:${String(windowOffset).padStart(2,'0')} AM`);
+    console.log(`[PharmarackBatch] Initialized cycle. Window: 11:${String(windowOffset).padStart(2, '0')} AM`);
     return windowOffset;
   }
 
@@ -58,7 +58,7 @@ export async function getOrInitWindow(db: any): Promise<number> {
     if (!nextOffsetStr) {
       const nextOffset = Math.floor(Math.random() * MAX_OFFSET_MINUTES);
       await setSetting(db, 'pharmarack_batch_next_offset', String(nextOffset));
-      console.log(`[PharmarackBatch] Pre-computed next cycle offset: 11:${String(nextOffset).padStart(2,'0')} AM`);
+      console.log(`[PharmarackBatch] Pre-computed next cycle offset: 11:${String(nextOffset).padStart(2, '0')} AM`);
     }
   }
 
@@ -68,7 +68,7 @@ export async function getOrInitWindow(db: any): Promise<number> {
     await setSetting(db, 'pharmarack_batch_cycle_start', today);
     await setSetting(db, 'pharmarack_batch_window_offset', String(windowOffset));
     await setSetting(db, 'pharmarack_batch_next_offset', '');
-    console.log(`[PharmarackBatch] Cycle rotated. New window: 11:${String(windowOffset).padStart(2,'0')} AM`);
+    console.log(`[PharmarackBatch] Cycle rotated. New window: 11:${String(windowOffset).padStart(2, '0')} AM`);
   }
 
   return windowOffset;
@@ -109,7 +109,7 @@ export async function recordPlacedOrder(
 async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = false): Promise<{ distMessages: { distName: string; message: string }[]; summaryMessage: string }> {
   const today = todayIST();
   const [, mm, dd] = today.split('-');
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dateLabel = `${parseInt(dd)} ${months[parseInt(mm) - 1]}`;
 
   const grouped: Record<string, any[]> = {};
@@ -236,31 +236,27 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
   // Fallback to all active delivery boys from database if order array had no explicit names
   if (result.length === 0) {
     const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
-    for (const boy of activeBoys) {
-      if (!boy.whatsapp_number) continue;
-      const clean = boy.whatsapp_number.replace(/\D/g, '');
+    const boysToMap = activeBoys.map((b: any) => ({ name: b.name, val: b.whatsapp_number }));
+    for (const item of boysToMap) {
+      if (!item.val) continue;
+      const clean = String(item.val).replace(/\D/g, '');
       if (clean.length >= 10) {
         const formatted = clean.length === 10 ? `91${clean}` : clean;
-        result.push({ name: boy.name, phone: formatted });
+        if (!result.some(b => b.phone === formatted)) {
+          result.push({ name: item.name, phone: formatted });
+        }
       }
     }
 
-    // Fallback to settings delivery boy phone numbers if table was empty
+    // Fallback to Admin / Pharmacy owner number if no delivery boy number exists
     if (result.length === 0) {
-      const setting1 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp'");
-      const setting2 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp_2'");
-      const setting3 = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
-
-      const numbers = [setting1?.value, setting2?.value, setting3?.value]
-        .filter(Boolean)
-        .map(num => String(num).replace(/\D/g, ''))
-        .filter(num => num.length >= 10);
-
-      const uniqueNumbers = Array.from(new Set(numbers));
-      for (let i = 0; i < uniqueNumbers.length; i++) {
-        const num = uniqueNumbers[i];
-        const formatted = num.length === 10 ? `91${num}` : num;
-        result.push({ name: `Delivery Staff ${i + 1}`, phone: formatted });
+      const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+      if (adminSetting?.value) {
+        const clean = String(adminSetting.value).replace(/\D/g, '');
+        if (clean.length >= 10) {
+          const formatted = clean.length === 10 ? `91${clean}` : clean;
+          result.push({ name: 'Admin (Delivery Fallback)', phone: formatted });
+        }
       }
     }
   }

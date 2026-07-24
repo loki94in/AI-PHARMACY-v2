@@ -1282,6 +1282,9 @@ export const Layout = ({
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [showLiveCartAdd, setShowLiveCartAdd] = useState(false);
   const [liveCartAddSearch, setLiveCartAddSearch] = useState<string | undefined>(undefined);
+  const [liveCartAddQty, setLiveCartAddQty] = useState<number | undefined>(undefined);
+  const [liveCartAddSourceOrderId, setLiveCartAddSourceOrderId] = useState<number | undefined>(undefined);
+  const [liveCartAddSourceRefillId, setLiveCartAddSourceRefillId] = useState<number | undefined>(undefined);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -1387,6 +1390,9 @@ export const Layout = ({
     const unsubscribeQuickOrder = quickOrderEvent.subscribeOpen(() => setShowQuickOrder(true));
     const unsubscribeLiveCartAdd = liveCartAddEvent.subscribeOpen((detail) => {
       setLiveCartAddSearch(detail?.search);
+      setLiveCartAddQty(detail?.qty);
+      setLiveCartAddSourceOrderId(detail?.sourceOrderId);
+      setLiveCartAddSourceRefillId(detail?.sourceRefillId);
       setShowLiveCartAdd(true);
     });
     return () => {
@@ -1559,9 +1565,15 @@ export const Layout = ({
         {showLiveCartAdd && (
           <LiveCartAddModal 
             initialSearch={liveCartAddSearch}
+            initialQty={liveCartAddQty}
+            sourceOrderId={liveCartAddSourceOrderId}
+            sourceRefillId={liveCartAddSourceRefillId}
             onClose={() => {
               setShowLiveCartAdd(false);
               setLiveCartAddSearch(undefined);
+              setLiveCartAddQty(undefined);
+              setLiveCartAddSourceOrderId(undefined);
+              setLiveCartAddSourceRefillId(undefined);
             }} 
           />
         )}

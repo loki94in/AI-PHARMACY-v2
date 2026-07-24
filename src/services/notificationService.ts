@@ -417,17 +417,35 @@ export class NotificationService {
           const setting2 = await db.get("SELECT value FROM app_settings WHERE key = 'delivery_boy_whatsapp_2'");
           const setting3 = await db.get("SELECT value FROM app_settings WHERE key = 'dinesh_whatsapp_number'");
 
-          const boys = [setting1?.value, setting2?.value, setting3?.value]
-            .filter(Boolean)
-            .map(num => String(num).replace(/\D/g, ''))
-            .filter(num => num.length >= 10);
+          const boysToMap = [
+            { name: 'Dinesh', val: setting3?.value },
+            { name: 'Delivery Staff 1', val: setting1?.value },
+            { name: 'Delivery Staff 2', val: setting2?.value }
+          ];
 
-          const uniqueBoys = Array.from(new Set(boys));
-          for (let i = 0; i < uniqueBoys.length; i++) {
-            const num = uniqueBoys[i];
-            const formatted = num.length === 10 ? `91${num}` : num;
-            resolvedDeliveryBoys.push({ name: `Delivery Staff ${i + 1}`, phone: formatted });
-            deliveryBoysText += `Delivery Staff ${i + 1}\nMobile: ${formatted}\n\n`;
+          for (const item of boysToMap) {
+            if (!item.val) continue;
+            const clean = String(item.val).replace(/\D/g, '');
+            if (clean.length >= 10) {
+              const formatted = clean.length === 10 ? `91${clean}` : clean;
+              if (!resolvedDeliveryBoys.some(b => b.phone === formatted)) {
+                resolvedDeliveryBoys.push({ name: item.name, phone: formatted });
+                deliveryBoysText += `${item.name}\nMobile: ${formatted}\n\n`;
+              }
+            }
+          }
+
+          // Fallback to Admin / Pharmacy owner number if no delivery boy number exists
+          if (resolvedDeliveryBoys.length === 0) {
+            const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+            if (adminSetting?.value) {
+              const clean = String(adminSetting.value).replace(/\D/g, '');
+              if (clean.length >= 10) {
+                const formatted = clean.length === 10 ? `91${clean}` : clean;
+                resolvedDeliveryBoys.push({ name: 'Admin (Delivery Fallback)', phone: formatted });
+                deliveryBoysText += `Admin (Delivery Contact)\nMobile: ${formatted}\n\n`;
+              }
+            }
           }
         }
       }
@@ -437,7 +455,7 @@ export class NotificationService {
       }
 
       // 4. Format message
-      const message = `Order Finalized (Pharmarack Cart)\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nExpected Delivery:\nToday`;
+      const message = `Order Finalized (Pharmarack Cart)\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nRequested File Format:\nCSV File Format\n\nExpected Delivery:\nToday`;
 
       // 5. Parse distributor numbers
       const distPhones = rawPhone

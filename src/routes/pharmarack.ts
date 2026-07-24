@@ -325,6 +325,29 @@ router.get('/search', async (req, res) => {
         }
       }
 
+      // Stage 6: Local SQLite DB medicine / alias cross-reference fallback
+      if (!searchSuccessful) {
+        try {
+          const db = await dbManager.getConnection();
+          const matchedMed: any = await db.get(
+            `SELECT m.name FROM medicines m 
+             LEFT JOIN medicine_aliases ma ON ma.medicine_id = m.id
+             WHERE LOWER(m.name) LIKE ? OR LOWER(ma.alias_name) LIKE ?
+             LIMIT 1`,
+            [`%${qLower}%`, `%${qLower}%`]
+          );
+          if (matchedMed && matchedMed.name) {
+            const aliasTerm = matchedMed.name.trim();
+            if (aliasTerm && aliasTerm.toLowerCase() !== qLower) {
+              console.log(`[Pharmarack Search] Trying local DB medicine match: "${aliasTerm}" for query "${qRaw}"`);
+              await trySearch(aliasTerm);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('[Pharmarack Search] DB alias lookup error:', dbErr);
+        }
+      }
+
       if (!searchSuccessful) {
         console.log(`[Pharmarack Search] All stages exhausted for "${qRaw}". Product may not be in Pharmarack catalog.`);
       }

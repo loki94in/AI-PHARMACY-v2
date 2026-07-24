@@ -81,6 +81,67 @@ router.post('/save', async (req, res) => {
 
     const keys = Object.keys(payload);
 
+    // Sync delivery boys to single DB source location (delivery_boys table)
+    const boy1Name = payload['delivery_boy_name'] || payload['delivery_boy_1_name'];
+    const boy1Phone = payload['delivery_boy_whatsapp'] || payload['delivery_boy_phone'];
+    if (boy1Phone !== undefined) {
+      const nameToUse = String(boy1Name || '').trim() || 'Delivery Staff 1';
+      const phoneStr = String(boy1Phone || '').trim();
+
+      // Find first existing Delivery Staff 1 record
+      const existing1 = await db.get(
+        "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 1%' OR id = 1 ORDER BY id ASC LIMIT 1",
+        [nameToUse]
+      );
+
+      if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
+        if (existing1) {
+          await db.run(
+            'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?',
+            [nameToUse, phoneStr, existing1.id]
+          );
+        } else {
+          await db.run(
+            'INSERT INTO delivery_boys (name, whatsapp_number, is_active) VALUES (?, ?, 1)',
+            [nameToUse, phoneStr]
+          );
+        }
+      } else if (existing1) {
+        await db.run('UPDATE delivery_boys SET is_active = 0 WHERE id = ?', [existing1.id]);
+      }
+    }
+
+    const boy2Name = payload['delivery_boy_name_2'] || payload['delivery_boy_2_name'];
+    const boy2Phone = payload['delivery_boy_whatsapp_2'];
+    if (boy2Phone !== undefined) {
+      const nameToUse = String(boy2Name || '').trim() || 'Delivery Staff 2';
+      const phoneStr = String(boy2Phone || '').trim();
+
+      // Find first existing Delivery Staff 2 record
+      const existing2 = await db.get(
+        "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 2%' OR id = 2 ORDER BY id ASC LIMIT 1",
+        [nameToUse]
+      );
+
+      if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
+        if (existing2) {
+          await db.run(
+            'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?',
+            [nameToUse, phoneStr, existing2.id]
+          );
+        } else {
+          await db.run(
+            'INSERT INTO delivery_boys (name, whatsapp_number, is_active) VALUES (?, ?, 1)',
+            [nameToUse, phoneStr]
+          );
+        }
+      } else if (existing2) {
+        await db.run('UPDATE delivery_boys SET is_active = 0 WHERE id = ?', [existing2.id]);
+      }
+    }
+
+
+
     // If telegram settings changed, trigger hot-reload of Telegram bot service
     const hasTelegramKey = keys.some(k => k === 'telegram_enabled' || k === 'telegram_token' || k === 'telegram_chat_id');
     if (hasTelegramKey) {

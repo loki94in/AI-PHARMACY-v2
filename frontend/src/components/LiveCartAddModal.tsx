@@ -103,7 +103,21 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
   return (qty * rate) / totalItems;
 };
 
-export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () => void }> = ({ initialSearch, onClose }) => {
+export interface LiveCartAddModalProps {
+  initialSearch?: string;
+  initialQty?: number;
+  sourceOrderId?: number;
+  sourceRefillId?: number;
+  onClose: () => void;
+}
+
+export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
+  initialSearch,
+  initialQty,
+  sourceOrderId,
+  sourceRefillId,
+  onClose
+}) => {
   const [isOpen, setIsOpen] = useState(true);
   
   const handleClose = () => {
@@ -113,7 +127,7 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
   
   // Input fields
   const [product, setProduct] = useState(initialSearch || '');
-  const [qty, setQty] = useState(1);
+  const [qty, setQty] = useState(initialQty || 1);
   
   // Selected Pharmarack Metadata
   const [selectedDistributor, setSelectedDistributor] = useState('');
@@ -992,6 +1006,23 @@ export const LiveCartAddModal: React.FC<{ initialSearch?: string; onClose: () =>
       }]);
 
       toastEvent.trigger(`Added "${productNameToUse}" directly to live Pharmarack cart!`, 'success');
+
+      // Automatically update source order status if opened from pending requests or refills
+      if (sourceOrderId) {
+        try {
+          await api.updateOrder(sourceOrderId, { status: 'Ordered' });
+          await fetchPendingOrders();
+        } catch (e) {
+          console.warn('Failed to update source order status:', e);
+        }
+      }
+      if (sourceRefillId) {
+        try {
+          await fetchPendingRefills();
+        } catch (e) {
+          console.warn('Failed to refresh source refill status:', e);
+        }
+      }
       
       // Reset form and keep open
       setProduct('');
