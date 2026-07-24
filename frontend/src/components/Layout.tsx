@@ -737,6 +737,29 @@ const Topbar = ({
     }
   }, []);
 
+  const [servicesStatus, setServicesStatus] = useState<{
+    pharmarack: { connected: boolean; isRefreshing: boolean; lastError: string | null };
+    whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number };
+  } | null>(null);
+
+  const fetchServicesStatus = useCallback(async () => {
+    try {
+      const { api } = await import('../services/api.js');
+      const res = await api.getServicesStatus();
+      if (res && res.success && res.services) {
+        setServicesStatus(res.services);
+      }
+    } catch (err) {
+      console.warn('[Layout] Failed to fetch services status:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchServicesStatus();
+    const interval = setInterval(fetchServicesStatus, 10000);
+    return () => clearInterval(interval);
+  }, [fetchServicesStatus]);
+
   useEffect(() => {
     fetchDevices();
   }, [fetchDevices]);
@@ -911,6 +934,52 @@ const Topbar = ({
               </div>
             )}
           </div>
+
+          {/* Pharmarack Live Cart Connection Status */}
+          <Link
+            to="/pharmarack-cart"
+            className={`
+              hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
+              ${servicesStatus?.pharmarack?.isRefreshing
+                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                : servicesStatus?.pharmarack?.connected
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}
+            `}
+            title={servicesStatus?.pharmarack?.connected ? "Pharmarack Live Cart Online" : "Pharmarack Session Expired - Click to Re-authenticate"}
+          >
+            <ShoppingCart size={13} className={servicesStatus?.pharmarack?.isRefreshing ? "animate-spin" : ""} />
+            <span>
+              {servicesStatus?.pharmarack?.isRefreshing
+                ? 'Refreshing'
+                : servicesStatus?.pharmarack?.connected
+                ? 'Live Cart'
+                : 'Re-auth'}
+            </span>
+          </Link>
+
+          {/* WhatsApp Connection & Queue Status */}
+          <Link
+            to="/crm"
+            className={`
+              hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
+              ${servicesStatus?.whatsapp?.connected
+                ? servicesStatus.whatsapp.pendingQueueCount > 0
+                  ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'}
+            `}
+            title={servicesStatus?.whatsapp?.connected ? `WhatsApp Online (${servicesStatus.whatsapp.pendingQueueCount} queued)` : "WhatsApp Connecting/Offline"}
+          >
+            <MessageSquareIcon size={13} className={!servicesStatus?.whatsapp?.connected ? "animate-pulse" : ""} />
+            <span>
+              {servicesStatus?.whatsapp?.connected
+                ? servicesStatus.whatsapp.pendingQueueCount > 0
+                  ? `${servicesStatus.whatsapp.pendingQueueCount} Q`
+                  : 'WA Online'
+                : 'WA Sync'}
+            </span>
+          </Link>
 
           {/* Quick Order Shortcut Button */}
           <button

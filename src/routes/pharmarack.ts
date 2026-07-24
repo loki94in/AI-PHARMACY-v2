@@ -1228,6 +1228,26 @@ router.post('/cart/notify-manual', async (req, res) => {
   }
 });
 
+// Batch delivery boy notification: send ONE consolidated message with ALL orders
+router.post('/cart/notify-delivery-boys-batch', async (req, res) => {
+  const { orders } = req.body;
+  if (!orders || !Array.isArray(orders) || orders.length === 0) {
+    return res.status(400).json({ error: 'Missing or empty orders array' });
+  }
+
+  try {
+    const success = await notificationService.notifyDeliveryBoysBatch(orders);
+    if (success) {
+      res.json({ success: true, message: `Delivery boy batch notification sent for ${orders.length} order(s)!` });
+    } else {
+      res.status(500).json({ error: 'Failed to send delivery boy batch notification. No delivery boy contacts found.' });
+    }
+  } catch (err: any) {
+    console.error('Batch delivery boy notification error:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Fetch current Pharmarack cart
 router.get('/cart', async (req, res) => {
   try {

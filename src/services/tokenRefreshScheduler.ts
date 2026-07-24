@@ -95,6 +95,8 @@ export class TokenRefreshScheduler {
   private intervalId: NodeJS.Timeout | null = null;
   private isRefreshing = false;
   public isLoginWindowActive = false;
+  private lastCapturedAt: number | null = null;
+  private lastError: string | null = null;
 
   private constructor() {}
 
@@ -103,6 +105,19 @@ export class TokenRefreshScheduler {
       TokenRefreshScheduler.instance = new TokenRefreshScheduler();
     }
     return TokenRefreshScheduler.instance;
+  }
+
+  public getStatus() {
+    return {
+      isRefreshing: this.isRefreshing,
+      isLoginWindowActive: this.isLoginWindowActive,
+      lastCapturedAt: this.lastCapturedAt,
+      lastError: this.lastError
+    };
+  }
+
+  public async triggerImmediateCheck() {
+    return this.refreshIfNeeded();
   }
 
   public start() {
@@ -254,16 +269,20 @@ export class TokenRefreshScheduler {
 
       if (holder.token) {
         console.log('[TokenRefreshScheduler] Successfully captured fresh token:', holder.token.substring(0, 15) + '...');
+        this.lastCapturedAt = Date.now();
+        this.lastError = null;
         const db = await dbManager.getConnection();
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [holder.token]);
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
         return holder.token;
       } else {
         console.warn('[TokenRefreshScheduler] Headless navigation completed but no authorization header was captured.');
+        this.lastError = 'No authorization header captured';
         return null;
       }
     } catch (err: any) {
       console.error('[TokenRefreshScheduler] Failed to refresh token in background:', err.message);
+      this.lastError = err.message || 'Background token refresh failed';
       return null;
     } finally {
       if (browser) {

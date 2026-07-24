@@ -69,6 +69,22 @@ export function setIsReady(ready: boolean) {
   isReady = ready;
 }
 
+export async function getWhatsAppStatus() {
+  let pendingCount = 0;
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get("SELECT COUNT(*) as cnt FROM whatsapp_send_queue WHERE sent_at IS NULL");
+    pendingCount = row?.cnt || 0;
+  } catch (_) {}
+  return {
+    isReady,
+    initializing,
+    isSyncing,
+    pendingQueueCount: pendingCount,
+    hasQr: !!currentQr
+  };
+}
+
 /** Helper to check whether we should route messages to WhatsApp Business Cloud API */
 export async function shouldRouteToBusiness(): Promise<boolean> {
   const db = await dbManager.getConnection();
@@ -622,7 +638,13 @@ export async function sendMessage(
     }
 
     // Anti-duplicate protection: prevent identical sends to same recipient within 30s
-    const sendKey = `${cleanPhone}:${(caption || '').trim().slice(0, 60)}`;
+    // Use a simple hash of the full message to avoid false collisions between different orders
+    const fullMsg = (caption || '').trim();
+    let msgHash = 0;
+    for (let ci = 0; ci < fullMsg.length; ci++) {
+      msgHash = ((msgHash << 5) - msgHash + fullMsg.charCodeAt(ci)) | 0;
+    }
+    const sendKey = `${cleanPhone}:${msgHash}:${fullMsg.length}`;
     const nowTs = Date.now();
     if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey)! < 30000) {
       console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 30s.`);

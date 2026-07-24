@@ -710,4 +710,15 @@ export const api = {
   getPharmarackSentDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/pharmarack/sent-orders/dates').then(res => res.data),
   getPharmarackSentOrders: (date?: string) => apiClient.get<{ success: boolean; date: string; orders: any[] }>('/pharmarack/sent-orders', { params: { date } }).then(res => res.data),
   logPharmarackPlacedOrder: (data: { store_id?: number; store_name: string; items: any[]; delivery_persons?: any[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
+
+  // System Services Live Health Status
+  getServicesStatus: () => apiClient.get<{
+    success: boolean;
+    timestamp: number;
+    services: {
+      internet: { connected: boolean };
+      pharmarack: { connected: boolean; hasToken: boolean; isRefreshing: boolean; lastCapturedAt: number | null; lastError: string | null; mode: string };
+      whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number; hasQr: boolean };
+    };
+  }>('/system/services-status').then(res => res.data),
 };

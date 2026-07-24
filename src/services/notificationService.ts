@@ -429,8 +429,8 @@ export class NotificationService {
         deliveryBoysText = 'Not assigned yet';
       }
 
-      // 4. Format message
-      const message = `Order Finalized (Pharmarack Cart)\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nRequested File Format:\nCSV File Format\n\nExpected Delivery:\nToday`;
+      // 4. Format message (include distributor name so each is unique and identifiable)
+      const message = `Order Finalized (Pharmarack Cart)\n\n📦 Distributor: ${storeName}\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nRequested File Format:\nCSV File Format\n\nExpected Delivery:\nToday`;
 
       // 5. Parse distributor numbers
       const distPhones = rawPhone
@@ -493,6 +493,163 @@ export class NotificationService {
       } catch (recErr) {
         console.warn('[CartOrderNotif] Failed to record order for daily batch:', recErr);
       }
+    }
+  }
+
+  /**
+   * Send WhatsApp notification messages to delivery boy(s) for a batch of distributor orders.
+   * Sends Summary message FIRST, followed by individual distributor order messages with packaging and qty.
+   */
+  async notifyDeliveryBoysBatch(
+    orders: { storeName: string; storeId: number; phone?: string; items: any[]; deliveryPersons?: any[] }[]
+  ): Promise<boolean> {
+    if (!orders || orders.length === 0) return false;
+
+    let db = null;
+    try {
+      db = await dbManager.getConnection();
+
+      // 1. Resolve delivery boy contacts
+      const resolvedDeliveryBoys: { name: string; phone: string }[] = [];
+
+      const boyNamesSeen = new Set<string>();
+      for (const order of orders) {
+        for (const person of (order.deliveryPersons || [])) {
+          const name = (person.name || '').trim();
+          if (!name || boyNamesSeen.has(name.toLowerCase())) continue;
+          boyNamesSeen.add(name.toLowerCase());
+          const dbBoy = await db.get(
+            "SELECT name, whatsapp_number FROM delivery_boys WHERE (name LIKE ? OR name = ?) AND is_active = 1",
+            [`%${name}%`, name]
+          );
+          const rawPhone = dbBoy?.whatsapp_number || (person as any).phone || '';
+          const clean = rawPhone.replace(/\D/g, '');
+          if (clean.length >= 10) {
+            resolvedDeliveryBoys.push({ name: dbBoy?.name || name, phone: clean.length === 10 ? `91${clean}` : clean });
+          }
+        }
+      }
+
+      if (resolvedDeliveryBoys.length === 0) {
+        const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
+        for (const boy of activeBoys) {
+          if (!boy.whatsapp_number) continue;
+          const clean = boy.whatsapp_number.replace(/\D/g, '');
+          if (clean.length >= 10) {
+            resolvedDeliveryBoys.push({ name: boy.name, phone: clean.length === 10 ? `91${clean}` : clean });
+          }
+        }
+      }
+
+      if (resolvedDeliveryBoys.length === 0) {
+        const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+        if (adminSetting?.value) {
+          const clean = String(adminSetting.value).replace(/\D/g, '');
+          if (clean.length >= 10) {
+            resolvedDeliveryBoys.push({ name: 'Admin', phone: clean.length === 10 ? `91${clean}` : clean });
+          }
+        }
+      }
+
+      if (resolvedDeliveryBoys.length === 0) {
+        console.warn('[CartBatchNotif] No delivery boy contacts found for batch notification.');
+        return false;
+      }
+
+      // Format date label (e.g. "24 Jul")
+      const now = new Date();
+      const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+      const dateStr = ist.toISOString().slice(0, 10);
+      const [, mm, dd] = dateStr.split('-');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const dateLabel = `${parseInt(dd)} ${months[parseInt(mm) - 1]}`;
+
+      // 2. Fetch distributor contact phones for summary & order headers
+      const distPhonesMap: Record<string, string> = {};
+      for (const order of orders) {
+        if (order.phone) {
+          distPhonesMap[order.storeName] = order.phone;
+        } else {
+          const dRow = await db.get(
+            `SELECT phone FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
+            [order.storeName, `%${order.storeName}%`]
+          );
+          distPhonesMap[order.storeName] = dRow?.phone || 'No phone set';
+        }
+      }
+
+      // 3. Build Summary Message
+      const totalDistributors = orders.length;
+      const totalItems = orders.reduce((sum, o) => sum + (o.items?.length || 0), 0);
+
+      const summaryLines: string[] = [];
+      orders.forEach((order, idx) => {
+        const phone = distPhonesMap[order.storeName] || 'No phone set';
+        summaryLines.push(`${idx + 1}. *${order.storeName}*: ${phone} (${order.items?.length || 0} items)`);
+      });
+
+      let summaryMessage = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+      summaryMessage += summaryLines.join('\n') + `\n\n`;
+      summaryMessage += `==================================\n`;
+      summaryMessage += `🚚 *Total Today Distributors:* ${totalDistributors}\n`;
+      summaryMessage += `📦 *Total Today Order Items:* ${totalItems}\n`;
+      summaryMessage += `==================================`;
+
+      // 4. Build Per-Distributor Order Messages
+      const distMessages: { distName: string; message: string }[] = [];
+      for (const order of orders) {
+        const phone = distPhonesMap[order.storeName] || 'No phone set';
+        let msg = `📅 TODAY ORDER — ${dateLabel}\n\n`;
+        msg += `🏬 *${order.storeName.toUpperCase()}*\n`;
+        msg += `📞 Contact: ${phone}\n\n`;
+        msg += `📦 *Medicines List:*\n`;
+
+        (order.items || []).forEach((item, idx) => {
+          const name = item.productName || item.name || 'Unknown Product';
+          const qty = item.qty || item.Quantity || item.quantity || 1;
+          const pack = item.packaging || item.packing ? ` (${item.packaging || item.packing})` : '';
+          msg += `${idx + 1}. *${name}*${pack} — Qty: *${qty}*\n`;
+        });
+
+        msg += `\n📊 *Total Items:* ${order.items?.length || 0}`;
+        distMessages.push({ distName: order.storeName, message: msg.trim() });
+      }
+
+      // 5. Send to each delivery boy (Summary FIRST, then per-distributor messages with 1.5s gap)
+      let sentCount = 0;
+      for (const boy of resolvedDeliveryBoys) {
+        try {
+          // A. Send Summary Message
+          await sendMessage(boy.phone, undefined, summaryMessage);
+          sentCount++;
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${Date.now()}`]
+          );
+
+          // B. Send Individual Distributor Messages with 1.5s gap
+          for (const distObj of distMessages) {
+            await new Promise(r => setTimeout(r, 1500));
+            await sendMessage(boy.phone, undefined, distObj.message);
+            sentCount++;
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, 'sent', `batch_${Date.now()}_${distObj.distName}`]
+            );
+          }
+
+          console.log(`[CartBatchNotif] Sent summary + ${distMessages.length} distributor order messages to delivery boy ${boy.name}`);
+        } catch (err: any) {
+          console.error(`[CartBatchNotif] Failed to send batch to ${boy.name}:`, err.message);
+        }
+      }
+
+      return sentCount > 0;
+    } catch (err) {
+      console.error('[CartBatchNotif] Error sending batch notification:', err);
+      return false;
     }
   }
 }

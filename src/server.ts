@@ -164,6 +164,7 @@ app.use('/api/telegram-prescription', lazyRoute('./routes/telegramPrescription.j
 app.use('/api/refills', lazyRoute('./routes/refills.js'));
 app.use('/api/wa-business', lazyRoute('./routes/whatsappBusiness.js'));
 app.use('/api/automation', lazyRoute('./routes/automation.js'));
+app.use('/api/system', lazyRoute('./routes/serviceStatus.js'));
 // Core API routes
 app.use('/api/sales', lazyRoute('./routes/sales.js'));
 app.use('/api/inventory', lazyRoute('./routes/inventory.js'));

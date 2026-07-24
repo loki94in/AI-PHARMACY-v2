@@ -895,6 +895,7 @@ export default function PharmarackCart() {
 
     setIsSendingBatchWhatsApp(true);
     let sentCount = 0;
+    const successfullySentOrders: { storeName: string; storeId: number; phone?: string; items: any[]; deliveryPersons: any[] }[] = [];
 
     try {
       toastEvent.trigger(`Starting WhatsApp batch delivery for ${mapped.length} distributor(s) with 30-45s safe delay...`, 'info');
@@ -937,18 +938,14 @@ export default function PharmarackCart() {
             });
             toastEvent.trigger(`[${i + 1}/${mapped.length}] WhatsApp order sent for ${dist.storeName}!`, 'success');
             sentCount++;
-
-            // Trigger backend notification to Delivery Boys
-            try {
-              await apiClient.post('/pharmarack/cart/notify-manual', {
-                storeId: dist.storeId,
-                storeName: dist.storeName,
-                deliveryPersons: dist.deliveryPersons,
-                items: dist.items
-              });
-            } catch (distErr) {
-              console.warn('Could not notify delivery boys via backend route in batch:', distErr);
-            }
+            // Collect for consolidated delivery boy notification
+            successfullySentOrders.push({
+              storeName: dist.storeName,
+              storeId: dist.storeId,
+              phone: cleanPhone,
+              items: dist.items,
+              deliveryPersons: dist.deliveryPersons
+            });
           } else {
             throw new Error(res?.data?.error || 'Silent send failed');
           }
@@ -967,6 +964,13 @@ export default function PharmarackCart() {
             });
             toastEvent.trigger(`[${i + 1}/${mapped.length}] Opened WhatsApp Web tab for ${dist.storeName}`, 'info');
             sentCount++;
+            successfullySentOrders.push({
+              storeName: dist.storeName,
+              storeId: dist.storeId,
+              phone: cleanPhone,
+              items: dist.items,
+              deliveryPersons: dist.deliveryPersons
+            });
           } catch (tabErr) {
             setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
             toastEvent.trigger(`Failed to send order for ${dist.storeName}`, 'error');
@@ -991,6 +995,16 @@ export default function PharmarackCart() {
         setLastBatchSentTime(batchTimeStr);
         try { localStorage.setItem('pharmarack_last_batch_sent_time', batchTimeStr); } catch (_) {}
         toastEvent.trigger(`Batch complete! Successfully sent ${sentCount} distributor order(s) via WhatsApp at ${batchTimeStr}!`, 'success');
+
+        // Send ONE consolidated delivery boy notification with ALL sent orders
+        try {
+          await apiClient.post('/pharmarack/cart/notify-delivery-boys-batch', {
+            orders: successfullySentOrders
+          });
+          toastEvent.trigger(`Delivery boy notified with all ${successfullySentOrders.length} order(s)!`, 'success');
+        } catch (batchNotifErr) {
+          console.warn('Could not send consolidated delivery boy batch notification:', batchNotifErr);
+        }
       }
 
       if (unmapped.length > 0) {
