@@ -699,7 +699,6 @@ export default function PharmarackCart() {
     }
 
     // ponytail: no app_settings fallback — delivery boys come exclusively from delivery_boys table
-    }
 
     // Fallback to Admin contact if user skipped or no delivery boys exist
     if (addedContacts.size === 0) {
