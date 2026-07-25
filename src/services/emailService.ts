@@ -14,6 +14,7 @@ import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
+import { extractCleanEmail } from '../utils/emailSanitizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1808,11 +1809,10 @@ export class EmailService {
       );
 
       if (emailAttachment) {
-        const fromEmailMatch = emailAttachment.from_addr.match(/<([^>]+)>/);
-        const senderEmail = fromEmailMatch ? fromEmailMatch[1] : emailAttachment.from_addr;
+        const senderEmail = extractCleanEmail(emailAttachment.from_addr);
         distributor = await db.get(
-          'SELECT * FROM distributors WHERE LOWER(email) = ? OR LOWER(name) = ? OR LOWER(name) LIKE ?',
-          [senderEmail.toLowerCase(), emailAttachment.distributor_name?.toLowerCase(), `%${emailAttachment.distributor_name?.toLowerCase()}%`]
+          'SELECT * FROM distributors WHERE (email IS NOT NULL AND email != "" AND LOWER(email) = ?) OR LOWER(name) = ? OR LOWER(name) LIKE ?',
+          [senderEmail, emailAttachment.distributor_name?.toLowerCase(), `%${emailAttachment.distributor_name?.toLowerCase()}%`]
         );
       }
 

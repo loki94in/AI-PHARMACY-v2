@@ -1624,6 +1624,21 @@ export async function ensureSchema(dbPath: string) {
     console.warn('[Database Healing] Non-critical warning, failed to run database healing checks:', healErr);
   }
 
+  // Sanitize existing distributor email addresses in DB (e.g. "Name" <email@domain.com> -> email@domain.com)
+  try {
+    const distsWithEmail = await db.all("SELECT id, email FROM distributors WHERE email IS NOT NULL AND email != ''");
+    const { extractCleanEmail } = await import('./utils/emailSanitizer.js');
+    for (const dist of distsWithEmail) {
+      const clean = extractCleanEmail(dist.email);
+      if (clean && clean !== dist.email) {
+        console.log(`[Database Migration] Sanitizing distributor #${dist.id} email: "${dist.email}" -> "${clean}"`);
+        await db.run("UPDATE distributors SET email = ? WHERE id = ?", [clean, dist.id]);
+      }
+    }
+  } catch (distEmailErr) {
+    console.warn('[Database Migration] Failed to clean distributor emails in DB:', distEmailErr);
+  }
+
   // WhatsApp silent-send queue with status, pacing, and retry tracking
   await db.run(`
     CREATE TABLE IF NOT EXISTS whatsapp_send_queue (

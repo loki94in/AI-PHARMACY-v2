@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dbManager } from '../database/connection.js';
 import { telegramBotService } from '../telegramBot.js';
+import { extractCleanEmail } from '../utils/emailSanitizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -252,6 +253,7 @@ router.post('/distributors', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const cleanName = name.trim();
+    const cleanEmail = extractCleanEmail(email);
     const normName = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     const existing = await db.all(
@@ -271,7 +273,7 @@ router.post('/distributors', async (req, res) => {
           address = CASE WHEN ? != '' THEN ? ELSE address END,
           state_code = CASE WHEN ? != '' THEN ? ELSE state_code END
          WHERE id IN (${placeholders})`,
-        [cleanPhone, cleanPhone, cleanPhone, cleanPhone, email || '', email || '', address || '', address || '', state_code || '', state_code || '', ...ids]
+        [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', ...ids]
       );
       const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [ids[0]]);
       return res.json({ success: true, data: updated });
@@ -280,7 +282,7 @@ router.post('/distributors', async (req, res) => {
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
     const result = await db.run(
       `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
-      [cleanName, cleanPhone, cleanPhone, email || '', address || '', state_code || '']
+      [cleanName, cleanPhone, cleanPhone, cleanEmail, address || '', state_code || '']
     );
     const id = result.lastID;
     const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
@@ -297,6 +299,7 @@ router.put('/distributors/:id', async (req, res) => {
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
   const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+  const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
     await db.run(
@@ -308,7 +311,7 @@ router.put('/distributors/:id', async (req, res) => {
         address = CASE WHEN ? != '' THEN ? ELSE address END, 
         state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
        WHERE id = ?`,
-      [name, cleanPhone, cleanPhone, email || '', email || '', address || '', address || '', state_code || '', state_code || '', id]
+      [name, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', id]
     );
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });

@@ -1,6 +1,7 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { reconcileCreditNote } from '../services/creditNoteService.js';
+import { extractCleanEmail } from '../utils/emailSanitizer.js';
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.post('/distributors', async (req, res) => {
   if (!name) {
     return res.status(400).json({ error: 'Distributor name is required' });
   }
+  const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
     const existing = await db.get('SELECT id FROM distributors WHERE name = ? OR name LIKE ?', [name, `%${name}%`]);
@@ -32,13 +34,13 @@ router.post('/distributors', async (req, res) => {
              address = COALESCE(?, address),
              gstin = COALESCE(?, gstin)
          WHERE id = ?`,
-        [phone, phone, email, address, gstin, existing.id]
+        [phone, phone, cleanEmail, address, gstin, existing.id]
       );
       res.json({ success: true, message: 'Distributor updated', id: existing.id });
     } else {
       const result = await db.run(
         `INSERT INTO distributors (name, phone, contact, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, phone, phone, email, address, gstin]
+        [name, phone, phone, cleanEmail, address, gstin]
       );
       res.json({ success: true, message: 'Distributor created', id: result.lastID });
     }
@@ -52,6 +54,7 @@ router.post('/distributors', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phone, email, preferred_file_format, gstin, address } = req.body;
+  const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
     await db.run(
@@ -64,7 +67,7 @@ router.put('/:id', async (req, res) => {
            gstin = COALESCE(?, gstin),
            address = COALESCE(?, address)
        WHERE id = ?`,
-      [name, phone, phone, email, preferred_file_format, gstin, address, id]
+      [name, phone, phone, cleanEmail, preferred_file_format, gstin, address, id]
     );
     res.json({ success: true, message: 'Distributor details updated successfully' });
   } catch (error) {

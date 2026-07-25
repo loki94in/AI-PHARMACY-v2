@@ -39,6 +39,7 @@ import { getNDaysAgoString } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useFetchMode } from '../../hooks/useFetchMode';
+import { extractCleanEmail } from '../../utils/emailSanitizer';
 import Dispatch from '../Dispatch';
 
 interface LearningProfileSummary {
@@ -294,11 +295,12 @@ const Learning: React.FC = () => {
       toastEvent.trigger('Distributor name is required', 'error');
       return;
     }
+    const cleanEmail = extractCleanEmail(newDistEmail);
     try {
       const res = await apiClient.post('/settings/distributors', {
         name: newDistName.trim(),
         phone: newDistPhone.trim(),
-        email: newDistEmail.trim()
+        email: cleanEmail
       });
       if (res.data && res.data.success) {
         // Also save to unified contacts master table & notify all components
@@ -307,7 +309,7 @@ const Learning: React.FC = () => {
             name: newDistName.trim(),
             type: 'distributor',
             phone: newDistPhone.trim(),
-            email: newDistEmail.trim()
+            email: cleanEmail
           });
         } catch (_) {}
 
@@ -1224,7 +1226,16 @@ const Learning: React.FC = () => {
                           <button
                             onClick={async () => {
                               try {
-                                await apiClient.put(`/settings/distributors/${selectedProfile.distributor.id}`, selectedProfile.distributor);
+                                const cleanDistEmail = extractCleanEmail(selectedProfile.distributor.email);
+                                const updatedDistributor = {
+                                  ...selectedProfile.distributor,
+                                  email: cleanDistEmail
+                                };
+                                await apiClient.put(`/settings/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
+                                setSelectedProfile({
+                                  ...selectedProfile,
+                                  distributor: updatedDistributor
+                                });
                                 window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
                                 window.dispatchEvent(new CustomEvent('contacts-updated'));
                                 toastEvent.trigger('Distributor profile updated', 'success');
