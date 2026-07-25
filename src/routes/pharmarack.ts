@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import { dbManager } from '../database/connection.js';
 import { notificationService } from '../services/notificationService.js';
 import { searchCache } from '../services/searchCache.js';
-import { tokenRefreshScheduler, cleanProfileLockFiles } from '../services/tokenRefreshScheduler.js';
+import { tokenRefreshScheduler, cleanProfileLockFiles, killOrphanChromeProcesses } from '../services/tokenRefreshScheduler.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -913,6 +913,7 @@ router.post('/cart/add', async (req, res) => {
 
         try {
           try {
+            await killOrphanChromeProcesses('pharmarack_profile');
             cleanProfileLockFiles(pharmarackProfilePath);
             browser = await puppeteer.launch({
               executablePath: chromePath,

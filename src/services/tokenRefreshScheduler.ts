@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import puppeteer from 'puppeteer-core';
 import { dbManager } from '../database/connection.js';
 
+const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -63,6 +66,58 @@ function copyProfileFolder(src: string, dest: string) {
         console.warn(`[TokenRefreshScheduler] Warning: Could not copy file ${srcPath}: ${err.message}`);
       }
     }
+  }
+}
+
+export async function killOrphanChromeProcesses(keyword: string = 'pharmarack_profile'): Promise<void> {
+  if (process.platform !== 'win32') return;
+  try {
+    const execResult = await execAsync(`wmic process where "name='chrome.exe' and CommandLine like '%${keyword}%'" get ProcessId`).catch(async () => {
+      return await execAsync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name='chrome.exe' and commandline like '%${keyword}%'\\" | Select-Object -ExpandProperty ProcessId"`).catch(() => ({ stdout: '' }));
+    });
+
+    const stdout = execResult.stdout || '';
+    const pids = stdout
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && !line.toLowerCase().includes('processid'))
+      .map(pid => parseInt(pid, 10))
+      .filter(pid => !isNaN(pid) && pid > 0);
+
+    for (const pid of pids) {
+      console.log(`[ProcessGuardian] Killing lock-holding Chrome process: ${pid}`);
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (_) {
+        try {
+          await execAsync(`taskkill /F /PID ${pid}`);
+        } catch (_) {}
+      }
+    }
+    if (pids.length > 0) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  } catch (err: any) {
+    console.error(`[ProcessGuardian] Failed to kill lock-holding Chrome processes for ${keyword}:`, err.message);
+  }
+}
+
+export function cleanTempProfileFolders() {
+  try {
+    const dataDir = path.resolve(__dirname, '..', '..', 'data');
+    if (!fs.existsSync(dataDir)) return;
+    const entries = fs.readdirSync(dataDir);
+    for (const entry of entries) {
+      if (entry.startsWith('pharmarack_profile_temp_')) {
+        const fullPath = path.join(dataDir, entry);
+        try {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+          console.log(`[TokenRefreshScheduler] Removed orphaned temp profile folder: ${entry}`);
+        } catch (_) {}
+      }
+    }
+  } catch (err: any) {
+    console.warn('[TokenRefreshScheduler] Error cleaning temp profile folders:', err.message);
   }
 }
 
@@ -245,7 +300,9 @@ export class TokenRefreshScheduler {
     let tempProfilePathToDelete = '';
 
     try {
-      console.log('[TokenRefreshScheduler] Launching background headless Chrome for silent session capture...');
+      console.log('[TokenRefreshScheduler] Killing orphan Chrome processes and cleaning profile locks...');
+      await killOrphanChromeProcesses('pharmarack_profile');
+      cleanTempProfileFolders();
       try {
         cleanProfileLockFiles(mainProfilePath);
         browser = await puppeteer.launch({
