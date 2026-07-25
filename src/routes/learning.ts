@@ -197,7 +197,8 @@ router.get('/profiles', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     const profiles = await db.all(`
-      SELECT d.id as distributor_id, d.name as distributor_name, d.email as distributor_email, d.phone as distributor_phone,
+      SELECT d.id as distributor_id, d.name as distributor_name, d.email as distributor_email,
+             COALESCE(NULLIF(d.phone, ''), NULLIF(d.contact, '')) as distributor_phone,
              lp.last_updated,
              (SELECT COUNT(*) FROM distributor_historical_files WHERE distributor_id = d.id) as files_count,
              (SELECT status FROM distributor_historical_files WHERE distributor_id = d.id ORDER BY id DESC LIMIT 1) as last_status

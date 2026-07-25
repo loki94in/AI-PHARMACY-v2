@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, getWhatsAppStatus } from '../whatsappClient.js';
+import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient } from '../whatsappClient.js';
 
 export interface QueueItem {
   id: number;
@@ -12,6 +12,7 @@ export interface QueueItem {
   sent_at: number | null;
   error_message?: string;
   target_name?: string;
+  scheduled_at?: number | null;
 }
 
 export interface QueueWorkerState {
@@ -77,20 +78,56 @@ class WhatsAppQueueWorker {
     this.pacingMaxMs = maxMs;
   }
 
-  /** Enqueue message into whatsapp_send_queue */
-  public async enqueue(number: string, message: string, type = 'distributor_collection', targetName?: string): Promise<number> {
+  /** Enqueue message into whatsapp_send_queue with optional explicit or setting-based delay */
+  public async enqueue(
+    number: string, 
+    message: string, 
+    type = 'distributor_collection', 
+    targetName?: string,
+    explicitScheduledAt?: number
+  ): Promise<number> {
     const db = await dbManager.getConnection();
     const cleanPhone = number.replace(/[^0-9]/g, '');
     const now = Date.now();
 
+    let scheduledAt = explicitScheduledAt;
+    if (scheduledAt === undefined || scheduledAt === null) {
+      let settingKey = '';
+      if (type.includes('credit') || type === 'pos_credit_invoice') {
+        settingKey = 'whatsapp_delay_credit_bill';
+      } else if (type.includes('distributor') || type.includes('po') || type.includes('shortage')) {
+        settingKey = 'whatsapp_delay_distributor';
+      } else if (type.includes('delivery') || type.includes('dispatch') || type.includes('boy')) {
+        settingKey = 'whatsapp_delay_delivery_boy';
+      }
+
+      if (settingKey) {
+        try {
+          const row = await db.get("SELECT value FROM app_settings WHERE key = ?", [settingKey]);
+          const delayMins = row ? parseInt(row.value, 10) : 0;
+          if (!isNaN(delayMins) && delayMins > 0) {
+            scheduledAt = now + (delayMins * 60 * 1000);
+          } else {
+            scheduledAt = now;
+          }
+        } catch (e) {
+          scheduledAt = now;
+        }
+      } else {
+        scheduledAt = now;
+      }
+    }
+
     const result = await db.run(
-      `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, target_name)
-       VALUES (?, ?, ?, 'pending', 0, ?, ?)`,
-      [cleanPhone, message, type, now, targetName || null]
+      `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name)
+       VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
+      [cleanPhone, message, type, now, scheduledAt, targetName || null]
     );
 
-    // Trigger processing immediately
-    this.triggerProcessing();
+    // Trigger processing if scheduled time is now or past
+    if (scheduledAt <= now) {
+      this.triggerProcessing();
+    }
     return result.lastID || 0;
   }
 
@@ -122,25 +159,33 @@ class WhatsAppQueueWorker {
 
     try {
       await this.loadPacingConfig();
-      const status = await getWhatsAppStatus();
+      const useBusiness = await shouldRouteToBusiness();
+      let status = await getWhatsAppStatus();
 
-      if (!status.isReady) {
-        // Mark pending items as failed_offline if WhatsApp client is disconnected
-        const db = await dbManager.getConnection();
-        await db.run(
-          "UPDATE whatsapp_send_queue SET status = 'failed_offline', error_message = 'WhatsApp Client Offline' WHERE status = 'pending'"
-        );
-        this.isProcessing = false;
-        return;
+      // If not using Business API and client is not ready, try auto-initializing if not already initializing
+      if (!useBusiness && !status.isReady) {
+        if (!status.initializing) {
+          try {
+            console.log('[WhatsAppQueueWorker] WhatsApp Web client not ready. Auto-initializing...');
+            await initClient();
+            status = await getWhatsAppStatus();
+          } catch (initErr: any) {
+            console.warn('[WhatsAppQueueWorker] Auto-init attempt failed:', initErr?.message || initErr);
+          }
+        }
       }
 
       const db = await dbManager.getConnection();
-      
-      // Select next pending or offline retry item
+      const now = Date.now();
+
+      // Select next pending or offline retry item that is due
       const pendingItems: QueueItem[] = await db.all(
         `SELECT * FROM whatsapp_send_queue 
-         WHERE status IN ('pending', 'failed_offline') AND retry_count < 3 
-         ORDER BY created_at ASC`
+         WHERE status IN ('pending', 'failed_offline') 
+           AND (scheduled_at IS NULL OR scheduled_at <= ?)
+           AND retry_count < 3 
+         ORDER BY created_at ASC`,
+        [now]
       );
 
       if (pendingItems.length === 0) {
@@ -156,13 +201,11 @@ class WhatsAppQueueWorker {
         const item = pendingItems[i];
         this.currentSendingItemId = item.id;
 
-        // Check connection state before each send
+        // Verify connection status before sending each message
+        const isBizNow = await shouldRouteToBusiness();
         const currentWaStatus = await getWhatsAppStatus();
-        if (!currentWaStatus.isReady) {
-          await db.run(
-            "UPDATE whatsapp_send_queue SET status = 'failed_offline', error_message = 'Internet / WhatsApp Disconnected' WHERE id = ?",
-            [item.id]
-          );
+        if (!isBizNow && !currentWaStatus.isReady && !currentWaStatus.initializing) {
+          console.warn('[WhatsAppQueueWorker] WhatsApp client offline. Leaving remaining queue items pending for next attempt.');
           break;
         }
 
@@ -170,7 +213,7 @@ class WhatsAppQueueWorker {
         await db.run("UPDATE whatsapp_send_queue SET status = 'sending' WHERE id = ?", [item.id]);
 
         try {
-          // Send message via WhatsApp
+          // Send message via WhatsApp (sendMessage handles Business API routing and Web client sending)
           await sendMessage(item.number, undefined, item.message);
 
           // Mark sent

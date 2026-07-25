@@ -413,7 +413,7 @@ export class NotificationService {
 
         // Fallback to Admin / Pharmacy owner number if no delivery boy number exists
         if (resolvedDeliveryBoys.length === 0) {
-          const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+          const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
           if (adminSetting?.value) {
             const clean = String(adminSetting.value).replace(/\D/g, '');
             if (clean.length >= 10) {
@@ -542,7 +542,7 @@ export class NotificationService {
       }
 
       if (resolvedDeliveryBoys.length === 0) {
-        const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+        const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
         if (adminSetting?.value) {
           const clean = String(adminSetting.value).replace(/\D/g, '');
           if (clean.length >= 10) {

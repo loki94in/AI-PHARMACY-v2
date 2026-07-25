@@ -36,6 +36,7 @@ import {
   Clock,
   Edit,
   Menu,
+  Truck,
 } from 'lucide-react';
 import { 
   ChevronLeft as ChevronLeftIcon, 
@@ -110,25 +111,25 @@ const Sidebar = ({
   const hoverPrefetchControl = useFetchMode('layout.hoverPrefetch');
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
-    { path: '/sells', label: 'Sells / Bills', icon: <Receipt size={18} /> },
-    { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
-    { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
+    { path: '/sells', label: 'Sales History / Bills', icon: <Receipt size={18} /> },
     { path: '/inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
-    { path: '/purchases', label: 'Purchases', icon: <Receipt size={18} /> },
     { path: '/purchase-history', label: 'Purchase History', icon: <ClipboardList size={18} /> },
+    { path: '/purchases', label: 'Purchases', icon: <Receipt size={18} /> },
     { path: '/mail', label: 'Distributor Mail', icon: <Activity size={18} /> },
-    { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
-    { path: '/orders', label: 'Orders & Requests', icon: <ClipboardList size={18} /> },
-    { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
-    { path: '/database', label: 'Master Database', icon: <Database size={18} /> },
-    { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
+    { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
+    { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
+    { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
     { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },
+    { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
+    { path: '/orders', label: 'Orders & Requests', icon: <ClipboardList size={18} /> },
+    { path: '/database', label: 'Master Database', icon: <Database size={18} /> },
+    { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },
-    { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
     { path: '/license', label: 'License', icon: <Database size={18} /> },
+    { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
   ];
 
   return (
@@ -434,6 +435,17 @@ const NotificationPanel = ({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              navigate('/settings');
+              onClose();
+            }}
+            className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-white/10 transition-all flex items-center gap-1 text-[11px] font-medium"
+            title="Manage Notification & Message Settings"
+          >
+            <SettingsIcon size={13} />
+            <span className="hidden sm:inline">Settings</span>
+          </button>
           {notifications.length > 0 && (
             <button
               onClick={onClearAll}

@@ -126,14 +126,15 @@ router.get('/delivery-boys', async (req, res) => {
 router.post('/delivery-boys', async (req, res) => {
   const { name, whatsapp_number, telegram_chat_id, is_active } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
+  const cleanPhone = whatsapp_number ? String(whatsapp_number).replace(/\D/g, '') : null;
   try {
     const db = await dbManager.getConnection();
     const result = await db.run(
       'INSERT INTO delivery_boys (name, whatsapp_number, telegram_chat_id, is_active) VALUES (?, ?, ?, ?)',
-      [name, whatsapp_number || null, telegram_chat_id || null, is_active !== undefined ? is_active : 1]
+      [name, cleanPhone, telegram_chat_id || null, is_active !== undefined ? is_active : 1]
     );
     const newBoy = await db.get('SELECT * FROM delivery_boys WHERE id = ?', result.lastID);
-        res.status(201).json(newBoy);
+    res.status(201).json(newBoy);
   } catch (error) {
     console.error('Add delivery boy error:', error);
     res.status(500).json({ error: 'Failed to add delivery boy' });
@@ -147,14 +148,19 @@ router.put('/delivery-boys/:id', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const existing = await db.get('SELECT * FROM delivery_boys WHERE id = ?', id);
-    if (!existing) {  return res.status(404).json({ error: 'Delivery boy not found' }); }
+    if (!existing) { return res.status(404).json({ error: 'Delivery boy not found' }); }
     await db.run(
       `UPDATE delivery_boys SET name=?, whatsapp_number=?, telegram_chat_id=?, is_active=? WHERE id=?`,
-      [name ?? existing.name, whatsapp_number ?? existing.whatsapp_number,
-       telegram_chat_id ?? existing.telegram_chat_id, is_active ?? existing.is_active, id]
+      [
+        name !== undefined && name !== null ? name : existing.name,
+        whatsapp_number !== undefined ? (whatsapp_number ? String(whatsapp_number).replace(/\D/g, '') : null) : existing.whatsapp_number,
+        telegram_chat_id !== undefined ? telegram_chat_id : existing.telegram_chat_id,
+        is_active !== undefined ? is_active : existing.is_active,
+        id
+      ]
     );
     const updated = await db.get('SELECT * FROM delivery_boys WHERE id = ?', id);
-        res.json(updated);
+    res.json(updated);
   } catch (error) {
     console.error('Update delivery boy error:', error);
     res.status(500).json({ error: 'Failed to update delivery boy' });

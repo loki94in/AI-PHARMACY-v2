@@ -979,8 +979,27 @@ export default function PharmarackCart() {
         toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone numbers.`, 'info');
       }
     } catch (err: any) {
-      console.error('Batch WhatsApp send error:', err);
-      toastEvent.trigger(err?.message || 'Failed to send WhatsApp orders', 'error');
+      console.warn('Batch WhatsApp send error:', err);
+      toastEvent.trigger(err?.message || 'Failed to send WhatsApp orders automatically.', 'error');
+
+      // Fallback: If background queue or backend service is unavailable, offer browser WhatsApp Web tabs for mapped distributors
+      try {
+        const mapped = distributors.filter(d => isDistributorMapped(d));
+        if (mapped.length > 0 && window.confirm('Automated background WhatsApp service is currently unavailable. Would you like to open WhatsApp Web tabs to send these orders directly in your browser?')) {
+          mapped.forEach((dist, idx) => {
+            setTimeout(() => {
+              let phoneNum = getDistributorPhoneNumber(dist);
+              let cleanPhone = phoneNum.replace(/\D/g, '');
+              if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+              const msg = buildDistributorOrderMessage(dist);
+              openOrReuseWhatsappTab('', cleanPhone, msg);
+              setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
+            }, idx * 1500);
+          });
+        }
+      } catch (tabErr) {
+        console.warn('Tab fallback error:', tabErr);
+      }
     } finally {
       setIsSendingBatchWhatsApp(false);
       setBatchCountdownSec(null);

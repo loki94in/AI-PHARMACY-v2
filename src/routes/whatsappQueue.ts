@@ -101,7 +101,7 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
     }
 
     if (!targetBoyPhone) {
-      const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp', 'owner_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+      const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
       if (adminSetting?.value) {
         targetBoyPhone = String(adminSetting.value);
         targetBoyName = 'Admin Contact';

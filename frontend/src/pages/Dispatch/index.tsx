@@ -218,7 +218,7 @@ const Dispatch = () => {
   }).length;
 
   return (
-    <div className="h-full flex flex-col p-6 gap-3 pb-4 animate-in fade-in duration-500">
+    <div className="w-full flex-1 flex flex-col gap-4 pb-4 animate-in fade-in duration-500">
 
 
       {/* Header */}

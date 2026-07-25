@@ -262,22 +262,25 @@ router.post('/distributors', async (req, res) => {
     if (existing && existing.length > 0) {
       const ids = existing.map(e => e.id);
       const placeholders = ids.map(() => '?').join(',');
+      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
       await db.run(
         `UPDATE distributors SET 
           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+          contact = CASE WHEN ? != '' THEN ? ELSE contact END,
           email = CASE WHEN ? != '' THEN ? ELSE email END,
           address = CASE WHEN ? != '' THEN ? ELSE address END,
           state_code = CASE WHEN ? != '' THEN ? ELSE state_code END
          WHERE id IN (${placeholders})`,
-        [phone || '', phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', ...ids]
+        [cleanPhone, cleanPhone, cleanPhone, cleanPhone, email || '', email || '', address || '', address || '', state_code || '', state_code || '', ...ids]
       );
       const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [ids[0]]);
       return res.json({ success: true, data: updated });
     }
 
+    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
     const result = await db.run(
-      `INSERT INTO distributors (name, phone, email, address, state_code) VALUES (?, ?, ?, ?, ?)`,
-      [cleanName, phone || '', email || '', address || '', state_code || '']
+      `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
+      [cleanName, cleanPhone, cleanPhone, email || '', address || '', state_code || '']
     );
     const id = result.lastID;
     const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
@@ -287,22 +290,25 @@ router.post('/distributors', async (req, res) => {
     res.status(500).json({ error: 'Failed to save distributor: ' + error.message });
   }
 });
+
 // Update a distributor
 router.put('/distributors/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
+  const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
   try {
     const db = await dbManager.getConnection();
     await db.run(
       `UPDATE distributors SET 
         name = ?, 
         phone = ?, 
+        contact = ?,
         email = CASE WHEN ? != '' THEN ? ELSE email END, 
         address = CASE WHEN ? != '' THEN ? ELSE address END, 
         state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
        WHERE id = ?`,
-      [name, phone || '', email || '', email || '', address || '', address || '', state_code || '', state_code || '', id]
+      [name, cleanPhone, cleanPhone, email || '', email || '', address || '', address || '', state_code || '', state_code || '', id]
     );
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });

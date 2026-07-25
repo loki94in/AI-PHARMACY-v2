@@ -42,10 +42,27 @@ router.post('/', async (req, res) => {
     nextRefillDate.setDate(nextRefillDate.getDate() + intervalDays);
     const nextRefillStr = nextRefillDate.toISOString().slice(0, 19).replace('T', ' ');
 
+    // Resolve or auto-create customer profile in customers table
+    const cleanPhone = (patient_phone || '').trim();
+    const cleanName = (patient_name || 'Customer').trim();
+    let customerId = req.body.customer_id || null;
+    if (!customerId && (cleanPhone || cleanName)) {
+      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+      if (!cust && cleanName && cleanName.toLowerCase() !== 'customer') {
+        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanName]);
+      }
+      if (cust) {
+        customerId = cust.id;
+      } else if (cleanPhone || cleanName) {
+        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanName, cleanPhone]);
+        customerId = custRes.lastID;
+      }
+    }
+
     await db.run(
-      `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
-      [patient_name, patient_phone, medicine_id, intervalDays, nextRefillStr]
+      `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [customerId, patient_name, patient_phone, medicine_id, intervalDays, nextRefillStr]
     );
 
     // Run a check immediately in case the medicine is already in stock!

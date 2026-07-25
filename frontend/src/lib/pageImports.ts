@@ -19,4 +19,6 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/pharmarack-cart': () => import('../pages/PharmarackCart'),
   '/investigation': () => import('../pages/Investigation'),
   '/phone-sales': () => import('../pages/PhoneSales'),
+  '/dispatch': () => import('../pages/Dispatch'),
+  '/non-mapped-distributors': () => import('../pages/NonMappedDistributors'),
 };

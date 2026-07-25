@@ -87,6 +87,9 @@ interface SettingsData {
   ownerWhatsappNumber: string;
   monthlyReportTemplateTheme: string;
   distributorInvoiceFileFormat: string;
+  whatsappDelayCreditBill: number;
+  whatsappDelayDistributor: number;
+  whatsappDelayDeliveryBoy: number;
 }
 
 const Settings = () => {
@@ -145,6 +148,9 @@ const Settings = () => {
     ownerWhatsappNumber: '',
     monthlyReportTemplateTheme: 'executive',
     distributorInvoiceFileFormat: 'CSV',
+    whatsappDelayCreditBill: 0,
+    whatsappDelayDistributor: 0,
+    whatsappDelayDeliveryBoy: 0,
   });
 
   // Transient UI states
@@ -267,6 +273,9 @@ const Settings = () => {
   const setOwnerWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('ownerWhatsappNumber', val);
   const setMonthlyReportTemplateTheme = (val: string | ((p: string) => string)) => updateSetting('monthlyReportTemplateTheme', val);
   const setDistributorInvoiceFileFormat = (val: string | ((p: string) => string)) => updateSetting('distributorInvoiceFileFormat', val);
+  const setWhatsappDelayCreditBill = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayCreditBill', val);
+  const setWhatsappDelayDistributor = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayDistributor', val);
+  const setWhatsappDelayDeliveryBoy = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayDeliveryBoy', val);
 
   // Transient state for Monthly Report Preview and manual triggers
   const [reportPreview, setReportPreview] = useState<{ formattedText: string; periodLabel: string; targetPhone: string } | null>(null);
@@ -417,6 +426,9 @@ const Settings = () => {
     ownerWhatsappNumber,
     monthlyReportTemplateTheme,
     distributorInvoiceFileFormat,
+    whatsappDelayCreditBill,
+    whatsappDelayDistributor,
+    whatsappDelayDeliveryBoy,
   } = settings;
 
   const handleToggleDesktopNotifications = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -500,6 +512,9 @@ const Settings = () => {
         ownerWhatsappNumber: serverSettings.owner_whatsapp_number || '',
         monthlyReportTemplateTheme: serverSettings.monthly_report_template_theme || 'executive',
         distributorInvoiceFileFormat: serverSettings.distributor_invoice_file_format || 'CSV',
+        whatsappDelayCreditBill: Number(serverSettings.whatsapp_delay_credit_bill) || 0,
+        whatsappDelayDistributor: Number(serverSettings.whatsapp_delay_distributor) || 0,
+        whatsappDelayDeliveryBoy: Number(serverSettings.whatsapp_delay_delivery_boy) || 0,
         prUsername: serverSettings.pharmarack_username || '',
         prPassword: serverSettings.pharmarack_password || '',
         prToken: serverSettings.pharmarack_session_token || '',
@@ -575,6 +590,9 @@ const Settings = () => {
       expiry_alert_days: expiryAlertDays.toString(),
       dinesh_whatsapp_number: dineshWhatsappNumber,
       distributor_invoice_file_format: distributorInvoiceFileFormat,
+      whatsapp_delay_credit_bill: whatsappDelayCreditBill.toString(),
+      whatsapp_delay_distributor: whatsappDelayDistributor.toString(),
+      whatsapp_delay_delivery_boy: whatsappDelayDeliveryBoy.toString(),
       monthly_report_enabled: monthlyReportEnabled.toString(),
       monthly_report_phone: monthlyReportPhone,
       monthly_report_delivery_format: monthlyReportDeliveryFormat,
@@ -609,12 +627,12 @@ const Settings = () => {
       if (ownerWhatsappNumber) {
         try {
           await api.saveContact({
-            name: storeName || 'Pharmacy Owner',
+            name: pharmacyName || 'Pharmacy Owner',
             type: 'owner',
             phone: ownerWhatsappNumber,
-            email: storeEmail || undefined,
-            address: storeAddress || undefined,
-            gstin: storeGstin || undefined
+            email: email || undefined,
+            address: address || undefined,
+            gstin: gstin || undefined
           });
         } catch (_) {}
       }
@@ -1323,6 +1341,128 @@ const Settings = () => {
               onChange={(e) => setDineshWhatsappNumber(e.target.value)}
             />
             <p className="text-[10px] text-muted">Daily morning notification (at 9:00 AM) summarizing missing bills or bounced medicines will be sent to this number.</p>
+          </div>
+
+          {/* WhatsApp Scheduled Message Delay Timers Section */}
+          <div className="space-y-4 md:col-span-2 border-t border-border/50 pt-4 mt-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  WhatsApp Scheduled Message Delay Timers
+                </h4>
+                <p className="text-[11px] text-muted font-normal mt-0.5">
+                  Set post-save send delays (in minutes) for automated WhatsApp dispatches. 0 = Send immediately.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Credit Bills Delay */}
+              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
+                <label htmlFor="whatsappDelayCreditBill" className="text-xs font-semibold text-text block">
+                  Credit Bills WhatsApp Delay
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="whatsappDelayCreditBill"
+                    type="number"
+                    min={0}
+                    className="premium-input w-full bg-bg text-text border-border"
+                    placeholder="0"
+                    value={whatsappDelayCreditBill}
+                    onChange={(e) => setWhatsappDelayCreditBill(Math.max(0, Number(e.target.value)))}
+                  />
+                  <span className="text-xs text-muted font-medium">mins</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[0, 5, 15, 60, 360, 1440].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setWhatsappDelayCreditBill(m)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
+                        whatsappDelayCreditBill === m
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
+                          : 'bg-bg border-border text-muted hover:text-text'
+                      }`}
+                    >
+                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Distributor Messages Delay */}
+              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
+                <label htmlFor="whatsappDelayDistributor" className="text-xs font-semibold text-text block">
+                  Distributors WhatsApp Delay
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="whatsappDelayDistributor"
+                    type="number"
+                    min={0}
+                    className="premium-input w-full bg-bg text-text border-border"
+                    placeholder="0"
+                    value={whatsappDelayDistributor}
+                    onChange={(e) => setWhatsappDelayDistributor(Math.max(0, Number(e.target.value)))}
+                  />
+                  <span className="text-xs text-muted font-medium">mins</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[0, 5, 15, 60, 360, 1440].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setWhatsappDelayDistributor(m)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
+                        whatsappDelayDistributor === m
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
+                          : 'bg-bg border-border text-muted hover:text-text'
+                      }`}
+                    >
+                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Delivery Staff Delay */}
+              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
+                <label htmlFor="whatsappDelayDeliveryBoy" className="text-xs font-semibold text-text block">
+                  Delivery Staff WhatsApp Delay
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="whatsappDelayDeliveryBoy"
+                    type="number"
+                    min={0}
+                    className="premium-input w-full bg-bg text-text border-border"
+                    placeholder="0"
+                    value={whatsappDelayDeliveryBoy}
+                    onChange={(e) => setWhatsappDelayDeliveryBoy(Math.max(0, Number(e.target.value)))}
+                  />
+                  <span className="text-xs text-muted font-medium">mins</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[0, 5, 15, 60, 360, 1440].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setWhatsappDelayDeliveryBoy(m)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
+                        whatsappDelayDeliveryBoy === m
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
+                          : 'bg-bg border-border text-muted hover:text-text'
+                      }`}
+                    >
+                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2 md:col-span-2 border-t border-border/50 pt-4 mt-2">

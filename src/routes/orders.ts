@@ -14,6 +14,7 @@ async function initOrdersTable(db: any) {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS special_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER DEFAULT NULL,
       product TEXT,
       requester TEXT,
       phone TEXT,
@@ -33,6 +34,9 @@ async function initOrdersTable(db: any) {
     )
   `);
   // Try adding columns if they do not exist
+  try {
+    await db.exec('ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL');
+  } catch (_) {}
   try {
     await db.exec('ALTER TABLE special_orders ADD COLUMN phone TEXT');
   } catch (_) {}
@@ -71,7 +75,7 @@ router.get('/', async (_req, res) => {
     const db = await dbManager.getConnection();
     await initOrdersTable(db);
     const orders = await db.all('SELECT * FROM special_orders ORDER BY date DESC');
-        res.json(orders);
+    res.json(orders);
   } catch (err) {
     console.error('Orders fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -80,23 +84,25 @@ router.get('/', async (_req, res) => {
 
 // Log a new request / order
 router.post('/', async (req, res) => {
-
-
   const { 
-    product, requester, phone, qty, priority, status,
-    pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped,
-    pharmarack_scheme, advance_payment
+    product, 
+    requester, 
+    phone, 
+    qty, 
+    priority, 
+    status,
+    pharmarack_distributor,
+    pharmarack_rate,
+    pharmarack_mrp,
+    pharmarack_mapped,
+    pharmarack_scheme,
+    advance_payment
   } = req.body;
-  if (!product || !product.trim()) {
-    return res.status(400).json({ error: 'Product name is required' });
+
+  if (!product || !requester || !phone) {
+    return res.status(400).json({ error: 'Product, requester name, and phone are required' });
   }
-  if (!requester || !requester.trim()) {
-    return res.status(400).json({ error: 'Customer Name is required' });
-  }
-  if (!phone || !phone.trim()) {
-    return res.status(400).json({ error: 'Phone Number is required' });
-  }
-  const cleanPhone = phone.replace(/\D/g, '');
+  const cleanPhone = (phone || '').replace(/\D/g, '');
   if (cleanPhone.length < 10) {
     return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
   }
@@ -107,13 +113,31 @@ router.post('/', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await initOrdersTable(db);
+
+    const cleanReqPhone = phone.trim();
+    const cleanReqName = requester.trim();
+    let customerId = req.body.customer_id || null;
+    if (!customerId && (cleanReqPhone || cleanReqName)) {
+      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanReqPhone]);
+      if (!cust && cleanReqName && cleanReqName.toLowerCase() !== 'customer') {
+        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanReqName]);
+      }
+      if (cust) {
+        customerId = cust.id;
+      } else if (cleanReqPhone || cleanReqName) {
+        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanReqName, cleanReqPhone]);
+        customerId = custRes.lastID;
+      }
+    }
+
     const result = await db.run(
       `INSERT INTO special_orders (
-        product, requester, phone, qty, priority, status,
+        customer_id, product, requester, phone, qty, priority, status,
         pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped,
         pharmarack_scheme, advance_payment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        customerId,
         product.trim(), 
         requester.trim(), 
         phone.trim(), 

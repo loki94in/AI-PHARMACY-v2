@@ -171,6 +171,7 @@ export async function ensureSchema(dbPath: string) {
     );
     CREATE TABLE IF NOT EXISTS patient_refills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER,
       patient_name TEXT NOT NULL,
       patient_phone TEXT NOT NULL,
       medicine_id INTEGER NOT NULL,
@@ -178,10 +179,12 @@ export async function ensureSchema(dbPath: string) {
       last_refill_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       next_refill_date DATETIME,
       status TEXT CHECK(status IN ('pending', 'notified')) DEFAULT 'pending',
-      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      FOREIGN KEY(customer_id) REFERENCES customers(id)
     );
     CREATE TABLE IF NOT EXISTS held_bills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER,
       temp_label TEXT,
       patient_name TEXT,
       patient_phone TEXT,
@@ -189,7 +192,8 @@ export async function ensureSchema(dbPath: string) {
       discount REAL DEFAULT 0,
       remarks TEXT,
       cart_data TEXT,
-      date DATETIME DEFAULT CURRENT_TIMESTAMP
+      date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(customer_id) REFERENCES customers(id)
     );
     CREATE TABLE IF NOT EXISTS ocr_corrections (
       ocr TEXT PRIMARY KEY,
@@ -372,6 +376,10 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE distributors ADD COLUMN gstin TEXT DEFAULT ''`,
     `ALTER TABLE distributors ADD COLUMN state_code TEXT DEFAULT ''`,
     `ALTER TABLE distributors ADD COLUMN preferred_file_format TEXT DEFAULT 'excel'`,
+    // Unify patient contact storage — ensure customer_id FK column exists across operational tables
+    `ALTER TABLE patient_refills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
+    `ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL`,
+    `ALTER TABLE held_bills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
   ];
   for (const stmt of alterStatements) {
     try {
@@ -379,6 +387,69 @@ export async function ensureSchema(dbPath: string) {
     } catch (_e) {
       // Column already exists — safe to ignore
     }
+  }
+
+  // Unify patient contact storage — Backfill customer_id across patient_refills, special_orders, held_bills
+  try {
+    const unlinkedRefills = await db.all('SELECT id, patient_name, patient_phone FROM patient_refills WHERE customer_id IS NULL AND patient_phone IS NOT NULL AND patient_phone != ""');
+    for (const refill of unlinkedRefills) {
+      const phoneClean = refill.patient_phone.trim();
+      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
+      if (!cust && refill.patient_name) {
+        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [refill.patient_name]);
+      }
+      if (!cust && phoneClean) {
+        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [refill.patient_name || 'Walk-in Patient', phoneClean]);
+        cust = { id: res.lastID };
+      }
+      if (cust) {
+        await db.run('UPDATE patient_refills SET customer_id = ? WHERE id = ?', [cust.id, refill.id]);
+      }
+    }
+
+    const specialOrdersTableExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='special_orders'");
+    if (specialOrdersTableExists) {
+      const unlinkedOrders = await db.all('SELECT id, requester, phone FROM special_orders WHERE customer_id IS NULL AND phone IS NOT NULL AND phone != ""');
+      for (const order of unlinkedOrders) {
+        const phoneClean = (order.phone || '').trim();
+        let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
+        if (!cust && order.requester) {
+          cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [order.requester]);
+        }
+        if (!cust && phoneClean) {
+          const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [order.requester || 'Customer', phoneClean]);
+          cust = { id: res.lastID };
+        }
+        if (cust) {
+          await db.run('UPDATE special_orders SET customer_id = ? WHERE id = ?', [cust.id, order.id]);
+        }
+      }
+    }
+
+    const unlinkedBills = await db.all('SELECT id, patient_name, patient_phone FROM held_bills WHERE customer_id IS NULL AND patient_phone IS NOT NULL AND patient_phone != ""');
+    for (const bill of unlinkedBills) {
+      const phoneClean = (bill.patient_phone || '').trim();
+      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
+      if (!cust && bill.patient_name) {
+        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [bill.patient_name]);
+      }
+      if (!cust && phoneClean) {
+        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [bill.patient_name || 'Walk-in Patient', phoneClean]);
+        cust = { id: res.lastID };
+      }
+      if (cust) {
+        await db.run('UPDATE held_bills SET customer_id = ? WHERE id = ?', [cust.id, bill.id]);
+      }
+    }
+
+    // Sanitize distributors contact table: overwrite legacy contact column with phone so old numbers are purged
+    await db.run(`
+      UPDATE distributors 
+      SET contact = phone 
+      WHERE phone IS NOT NULL AND phone != '' AND (contact IS NULL OR contact != phone)
+    `);
+  } catch (err) {
+    console.warn('Customer contact backfill warning:', err);
   }
 
   // Create index on medicines (item_code) after columns are added
@@ -635,7 +706,6 @@ export async function ensureSchema(dbPath: string) {
       FOREIGN KEY(uid) REFERENCES emails(uid)
     );
 
-    -- Resilient WhatsApp transmission queue
     CREATE TABLE IF NOT EXISTS pending_whatsapp_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       invoice_id INTEGER,
@@ -643,9 +713,20 @@ export async function ensureSchema(dbPath: string) {
       pdf_path TEXT,
       caption TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      retries INTEGER DEFAULT 0
+      retries INTEGER DEFAULT 0,
+      scheduled_at INTEGER
     );
+  `);
 
+  try {
+    const pCols = await db.all("PRAGMA table_info(pending_whatsapp_jobs)");
+    const pNames = pCols.map((c: any) => c.name);
+    if (!pNames.includes('scheduled_at')) {
+      await db.run("ALTER TABLE pending_whatsapp_jobs ADD COLUMN scheduled_at INTEGER");
+    }
+  } catch (err) {}
+
+  await db.exec(`
     -- Expiry returns tracking and credit notes reconciliation
     CREATE TABLE IF NOT EXISTS expiry_returns_tracking (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1273,6 +1354,9 @@ export async function ensureSchema(dbPath: string) {
     if (!colNames.includes('target_name')) {
       await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN target_name TEXT");
     }
+    if (!colNames.includes('scheduled_at')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN scheduled_at INTEGER");
+    }
   } catch (colErr) {
     console.warn('[Database Schema] Column check warning for whatsapp_send_queue:', colErr);
   }
@@ -1280,6 +1364,11 @@ export async function ensureSchema(dbPath: string) {
   // Pacing settings default (min 5s, max 8s)
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_min', '5000')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_max', '8000')");
+
+  // WhatsApp Delay Timers defaults (in minutes)
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_delay_credit_bill', '0')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_delay_distributor', '0')");
+  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_delay_delivery_boy', '0')");
 
   // WhatsApp message templates for quick CRM sending
   await db.run(`
@@ -1311,68 +1400,7 @@ export async function ensureSchema(dbPath: string) {
     }
   }
 
-  // Unified Contact Management Master Table
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      type TEXT CHECK(type IN ('distributor', 'delivery_boy', 'doctor', 'customer', 'owner', 'admin')) NOT NULL,
-      phone TEXT,
-      email TEXT,
-      address TEXT,
-      gstin TEXT,
-      alias_names TEXT,
-      is_active INTEGER DEFAULT 1,
-      notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
 
-  await db.run("CREATE INDEX IF NOT EXISTS idx_contacts_type_name ON contacts (type, name)");
-  await db.run("CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts (phone)");
-
-  // Seed initial contacts from legacy domain tables if empty
-  try {
-    const contactCount = await db.get("SELECT COUNT(*) as count FROM contacts");
-    if (!contactCount || contactCount.count === 0) {
-      // Seed distributors
-      const dists = await db.all("SELECT * FROM distributors");
-      for (const d of dists) {
-        await db.run(
-          "INSERT OR IGNORE INTO contacts (name, type, phone, email, address, gstin) VALUES (?, 'distributor', ?, ?, ?, ?)",
-          [d.name, d.phone || d.contact || null, d.email || null, d.address || null, d.gstin || null]
-        );
-      }
-      // Seed delivery boys
-      const boys = await db.all("SELECT * FROM delivery_boys");
-      for (const b of boys) {
-        await db.run(
-          "INSERT OR IGNORE INTO contacts (name, type, phone, is_active) VALUES (?, 'delivery_boy', ?, ?)",
-          [b.name, b.whatsapp_number || null, b.is_active ?? 1]
-        );
-      }
-      // Seed doctors
-      const docs = await db.all("SELECT * FROM doctors");
-      for (const doc of docs) {
-        await db.run(
-          "INSERT OR IGNORE INTO contacts (name, type, phone, address) VALUES (?, 'doctor', ?, ?)",
-          [doc.name, doc.phone || null, doc.address || null]
-        );
-      }
-      // Seed customers
-      const custs = await db.all("SELECT * FROM customers");
-      for (const c of custs) {
-        await db.run(
-          "INSERT OR IGNORE INTO contacts (name, type, phone, address, notes) VALUES (?, 'customer', ?, ?, ?)",
-          [c.name, c.phone || null, c.address || null, c.notes || null]
-        );
-      }
-      console.log('[Boot] Unified contacts master table populated from domain tables.');
-    }
-  } catch (seedErr) {
-    console.warn('[Boot] Contacts seed warning:', seedErr);
-  }
 
   // Stamp schema version so subsequent boots skip all DDL
   await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('schema_version', ?)", [String(CURRENT_SCHEMA_VERSION)]);

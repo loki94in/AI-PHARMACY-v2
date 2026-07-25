@@ -1055,31 +1055,8 @@ const Learning: React.FC = () => {
 
         {/* Tab: Dispatch / Delivery */}
         {activeTab === 'dispatch' && (
-          <div className="flex-1 flex flex-col overflow-y-auto space-y-4 pr-1 custom-scrollbar min-h-0">
-            {/* Delivery Boy Contacts & Route Settings Card */}
-            <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4 shrink-0 text-left">
-              <div className="p-4 rounded-2xl border border-sky-500/30 bg-sky-500/10 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-extrabold text-sky-400 uppercase tracking-wider flex items-center gap-2">
-                    <Truck size={14} /> Delivery Boy Management Moved
-                  </h4>
-                  <p className="text-[10px] text-muted mt-1">
-                    Delivery staff names, WhatsApp numbers, active statuses, and route dispatches are managed exclusively on the <strong>Dispatch</strong> page.
-                  </p>
-                </div>
-                <Link
-                  to="/dispatch"
-                  className="px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs rounded-xl active:scale-95 transition-all shadow-md flex items-center gap-1.5 shrink-0"
-                >
-                  Go to Dispatch Management
-                </Link>
-              </div>
-            </div>
-
-            {/* Live Dispatch Orders & Management */}
-            <div className="flex-1 flex flex-col min-h-[500px]">
-              <Dispatch />
-            </div>
+          <div className="flex-1 flex flex-col overflow-y-auto pr-1 custom-scrollbar min-h-0">
+            <Dispatch />
           </div>
         )}
 

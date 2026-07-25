@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { 
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
-  Wifi, WifiOff, Edit3, Play, Sliders, ShieldAlert 
+  Wifi, WifiOff, Edit3, Play, Sliders, ShieldAlert, Settings, ChevronDown, ChevronUp 
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
 
 interface QueueItem {
@@ -17,6 +18,7 @@ interface QueueItem {
   created_at: number;
   sent_at: number | null;
   error_message?: string;
+  target_name?: string;
 }
 
 interface WhatsAppQueuePopoverProps {
@@ -31,6 +33,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   // Pacing Slider state
   const [pacingSec, setPacingSec] = useState<number>(10);
   const [savingPacing, setSavingPacing] = useState(false);
+
+  // Delay Timers state
+  const [delayCreditBill, setDelayCreditBill] = useState<number>(0);
+  const [delayDistributor, setDelayDistributor] = useState<number>(0);
+  const [delayDeliveryBoy, setDelayDeliveryBoy] = useState<number>(0);
+  const [showDelayConfig, setShowDelayConfig] = useState(false);
+  const [savingDelay, setSavingDelay] = useState(false);
 
   // Edit item modal state
   const [editingItem, setEditingItem] = useState<QueueItem | null>(null);
@@ -52,11 +61,49 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const fetchDelaySettings = async () => {
+    try {
+      const { data } = await apiClient.get('/settings');
+      if (data) {
+        setDelayCreditBill(Number(data.whatsapp_delay_credit_bill) || 0);
+        setDelayDistributor(Number(data.whatsapp_delay_distributor) || 0);
+        setDelayDeliveryBoy(Number(data.whatsapp_delay_delivery_boy) || 0);
+      }
+    } catch (err) {
+      console.warn('Failed to load WhatsApp delay settings:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
+    fetchDelaySettings();
     const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleSaveDelayTimer = async (key: string, val: number) => {
+    const updatedCredit = key === 'whatsapp_delay_credit_bill' ? val : delayCreditBill;
+    const updatedDist = key === 'whatsapp_delay_distributor' ? val : delayDistributor;
+    const updatedDeliv = key === 'whatsapp_delay_delivery_boy' ? val : delayDeliveryBoy;
+
+    if (key === 'whatsapp_delay_credit_bill') setDelayCreditBill(val);
+    if (key === 'whatsapp_delay_distributor') setDelayDistributor(val);
+    if (key === 'whatsapp_delay_delivery_boy') setDelayDeliveryBoy(val);
+
+    setSavingDelay(true);
+    try {
+      await apiClient.post('/settings/save', {
+        whatsapp_delay_credit_bill: updatedCredit.toString(),
+        whatsapp_delay_distributor: updatedDist.toString(),
+        whatsapp_delay_delivery_boy: updatedDeliv.toString(),
+      });
+      toastEvent.trigger('WhatsApp message delay timer updated', 'success');
+    } catch (err) {
+      toastEvent.trigger('Failed to save delay setting', 'error');
+    } finally {
+      setSavingDelay(false);
+    }
+  };
 
   const handleFlushNow = async () => {
     try {
@@ -220,6 +267,131 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <div className="flex items-center gap-2 text-xs font-mono font-bold text-sky animate-pulse">
                 <Clock size={13} />
                 <span>Next send in: {queueState.nextDispatchCountdownMs}s</span>
+              </div>
+            )}
+          </div>
+
+          {/* Scheduled Message Delay Timers Quick Config */}
+          <div className="pt-2 border-t border-glass-border/20">
+            <button
+              type="button"
+              onClick={() => setShowDelayConfig(prev => !prev)}
+              className="w-full flex items-center justify-between py-1 text-xs font-bold text-text hover:text-sky transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Clock size={14} className="text-emerald-400" />
+                <span>Message Delay Timers (Credit Bills, Distributors, Delivery Staff)</span>
+                {savingDelay && <span className="text-[10px] text-muted font-normal animate-pulse">(saving...)</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-normal text-muted">
+                  Credit: {delayCreditBill === 0 ? '0m' : `${delayCreditBill}m`} | Dist: {delayDistributor === 0 ? '0m' : `${delayDistributor}m`} | Staff: {delayDeliveryBoy === 0 ? '0m' : `${delayDeliveryBoy}m`}
+                </span>
+                {showDelayConfig ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </div>
+            </button>
+
+            {showDelayConfig && (
+              <div className="mt-2.5 p-3 rounded-xl bg-bg2/60 border border-glass-border space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-text border-b border-glass-border/30 pb-1.5">
+                  <span>Configure Post-Save Send Delays</span>
+                  <Link
+                    to="/settings"
+                    onClick={onClose}
+                    className="flex items-center gap-1 text-[10px] font-bold text-sky hover:text-sky-300 transition-colors"
+                  >
+                    <Settings size={11} /> Open Settings Page
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {/* Credit Bills */}
+                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
+                    <label className="text-[10px] font-bold text-muted uppercase block">Credit Bills</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={delayCreditBill}
+                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_credit_bill', Math.max(0, Number(e.target.value)))}
+                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
+                      />
+                      <span className="text-[10px] text-muted font-medium">m</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {[0, 5, 15, 60].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleSaveDelayTimer('whatsapp_delay_credit_bill', m)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
+                            delayCreditBill === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
+                          }`}
+                        >
+                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Distributors */}
+                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
+                    <label className="text-[10px] font-bold text-muted uppercase block">Distributors</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={delayDistributor}
+                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_distributor', Math.max(0, Number(e.target.value)))}
+                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
+                      />
+                      <span className="text-[10px] text-muted font-medium">m</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {[0, 5, 15, 60].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleSaveDelayTimer('whatsapp_delay_distributor', m)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
+                            delayDistributor === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
+                          }`}
+                        >
+                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Delivery Staff */}
+                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
+                    <label className="text-[10px] font-bold text-muted uppercase block">Delivery Staff</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={delayDeliveryBoy}
+                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_delivery_boy', Math.max(0, Number(e.target.value)))}
+                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
+                      />
+                      <span className="text-[10px] text-muted font-medium">m</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {[0, 5, 15, 60].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleSaveDelayTimer('whatsapp_delay_delivery_boy', m)}
+                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
+                            delayDeliveryBoy === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
+                          }`}
+                        >
+                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>

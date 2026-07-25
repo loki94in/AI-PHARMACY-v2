@@ -319,8 +319,8 @@ router.post('/', async (req, res) => {
           nextDate.setDate(nextDate.getDate() + Number(refillDays));
           
           await db.run(
-            'INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [patient_name || 'Walk-in Customer', patient_phone || '', invRecord.medicine_id, refillDays, nextDate.toISOString(), 'pending']
+            'INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [customerId, patient_name || 'Walk-in Customer', patient_phone || '', invRecord.medicine_id, refillDays, nextDate.toISOString(), 'pending']
           );
         }
       }
@@ -558,12 +558,37 @@ router.post('/hold', async (req, res) => {
       }
     }
     
+    // Resolve or auto-create customer for held bill
+    let customerId = null;
+    if (finalPatientPhone || finalPatientName) {
+      const cleanPhone = (finalPatientPhone || '').trim();
+      const digitsOnly = cleanPhone.replace(/\D/g, '').slice(-10);
+      const cleanName = (finalPatientName || 'Customer').trim();
+      let existing = null;
+      if (digitsOnly.length === 10) {
+        existing = await db.get(
+          `SELECT id FROM customers WHERE phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+          [cleanPhone, `%${digitsOnly}`]
+        );
+      }
+      if (!existing && cleanName && cleanName.toLowerCase() !== 'walk-in customer' && cleanName.toLowerCase() !== 'customer') {
+        existing = await db.get(`SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1`, [cleanName]);
+      }
+      if (existing) {
+        customerId = existing.id;
+      } else if (cleanPhone || (cleanName && cleanName.toLowerCase() !== 'walk-in customer')) {
+        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanName, cleanPhone]);
+        customerId = custRes.lastID;
+      }
+    }
+
     await db.run(
       `INSERT INTO held_bills (
-        invoice_no, temp_label, patient_name, patient_phone, doctor_name, 
+        customer_id, invoice_no, temp_label, patient_name, patient_phone, doctor_name, 
         discount, remarks, cart_data, data
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        customerId,
         holdInvoiceNo,
         temp_label || finalPatientName || 'Held Bill',
         finalPatientName,

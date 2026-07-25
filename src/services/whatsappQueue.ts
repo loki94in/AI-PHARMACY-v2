@@ -10,18 +10,32 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 export class WhatsappQueue {
   private isProcessing = false;
 
-  async queueJob(invoiceId: number, phone: string, pdfPath: string, caption: string): Promise<void> {
+  async queueJob(invoiceId: number, phone: string, pdfPath: string, caption: string, explicitScheduledAt?: number): Promise<void> {
     let db;
     try {
       db = await dbManager.getConnection();
+      const now = Date.now();
+      let scheduledAt = explicitScheduledAt;
+      if (scheduledAt === undefined || scheduledAt === null) {
+        const delayRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_credit_bill'");
+        const delayMins = delayRow ? parseInt(delayRow.value, 10) : 0;
+        if (!isNaN(delayMins) && delayMins > 0) {
+          scheduledAt = now + (delayMins * 60 * 1000);
+        } else {
+          scheduledAt = now;
+        }
+      }
+
       await db.run(
-        `INSERT INTO pending_whatsapp_jobs (invoice_id, recipient_phone, pdf_path, caption) VALUES (?, ?, ?, ?)`,
-        [invoiceId, phone, pdfPath, caption]
+        `INSERT INTO pending_whatsapp_jobs (invoice_id, recipient_phone, pdf_path, caption, scheduled_at) VALUES (?, ?, ?, ?, ?)`,
+        [invoiceId, phone, pdfPath, caption, scheduledAt]
       );
-            console.log(`Queued pending WhatsApp transmission for Invoice ID ${invoiceId}`);
+      console.log(`Queued pending WhatsApp transmission for Invoice ID ${invoiceId} (scheduled_at: ${new Date(scheduledAt).toISOString()})`);
       
-      // Try immediate processing
-      this.processQueue().catch(console.error);
+      // Try immediate processing if due
+      if (scheduledAt <= now) {
+        this.processQueue().catch(console.error);
+      }
     } catch (err) {
       console.error('Failed to queue WhatsApp job:', err);
     }
@@ -58,7 +72,8 @@ export class WhatsappQueue {
     let db;
     try {
       db = await dbManager.getConnection();
-      const jobs = await db.all('SELECT * FROM pending_whatsapp_jobs ORDER BY created_at ASC');
+      const now = Date.now();
+      const jobs = await db.all('SELECT * FROM pending_whatsapp_jobs WHERE (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY created_at ASC', [now]);
 
       for (const job of jobs) {
         try {
