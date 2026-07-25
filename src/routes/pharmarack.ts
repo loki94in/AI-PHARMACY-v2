@@ -219,7 +219,7 @@ router.get('/search', async (req, res) => {
       const response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
         method: 'POST',
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(2500)
       });
 
       if (response.ok) {
@@ -247,7 +247,6 @@ router.get('/search', async (req, res) => {
     try {
       let mappedProducts: any[] = [];
       let searchSuccessful = false;
-      // Track already-attempted terms to avoid duplicate API calls
       const attempted = new Set<string>();
 
       const trySearch = async (term: string): Promise<boolean> => {
@@ -262,24 +261,40 @@ router.get('/search', async (req, res) => {
         return false;
       };
 
-      // Stage 1: Original case (Pharmarack Elasticsearch can be case-sensitive)
-      if (await trySearch(qRaw)) {
-        // found
-      }
-      // Stage 2: Lowercase fallback
-      else if (await trySearch(qLower)) {
-        console.log(`[Pharmarack Search] Found via lowercase: "${qLower}"`);
-      }
-      // Stage 3: Cleaned query — removes dosage-form words (syrup, tonic, injection, etc.)
-      else {
-      const { cleaned: cleanedQ, detectedForms } = cleanSearchQuery(qRaw);
-        if (cleanedQ && cleanedQ !== qRaw) {
-          console.log(`[Pharmarack Search] No results for "${qRaw}". Trying cleaned (no dosage form): "${cleanedQ}" (detected forms: ${detectedForms.join(', ')})`);
-          await trySearch(cleanedQ);
+      // Upfront Cleaned Brand extraction (e.g. "HYPONAT O 15 MG TAB 10 (10 TABS)" -> "HYPONAT O 15")
+      const rawNoParens = qRaw.replace(/\([^)]*\)/g, '').trim();
+      const { cleaned: cleanedTerm } = cleanSearchQuery(rawNoParens);
+
+      // Stage 1: Cleaned brand query upfront if different from raw query
+      if (cleanedTerm && cleanedTerm.length >= 3 && cleanedTerm !== qRaw) {
+        if (await trySearch(cleanedTerm)) {
+          console.log(`[Pharmarack Search] Rapid hit on pre-cleaned term: "${cleanedTerm}"`);
         }
       }
 
-      // Stage 4: First word only (brand name prefix)
+      // Stage 2: Original query exact match
+      if (!searchSuccessful && await trySearch(qRaw)) {
+        // found
+      }
+
+      // Stage 3: Lowercase fallback
+      if (!searchSuccessful && await trySearch(qLower)) {
+        console.log(`[Pharmarack Search] Found via lowercase: "${qLower}"`);
+      }
+
+      // Stage 4: First two words (Brand + strength, e.g., "HYPONAT O")
+      if (!searchSuccessful && qRaw.includes(' ')) {
+        const words = qRaw.trim().split(/\s+/);
+        if (words.length >= 2) {
+          const brandPrefix = `${words[0]} ${words[1]}`;
+          if (brandPrefix.length >= 3) {
+            console.log(`[Pharmarack Search] Trying brand prefix: "${brandPrefix}"`);
+            await trySearch(brandPrefix);
+          }
+        }
+      }
+
+      // Stage 5: First word only (brand name)
       if (!searchSuccessful && qRaw.includes(' ')) {
         const firstWord = qRaw.split(' ')[0].trim();
         if (firstWord.length >= 3) {
@@ -288,18 +303,8 @@ router.get('/search', async (req, res) => {
         }
       }
 
-      // Stage 5: Last word only (product type keyword, e.g. the product might be indexed by type)
-      if (!searchSuccessful && qRaw.includes(' ')) {
-        const words = qRaw.trim().split(/\s+/);
-        const lastWord = words[words.length - 1];
-        if (lastWord.length >= 3) {
-          console.log(`[Pharmarack Search] Trying last-word fallback: "${lastWord}"`);
-          await trySearch(lastWord);
-        }
-      }
-
-      // Stage 6: Local SQLite DB medicine / alias cross-reference fallback
-      if (!searchSuccessful) {
+      // Stage 6: Local SQLite DB medicine / alias cross-reference fallback (only for search terms >= 3 chars to prevent random matches)
+      if (!searchSuccessful && qLower.length >= 3) {
         try {
           const db = await dbManager.getConnection();
           const matchedMed: any = await db.get(
@@ -307,7 +312,7 @@ router.get('/search', async (req, res) => {
              LEFT JOIN medicine_aliases ma ON ma.medicine_id = m.id
              WHERE LOWER(m.name) LIKE ? OR LOWER(ma.alias_name) LIKE ?
              LIMIT 1`,
-            [`%${qLower}%`, `%${qLower}%`]
+            [`${qLower}%`, `${qLower}%`]
           );
           if (matchedMed && matchedMed.name) {
             const aliasTerm = matchedMed.name.trim();
@@ -326,8 +331,11 @@ router.get('/search', async (req, res) => {
       }
 
       if (searchSuccessful) {
-        // Cache successful response (cached under original query 'q' to avoid duplicate remote lookups)
+        // Cache under both original query 'q' and cleaned term to maximize instant cache hits
         searchCache.set(q, storeId, isMapped, mappedProducts);
+        if (cleanedTerm && cleanedTerm.toLowerCase() !== q) {
+          searchCache.set(cleanedTerm.toLowerCase(), storeId, isMapped, mappedProducts);
+        }
         return res.json(mappedProducts);
       } else {
         return res.json([]);

@@ -2,7 +2,9 @@ import express from 'express';
 import { inventoryService } from '../services/inventoryService.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { dbManager } from '../database/connection.js';
+import { cacheService } from '../services/cacheService.js';
 import { parsePackSizeFromPackaging } from '../utils/packaging.js';
+
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -618,13 +620,8 @@ router.get('/medicines/:id/enriched', async (req, res) => {
             return res.status(404).json({ error: 'Medicine not found' });
     }
 
-    // Lookup matching entry in enrichment cache
-    const cacheRow = await db.get(
-      'SELECT enriched_data FROM medicine_enrichment_cache WHERE LOWER(medicine_name) = ?',
-      [medicine.name.toLowerCase().trim()]
-    );
-    
-    const enrichment = cacheRow ? JSON.parse(cacheRow.enriched_data) : null;
+    // Lookup matching entry in enrichment cache safely via cacheService
+    const enrichment = await cacheService.get(medicine.name);
 
     res.json({
       success: true,

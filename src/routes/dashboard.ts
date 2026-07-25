@@ -28,6 +28,29 @@ router.get('/', async (_req, res) => {
     const activeDeliveryBoysCount = await db.get(`SELECT COUNT(*) as cnt FROM delivery_boys WHERE is_active = 1`);
     const purchasesTodayRow = await db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM purchases WHERE date(date) = date('now')`);
 
+    // Fetch top 5 recent sales
+    const recentSales = await db.all(`
+      SELECT si.id, si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.date,
+             c.name as customer_name
+      FROM sales_invoices si
+      LEFT JOIN customers c ON si.customer_id = c.id
+      ORDER BY si.date DESC, si.id DESC
+      LIMIT 5
+    `);
+
+    // Fetch top 5 recent communications/emails
+    let recentCommunications: any[] = [];
+    try {
+      recentCommunications = await db.all(`
+        SELECT 'email' as type, subject as title, from_addr as recipient_or_sender, date as created_at
+        FROM emails
+        ORDER BY date DESC
+        LIMIT 5
+      `);
+    } catch {
+      recentCommunications = [];
+    }
+
     res.json({
       todaySales: salesTodayRow.total,
       lowStock: lowStockCount.cnt,
@@ -36,7 +59,9 @@ router.get('/', async (_req, res) => {
       pendingSpecialOrders: pendingSpecialOrdersCount?.cnt || 0,
       activeDeliveryBoys: activeDeliveryBoysCount?.cnt || 0,
       todayPurchases: purchasesTodayRow?.total || 0,
-      alerts
+      alerts,
+      recentSales: recentSales || [],
+      recentCommunications: recentCommunications || []
     });
   } catch (err) {
     console.error('Dashboard error:', err);

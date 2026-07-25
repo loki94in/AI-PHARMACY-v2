@@ -28,6 +28,10 @@ import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString } from '../../utils/date';
 
+// Module-level cache for instant report hydration on tab switches / re-mounts
+const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
+const cachedNonMovingMap: Record<number, any> = {};
+
 const Reports = () => {
   const [fromDate, setFromDate] = useState(getNDaysAgoString(30));
   const [toDate, setToDate] = useState(getTodayString());
@@ -122,8 +126,10 @@ const Reports = () => {
     }
   };
 
+  const cacheKeyStr = `${activeTab}:${fromDate}:${toDate}`;
+
   // Main reports query (sales, purchases, inventory, expiry) - enabled by default so it auto-loads
-  const { data: reportData, isLoading: loading, refetch } = useApiQuery<{
+  const { data: reportData = cachedReportsMap[cacheKeyStr], isLoading: loading, refetch } = useApiQuery<{
     summary: any;
     records: any[];
   }>(
@@ -132,23 +138,29 @@ const Reports = () => {
       // Don't query default endpoints if tab is nonMoving or trace
       if (activeTab === 'nonMoving' || activeTab === 'trace') {
         const summaryData = await api.getReportsSummary({ type: activeTab, fromDate, toDate });
-        return { summary: summaryData, records: [] };
+        const result = { summary: summaryData, records: [] };
+        cachedReportsMap[cacheKeyStr] = result;
+        return result;
       }
 
       const [summaryData, tableData] = await Promise.all([
         api.getReportsSummary({ type: activeTab, fromDate, toDate }),
         api.getReportsData({ type: activeTab, fromDate, toDate })
       ]);
-      return { summary: summaryData, records: tableData };
+      const result = { summary: summaryData, records: tableData };
+      cachedReportsMap[cacheKeyStr] = result;
+      return result;
     },
     { 
       enabled: true,
+      staleTime: 300000,
+      initialData: cachedReportsMap[cacheKeyStr] || undefined,
       refetchOnWindowFocus: false
     }
   );
 
   // Non-Moving Inventory query
-  const { data: nonMovingData, isLoading: loadingNonMoving, refetch: refetchNonMoving } = useApiQuery<{
+  const { data: nonMovingData = cachedNonMovingMap[nonMovingDays], isLoading: loadingNonMoving, refetch: refetchNonMoving } = useApiQuery<{
     success: boolean;
     periodDays: number;
     count: number;
@@ -156,10 +168,14 @@ const Reports = () => {
   }>(
     ['reports', 'nonMoving', nonMovingDays],
     async () => {
-      return api.getNonMovingReportData({ days: nonMovingDays });
+      const result = await api.getNonMovingReportData({ days: nonMovingDays });
+      if (result) cachedNonMovingMap[nonMovingDays] = result;
+      return result;
     },
     { 
       enabled: activeTab === 'nonMoving',
+      staleTime: 300000,
+      initialData: cachedNonMovingMap[nonMovingDays] || undefined,
       refetchOnWindowFocus: false
     }
   );
@@ -230,9 +246,9 @@ const Reports = () => {
   const getStatsCards = () => {
     if (activeTab === 'nonMoving') {
       const deadItems = nonMovingData?.items ?? [];
-      const totalDeadValuation = deadItems.reduce((acc, item) => acc + (item.totalValue || 0), 0);
-      const totalDeadCostValuation = deadItems.reduce((acc, item) => acc + (item.totalCostValue || 0), 0);
-      const neverMovedCount = deadItems.filter(item => item.daysSinceLastTransaction === 999).length;
+      const totalDeadValuation = deadItems.reduce((acc: number, item: any) => acc + (item.totalValue || 0), 0);
+      const totalDeadCostValuation = deadItems.reduce((acc: number, item: any) => acc + (item.totalCostValue || 0), 0);
+      const neverMovedCount = deadItems.filter((item: any) => item.daysSinceLastTransaction === 999).length;
 
       return [
         {
@@ -1041,7 +1057,7 @@ const Reports = () => {
                         </td>
                       </tr>
                     ) : (
-                      nonMovingData.items.map((row, idx) => (
+                      nonMovingData.items.map((row: any, idx: number) => (
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicineName || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batchNo || 'N/A'}</td>

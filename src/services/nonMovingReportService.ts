@@ -42,8 +42,7 @@ export class NonMovingReportService {
       cutoffDate.setDate(cutoffDate.getDate() - periodDays);
       const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Get items with no stock ledger transactions in the period
-      // or with quantity but no recent movements
+      // Get items with active stock (> 0) and NO sales or ledger movements in the period
       const rows = await db.all(`
         SELECT
           im.id,
@@ -51,38 +50,35 @@ export class NonMovingReportService {
           m.name as medicine_name,
           im.batch_no,
           im.quantity,
-          -- Get the most recent transaction date from stock ledger
-          (SELECT MAX(sl.business_date)
-           FROM stock_ledger sl
-           WHERE sl.medicine_id = im.medicine_id) as last_transaction_date,
+          -- Get the most recent date between POS sales and stock ledger
+          COALESCE(
+            (SELECT MAX(si.date) 
+             FROM sale_items sit 
+             JOIN sales_invoices si ON sit.invoice_id = si.id 
+             WHERE sit.inventory_id = im.id),
+            (SELECT MAX(sl.business_date)
+             FROM stock_ledger sl
+             WHERE sl.medicine_id = im.medicine_id)
+          ) as last_transaction_date,
           im.mrp,
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE im.quantity > 0
-          AND (
-            -- No transactions in the period OR last transaction before cutoff
-            NOT EXISTS (
-              SELECT 1
-              FROM stock_ledger sl
-              WHERE sl.medicine_id = im.medicine_id
-                AND date(sl.business_date) >= date(?)
-            )
-            OR
-            (
-              -- Has transactions but last one is older than cutoff
-              EXISTS (
-                SELECT 1
-                FROM stock_ledger sl
-                WHERE sl.medicine_id = im.medicine_id
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                FROM stock_ledger sl
-                WHERE sl.medicine_id = im.medicine_id
-                  AND date(sl.business_date) >= date(?)
-              )
-            )
+          -- Exclude any items with sales in POS within cutoff period
+          AND NOT EXISTS (
+            SELECT 1 
+            FROM sale_items sit
+            JOIN sales_invoices si ON sit.invoice_id = si.id
+            WHERE sit.inventory_id = im.id
+              AND date(si.date) >= date(?)
+          )
+          -- Exclude any items with stock ledger movements within cutoff period
+          AND NOT EXISTS (
+            SELECT 1
+            FROM stock_ledger sl
+            WHERE sl.medicine_id = im.medicine_id
+              AND date(sl.business_date) >= date(?)
           )
       `, [cutoffDateString, cutoffDateString]);
 

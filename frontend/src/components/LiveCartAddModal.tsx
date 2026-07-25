@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent, liveCartAddEvent } from '../services/events';
+import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
 
 interface SuggestionMedicine {
   medicine_name: string;
@@ -707,12 +708,23 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       let bestOption: any = null;
       let bestEff = currentEff;
 
+      const targetPackaging = `${selectedMedicineName} ${selectedPackaging}`;
+
       suggestions.forEach(item => {
         // Only suggest from mapped (main) distributors
         if (item.storeId !== selectedStoreId && item.rate && item.mapped === true) {
+          // Check stock status: exclude 0 stock or unavailable items
+          const stockStr = (item.stock || '').toLowerCase().trim();
+          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock' || stockStr === 'low';
+          if (isOutOfStock) return;
+
+          // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
+          const candidatePackaging = `${item.medicine_name} ${item.packaging}`;
+          if (!isPackagingCompatible(targetPackaging, candidatePackaging)) return;
+
           const nameClean1 = item.medicine_name.toLowerCase().replace(/[^a-z0-9]/g, '');
           const nameClean2 = selectedMedicineName.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (nameClean1 === nameClean2 && item.rate) {
+          if ((nameClean1 === nameClean2 || nameClean1.includes(nameClean2) || nameClean2.includes(nameClean1)) && item.rate) {
             const itemEff = getEffectiveRate(item.rate, item.scheme, qty);
             if (itemEff < bestEff - 0.01) {
               bestEff = itemEff;
@@ -729,7 +741,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     } else {
       setCheaperDistributor(null);
     }
-  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, selectedMedicineName]);
+  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, selectedMedicineName, selectedPackaging]);
+
 
   // Find the minimum effective rate among all suggestions to identify the best rate option
   const minEffectiveRate = React.useMemo(() => {
@@ -898,12 +911,22 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               });
             });
 
-            // Sort mapped items first, then non-mapped items
+            // Sort mapped items first, then by packaging size & MRP match score ranking
             mergedList.sort((a, b) => {
               if (a.isErrorMessage || b.isErrorMessage) return 0;
               if (a.mapped && !b.mapped) return -1;
               if (!a.mapped && b.mapped) return 1;
-              return 0;
+
+              const scoreA = getMatchScore(
+                { name: product, packaging: '' },
+                { name: a.medicine_name, packaging: a.packaging, mrp: a.mrp }
+              );
+              const scoreB = getMatchScore(
+                { name: product },
+                { name: b.medicine_name, packaging: b.packaging, mrp: b.mrp }
+              );
+
+              return scoreB - scoreA;
             });
           }
         }

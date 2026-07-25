@@ -4,6 +4,8 @@ import { X, Search, Plus, Minus, ClipboardList, Sparkles, Loader2, ShoppingCart,
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent } from '../services/events';
 import { useApiQuery } from '../hooks/useApiQuery';
+import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
+
 
 interface SuggestionMedicine {
   inventory_id?: number;
@@ -167,11 +169,22 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
       let bestOption: any = null;
       let bestEff = currentEff;
 
+      const targetPackaging = `${product} ${selectedPackaging}`;
+
       suggestions.forEach(item => {
         if (item.storeId !== selectedStoreId && item.rate) {
+          // Check stock status: exclude 0 stock or unavailable items
+          const stockStr = (item.stock || '').toLowerCase().trim();
+          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock' || stockStr === 'low';
+          if (isOutOfStock) return;
+
+          // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
+          const candidatePackaging = `${item.medicine_name} ${item.packaging}`;
+          if (!isPackagingCompatible(targetPackaging, candidatePackaging)) return;
+
           const nameClean1 = item.medicine_name.toLowerCase().replace(/[^a-z0-9]/g, '');
           const nameClean2 = product.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (nameClean1 === nameClean2 && item.rate) {
+          if ((nameClean1 === nameClean2 || nameClean1.includes(nameClean2) || nameClean2.includes(nameClean1)) && item.rate) {
             const itemEff = getEffectiveRate(item.rate, item.scheme, qty);
             if (itemEff < bestEff - 0.01) {
               bestEff = itemEff;
@@ -188,7 +201,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     } else {
       setCheaperDistributor(null);
     }
-  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, product]);
+  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, product, selectedPackaging]);
 
   const resetInputsAndFocus = () => {
     setProduct('');

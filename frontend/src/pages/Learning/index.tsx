@@ -71,6 +71,8 @@ interface ProfileDetail {
   last_updated: string;
 }
 
+let cachedDoctorsList: any[] = [];
+let cachedServerSettings: any = null;
 let cachedProfiles: LearningProfileSummary[] = [];
 const cachedProfileDetailsMap: Record<number, any> = {};
 
@@ -94,10 +96,20 @@ const Learning: React.FC = () => {
 
   const queryClient = useQueryClient();
 
-  // Doctors Query
-  const { data: doctorsList = [], isLoading: loadingDoctors } = useApiQuery<any[]>(
+  // Doctors Query with module caching
+  const { data: doctorsList = cachedDoctorsList, isLoading: loadingDoctors } = useApiQuery<any[]>(
     'crm-doctors',
-    () => apiClient.get('/crm/doctors').then(res => res.data)
+    async () => {
+      const res = await apiClient.get('/crm/doctors');
+      const data = res.data || [];
+      cachedDoctorsList = data;
+      return data;
+    },
+    {
+      staleTime: 300000,
+      initialData: cachedDoctorsList.length > 0 ? cachedDoctorsList : undefined,
+      refetchOnWindowFocus: false
+    }
   );
 
   // Profiles Query with module caching
@@ -109,13 +121,27 @@ const Learning: React.FC = () => {
       cachedProfiles = list;
       return list;
     },
-    { staleTime: 60000, initialData: cachedProfiles.length > 0 ? cachedProfiles : undefined }
+    { 
+      staleTime: 300000, 
+      initialData: cachedProfiles.length > 0 ? cachedProfiles : undefined,
+      refetchOnWindowFocus: false
+    }
   );
 
-  // Settings Query
-  const { data: serverSettings, isLoading: loadingSettings } = useApiQuery<any>(
+  // Settings Query with module caching
+  const { data: serverSettings = cachedServerSettings, isLoading: loadingSettings } = useApiQuery<any>(
     'settings',
-    () => apiClient.get('/settings').then(res => res.data)
+    async () => {
+      const res = await apiClient.get('/settings');
+      const data = res.data;
+      cachedServerSettings = data;
+      return data;
+    },
+    {
+      staleTime: 300000,
+      initialData: cachedServerSettings || undefined,
+      refetchOnWindowFocus: false
+    }
   );
 
   // Profile Detail Query with module caching and instant hydration

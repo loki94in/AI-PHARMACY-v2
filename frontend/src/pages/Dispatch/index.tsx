@@ -58,7 +58,9 @@ const Dispatch = () => {
   };
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
+    if (!cachedOrders || cachedOrders.length === 0) {
+      setLoading(true);
+    }
     try {
       const [ordersData, boysData] = await Promise.all([
         api.getDispatchOrders(),

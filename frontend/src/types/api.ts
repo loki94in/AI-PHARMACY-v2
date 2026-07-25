@@ -11,6 +11,21 @@ export interface DashboardStats {
     description: string;
     created_at: string;
   }>;
+  recentSales?: Array<{
+    id: number;
+    invoice_no: string;
+    customer_name?: string;
+    total_amount: number;
+    payment_medium?: string;
+    payment_status?: string;
+    date: string;
+  }>;
+  recentCommunications?: Array<{
+    type?: string;
+    title: string;
+    recipient_or_sender?: string;
+    created_at: string;
+  }>;
 }
 
 export interface Medicine {

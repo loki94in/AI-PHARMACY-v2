@@ -74,25 +74,55 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
   let errors = 0;
 
   try {
+    const db = await dbManager.getConnection();
+
+    // Ensure distributor_catalog table exists
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS distributor_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id INTEGER NOT NULL,
+        store_name TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        mrp REAL,
+        packaging TEXT,
+        dosage_form TEXT,
+        manufacturer TEXT,
+        distributor_price REAL,
+        availability TEXT,
+        is_mapped INTEGER DEFAULT 0,
+        last_synced DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(store_id, product_name)
+      )
+    `);
+
+    // Check token presence first to avoid 82 unauthenticated API calls
+    const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
+    if (!tokenRow?.value) {
+      console.log('[Catalog Cache] Skipped background sync: No active Pharmarack session token.');
+      return { synced: 0, errors: 0 };
+    }
+
     // Fetch store list
     const storeRes = await fetchPharmarackApi('https://pharmretail-api.pharmarack.com/user/api/v2/store-list', {
       method: 'GET',
       signal: AbortSignal.timeout(15000)
+    }).catch(err => {
+      console.warn('[Catalog Cache] Could not reach store list API:', err.message);
+      return null;
     });
 
-    if (!storeRes.ok) {
-      console.error(`[Catalog Cache] Store list API returned ${storeRes.status}`);
+    if (!storeRes || !storeRes.ok) {
+      console.warn(`[Catalog Cache] Store list API returned ${storeRes?.status || 'Network Error'}. Aborting sync.`);
       return { synced: 0, errors: 1 };
     }
 
     const storeData: any = await storeRes.json();
     if (!storeData?.success || !storeData?.data?.Stores) {
-      console.error('[Catalog Cache] Unexpected store list response structure');
+      console.warn('[Catalog Cache] Unexpected store list response structure');
       return { synced: 0, errors: 1 };
     }
 
     const stores = storeData.data.Stores;
-    const db = await dbManager.getConnection();
 
     // Prioritize mapped stores to avoid 355 unmapped error spam on boot
     const targetStores = stores.filter((s: any) => s.Ismapped === 1);
@@ -104,9 +134,9 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
       const isMapped = store.Ismapped === 1;
 
       try {
-        // Search with empty keyword to get full catalog (limited to 200 per store)
+        // Use 'a' as search keyword to fetch catalog items safely from Elasticsearch
         const searchPayload = {
-          SearchKeyword: '',
+          SearchKeyword: 'a',
           StoreId: isMapped ? [storeId] : [],
           NonMappedStoreId: !isMapped ? [storeId] : [],
           Count: 200,
@@ -121,10 +151,10 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
         const catalogRes = await fetchPharmarackApi('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
           method: 'POST',
           body: JSON.stringify(searchPayload),
-          signal: AbortSignal.timeout(10000)
-        });
+          signal: AbortSignal.timeout(8000)
+        }).catch(() => null);
 
-        if (!catalogRes.ok) {
+        if (!catalogRes || !catalogRes.ok) {
           errors++;
           continue;
         }
