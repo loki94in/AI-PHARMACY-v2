@@ -571,12 +571,35 @@ router.post('/reset-data', async (req, res) => {
     //    This is reliable because we can write to the DB through the existing connection.
     const db = await dbManager.getConnection();
 
-    // 2a. Get all user-created table names
+    // 2a. Remove the FTS5 index as a unit before dropping anything else.
+    // Dropping medicines_fts also drops its shadow tables. Letting the generic loop
+    // below drop those shadow tables individually would leave the vtable declaration
+    // orphaned in sqlite_master, and an orphaned medicines_fts makes every later
+    // INSERT INTO medicines fail with "vtable constructor failed" — permanently,
+    // because a vtable whose constructor fails can no longer be dropped.
+    try { await db.exec('DROP TRIGGER IF EXISTS medicines_ai'); } catch (_) {}
+    try { await db.exec('DROP TRIGGER IF EXISTS medicines_ad'); } catch (_) {}
+    try { await db.exec('DROP TRIGGER IF EXISTS medicines_au'); } catch (_) {}
+    try {
+      await db.exec('DROP TABLE IF EXISTS medicines_fts');
+    } catch (_) {
+      // Already broken from an earlier reset — strip it out of the schema directly.
+      try {
+        const { purgeMedicinesFts } = await import('../database.js');
+        await purgeMedicinesFts(db);
+      } catch (purgeErr: any) {
+        console.warn('[Reset] Could not purge medicines_fts:', purgeErr.message);
+      }
+    }
+
+    // 2b. Get all user-created table names. FTS shadow tables are excluded: they are
+    // gone with the vtable above, and dropping them piecemeal is what causes the
+    // orphaned-index damage described in 2a.
     const tables = await db.all(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'medicines_fts%'"
     );
 
-    // 2b. Drop every table
+    // 2c. Drop every table
     for (const { name } of tables) {
       try {
         await db.run(`DROP TABLE IF EXISTS "${name}"`);
@@ -603,6 +626,14 @@ router.post('/reset-data', async (req, res) => {
     // 3. Recreate all tables from scratch via the schema migrations
     const { ensureSchema } = await import('../database.js');
     await ensureSchema(getDbPath());
+
+    // 3a. Deliberately NOT auto-seeding the reference medicine catalogue here.
+    // reference_medicines.csv holds ~200k generic rows with mrp 0 and guessed tax
+    // rates. Injecting them into a freshly reset database means the next real
+    // import (migration or restore) lands on top of 200k placeholder entries and
+    // the app then reports prices and duplicates that came from the seed rather
+    // than from the pharmacy's own records. Seeding stays an explicit user action
+    // via POST /api/medicines/seed-master.
 
     // 3b. Compact the DB file to reclaim space from dropped tables
     try {

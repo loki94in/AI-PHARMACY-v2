@@ -1,4 +1,4 @@
-import { IndianRupee, PackageOpen, ListTodo, Server, ArrowUpRight, AlertTriangle, Clock, CheckCircle, Activity, MessageCircle, Mail, Send } from 'lucide-react';
+import { IndianRupee, PackageOpen, ListTodo, Server, ArrowUpRight, AlertTriangle, Clock, CheckCircle, Activity, MessageCircle, Mail, Send, Truck, Layers, ClipboardList, ShoppingBag } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { DashboardStats } from '../../services/api';
@@ -128,6 +128,49 @@ const Dashboard = () => {
           </div>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-muted">
             All services operational
+          </div>
+        </div>
+      </div>
+
+      {/* Central Storage & Master Data Overview */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div className="glass-panel p-4 flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+            <Layers size={18} />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Storage Racks</div>
+            <div className="text-lg font-bold text-text">{stats?.storageLocations || 5} active</div>
+          </div>
+        </div>
+
+        <div className="glass-panel p-4 flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-amber/10 border border-amber/20 text-amber">
+            <ClipboardList size={18} />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Special Orders</div>
+            <div className="text-lg font-bold text-amber">{stats?.pendingSpecialOrders || 0} pending</div>
+          </div>
+        </div>
+
+        <div className="glass-panel p-4 flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-sky/10 border border-sky/20 text-sky">
+            <Truck size={18} />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Delivery Boys</div>
+            <div className="text-lg font-bold text-sky">{stats?.activeDeliveryBoys || 0} staff</div>
+          </div>
+        </div>
+
+        <div className="glass-panel p-4 flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+            <ShoppingBag size={18} />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Today Purchases</div>
+            <div className="text-lg font-bold text-text">₹{Number(stats?.todayPurchases || 0).toFixed(0)}</div>
           </div>
         </div>
       </div>

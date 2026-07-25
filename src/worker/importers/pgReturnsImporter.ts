@@ -33,8 +33,8 @@ export async function importReturnOrder(row: Record<string, string | null>, db: 
   const legacyDistId = row['distributor_id'];
   const distributorId = legacyDistId ? distributorMap.get(legacyDistId) : null;
 
-  // Generate return_no
-  const returnNo = row['invoice_id'] || `RET-${legacyId}`;
+  // Generate a meaningful return number — use legacy ID with type prefix
+  const returnNo = `RET-${returnType === 'purchase' ? 'PUR' : 'SALE'}-${legacyId}`;
 
   // Resolve original invoice for sale returns
   let originalInvoiceId: number | null = null;

@@ -41,6 +41,9 @@ async function initOrdersTable(db: any) {
     await db.exec('ALTER TABLE special_orders ADD COLUMN phone TEXT');
   } catch (_) {}
   try {
+    await db.exec('ALTER TABLE special_orders ADD COLUMN date DATETIME DEFAULT CURRENT_TIMESTAMP');
+  } catch (_) {}
+  try {
     await db.exec('ALTER TABLE special_orders ADD COLUMN notified INTEGER DEFAULT 0');
   } catch (_) {}
   try {
@@ -74,7 +77,12 @@ router.get('/', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
     await initOrdersTable(db);
-    const orders = await db.all('SELECT * FROM special_orders ORDER BY date DESC');
+    let orders;
+    try {
+      orders = await db.all('SELECT * FROM special_orders ORDER BY date DESC');
+    } catch (_) {
+      orders = await db.all('SELECT * FROM special_orders ORDER BY id DESC');
+    }
     res.json(orders);
   } catch (err) {
     console.error('Orders fetch error:', err);

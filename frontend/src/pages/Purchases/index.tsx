@@ -82,6 +82,35 @@ interface PurchaseHistory {
   total_amount: number;
 }
 
+let cachedMasterCatalog: Medicine[] = [];
+let isMasterCatalogHydrating = false;
+
+const filterLocalCatalog = (query: string, catalog: Medicine[]): Medicine[] => {
+  if (!query || !query.trim()) return catalog.slice(0, 30);
+  const term = query.trim().toLowerCase();
+  
+  // Prefix matches first
+  const prefixes = catalog.filter(m =>
+    (m.name && m.name.toLowerCase().startsWith(term)) ||
+    (m.generic_name && m.generic_name.toLowerCase().startsWith(term)) ||
+    (m.manufacturer && m.manufacturer.toLowerCase().startsWith(term))
+  );
+
+  if (prefixes.length >= 15) {
+    return prefixes.slice(0, 30);
+  }
+
+  // Infix matches second
+  const infixes = catalog.filter(m =>
+    ((m.name && m.name.toLowerCase().includes(term)) ||
+     (m.generic_name && m.generic_name.toLowerCase().includes(term)) ||
+     (m.manufacturer && m.manufacturer.toLowerCase().includes(term))) &&
+    !(m.name && m.name.toLowerCase().startsWith(term))
+  );
+
+  return [...prefixes, ...infixes].slice(0, 30);
+};
+
 const getInitialPurchasesTabs = () => {
   const saved = localStorage.getItem('purchase_tabs');
   if (saved) {
@@ -787,46 +816,59 @@ const Purchases: React.FC = () => {
 
   const searchTimeoutRef = React.useRef<any>(null);
 
+  // Pre-hydrate master catalog in background on mount
+  useEffect(() => {
+    if (cachedMasterCatalog.length === 0 && !isMasterCatalogHydrating) {
+      isMasterCatalogHydrating = true;
+      api.catalogSearch('').then(list => {
+        if (Array.isArray(list) && list.length > 0) {
+          cachedMasterCatalog = list;
+        }
+      }).catch(err => {
+        console.warn('Background catalog pre-hydration warning:', err);
+      }).finally(() => {
+        isMasterCatalogHydrating = false;
+      });
+    }
+  }, []);
+
   const searchMedicines = useCallback((term: string, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    if (term.length < 2) {
-      setSearchResults([]);
-      setActiveSearchIndex(null);
-      setSearchHighlightIndex(-1);
-      return;
-    }
-
-    if (term.length === 2) {
-      // Prefetch 2 characters in background, no dropdown
-      setActiveSearchIndex(null);
-      searchTimeoutRef.current = setTimeout(async () => {
-        try {
-          const response = await api.catalogSearch(term);
-          setSearchResults(response || []);
-          setSearchHighlightIndex(-1);
-        } catch (error) {
-          console.error('Error prefetching medicines:', error);
-        }
-      }, 150);
-      return;
-    }
-
-    // >= 3 characters: show dropdown immediately
     setActiveSearchIndex(index);
     setActiveMedicineIndex(index);
 
+    // Step 1: INSTANT (<1ms) in-memory filter from local module cache
+    if (cachedMasterCatalog.length > 0) {
+      const instantMatches = filterLocalCatalog(term, cachedMasterCatalog);
+      setSearchResults(instantMatches);
+      setSearchHighlightIndex(-1);
+    }
+
+    // Step 2: Asynchronous backend query to update and merge master catalog
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const response = await api.catalogSearch(term);
-        setSearchResults(response || []);
-        setSearchHighlightIndex(-1);
+        const response = await api.catalogSearch(term || '');
+        if (Array.isArray(response) && response.length > 0) {
+          // Merge newly fetched items into cachedMasterCatalog
+          const seen = new Set(cachedMasterCatalog.map(m => m.id));
+          let added = false;
+          for (const item of response) {
+            if (!seen.has(item.id)) {
+              seen.add(item.id);
+              cachedMasterCatalog.push(item);
+              added = true;
+            }
+          }
+          setSearchResults(response);
+          setSearchHighlightIndex(-1);
+        }
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
-    }, 250);
+    }, 120);
   }, []);
 
   useEffect(() => {
@@ -1961,6 +2003,10 @@ const Purchases: React.FC = () => {
                         <input
                           type="text"
                           value={item.medicine_name}
+                          onFocus={() => {
+                            setActiveSearchIndex(index);
+                            searchMedicines(item.medicine_name, index);
+                          }}
                           onChange={(e) => {
                             updateItem(index, 'medicine_name', e.target.value);
                             searchMedicines(e.target.value, index);

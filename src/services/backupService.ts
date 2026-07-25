@@ -138,21 +138,98 @@ export async function restoreBackup(filename: string): Promise<void> {
     throw new Error('Backup file not found');
   }
 
-  // Close the active DB connection before overwriting
-  await dbManager.close();
+  // Unpack to a sibling temp file first: writing straight onto the live path would
+  // destroy the current database if decompression failed halfway through.
+  const stagedPath = `${DB_PATH}.restoring_${Date.now()}`;
 
-  if (sanitized.endsWith('.gz')) {
-    // Decompress the gzip backup to the live database path (ponytail: native stdlib zlib)
-    const gunzip = zlib.createGunzip();
-    const source = fs.createReadStream(filePath);
-    const destination = fs.createWriteStream(DB_PATH);
-    await pipeline(source, gunzip, destination);
-  } else {
-    fs.copyFileSync(filePath, DB_PATH);
+  // Background workers must not reopen the database between the close and the swap,
+  // or they recreate the -wal we are about to delete.
+  let workers: { start: () => void; stop: () => void } | null = null;
+  const isTest = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
+  if (!isTest) {
+    try {
+      workers = (await import('../worker/workerSupervisor.js')).workerSupervisor;
+      workers.stop();
+    } catch (_) {
+      workers = null;
+    }
   }
 
-  // Re-open and log
+  try {
+    if (sanitized.endsWith('.gz')) {
+      await pipeline(fs.createReadStream(filePath), zlib.createGunzip(), fs.createWriteStream(stagedPath));
+    } else {
+      fs.copyFileSync(filePath, stagedPath);
+    }
+
+    // Never put an unreadable database live.
+    const probe = new Database(stagedPath, { readonly: true });
+    try {
+      const integrity = probe.pragma('integrity_check') as Array<{ integrity_check: string }>;
+      if (!integrity?.[0] || integrity[0].integrity_check !== 'ok') {
+        throw new Error(`Backup failed its integrity check: ${JSON.stringify(integrity)}`);
+      }
+    } catch (probeErr: any) {
+      // integrity_check opens every virtual table, so a backup taken while the search
+      // index was damaged makes the check itself throw. The file is fine and the index
+      // is rebuilt after the swap below, so this must not block the restore.
+      if (!String(probeErr?.message).includes('vtable constructor failed')) {
+        throw probeErr;
+      }
+      console.warn('[Restore] Backup has a damaged search index; it will be rebuilt after the restore.');
+    } finally {
+      probe.close();
+    }
+
+    // force=true is required. A pooled close keeps handles open, and the surviving
+    // connection would go on serving the old database and later checkpoint its WAL
+    // back over the restored file — the restore would appear to succeed and be undone.
+    await dbManager.close(true);
+
+    // The -wal/-shm sidecars belong to the database being replaced. Left in place,
+    // SQLite would replay those old frames on top of the restored file.
+    for (const suffix of ['-wal', '-shm']) {
+      const sidecar = DB_PATH + suffix;
+      if (!fs.existsSync(sidecar)) continue;
+      try {
+        fs.unlinkSync(sidecar);
+      } catch (err: any) {
+        throw new Error(`Could not clear ${path.basename(sidecar)} before restore: ${err.message}`);
+      }
+    }
+
+    try {
+      fs.renameSync(stagedPath, DB_PATH);
+    } catch (renameErr: any) {
+      // Windows can still hold a transient lock on the destination; a copy works there.
+      if (renameErr.code === 'EPERM' || renameErr.code === 'EBUSY' || renameErr.code === 'EEXIST') {
+        fs.copyFileSync(stagedPath, DB_PATH);
+        try { fs.unlinkSync(stagedPath); } catch (_) { }
+      } else {
+        throw renameErr;
+      }
+    }
+  } catch (err) {
+    try { if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath); } catch (_) { }
+    try { await dbManager.getConnection(); } catch (_) { }
+    if (workers) { try { workers.start(); } catch (_) { } }
+    throw err;
+  }
+
+  // Re-open, then bring the restored file up to the current schema. An older backup
+  // can predate recent tables, and its search index has to be confirmed usable —
+  // a broken medicines_fts blocks every medicine write.
   const db = await dbManager.getConnection();
+  try {
+    const { ensureSchema, ensureMedicinesFts } = await import('../database.js');
+    await ensureSchema(DB_PATH);
+    await ensureMedicinesFts(db);
+  } catch (schemaErr: any) {
+    console.warn('[Restore] Schema verification after restore failed:', schemaErr.message);
+  }
+
+  if (workers) { try { workers.start(); } catch (_) { } }
+
   await db.run(
     'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
     ['RESTORE_BACKUP', `Database restored from backup: ${sanitized}`]

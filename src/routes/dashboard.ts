@@ -23,10 +23,19 @@ router.get('/', async (_req, res) => {
       ORDER BY created_at DESC
       LIMIT 10
     `);
-        res.json({
+        const storageLocationsCount = await db.get(`SELECT COUNT(*) as cnt FROM storage_locations WHERE is_active = 1`);
+    const pendingSpecialOrdersCount = await db.get(`SELECT COUNT(*) as cnt FROM special_orders WHERE status = 'pending'`);
+    const activeDeliveryBoysCount = await db.get(`SELECT COUNT(*) as cnt FROM delivery_boys WHERE is_active = 1`);
+    const purchasesTodayRow = await db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM purchases WHERE date(date) = date('now')`);
+
+    res.json({
       todaySales: salesTodayRow.total,
       lowStock: lowStockCount.cnt,
       pendingTasks: pendingTasksCount.cnt,
+      storageLocations: storageLocationsCount?.cnt || 0,
+      pendingSpecialOrders: pendingSpecialOrdersCount?.cnt || 0,
+      activeDeliveryBoys: activeDeliveryBoysCount?.cnt || 0,
+      todayPurchases: purchasesTodayRow?.total || 0,
       alerts
     });
   } catch (err) {

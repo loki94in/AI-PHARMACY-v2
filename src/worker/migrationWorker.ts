@@ -12,6 +12,7 @@ import { eventService } from '../services/eventService.js';
 import { normalizeDate } from '../utils/migrationUtils.js';
 import { matchesFilters } from '../utils/preMigrationIntelligence.js';
 import { rebuildStockFromLedger } from '../utils/stockRebuild.js';
+import { config } from '../config/index.js';
 
 // PostgreSQL COPY parser
 import { parseCopyHeader, parseCopyDataRow, isCopyEndMarker, isPgDump } from './parsers/pgCopyParser.js';
@@ -23,7 +24,7 @@ import {
   importDoctor, flushDoctors, importPatient, flushPatients,
   importCustomer, flushCustomers,
   importGeneric,
-  importMedicine, flushMedicines,
+  importMedicine, flushMedicines, medicineImportResult,
 } from './importers/pgMasterImporter.js';
 
 import {
@@ -79,8 +80,10 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const MIGRATION_DIR = path.join(PROJECT_ROOT, 'MIGRATION SAMPEL');
 const TEMP_DIR = path.join(PROJECT_ROOT, 'data', 'temp_migration');
-const DB_PATH = process.env.DB_PATH || path.join(PROJECT_ROOT, 'data', 'app.db');
-const STAGING_DB_PATH = path.join(PROJECT_ROOT, 'data', 'staging.db');
+// Same single source of truth as dbManager and the migration routes, so the worker
+// can never stage into (or swap over) a different app.db than the app reads from.
+const DB_PATH = config.dbPath;
+const STAGING_DB_PATH = path.join(path.dirname(DB_PATH), 'staging.db');
 
 let currentMsgPrefix = '';
 
@@ -104,6 +107,28 @@ export const migrationStatus = new Proxy({
     return true;
   }
 });
+
+/**
+ * Make sure the staging database can actually accept medicine rows before importing.
+ *
+ * staging.db is a byte copy of the live app.db, so any damage to the medicines_fts
+ * index comes along with it. An unusable index makes the medicines_ai trigger fail,
+ * which fails every INSERT INTO medicines, which empties the whole migration because
+ * batches, inventory, sale items and stock rows are all keyed to a medicine id.
+ */
+async function ensureStagingFts(db: any) {
+  try {
+    const { ensureMedicinesFts } = await import('../database.js');
+    const outcome = await ensureMedicinesFts(db);
+    if (outcome === 'repaired') {
+      console.log('[Migration Worker] Rebuilt the damaged medicines_fts index in staging.db.');
+    } else if (outcome === 'unavailable') {
+      console.warn('[Migration Worker] medicines_fts unavailable in staging.db — importing without fuzzy search index.');
+    }
+  } catch (err: any) {
+    console.warn('[Migration Worker] Could not verify medicines_fts in staging.db:', err.message);
+  }
+}
 
 async function ensureMigrationErrorsTable(db: any) {
   await db.exec(`
@@ -205,6 +230,16 @@ export async function runManualMigrationQueue(tasks: MigrationTask[]): Promise<v
         startTime: Date.now()
       });
 
+      // Stop background workers to prevent database locks during migration
+      try {
+        const { closeAllStagingConnections } = await import('../routes/migration.js');
+        const { workerSupervisor } = await import('./workerSupervisor.js');
+        await closeAllStagingConnections();
+        workerSupervisor.stop();
+      } catch (wErr) {
+        console.warn('[Migration Worker] Failed to pause workers before migration:', wErr);
+      }
+
       const totalTasks = migrationQueue.length;
       let completedTasks = 0;
 
@@ -262,6 +297,12 @@ export async function runManualMigrationQueue(tasks: MigrationTask[]): Promise<v
       });
     } finally {
       isQueueRunning = false;
+      try {
+        const { workerSupervisor } = await import('./workerSupervisor.js');
+        workerSupervisor.start();
+      } catch (wErr) {
+        console.warn('[Migration Worker] Failed to restart workers after migration:', wErr);
+      }
     }
   })();
 }
@@ -337,7 +378,19 @@ async function processMigrationFile(
       // 2. Perform file copy
       await fs.promises.copyFile(DB_PATH, STAGING_DB_PATH);
 
-      // 3. Immediately validate the integrity of staging.db
+      // 3. Repair the copy's search index before validating it. PRAGMA integrity_check
+      // opens every virtual table, so a damaged medicines_fts makes the check itself
+      // throw "vtable constructor failed" — which used to abort the whole migration
+      // here, before a single row was read, and looked like a corrupt backup file.
+      migrationStatus.message = 'Verifying staging database...';
+      const stagingDb = await open({ filename: STAGING_DB_PATH, driver: sqlite3.Database });
+      try {
+        await ensureStagingFts(stagingDb);
+      } finally {
+        await stagingDb.close();
+      }
+
+      // 4. Now validate the integrity of staging.db
       try {
         const Database = (await import('better-sqlite3')).default;
         const checkDb = new Database(STAGING_DB_PATH, { readonly: true });
@@ -645,6 +698,11 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   await db.run('PRAGMA cache_size = -64000'); // 64MB cache
   await db.run('PRAGMA busy_timeout = 30000'); // 30s wait on lock
 
+  // staging.db is copied from the live app.db, so it inherits a broken medicines_fts
+  // index if the live one is damaged. Left alone that makes every medicine INSERT
+  // fail and silently imports zero medicines (and zero of everything keyed to them).
+  await ensureStagingFts(db);
+
   await ensureMigrationErrorsTable(db);
 
   // Clear all maps for a fresh import
@@ -674,6 +732,13 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   }
   try {
     await db.run(`DELETE FROM inventory_master WHERE legacy_batch_id IS NOT NULL`);
+  } catch (err) { }
+
+  // Drop reference-catalogue placeholders too. They carry mrp 0 and guessed tax rates,
+  // so leaving them beside the real imported catalogue produces near-duplicate entries
+  // with wrong prices. Medicines the user entered by hand are left untouched.
+  try {
+    await db.run(`DELETE FROM medicines WHERE source = 'master_reference'`);
   } catch (err) { }
 
   const totalPasses = 4;
@@ -760,7 +825,23 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
 
   await flushMedicines(db);
 
-  migrationStatus.message = `Pass 2 done: ${stats.medicines} medicines imported`;
+  // Report what was actually written, not what was queued, and refuse to continue on a
+  // total wipeout: every later pass resolves rows through medicineMap, so carrying on
+  // would produce an "empty but successful" migration.
+  const queuedMedicines = stats.medicines;
+  stats.medicines = medicineImportResult.inserted;
+  if (medicineImportResult.inserted === 0 && medicineImportResult.skipped > 0) {
+    throw new Error(
+      `All ${medicineImportResult.skipped} medicines were rejected by the staging database, ` +
+      `so nothing that depends on them could be imported. First error: ${medicineImportResult.firstError}`
+    );
+  }
+  if (medicineImportResult.skipped > 0) {
+    await logError('medicine', { rejected: String(medicineImportResult.skipped), of: String(queuedMedicines) }, medicineImportResult.firstError);
+  }
+
+  migrationStatus.message = `Pass 2 done: ${stats.medicines} medicines imported` +
+    (medicineImportResult.skipped > 0 ? ` (${medicineImportResult.skipped} rejected)` : '');
   migrationStatus.progress = 45;
   console.log(migrationStatus.message);
 
@@ -1082,6 +1163,7 @@ async function parseAndImportLegacySQL(sqlPath: string, targetDbPath: string) {
   const db = await open({ filename: targetDbPath, driver: sqlite3.Database });
   try {
     await db.run('PRAGMA busy_timeout = 30000');
+    await ensureStagingFts(db);
     await ensureMigrationErrorsTable(db);
 
     const fileStream = fs.createReadStream(sqlPath);
@@ -1159,6 +1241,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
   const db = await open({ filename: targetDbPath, driver: sqlite3.Database });
   try {
     await db.run('PRAGMA busy_timeout = 30000');
+    await ensureStagingFts(db);
     await ensureMigrationErrorsTable(db);
 
   if (skipLines > 0) {

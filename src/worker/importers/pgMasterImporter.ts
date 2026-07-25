@@ -22,6 +22,11 @@ export const medicineMap = new Map<string, number>();       // legacy_id → new
 export const customerMap = new Map<string, number>();       // legacy customer_id → new id (B2B)
 export const genericMap = new Map<string, string>();        // legacy generic_id → generic/composition name
 
+// Real outcome of the medicine inserts. Rows are queued by importMedicine() and only
+// actually written by flushMedicines(), so counting queued rows would overstate the
+// import — that is how a run that saved nothing could still report success.
+export const medicineImportResult = { inserted: 0, skipped: 0, firstError: null as string | null };
+
 export function clearAllMaps() {
   categoryMap.clear();
   manufacturerMap.clear();
@@ -32,6 +37,10 @@ export function clearAllMaps() {
   medicineMap.clear();
   customerMap.clear();
   genericMap.clear();
+  medicineBatch = [];
+  medicineImportResult.inserted = 0;
+  medicineImportResult.skipped = 0;
+  medicineImportResult.firstError = null;
 }
 
 // ─── Category ───────────────────────────────────────────────
@@ -299,7 +308,8 @@ const MEDICINE_BATCH_SIZE = 5000;
 
 export async function importMedicine(row: Record<string, string | null>, db: Database) {
   const legacyId = row['medicine_id'];
-  const name = row['medicine_name'];
+  // Prefer the detailed full name (includes packaging/dosage) over the base short name
+  const name = row['medicine_name_detailed'] || row['medicine_name'];
   const deleted = row['deleted'];
   if (!legacyId || !name || deleted === 't') return;
 
@@ -366,8 +376,15 @@ export async function flushMedicines(db: Database) {
           [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.cgst, m.sgst, m.igst, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
         );
         medicineMap.set(m.legacy_id, result.lastID!);
+        medicineImportResult.inserted++;
       } catch (err: any) {
-        console.warn(`[Migration] Skipped medicine ${m.name}: ${err.message}`);
+        medicineImportResult.skipped++;
+        if (!medicineImportResult.firstError) medicineImportResult.firstError = err.message;
+        // Only the first few are logged: a schema-level fault fails every single row,
+        // and 286k identical warnings bury the one line that matters.
+        if (medicineImportResult.skipped <= 5) {
+          console.warn(`[Migration] Skipped medicine ${m.name}: ${err.message}`);
+        }
       }
     }
     await db.run('COMMIT');

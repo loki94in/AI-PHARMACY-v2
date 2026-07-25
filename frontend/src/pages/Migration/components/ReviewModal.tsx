@@ -16,6 +16,7 @@ interface FileEntry {
   mapping: Record<string, string>;
   status: 'pending' | 'analyzing' | 'ready' | 'error';
   errorMsg?: string;
+  initialPhase?: 'review' | 'importing';
 }
 
 interface ReviewModalProps {

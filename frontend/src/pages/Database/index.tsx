@@ -83,6 +83,43 @@ const DatabasePage = () => {
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
   const [mrkSuggestions, setMrkSuggestions] = useState<string[]>([]);
   const [showMrkSuggestions, setShowMrkSuggestions] = useState(false);
+  const [seedingMaster, setSeedingMaster] = useState(false);
+  const [syncingInventory, setSyncingInventory] = useState(false);
+
+  const handleSeedMasterCatalog = async () => {
+    if (!window.confirm('Do you want to seed/restore the full master medicines catalog (200,000+ reference items) into the database?')) {
+      return;
+    }
+    setSeedingMaster(true);
+    try {
+      const res = await api.seedMasterMedicines();
+      alert(res.message || 'Master catalog seeded successfully!');
+      invalidateAfterStockWrite(queryClient);
+      setPage(1);
+      loadDatabase();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.error || err.message || 'Failed to seed master catalog');
+    } finally {
+      setSeedingMaster(false);
+    }
+  };
+
+  const handleSyncFromInventory = async () => {
+    setSyncingInventory(true);
+    try {
+      const res = await api.syncInventoryToMaster();
+      alert(res.message || 'Inventory medicines synced to master catalog!');
+      invalidateAfterStockWrite(queryClient);
+      setPage(1);
+      loadDatabase();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.error || err.message || 'Failed to sync inventory to master');
+    } finally {
+      setSyncingInventory(false);
+    }
+  };
 
   const handleMfgChange = async (val: string) => {
     setSingleForm(prev => ({ ...prev, manufacturer: val }));
@@ -408,29 +445,52 @@ const DatabasePage = () => {
   return (
     <div className="h-full flex flex-col fade-in relative gap-3">
       {/* Page Tabs */}
-      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
-        <button
-          onClick={() => setSearchParams({ tab: 'db' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'db'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <DatabaseIcon size={14} />
-          Master Database
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'catalog' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'catalog'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <Upload size={14} />
-          Catalog Upload
-        </button>
+      <div className="flex items-center justify-between border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSearchParams({ tab: 'db' })}
+            className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+              currentTab === 'db'
+                ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+                : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            }`}
+          >
+            <DatabaseIcon size={14} />
+            Master Database
+          </button>
+          <button
+            onClick={() => setSearchParams({ tab: 'catalog' })}
+            className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+              currentTab === 'catalog'
+                ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
+                : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+            }`}
+          >
+            <Upload size={14} />
+            Catalog Upload
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 pr-1">
+          <button
+            onClick={handleSyncFromInventory}
+            disabled={syncingInventory}
+            className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-bold uppercase flex items-center gap-1.5 transition-all"
+            title="Sync all saved/purchased products from inventory into Master Database"
+          >
+            <RefreshCw size={13} className={syncingInventory ? 'animate-spin' : ''} />
+            {syncingInventory ? 'Syncing...' : 'Sync Meds to Master'}
+          </button>
+          <button
+            onClick={handleSeedMasterCatalog}
+            disabled={seedingMaster}
+            className="px-3 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-lg text-xs font-bold uppercase flex items-center gap-1.5 transition-all"
+            title="Seed/Restore full 200,000+ reference medicines catalog"
+          >
+            <BookOpen size={13} className={seedingMaster ? 'animate-spin' : ''} />
+            {seedingMaster ? 'Seeding...' : 'Seed Master Catalog (200k+)'}
+          </button>
+        </div>
       </div>
 
       {currentTab === 'catalog' ? (

@@ -249,6 +249,14 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'id is required' });
     }
     db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
+    const oldInv = await db.get('SELECT * FROM inventory_master WHERE id = ?', [id]);
+    if (!oldInv) {
+      await db.run('ROLLBACK');
+      return res.status(404).json({ error: 'Inventory record not found' });
+    }
+
     // 1. Update inventory_master fields dynamically
     const updates = [];
     const params = [];
@@ -265,41 +273,87 @@ router.put('/:id', async (req, res) => {
       await db.run(`UPDATE inventory_master SET ${updates.join(', ')} WHERE id = ?`, params);
     }
 
-    // 2. Fetch the medicine_id associated with this inventory record
-    const invItem = await db.get('SELECT medicine_id FROM inventory_master WHERE id = ?', [id]);
-    
-    // 3. Update the medicines table if name or mrp changes
-    if (invItem && invItem.medicine_id) {
-      if (name !== undefined || mrp !== undefined || pack_size !== undefined) {
-        const updates = [];
-        const params = [];
-        if (name !== undefined) { updates.push('name = ?'); params.push(name); }
-        if (mrp !== undefined) { updates.push('mrp = ?'); params.push(mrp); }
-        if (pack_size !== undefined) { updates.push('pack_size = ?'); params.push(parseInt(pack_size, 10) || null); }
+    // 2. Keep purchase_items in sync if batch, expiry, or mrp was updated
+    if (batchNoVal !== undefined || expiry_date !== undefined || mrp !== undefined) {
+      const piUpdates = [];
+      const piParams = [];
+      if (batchNoVal !== undefined) { piUpdates.push('batch_no = ?'); piParams.push(batchNoVal); }
+      if (expiry_date !== undefined) { piUpdates.push('expiry_date = ?'); piParams.push(expiry_date); }
+      if (mrp !== undefined) { piUpdates.push('mrp = ?'); piParams.push(mrp); }
 
-        if (updates.length > 0) {
-          params.push(invItem.medicine_id);
-          await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
-        }
+      if (piUpdates.length > 0) {
+        piParams.push(oldInv.medicine_id, oldInv.batch_no);
+        await db.run(
+          `UPDATE purchase_items SET ${piUpdates.join(', ')} WHERE medicine_id = ? AND batch_no = ?`,
+          piParams
+        );
       }
-      
-      // Check if new stock triggers pending patient refills
-      await inventoryService.checkAndTriggerRefillsForMedicine(invItem.medicine_id);
     }
 
-    // POS's search/add-to-cart cache is otherwise only refreshed every 10 minutes —
-    // invalidate now so corrections (pack size, MRP, stock) are usable on the very next sale.
+    // 3. Update the medicines table if name, mrp, or pack_size changes
+    if (oldInv.medicine_id) {
+      if (name !== undefined || mrp !== undefined || pack_size !== undefined) {
+        const medUpdates = [];
+        const medParams = [];
+        if (name !== undefined) { medUpdates.push('name = ?'); medParams.push(name); }
+        if (mrp !== undefined) { medUpdates.push('mrp = ?'); medParams.push(mrp); }
+        if (pack_size !== undefined) { medUpdates.push('pack_size = ?'); medParams.push(parseInt(pack_size, 10) || null); }
+
+        if (medUpdates.length > 0) {
+          medParams.push(oldInv.medicine_id);
+          await db.run(`UPDATE medicines SET ${medUpdates.join(', ')} WHERE id = ?`, medParams);
+        }
+      }
+
+      await inventoryService.checkAndTriggerRefillsForMedicine(oldInv.medicine_id);
+    }
+
+    await db.run('COMMIT');
     inventoryCache.invalidate();
 
-        res.json({ success: true, message: 'Inventory updated' });
+    res.json({ success: true, message: 'Inventory updated and synced across unified storage' });
   } catch (error: any) {
-    if (db)     console.error(JSON.stringify({
-      message: 'Inventory update error',
-      error: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString()
-    }));
-    res.status(500).json({ error: 'Internal server error' });
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (_) {}
+    }
+    console.error('Inventory update error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  let db;
+  const { id } = req.params;
+  try {
+    if (!id) {
+      return res.status(400).json({ error: 'id is required' });
+    }
+    db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
+    const invItem = await db.get('SELECT * FROM inventory_master WHERE id = ?', [id]);
+    if (!invItem) {
+      await db.run('ROLLBACK');
+      return res.status(404).json({ error: 'Inventory item not found' });
+    }
+
+    await db.run('DELETE FROM inventory_master WHERE id = ?', [id]);
+
+    await db.run(
+      `INSERT INTO action_logs (action_type, description) VALUES ('INVENTORY_DELETE', ?)`,
+      [`Deleted inventory_master record ID ${id} (Medicine ID: ${invItem.medicine_id}, Batch: ${invItem.batch_no}, Qty: ${invItem.quantity})`]
+    );
+
+    await db.run('COMMIT');
+    inventoryCache.invalidate();
+
+    res.json({ success: true, message: 'Inventory item deleted successfully' });
+  } catch (error: any) {
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (_) {}
+    }
+    console.error('Inventory delete error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 });
 router.post('/bulk-action', async (req, res) => {
@@ -412,49 +466,83 @@ router.get('/catalog-search', async (req, res) => {
   let db;
   try {
     const q = (req.query.q as string || '').trim();
-    if (q.length < 2) return res.json([]);
     db = await dbManager.getConnection();
+
+    if (!q || q.length < 2) {
+      // Empty or 1-char query: return top 30 master medicines list
+      const defaultRows = await db.all(
+        `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
+         FROM medicines
+         ORDER BY name ASC LIMIT 30`
+      );
+      return res.json(defaultRows);
+    }
+
+    const prefixQ = `${q}%`;
     const likeQ = `%${q}%`;
     
-    // Pass 1: Query by name and aliases (extremely fast since name is primary search target)
-    const primaryRows = await db.all(
-      `SELECT id, name, item_code, manufacturer, strength, packaging, mrp, generic_name
+    // Pass 1: Prefix match on name & aliases (utilizes idx_medicines_name index range scan)
+    const prefixRows = await db.all(
+      `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
        FROM medicines
        WHERE name LIKE ?
        UNION ALL
-       SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.mrp, m.generic_name
+       SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
        FROM medicine_aliases a
        JOIN medicines m ON a.medicine_id = m.id
        WHERE a.alias_name LIKE ?
-       ORDER BY name ASC LIMIT 25`,
-      [likeQ, likeQ]
+       ORDER BY name ASC LIMIT 30`,
+      [prefixQ, prefixQ]
     );
 
     const rows: any[] = [];
     const seenIds = new Set<number>();
     
-    for (const r of primaryRows) {
+    for (const r of prefixRows) {
       if (!seenIds.has(r.id)) {
         seenIds.add(r.id);
         rows.push(r);
       }
     }
 
-    // Pass 2: Fall back to slower fields (api_reference, item_code, manufacturer) only if we need more results
-    if (rows.length < 25) {
-      const needed = 25 - rows.length;
-      const secondaryRows = await db.all(
-        `SELECT id, name, item_code, manufacturer, strength, packaging, mrp, generic_name
+    // Pass 2: Containment match on name & aliases if needed
+    if (rows.length < 30) {
+      const containmentRows = await db.all(
+        `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
          FROM medicines
-         WHERE api_reference LIKE ? OR item_code LIKE ? OR manufacturer LIKE ?
+         WHERE name LIKE ?
+         UNION ALL
+         SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
+         FROM medicine_aliases a
+         JOIN medicines m ON a.medicine_id = m.id
+         WHERE a.alias_name LIKE ?
+         ORDER BY name ASC LIMIT 30`,
+        [likeQ, likeQ]
+      );
+      for (const r of containmentRows) {
+        if (!seenIds.has(r.id)) {
+          seenIds.add(r.id);
+          rows.push(r);
+          if (rows.length >= 30) break;
+        }
+      }
+    }
+
+    // Pass 3: Secondary fields if still < 30 results
+    if (rows.length < 30) {
+      const needed = 30 - rows.length;
+      const secondaryRows = await db.all(
+        `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
+         FROM medicines
+         WHERE api_reference LIKE ? OR item_code LIKE ? OR manufacturer LIKE ? OR generic_name LIKE ?
          ORDER BY name ASC LIMIT ?`,
-        [likeQ, likeQ, likeQ, needed * 2]
+        [likeQ, likeQ, likeQ, likeQ, needed]
       );
       for (const r of secondaryRows) {
         if (!seenIds.has(r.id)) {
           seenIds.add(r.id);
           rows.push(r);
-          if (rows.length >= 25) break;
+          if (rows.length >= 30) break;
         }
       }
     }

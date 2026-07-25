@@ -30,6 +30,16 @@ class DatabaseManager {
 
   public async getConnection(): Promise<Database> {
     const dbPath = config.dbPath;
+    if (this.connection) {
+      try {
+        await this.connection.get('SELECT 1');
+      } catch (err: any) {
+        if (err?.code === 'SQLITE_MISUSE' || err?.message?.includes('closed') || err?.message?.includes('MISUSE')) {
+          this.connection = null;
+        }
+      }
+    }
+
     if (!this.connection || this.currentDbPath !== dbPath) {
       if (this.connection) {
         try {
@@ -46,9 +56,15 @@ class DatabaseManager {
       try {
         await db.open();
         await db.run(`PRAGMA busy_timeout = ${busyTimeout};`);
+        await db.run('PRAGMA journal_mode = WAL;');
       } catch (err: any) {
-        needsHeal = true;
-        initialErrorMsg = err.message || 'Failed to open database file';
+        const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked') || err?.code === 'SQLITE_BUSY';
+        if (!isBusy) {
+          needsHeal = true;
+          initialErrorMsg = err.message || 'Failed to open database file';
+        } else {
+          console.warn('[DB] Database busy on connection open, skipping self-healing rename.');
+        }
         try {
           await db.close();
         } catch (_) {}
@@ -82,6 +98,31 @@ class DatabaseManager {
               }
             }
           } catch (err: any) {
+            const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked');
+            if (isBusy) {
+              console.warn('[DB] Quick check hit transient busy lock. Skipping self-healing.');
+              return;
+            }
+
+            // PRAGMA quick_check opens every virtual table, so an unusable FTS index
+            // makes it throw even though the database file is perfectly intact.
+            // Restoring an old backup over a healthy live database because of a broken
+            // search index would lose real data, so rebuild the index and re-check first.
+            if (err?.message?.includes('vtable constructor failed')) {
+              console.warn('[DB] Quick check blocked by an unusable virtual table — rebuilding the search index.');
+              try {
+                const { ensureMedicinesFts } = await import('../database.js');
+                await ensureMedicinesFts(db);
+                const recheck = await db.get('PRAGMA quick_check');
+                if (recheck?.quick_check === 'ok') {
+                  console.log('[DB] Search index rebuilt; database is healthy, no restore needed.');
+                  return;
+                }
+              } catch (ftsErr: any) {
+                console.error('[DB] Search index rebuild failed:', ftsErr.message);
+              }
+            }
+
             console.error('[DB] Background quick check error:', err);
             try {
               const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || 'Background check error', db);

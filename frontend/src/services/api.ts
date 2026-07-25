@@ -400,6 +400,9 @@ export const api = {
     apiClient.post('/migration/staging/finalize', { regenerateInvoices }).then(r => r.data),
   rollbackMigration: () =>
     apiClient.delete('/migration/staging/rollback').then(r => r.data),
+  getLocalBackups: () => apiClient.get('/migration/local-backups').then(r => r.data),
+  runLocalBackupMigration: (fullPath: string, fileName?: string) =>
+    apiClient.post('/migration/run-local-backup', { fullPath, fileName }).then(r => r.data),
 
   // V2 endpoints
   getProjects: () => apiClient.get('/migration/projects').then(r => r.data),
@@ -703,8 +706,10 @@ export const api = {
   getNonMovingReportData: (params: { days: number }) => apiClient.get<{ success: boolean; periodDays: number; count: number; items: any[] }>('/reports/non-moving/data', { params }).then(res => res.data),
   getProductTrace: (params: { q: string }) => apiClient.get<{ purchases: any[]; sales: any[] }>('/reports/product-trace', { params }).then(res => res.data),
 
-  // Database Force Unlock
+  // Database Force Unlock & Master Catalog Seeding
   unlockDatabase: () => apiClient.post('/utilities/db/unlock').then(res => res.data),
+  seedMasterMedicines: () => apiClient.post<{ success: boolean; message: string; loaded: number }>('/medicines/seed-master').then(res => res.data),
+  syncInventoryToMaster: () => apiClient.post<{ success: boolean; message: string; synced: number }>('/medicines/sync-from-inventory').then(res => res.data),
 
   // Pharmarack Sent Orders History
   getPharmarackSentDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/pharmarack/sent-orders/dates').then(res => res.data),
@@ -754,4 +759,10 @@ export const api = {
   saveContact: (data: { name: string; type: string; phone?: string; email?: string; address?: string; gstin?: string; notes?: string; alias_names?: string; is_active?: number }) => apiClient.post<{ success: boolean; message: string; data: any }>('/contacts', data).then(res => res.data),
   updateContact: (id: number, data: Partial<{ name: string; type: string; phone: string; email: string; address: string; gstin: string; notes: string; alias_names: string; is_active: number }>) => apiClient.put<{ success: boolean; message: string; data: any }>(`/contacts/${id}`, data).then(res => res.data),
   deleteContact: (id: number) => apiClient.delete<{ success: boolean; message: string }>(`/contacts/${id}`).then(res => res.data),
+
+  // Storage Locations Management API
+  getStorageLocations: () => apiClient.get<any[]>('/settings/storage-locations').then(res => res.data),
+  saveStorageLocation: (data: { name: string; code?: string; type?: string; description?: string; is_default?: boolean; is_active?: boolean }) => apiClient.post<{ success: boolean; data: any }>('/settings/storage-locations', data).then(res => res.data),
+  updateStorageLocation: (id: number, data: Partial<{ name: string; code: string; type: string; description: string; is_default: boolean; is_active: boolean }>) => apiClient.put<{ success: boolean; data: any }>(`/settings/storage-locations/${id}`, data).then(res => res.data),
+  deleteStorageLocation: (id: number) => apiClient.delete<{ success: boolean; message: string }>(`/settings/storage-locations/${id}`).then(res => res.data),
 };

@@ -810,14 +810,24 @@ router.post('/manual', async (req, res) => {
         }
       }
       
-      if (!medId && medName) {
+      if (medName) {
+        try {
+          const { upsertMasterMedicine } = await import('../services/masterMedicinesSeedService.js');
+          await upsertMasterMedicine({
+            name: medName,
+            manufacturer: item.manufacturer || undefined,
+            mrp: mrp || undefined,
+            rate: rawRate || undefined,
+            cgst_per: rawCgst || undefined,
+            sgst_per: rawSgst || undefined,
+            hsn_code: item.hsn_code || undefined
+          });
+        } catch (_) {}
+
         const cleanName = medName.trim();
         let dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [cleanName]);
         if (dbMed) {
           medId = dbMed.id;
-        } else {
-          const insertRes = await db.run('INSERT INTO medicines (name) VALUES (?)', [cleanName]);
-          medId = insertRes.lastID;
         }
       }
 
@@ -841,17 +851,22 @@ router.post('/manual', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
-      // Update inventory_master
+      // Update inventory_master (unified storage)
       const totalQty = rawQty + rawFreeQty;
-      const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medId, rawBatch]);
+      const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
       if (invRow) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = ?, expiry_date = ? WHERE id = ?', 
+        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
       } else {
         await db.run(`
           INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp)
           VALUES (?, ?, ?, ?, ?, ?)
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+      }
+
+      // Keep medicines.mrp and rate in sync
+      if (mrp && mrp > 0) {
+        await db.run('UPDATE medicines SET mrp = ?, rate = ? WHERE id = ?', [mrp, rawRate, medId]);
       }
 
       // Learn mapping from user corrections/associations
@@ -1117,17 +1132,21 @@ router.put('/:id/full', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
-      // Update inventory_master (add new quantity)
+      // Update inventory_master (add new quantity and update cost_price, mrp, expiry_date)
       const totalQty = rawQty + rawFreeQty;
       const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
       if (invRow) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = ?, expiry_date = ? WHERE id = ?', 
+        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
       } else {
         await db.run(`
           INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp)
           VALUES (?, ?, ?, ?, ?, ?)
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+      }
+
+      if (mrp && mrp > 0) {
+        await db.run('UPDATE medicines SET mrp = ?, rate = ? WHERE id = ?', [mrp, rawRate, medId]);
       }
     }
 
@@ -1207,8 +1226,8 @@ router.delete('/:id', async (req, res) => {
     for (const item of items) {
       const totalQty = (item.quantity || 0) + (item.free_qty || 0);
       await db.run(
-        'UPDATE inventory_master SET quantity = quantity - ? WHERE medicine_id = ? AND batch_no = ?',
-        [totalQty, item.medicine_id, item.batch_no]
+        'UPDATE inventory_master SET quantity = MAX(0, quantity - ?) WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))',
+        [totalQty, item.medicine_id, item.batch_no, item.batch_no]
       );
     }
 

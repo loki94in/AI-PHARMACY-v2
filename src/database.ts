@@ -2,7 +2,173 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 19;
+const CURRENT_SCHEMA_VERSION = 21;
+
+// FTS5 creates exactly these four shadow tables for an external-content index.
+// While the `medicines_fts` declaration exists in sqlite_master these names are
+// reserved, so they can neither be created nor inspected as ordinary tables.
+const FTS_SHADOW_TABLES = ['medicines_fts_data', 'medicines_fts_idx', 'medicines_fts_docsize', 'medicines_fts_config'];
+
+const FTS_CREATE_SQL = `CREATE VIRTUAL TABLE medicines_fts USING fts5(name, content='medicines', content_rowid='id', tokenize='trigram')`;
+
+const FTS_TRIGGER_SQL = `
+  CREATE TRIGGER IF NOT EXISTS medicines_ai AFTER INSERT ON medicines BEGIN
+    INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
+  END;
+  CREATE TRIGGER IF NOT EXISTS medicines_ad AFTER DELETE ON medicines BEGIN
+    INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
+  END;
+  CREATE TRIGGER IF NOT EXISTS medicines_au AFTER UPDATE ON medicines BEGIN
+    INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
+    INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
+  END;
+`;
+
+async function tableExists(db: any, name: string): Promise<boolean> {
+  const row = await db.get("SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name = ?", [name]);
+  return !!row;
+}
+
+async function dropFtsTriggers(db: any) {
+  for (const trigger of ['medicines_ai', 'medicines_ad', 'medicines_au']) {
+    try { await db.exec(`DROP TRIGGER IF EXISTS ${trigger}`); } catch (_) { }
+  }
+}
+
+/**
+ * Classify the FTS index: fully present and queryable, absent, or declared but broken.
+ * A missing shadow table is the failure mode that produces "vtable constructor failed".
+ */
+async function inspectFts(db: any): Promise<'ok' | 'missing' | 'broken'> {
+  if (!(await tableExists(db, 'medicines_fts'))) return 'missing';
+  for (const shadow of FTS_SHADOW_TABLES) {
+    if (!(await tableExists(db, shadow))) return 'broken';
+  }
+  try {
+    await db.get('SELECT COUNT(*) AS cnt FROM medicines_fts');
+    return 'ok';
+  } catch (_) {
+    return 'broken';
+  }
+}
+
+/**
+ * Remove every trace of medicines_fts from the schema.
+ *
+ * This cannot be done with DROP TABLE alone: dropping an FTS5 virtual table runs
+ * its constructor, which is exactly what fails, and the shadow-table names stay
+ * reserved while the declaration lives in sqlite_master. Deleting that one schema
+ * row first is the only way to break the deadlock; afterwards any surviving shadow
+ * tables are ordinary tables and can be dropped normally so their pages are freed.
+ */
+export async function purgeMedicinesFts(db: any) {
+  try {
+    await db.run('PRAGMA writable_schema = ON');
+    await db.run("DELETE FROM sqlite_master WHERE type='table' AND name = 'medicines_fts'");
+  } finally {
+    // RESET also flushes the cached schema so later statements see the removal.
+    try { await db.run('PRAGMA writable_schema = RESET'); } catch (_) {
+      try { await db.run('PRAGMA writable_schema = OFF'); } catch (_) { }
+    }
+  }
+  for (const shadow of FTS_SHADOW_TABLES) {
+    try { await db.exec(`DROP TABLE IF EXISTS "${shadow}"`); } catch (_) { }
+  }
+}
+
+/**
+ * Decide whether the index actually holds terms.
+ *
+ * COUNT(*) cannot answer this: on an external-content FTS5 table a plain scan is
+ * served from the content table, so it reports every medicine even when the index
+ * is completely empty. Only a MATCH touches the index itself.
+ */
+async function ftsIndexIsPopulated(db: any): Promise<boolean> {
+  const sample = await db.get("SELECT name FROM medicines WHERE name IS NOT NULL AND name != '' LIMIT 1");
+  if (!sample) return true;
+  // The trigram tokenizer needs at least three characters to match on.
+  const token = String(sample.name).replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toLowerCase();
+  if (token.length < 3) return true;
+  try {
+    const hit = await db.get('SELECT rowid FROM medicines_fts WHERE medicines_fts MATCH ? LIMIT 1', [`"${token}"`]);
+    return !!hit;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function backfillFts(db: any, indexIsNew = false) {
+  try {
+    const medicines = await db.get('SELECT COUNT(*) AS cnt FROM medicines');
+    if (!medicines || medicines.cnt === 0) return;
+    // A freshly created index is always empty, so skip the probe in that case.
+    if (!indexIsNew && await ftsIndexIsPopulated(db)) return;
+    // 'rebuild' is the supported way to repopulate an external-content FTS5 index.
+    await db.exec("INSERT INTO medicines_fts(medicines_fts) VALUES('rebuild')");
+    console.log(`[Schema] FTS5 index built for ${medicines.cnt} medicine names.`);
+  } catch (err: any) {
+    console.warn('[Schema] FTS5 backfill skipped:', err.message);
+  }
+}
+
+/**
+ * Guarantee that the medicines_fts search index is either fully working or fully
+ * absent — never half-present.
+ *
+ * This matters far beyond search: the medicines_ai/ad/au triggers write into
+ * medicines_fts, so a broken index makes every INSERT/UPDATE/DELETE on `medicines`
+ * fail with "vtable constructor failed". That silently reduces a full data
+ * migration to zero imported medicines. The triggers are therefore only ever
+ * installed once the index has been verified usable, and are removed if it is not.
+ *
+ * Safe to call on any database handle, including a migration staging database.
+ */
+export async function ensureMedicinesFts(db: any): Promise<'ok' | 'repaired' | 'unavailable'> {
+  // An external-content index needs its content table to exist first.
+  if (!(await tableExists(db, 'medicines'))) return 'unavailable';
+
+  const state = await inspectFts(db);
+  if (state === 'ok') {
+    await db.exec(FTS_TRIGGER_SQL);
+    await backfillFts(db);
+    return 'ok';
+  }
+
+  if (state === 'broken') {
+    console.warn('[Schema] medicines_fts is unusable (missing shadow tables) — rebuilding it from scratch.');
+    await dropFtsTriggers(db);
+    await purgeMedicinesFts(db);
+  } else {
+    // No declaration, but shadow tables can outlive it (the mirror image of the
+    // orphan above). CREATE VIRTUAL TABLE would fail on the name collision, so
+    // clear them out first — without the declaration they are ordinary tables.
+    for (const shadow of FTS_SHADOW_TABLES) {
+      if (await tableExists(db, shadow)) {
+        try { await db.exec(`DROP TABLE IF EXISTS "${shadow}"`); } catch (_) { }
+      }
+    }
+  }
+
+  try {
+    await db.exec(FTS_CREATE_SQL);
+  } catch (err: any) {
+    // No usable index. Leaving the triggers in place would block every write to
+    // `medicines`, so the app runs without fuzzy search instead.
+    await dropFtsTriggers(db);
+    console.error('[Schema] Could not create medicines_fts — medicine search disabled:', err.message);
+    return 'unavailable';
+  }
+
+  if ((await inspectFts(db)) !== 'ok') {
+    await dropFtsTriggers(db);
+    console.error('[Schema] medicines_fts still unusable after rebuild — medicine search disabled.');
+    return 'unavailable';
+  }
+
+  await db.exec(FTS_TRIGGER_SQL);
+  await backfillFts(db, true);
+  return state === 'broken' ? 'repaired' : 'ok';
+}
 
 /**
  * Ensure required SQLite tables exist.
@@ -14,11 +180,15 @@ export async function ensureSchema(dbPath: string) {
   // Ensure app_settings table exists for schema version tracking
   await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
 
-  // Fast-path: skip entire DDL wall if schema is already at current version
+  // Fast-path: skip entire DDL wall if schema is already at current version AND key tables exist
   try {
     const versionRow = await db.get("SELECT value FROM app_settings WHERE key = 'schema_version'");
-    if (versionRow && parseInt(versionRow.value, 10) >= CURRENT_SCHEMA_VERSION) {
+    const tableCheck = await db.get("SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name IN ('inventory_master', 'purchase_items', 'sale_items', 'distributors')");
+    if (versionRow && parseInt(versionRow.value, 10) >= CURRENT_SCHEMA_VERSION && tableCheck && tableCheck.c >= 4) {
       console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} already applied, skipping DDL (fast boot).`);
+      // Still verify the FTS index: a broken one blocks every write to `medicines`,
+      // and that damage can happen long after the schema version was recorded.
+      await ensureMedicinesFts(db);
       return;
     }
   } catch (_) {
@@ -169,6 +339,16 @@ export async function ensureSchema(dbPath: string) {
       telegram_chat_id TEXT,
       is_active INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS storage_locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      code TEXT UNIQUE,
+      type TEXT DEFAULT 'rack',
+      description TEXT,
+      is_default INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS patient_refills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       customer_id INTEGER,
@@ -221,7 +401,153 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_phone ON patient_refills (patient_phone);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_next_refill ON patient_refills (next_refill_date);
+
+    -- Core Operational Tables
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_id INTEGER,
+      medicine_id INTEGER,
+      batch_no TEXT,
+      expiry_date DATETIME,
+      quantity INTEGER,
+      free_qty INTEGER DEFAULT 0,
+      cost_price REAL,
+      mrp REAL,
+      hsn_code TEXT,
+      cgst_per REAL DEFAULT 0,
+      cgst_value REAL DEFAULT 0,
+      sgst_per REAL DEFAULT 0,
+      sgst_value REAL DEFAULT 0,
+      igst_per REAL DEFAULT 0,
+      igst_value REAL DEFAULT 0,
+      scheme_per REAL DEFAULT 0,
+      scheme_value REAL DEFAULT 0,
+      cd_value REAL DEFAULT 0,
+      legacy_id TEXT,
+      FOREIGN KEY(purchase_id) REFERENCES purchases(id),
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_medicine_id ON purchase_items (medicine_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items (purchase_id);
+
+    CREATE TABLE IF NOT EXISTS return_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      return_id INTEGER,
+      medicine_id INTEGER,
+      batch_no TEXT,
+      quantity INTEGER,
+      cost_price REAL,
+      mrp REAL,
+      total_price REAL,
+      cgst_value REAL DEFAULT 0,
+      sgst_value REAL DEFAULT 0,
+      igst_value REAL DEFAULT 0,
+      legacy_id TEXT,
+      expiry_date DATETIME,
+      FOREIGN KEY(return_id) REFERENCES returns(id),
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS special_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requester TEXT,
+      phone TEXT,
+      notes TEXT,
+      medicine_name TEXT,
+      distributor_name TEXT,
+      status TEXT CHECK(status IN ('pending', 'ordered', 'fulfilled', 'cancelled')) DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      source_refill_id INTEGER DEFAULT NULL,
+      source TEXT,
+      customer_id INTEGER DEFAULT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS distributor_learning_profiles (
+      distributor_id INTEGER PRIMARY KEY,
+      file_mapping_rules TEXT,
+      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(distributor_id) REFERENCES distributors(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS distributor_historical_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      filename TEXT,
+      file_path TEXT,
+      file_type TEXT,
+      file_headers TEXT,
+      mapping_config TEXT,
+      extracted_data TEXT,
+      status TEXT DEFAULT 'success',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(distributor_id) REFERENCES distributors(id)
+    );
     CREATE INDEX IF NOT EXISTS idx_distributor_hist_files_dist_id ON distributor_historical_files (distributor_id);
+
+    CREATE TABLE IF NOT EXISTS push_tokens (
+      token TEXT PRIMARY KEY,
+      device_name TEXT,
+      os TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_send_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      number TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT DEFAULT 'distributor_collection',
+      status TEXT DEFAULT 'pending',
+      retry_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      target_name TEXT,
+      scheduled_at INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sent_at INTEGER DEFAULT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_wa_send_queue_status ON whatsapp_send_queue (status);
+
+    CREATE TABLE IF NOT EXISTS automation_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      recipient_name TEXT,
+      recipient_phone TEXT,
+      message TEXT,
+      status TEXT DEFAULT 'pending',
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reference_id TEXT,
+      needs_confirmation INTEGER DEFAULT 0,
+      lifecycle_status TEXT DEFAULT 'sent'
+    );
+
+    CREATE TABLE IF NOT EXISTS session_refresh_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      trigger_type TEXT NOT NULL,
+      next_scheduled_minutes INTEGER,
+      status TEXT NOT NULL,
+      error_message TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_refresh_logs_ts ON session_refresh_logs(timestamp);
+
+    CREATE TABLE IF NOT EXISTS emails (
+      uid INTEGER PRIMARY KEY,
+      from_addr TEXT,
+      subject TEXT,
+      body TEXT,
+      date DATETIME,
+      is_seen INTEGER DEFAULT 0,
+      is_order INTEGER DEFAULT 0,
+      is_saved INTEGER DEFAULT 0,
+      distributor_name TEXT,
+      has_attachments INTEGER DEFAULT 0,
+      synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      medicine_names TEXT,
+      extracted_invoice_no TEXT,
+      extracted_distributor TEXT
+    );
   `);
 
   // Safely add new columns to existing tables (SQLite throws if column exists — we catch and ignore)
@@ -233,6 +559,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE inventory_master ADD COLUMN mrp REAL DEFAULT 0`,
     `ALTER TABLE inventory_master ADD COLUMN legacy_batch_id TEXT`,
     `ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0`,
+    `ALTER TABLE inventory_master ADD COLUMN storage_location_id INTEGER DEFAULT NULL`,
     `ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL`,
     `ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN hsn_code TEXT`,
@@ -253,6 +580,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE medicines ADD COLUMN pack_unit TEXT`,
     `ALTER TABLE medicines ADD COLUMN cgst_per REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN sgst_per REAL DEFAULT 0`,
+    `ALTER TABLE medicines ADD COLUMN rate REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN item_code TEXT`,
     `ALTER TABLE medicines ADD COLUMN metadata TEXT`,
     // Purchases extra columns
@@ -380,6 +708,7 @@ export async function ensureSchema(dbPath: string) {
     // Unify patient contact storage — ensure customer_id FK column exists across operational tables
     `ALTER TABLE patient_refills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
     `ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL`,
+    `ALTER TABLE special_orders ADD COLUMN date DATETIME DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE held_bills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
   ];
   for (const stmt of alterStatements) {
@@ -460,6 +789,16 @@ export async function ensureSchema(dbPath: string) {
     await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_expiry ON inventory_master (expiry_date);');
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_generic_name ON medicines (generic_name);');
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_manufacturer ON medicines (manufacturer);');
+
+    // Seed default storage locations if table is empty
+    const locCount = await db.get("SELECT COUNT(*) as c FROM storage_locations");
+    if (!locCount || locCount.c === 0) {
+      await db.run("INSERT OR IGNORE INTO storage_locations (name, code, type, description, is_default, is_active) VALUES ('Main Store', 'MAIN', 'main_store', 'Primary Pharmacy Counter & Shelves', 1, 1)");
+      await db.run("INSERT OR IGNORE INTO storage_locations (name, code, type, description, is_default, is_active) VALUES ('Godown 1', 'GDN1', 'godown', 'Main Storage Godown', 0, 1)");
+      await db.run("INSERT OR IGNORE INTO storage_locations (name, code, type, description, is_default, is_active) VALUES ('Rack A1', 'RA1', 'rack', 'Front Counter Rack A1', 0, 1)");
+      await db.run("INSERT OR IGNORE INTO storage_locations (name, code, type, description, is_default, is_active) VALUES ('Rack B1', 'RB1', 'rack', 'Medicine Rack B1', 0, 1)");
+      await db.run("INSERT OR IGNORE INTO storage_locations (name, code, type, description, is_default, is_active) VALUES ('Cold Storage', 'COLD', 'cold_storage', 'Refrigerated Items', 0, 1)");
+    }
   } catch (err) {
     console.warn('Failed to create index idx_medicines_item_code or custom optimization indexes:', err);
   }
@@ -785,6 +1124,7 @@ export async function ensureSchema(dbPath: string) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(distributor_id) REFERENCES distributors(id)
     );
+    CREATE INDEX IF NOT EXISTS idx_distributor_hist_files_dist_id ON distributor_historical_files (distributor_id);
 
     -- Push Notification Registered Tokens Registry
     CREATE TABLE IF NOT EXISTS push_tokens (
@@ -1113,44 +1453,8 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_pharmarack_placed_orders_date ON pharmarack_placed_orders (order_date, batch_sent);
   `);
 
-  // FTS5 trigram index for fast fuzzy medicine name search (separate exec — virtual tables can't be inside multi-statement exec)
-  try {
-    await db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS medicines_fts USING fts5(name, content='medicines', content_rowid='id', tokenize='trigram')`);
-  } catch (ftsErr) {
-    console.warn('[Schema] FTS5 trigram table creation skipped (may already exist):', (ftsErr as any).message);
-  }
-
-  // FTS5 sync triggers — keep medicines_fts in sync with medicines table
-  try {
-    await db.exec(`
-      CREATE TRIGGER IF NOT EXISTS medicines_ai AFTER INSERT ON medicines BEGIN
-        INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
-      END;
-      CREATE TRIGGER IF NOT EXISTS medicines_ad AFTER DELETE ON medicines BEGIN
-        INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
-      END;
-      CREATE TRIGGER IF NOT EXISTS medicines_au AFTER UPDATE ON medicines BEGIN
-        INSERT INTO medicines_fts(medicines_fts, rowid, name) VALUES('delete', old.id, old.name);
-        INSERT INTO medicines_fts(rowid, name) VALUES (new.id, new.name);
-      END;
-    `);
-  } catch (triggerErr) {
-    console.warn('[Schema] FTS5 triggers may already exist:', (triggerErr as any).message);
-  }
-
-  // One-time FTS5 backfill — populate from existing medicines rows
-  try {
-    const ftsCount = await db.get('SELECT COUNT(*) as cnt FROM medicines_fts');
-    if (!ftsCount || ftsCount.cnt === 0) {
-      const medCount = await db.get('SELECT COUNT(*) as cnt FROM medicines');
-      if (medCount && medCount.cnt > 0) {
-        await db.exec('INSERT INTO medicines_fts(rowid, name) SELECT id, name FROM medicines');
-        console.log(`[Schema] FTS5 backfill: indexed ${medCount.cnt} medicine names.`);
-      }
-    }
-  } catch (backfillErr) {
-    console.warn('[Schema] FTS5 backfill skipped:', (backfillErr as any).message);
-  }
+  // FTS5 trigram index for fast fuzzy medicine name search, rebuilt if unusable
+  await ensureMedicinesFts(db);
 
   // Insert default settings if they don't exist
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('medical_name', 'XYZ MEDICAL')");

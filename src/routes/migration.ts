@@ -12,12 +12,17 @@ import { migrationStatus, runManualMigration, runManualMigrationQueue } from '..
 import csvParser from 'csv-parser';
 import { detectDataModules, autoMapColumn } from '../utils/preMigrationIntelligence.js';
 import { normalizeDate } from '../utils/migrationUtils.js';
+import { config } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+// Both must come from config.dbPath, the same value dbManager opens. Deriving them
+// from __dirname instead lets the finalize step write app.db to a different location
+// than every page reads from (they diverge in a packaged build), and lets this module
+// and migrationWorker disagree about where staging.db lives.
+const DB_PATH = config.dbPath;
 const MIGRATION_DIR = path.resolve(__dirname, '..', '..', 'MIGRATION SAMPEL');
-const STAGING_DB_PATH = path.resolve(__dirname, '..', '..', 'data', 'staging.db');
+const STAGING_DB_PATH = path.join(path.dirname(DB_PATH), 'staging.db');
 
 if (!fs.existsSync(MIGRATION_DIR)) fs.mkdirSync(MIGRATION_DIR, { recursive: true });
 
@@ -193,6 +198,22 @@ router.post('/pre-migration-analyze', async (req, res) => {
     let headers: string[] = [];
     let samples: any[] = [];
     let sheetNames: string[] = [];
+
+    if (['zip', 'sql', 'gz', 'tgz', 'db'].includes(ext) || ext.endsWith('zip') || ext.endsWith('gz')) {
+      return res.json({
+        success: true,
+        module: { type: 'database_dump', confidence: 1.0 },
+        columns: [],
+        autoMapping: {},
+        unmappedColumns: [],
+        validation: {
+          errors: [],
+          requiredFieldsMapped: true,
+          missingRequired: []
+        },
+        sheetNames: []
+      });
+    }
 
     if (ext === 'csv') {
       const r = await readCsvHeaders(filePath, skipCount);
@@ -410,7 +431,7 @@ router.get('/staging/returns', async (req, res) => {
   try {
     const db = await openStagingDb();
     const rows = await db.all(`
-      SELECT r.id, r.return_no, r.date, r.total_amountDistributor_name
+      SELECT r.id, r.return_no, r.date, r.total_amount, d.name as distributor_name
       FROM returns r
       LEFT JOIN distributors d ON r.distributor_id = d.id
       ORDER BY r.id DESC LIMIT 500
@@ -435,20 +456,10 @@ router.delete('/staging/rollback', async (_req, res) => {
 router.post('/staging/finalize', async (req, res) => {
   if (!fs.existsSync(STAGING_DB_PATH)) return res.status(400).json({ error: 'No staging DB found' });
   const { regenerateInvoices } = req.body;
-  try {
-    // 1. Validate staging.db integrity before swap
-    try {
-      const Database = (await import('better-sqlite3')).default;
-      const checkDb = new Database(STAGING_DB_PATH, { readonly: true });
-      const checkResult = checkDb.pragma('integrity_check') as any;
-      checkDb.close();
-      if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
-        return res.status(400).json({ error: `Staging database integrity validation failed: ${JSON.stringify(checkResult)}` });
-      }
-    } catch (integrityErr: any) {
-      return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
-    }
+  let backupPath: string | null = null;
 
+  try {
+    // 1. If requested, regenerate invoice numbers on staging.db
     if (regenerateInvoices) {
       const db = await openStagingDb();
       const invoices = await db.all('SELECT id FROM sales_invoices ORDER BY id ASC');
@@ -468,79 +479,89 @@ router.post('/staging/finalize', async (req, res) => {
 
     await closeAllStagingConnections();
 
-    // Checkpoint staging DB to commit all WAL frames before moving
+    // 1b. Verify the search index of the database about to go live. This matters before
+    // the integrity check below, which opens every virtual table and would throw on a
+    // damaged medicines_fts — blocking the swap even though the data itself is fine.
+    // Relevant when the staged database came straight from an imported .db backup.
+    try {
+      const stagingDb = await open({ filename: STAGING_DB_PATH, driver: sqlite3.Database });
+      try {
+        const { ensureMedicinesFts } = await import('../database.js');
+        await ensureMedicinesFts(stagingDb);
+      } finally {
+        await stagingDb.close();
+      }
+    } catch (ftsErr: any) {
+      console.warn('[Migration Finalize] Could not verify staging medicines_fts:', ftsErr.message);
+    }
+
+    // 2. Checkpoint staging.db and set journal_mode = DELETE to cleanly merge all WAL frames into staging.db file
     try {
       const Database = (await import('better-sqlite3')).default;
       const tempStagingDb = new Database(STAGING_DB_PATH);
       tempStagingDb.pragma('wal_checkpoint(TRUNCATE)');
+      tempStagingDb.pragma('journal_mode = DELETE');
       tempStagingDb.close();
     } catch (checkpointErr) {
       console.warn('[Migration Finalize] Staging DB checkpoint warning:', checkpointErr);
     }
 
-    // Checkpoint active DB to merge any pending transactions
+    // 3. Validate staging.db integrity before swap
+    try {
+      const Database = (await import('better-sqlite3')).default;
+      const checkDb = new Database(STAGING_DB_PATH, { readonly: true });
+      const checkResult = checkDb.pragma('integrity_check') as any;
+      checkDb.close();
+      if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
+        return res.status(400).json({ error: `Staging database integrity validation failed: ${JSON.stringify(checkResult)}` });
+      }
+    } catch (integrityErr: any) {
+      return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
+    }
+
+    // 4. Close all open staging connections and stop supervisor background workers
+    try {
+      await closeAllStagingConnections();
+      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
+      workerSupervisor.stop();
+    } catch (err) {
+      console.warn('Failed to stop workers or close staging connections:', err);
+    }
+
+    // 5. Checkpoint active DB and close dbManager connection pool
     if (fs.existsSync(DB_PATH)) {
       try {
         const Database = (await import('better-sqlite3')).default;
         const tempAppDb = new Database(DB_PATH);
         tempAppDb.pragma('wal_checkpoint(TRUNCATE)');
+        tempAppDb.pragma('journal_mode = DELETE');
         tempAppDb.close();
       } catch (checkpointErr) {
         console.warn('[Migration Finalize] Active DB checkpoint warning:', checkpointErr);
       }
     }
 
-    // Close the live connection pool to app.db before we replace the file
     await dbManager.close(true);
 
-    // Stop all supervisor background workers to prevent database corruption during file swap
-    try {
-      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
-      workerSupervisor.stop();
-    } catch (err) {
-      console.warn('Failed to stop workers:', err);
-    }
-
-    // Backup the old app.db just in case
+    // 6. Create backup of active app.db
     const timestamp = Date.now();
-    const backupPath = DB_PATH + '.bak_' + timestamp;
+    backupPath = DB_PATH + '.bak_' + timestamp;
     if (fs.existsSync(DB_PATH)) {
       fs.copyFileSync(DB_PATH, backupPath);
+    }
 
-      // Save backup to snapshots table
-      try {
-        const coreDb = await open({ filename: DB_PATH, driver: sqlite3.Database });
-        await coreDb.run('INSERT INTO migration_snapshots (backup_path) VALUES (?)', [backupPath]);
-        await coreDb.close();
-      } catch (dbErr) {
-        console.error('Failed to log snapshot:', dbErr);
+    // Clean any leftover wal/shm files for app.db and staging.db
+    ['app.db-wal', 'app.db-shm', 'staging.db-wal', 'staging.db-shm'].forEach(f => {
+      const p = path.join(path.dirname(DB_PATH), f);
+      if (fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch (_) { }
       }
-    }
+    });
 
-    // Delete WAL and SHM files of app.db to prevent SQLite recovery mismatch / corruption
-    const appWal = DB_PATH + '-wal';
-    const appShm = DB_PATH + '-shm';
-    if (fs.existsSync(appWal)) {
-      try { fs.unlinkSync(appWal); } catch (_) { }
-    }
-    if (fs.existsSync(appShm)) {
-      try { fs.unlinkSync(appShm); } catch (_) { }
-    }
-
-    // Delete staging database WAL and SHM files
-    const stagingWal = STAGING_DB_PATH + '-wal';
-    const stagingShm = STAGING_DB_PATH + '-shm';
-    if (fs.existsSync(stagingWal)) {
-      try { fs.unlinkSync(stagingWal); } catch (_) { }
-    }
-    if (fs.existsSync(stagingShm)) {
-      try { fs.unlinkSync(stagingShm); } catch (_) { }
-    }
-
-    // Replace app.db with staging.db
+    // 7. Swap files: replace app.db with staging.db
     fs.copyFileSync(STAGING_DB_PATH, DB_PATH);
 
-    // Validate the newly copied app.db before deleting staging database
+    // 8. Validate swapped app.db integrity
     try {
       const Database = (await import('better-sqlite3')).default;
       const checkDb = new Database(DB_PATH, { readonly: true });
@@ -549,21 +570,45 @@ router.post('/staging/finalize', async (req, res) => {
       if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
         throw new Error(`Integrity check failed: ${JSON.stringify(checkResult)}`);
       }
-      fs.unlinkSync(STAGING_DB_PATH);
+      try { fs.unlinkSync(STAGING_DB_PATH); } catch (_) {}
     } catch (integrityErr: any) {
       console.error('[Migration Finalize] Swapped app.db integrity check failed:', integrityErr);
-      // Restore from backup immediately if swap is corrupted
-      if (fs.existsSync(backupPath)) {
+      if (backupPath && fs.existsSync(backupPath)) {
         fs.copyFileSync(backupPath, DB_PATH);
       }
       throw new Error(`Swapped database integrity check failed. Restored from backup. Details: ${integrityErr.message}`);
     }
 
-    // Reset migration status
+    // 9. Re-initialize live dbManager connection pool
+    const activeDb = await dbManager.getConnection();
+
+    // The database that just went live came from a staging copy or an imported
+    // backup file, so verify its search index rather than assuming it is intact —
+    // a broken medicines_fts would block every medicine write from here on.
+    try {
+      const { ensureMedicinesFts } = await import('../database.js');
+      const ftsOutcome = await ensureMedicinesFts(activeDb);
+      if (ftsOutcome === 'repaired') {
+        console.log('[Migration Finalize] Rebuilt the medicines_fts index on the new live database.');
+      }
+    } catch (ftsErr: any) {
+      console.warn('[Migration Finalize] Could not verify medicines_fts:', ftsErr.message);
+    }
+
+    // 10. Log backup snapshot in migration_snapshots table using active db
+    try {
+      if (backupPath) {
+        await activeDb.run('INSERT INTO migration_snapshots (backup_path) VALUES (?)', [backupPath]);
+      }
+    } catch (dbErr) {
+      console.error('Failed to log snapshot:', dbErr);
+    }
+
+    // 11. Reset migration status
     migrationStatus.isStagingReady = false;
     migrationStatus.message = 'Idle';
 
-    // Restart supervisor background workers
+    // 12. Restart supervisor background workers
     try {
       const { workerSupervisor } = await import('../worker/workerSupervisor.js');
       workerSupervisor.start();
@@ -573,7 +618,118 @@ router.post('/staging/finalize', async (req, res) => {
 
     res.json({ success: true, message: 'Migration finalized and live!' });
   } catch (e: any) {
+    console.error('[Migration Finalize] Error during finalize:', e);
+
+    // Ensure dbManager connection pool and background workers are restored even on failure
+    try {
+      if (backupPath && fs.existsSync(backupPath) && !fs.existsSync(DB_PATH)) {
+        fs.copyFileSync(backupPath, DB_PATH);
+      }
+      await dbManager.getConnection();
+    } catch (restoreErr) {
+      console.error('Failed to restore connection after error:', restoreErr);
+    }
+
+    try {
+      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
+      workerSupervisor.start();
+    } catch (_) {}
+
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Scan local machine for RedBook & DGH backup files
+router.get('/local-backups', async (_req, res) => {
+  try {
+    const backupDirs = [
+      { path: 'D:\\redbook\\DGH_Backup', label: 'DGH Backup Folder' },
+      { path: 'D:\\redbook', label: 'RedBook Root' },
+      { path: MIGRATION_DIR, label: 'Migration Sample Folder' },
+      { path: path.resolve(__dirname, '..', '..', 'data', 'archived_migrations'), label: 'Archived Migrations' }
+    ];
+
+    const backups: Array<{
+      name: string;
+      fullPath: string;
+      sourceLabel: string;
+      sizeBytes: number;
+      lastModified: string;
+      ext: string;
+      isDbDump: boolean;
+    }> = [];
+
+    const ALLOWED_BACKUP_EXT = /\.(zip|sql|gz|tgz|db)$/i;
+
+    for (const dirObj of backupDirs) {
+      if (fs.existsSync(dirObj.path)) {
+        try {
+          const files = fs.readdirSync(dirObj.path);
+          for (const f of files) {
+            if (ALLOWED_BACKUP_EXT.test(f)) {
+              const fullPath = path.join(dirObj.path, f);
+              try {
+                const stat = fs.statSync(fullPath);
+                if (stat.isFile()) {
+                  backups.push({
+                    name: f,
+                    fullPath,
+                    sourceLabel: dirObj.label,
+                    sizeBytes: stat.size,
+                    lastModified: stat.mtime.toISOString(),
+                    ext: path.extname(f).toLowerCase().replace('.', ''),
+                    isDbDump: true
+                  });
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Sort by last modified date descending
+    backups.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+
+    res.json({ success: true, backups });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to scan local backups', details: err.message });
+  }
+});
+
+// Trigger migration on a local detected backup file
+router.post('/run-local-backup', async (req, res) => {
+  try {
+    const { fullPath, fileName } = req.body;
+    let targetPath = fullPath;
+    let targetName = fileName;
+
+    if (!targetPath && targetName) {
+      targetPath = path.join(MIGRATION_DIR, targetName);
+    }
+
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      return res.status(404).json({ error: 'Local backup file not found at: ' + targetPath });
+    }
+
+    targetName = path.basename(targetPath);
+    const destPath = path.join(MIGRATION_DIR, targetName);
+
+    if (path.resolve(targetPath) !== path.resolve(destPath)) {
+      fs.copyFileSync(targetPath, destPath);
+    }
+
+    runManualMigration(targetName, 'inventory').catch(err => {
+      console.error('Local backup background migration error:', err);
+    });
+
+    res.json({
+      success: true,
+      message: `Local backup migration started in background for ${targetName}`,
+      file: targetName
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to run local backup migration', details: err.message });
   }
 });
 

@@ -2,6 +2,10 @@ export interface DashboardStats {
   todaySales: number;
   lowStock: number;
   pendingTasks: number;
+  storageLocations?: number;
+  pendingSpecialOrders?: number;
+  activeDeliveryBoys?: number;
+  todayPurchases?: number;
   alerts?: Array<{
     id: number;
     description: string;

@@ -26,6 +26,10 @@ import {
   FileText,
   Send,
   Eye,
+  MapPin,
+  Plus,
+  Pencil,
+  CheckCircle2,
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { MobileConnectionModal } from '../../components/MobileConnectionModal';
@@ -173,6 +177,94 @@ const Settings = () => {
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  // Storage Locations state
+  interface StorageLocation {
+    id: number;
+    name: string;
+    code: string;
+    type: string;
+    description: string;
+    is_default: number;
+    is_active: number;
+  }
+  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
+  const [storageLocLoading, setStorageLocLoading] = useState(false);
+  const [storageLocForm, setStorageLocForm] = useState({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
+  const [editingLocId, setEditingLocId] = useState<number | null>(null);
+  const [deletingLocId, setDeletingLocId] = useState<number | null>(null);
+  const [storageLocSaving, setStorageLocSaving] = useState(false);
+
+  const fetchStorageLocations = async () => {
+    setStorageLocLoading(true);
+    try {
+      const res = await apiClient.get('/settings/storage-locations');
+      setStorageLocations(res.data || []);
+    } catch (err) {
+      console.warn('Failed to fetch storage locations:', err);
+    } finally {
+      setStorageLocLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchStorageLocations(); }, []);
+
+  const handleSaveStorageLoc = async () => {
+    if (!storageLocForm.name.trim()) {
+      toastEvent.trigger('Location name is required', 'error');
+      return;
+    }
+    setStorageLocSaving(true);
+    try {
+      if (editingLocId !== null) {
+        await apiClient.put(`/settings/storage-locations/${editingLocId}`, storageLocForm);
+        toastEvent.trigger('Storage location updated', 'success');
+      } else {
+        await apiClient.post('/settings/storage-locations', storageLocForm);
+        toastEvent.trigger('Storage location added', 'success');
+      }
+      setStorageLocForm({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
+      setEditingLocId(null);
+      fetchStorageLocations();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to save location', 'error');
+    } finally {
+      setStorageLocSaving(false);
+    }
+  };
+
+  const handleDeleteStorageLoc = async (id: number) => {
+    setDeletingLocId(id);
+    try {
+      await apiClient.delete(`/settings/storage-locations/${id}`);
+      toastEvent.trigger('Storage location deleted', 'success');
+      fetchStorageLocations();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Cannot delete this location', 'error');
+    } finally {
+      setDeletingLocId(null);
+    }
+  };
+
+  const startEditLoc = (loc: StorageLocation) => {
+    setEditingLocId(loc.id);
+    setStorageLocForm({
+      name: loc.name,
+      code: loc.code,
+      type: loc.type,
+      description: loc.description || '',
+      is_default: loc.is_default === 1,
+      is_active: loc.is_active === 1,
+    });
+  };
+
+  const LOC_TYPE_LABELS: Record<string, string> = {
+    main_store: 'Main Store',
+    godown: 'Godown',
+    rack: 'Rack',
+    cold_storage: 'Cold Storage',
+    other: 'Other',
+  };
 
   // Session Refresh Audit Logs state
   const [sessionLogs, setSessionLogs] = useState<{ id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[]>([]);
@@ -2290,6 +2382,187 @@ const Settings = () => {
             <span className="text-sm font-semibold text-sky">v2.0.0</span>
           </div>
         </div>
+      </div>
+
+      {/* ─── Storage Locations ─── */}
+      <div className="glass-panel p-6">
+        <h3 className="font-bold flex items-center gap-2 mb-1">
+          <MapPin size={18} className="text-sky" />
+          Storage Locations
+        </h3>
+        <p className="text-xs text-muted mb-5">Define where medicines are stored — racks, godowns, cold storage, etc. Used across Inventory, Purchases, and POS.</p>
+
+        {/* Add / Edit Form */}
+        <div className="border border-glass-border/50 rounded-xl p-4 mb-5 bg-bg3/20">
+          <p className="text-xs font-bold text-muted uppercase tracking-wider mb-3">
+            {editingLocId !== null ? '✏️ Edit Location' : '➕ Add New Location'}
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Name *</label>
+              <input
+                id="locName"
+                type="text"
+                className="premium-input w-full"
+                placeholder="e.g. Rack A1"
+                value={storageLocForm.name}
+                onChange={(e) => setStorageLocForm(f => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Short Code</label>
+              <input
+                id="locCode"
+                type="text"
+                className="premium-input w-full font-mono uppercase"
+                placeholder="e.g. RA1"
+                value={storageLocForm.code}
+                onChange={(e) => setStorageLocForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Type</label>
+              <select
+                id="locType"
+                className="premium-input w-full"
+                value={storageLocForm.type}
+                onChange={(e) => setStorageLocForm(f => ({ ...f, type: e.target.value }))}
+              >
+                <option value="rack">Rack</option>
+                <option value="main_store">Main Store</option>
+                <option value="godown">Godown</option>
+                <option value="cold_storage">Cold Storage</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider">Description</label>
+              <input
+                id="locDescription"
+                type="text"
+                className="premium-input w-full"
+                placeholder="Optional description"
+                value={storageLocForm.description}
+                onChange={(e) => setStorageLocForm(f => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <div className="flex items-end gap-4">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="accent-sky w-4 h-4"
+                  checked={storageLocForm.is_default}
+                  onChange={(e) => setStorageLocForm(f => ({ ...f, is_default: e.target.checked }))}
+                />
+                <span className="text-xs font-bold text-muted">Default</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="accent-green w-4 h-4"
+                  checked={storageLocForm.is_active}
+                  onChange={(e) => setStorageLocForm(f => ({ ...f, is_active: e.target.checked }))}
+                />
+                <span className="text-xs font-bold text-muted">Active</span>
+              </label>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              id="saveStorageLocBtn"
+              onClick={handleSaveStorageLoc}
+              disabled={storageLocSaving}
+              className="premium-btn bg-sky text-white flex items-center gap-2 disabled:opacity-50"
+            >
+              {storageLocSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              {editingLocId !== null ? 'Update Location' : 'Add Location'}
+            </button>
+            {editingLocId !== null && (
+              <button
+                onClick={() => { setEditingLocId(null); setStorageLocForm({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true }); }}
+                className="premium-btn bg-bg3/60 text-muted hover:text-text hover:bg-bg3"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Locations List */}
+        {storageLocLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted py-6 justify-center">
+            <RefreshCw size={16} className="animate-spin" /> Loading locations...
+          </div>
+        ) : storageLocations.length === 0 ? (
+          <div className="text-center py-8 text-muted">
+            <MapPin size={28} className="mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No storage locations defined yet.</p>
+          </div>
+        ) : (
+          <div className="border border-glass-border/40 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-bg2/60 border-b border-glass-border/30">
+                <tr className="text-xs text-muted uppercase tracking-wider">
+                  <th className="text-left px-4 py-2.5 font-bold">Name</th>
+                  <th className="text-left px-4 py-2.5 font-bold">Code</th>
+                  <th className="text-left px-4 py-2.5 font-bold">Type</th>
+                  <th className="text-left px-4 py-2.5 font-bold">Description</th>
+                  <th className="text-center px-4 py-2.5 font-bold">Status</th>
+                  <th className="text-right px-4 py-2.5 font-bold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {storageLocations.map((loc) => (
+                  <tr key={loc.id} className="border-t border-glass-border/20 hover:bg-bg3/20 transition-colors">
+                    <td className="px-4 py-3 font-semibold">
+                      {loc.name}
+                      {loc.is_default === 1 && (
+                        <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 bg-sky/15 text-sky rounded">DEFAULT</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted">{loc.code}</td>
+                    <td className="px-4 py-3 text-xs">{LOC_TYPE_LABELS[loc.type] || loc.type}</td>
+                    <td className="px-4 py-3 text-xs text-muted max-w-[200px] truncate" title={loc.description}>{loc.description || '—'}</td>
+                    <td className="px-4 py-3 text-center">
+                      {loc.is_active === 1 ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green/15 text-green">
+                          <CheckCircle2 size={10} /> Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-bg3/60 text-muted">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => startEditLoc(loc)}
+                          className="text-[10px] font-bold bg-sky/10 text-sky px-2.5 py-1 rounded-full hover:bg-sky/20 transition-all flex items-center gap-1"
+                          title="Edit"
+                        >
+                          <Pencil size={10} /> Edit
+                        </button>
+                        {loc.is_default !== 1 && (
+                          <button
+                            onClick={() => handleDeleteStorageLoc(loc.id)}
+                            disabled={deletingLocId === loc.id}
+                            className="text-[10px] font-bold bg-red/10 text-red/70 px-2.5 py-1 rounded-full hover:bg-red/20 hover:text-red transition-all flex items-center gap-1 disabled:opacity-50"
+                            title="Delete"
+                          >
+                            {deletingLocId === loc.id ? <RefreshCw size={10} className="animate-spin" /> : <Trash2 size={10} />} Del
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ─── Factory Reset Confirmation Modal ─── */}

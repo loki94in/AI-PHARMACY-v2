@@ -552,6 +552,30 @@ router.get('/medicines/:id/quick-details', async (req, res) => {
   }
 });
 
+// POST /api/medicines/seed-master - seed master reference catalog
+router.post('/medicines/seed-master', async (req, res) => {
+  try {
+    const { seedMasterMedicines } = await import('../services/masterMedicinesSeedService.js');
+    const result = await seedMasterMedicines(true);
+    res.json({ success: true, message: `Seeded ${result.loaded} master medicines into database`, ...result });
+  } catch (error: any) {
+    console.error('Failed to seed master medicines:', error);
+    res.status(500).json({ error: 'Failed to seed master medicines: ' + error.message });
+  }
+});
+
+// POST /api/medicines/sync-from-inventory - sync all stored/purchased products to master catalog
+router.post('/medicines/sync-from-inventory', async (req, res) => {
+  try {
+    const { syncInventoryToMaster } = await import('../services/masterMedicinesSeedService.js');
+    const result = await syncInventoryToMaster();
+    res.json({ success: true, message: `Synced ${result.synced} inventory products into master catalog`, ...result });
+  } catch (error: any) {
+    console.error('Failed to sync inventory to master:', error);
+    res.status(500).json({ error: 'Failed to sync inventory: ' + error.message });
+  }
+});
+
 export default router;
 
 

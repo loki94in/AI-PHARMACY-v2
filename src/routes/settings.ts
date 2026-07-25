@@ -352,4 +352,97 @@ router.post('/google/disconnect', async (_req, res) => {
   }
 });
 
+// Storage Locations Management
+router.get('/storage-locations', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const locations = await db.all('SELECT * FROM storage_locations ORDER BY is_default DESC, name ASC');
+    res.json(locations);
+  } catch (error) {
+    console.error('Failed to fetch storage locations:', error);
+    res.status(500).json({ error: 'Failed to fetch storage locations' });
+  }
+});
+
+router.post('/storage-locations', async (req, res) => {
+  const { name, code, type, description, is_default, is_active } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Storage location name is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const cleanName = name.trim();
+    const cleanCode = (code || cleanName.substring(0, 4).toUpperCase()).trim();
+
+    if (is_default) {
+      await db.run('UPDATE storage_locations SET is_default = 0');
+    }
+
+    const result = await db.run(
+      `INSERT INTO storage_locations (name, code, type, description, is_default, is_active)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [cleanName, cleanCode, type || 'rack', description || '', is_default ? 1 : 0, is_active !== undefined ? (is_active ? 1 : 0) : 1]
+    );
+
+    const saved = await db.get('SELECT * FROM storage_locations WHERE id = ?', [result.lastID]);
+    res.json({ success: true, data: saved });
+  } catch (error: any) {
+    console.error('Failed to create storage location:', error);
+    res.status(500).json({ error: error.message || 'Failed to create storage location' });
+  }
+});
+
+router.put('/storage-locations/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, code, type, description, is_default, is_active } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    if (is_default) {
+      await db.run('UPDATE storage_locations SET is_default = 0');
+    }
+    await db.run(
+      `UPDATE storage_locations
+       SET name = COALESCE(?, name),
+           code = COALESCE(?, code),
+           type = COALESCE(?, type),
+           description = COALESCE(?, description),
+           is_default = CASE WHEN ? IS NOT NULL THEN ? ELSE is_default END,
+           is_active = CASE WHEN ? IS NOT NULL THEN ? ELSE is_active END
+       WHERE id = ?`,
+      [
+        name ? name.trim() : null,
+        code ? code.trim() : null,
+        type || null,
+        description !== undefined ? description : null,
+        is_default !== undefined ? 1 : null,
+        is_default ? 1 : 0,
+        is_active !== undefined ? 1 : null,
+        is_active ? 1 : 0,
+        id
+      ]
+    );
+    const updated = await db.get('SELECT * FROM storage_locations WHERE id = ?', [id]);
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    console.error('Failed to update storage location:', error);
+    res.status(500).json({ error: error.message || 'Failed to update storage location' });
+  }
+});
+
+router.delete('/storage-locations/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    const loc = await db.get('SELECT * FROM storage_locations WHERE id = ?', [id]);
+    if (!loc) return res.status(404).json({ error: 'Storage location not found' });
+    if (loc.is_default) return res.status(400).json({ error: 'Cannot delete default storage location' });
+
+    await db.run('DELETE FROM storage_locations WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Storage location deleted' });
+  } catch (error) {
+    console.error('Failed to delete storage location:', error);
+    res.status(500).json({ error: 'Failed to delete storage location' });
+  }
+});
+
 export default router;
