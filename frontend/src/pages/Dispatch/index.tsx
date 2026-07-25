@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown, Send } from 'lucide-react';
+import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown, Send, Check, Edit3 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 
@@ -102,13 +102,14 @@ const Dispatch = () => {
         whatsapp_number: newBoyPhone.trim() || undefined,
         is_active: 1,
       });
-      showNotif(`Delivery boy "${newBoyName}" added successfully!`);
+      showNotif(`Delivery boy "${newBoyName.trim()}" added successfully!`);
       setNewBoyName('');
       setNewBoyPhone('');
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
-    } catch { showNotif('Failed to add delivery boy', 'error'); }
-    finally { setAddingBoy(false); }
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || 'Failed to add delivery boy', 'error');
+    } finally { setAddingBoy(false); }
   };
 
   const handleSaveBoyEdit = async (id: number) => {
@@ -123,8 +124,9 @@ const Dispatch = () => {
       setEditingBoyId(null);
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
-    } catch { showNotif('Failed to update delivery boy', 'error'); }
-    finally { setSavingBoyEdit(false); }
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || 'Failed to update delivery boy', 'error');
+    } finally { setSavingBoyEdit(false); }
   };
 
   const handleToggleBoyActive = async (boy: DeliveryBoy) => {
@@ -134,7 +136,9 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${boy.name}" ${newActive ? 'activated' : 'deactivated'}`);
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
-    } catch { showNotif('Failed to update status', 'error'); }
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || 'Failed to update status', 'error');
+    }
   };
 
   const handleDeleteBoy = async (id: number, name: string) => {
@@ -144,7 +148,9 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${name}" deleted`);
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       fetchAll();
-    } catch { showNotif('Failed to delete delivery boy', 'error'); }
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || 'Failed to delete delivery boy', 'error');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

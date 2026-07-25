@@ -32,7 +32,7 @@ import {
   Truck,
   Check
 } from 'lucide-react';
-import { apiClient } from '../../services/api';
+import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getNDaysAgoString } from '../../utils/date';
@@ -70,6 +70,9 @@ interface ProfileDetail {
   last_updated: string;
 }
 
+let cachedProfiles: LearningProfileSummary[] = [];
+const cachedProfileDetailsMap: Record<number, any> = {};
+
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'clinical';
@@ -96,10 +99,16 @@ const Learning: React.FC = () => {
     () => apiClient.get('/crm/doctors').then(res => res.data)
   );
 
-  // Profiles Query
-  const { data: profiles = [], isLoading: loadingProfiles } = useApiQuery<LearningProfileSummary[]>(
+  // Profiles Query with module caching
+  const { data: profiles = cachedProfiles, isLoading: loadingProfiles } = useApiQuery<LearningProfileSummary[]>(
     'learning-profiles',
-    () => apiClient.get('/learning/profiles').then(res => res.data.profiles || [])
+    async () => {
+      const res = await apiClient.get('/learning/profiles');
+      const list = res.data.profiles || [];
+      cachedProfiles = list;
+      return list;
+    },
+    { staleTime: 60000, initialData: cachedProfiles.length > 0 ? cachedProfiles : undefined }
   );
 
   // Settings Query
@@ -108,12 +117,24 @@ const Learning: React.FC = () => {
     () => apiClient.get('/settings').then(res => res.data)
   );
 
-  // Profile Detail Query
+  // Profile Detail Query with module caching and instant hydration
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const { data: serverProfileDetail, isLoading: loadingDetail } = useApiQuery<any>(
     ['learning-profile-detail', selectedProfileId],
-    () => apiClient.get(`/learning/profiles/${selectedProfileId}`).then(res => res.data),
-    { enabled: !!selectedProfileId }
+    async () => {
+      if (!selectedProfileId) return null;
+      const res = await apiClient.get(`/learning/profiles/${selectedProfileId}`);
+      const data = res.data;
+      if (data) {
+        cachedProfileDetailsMap[selectedProfileId] = data;
+      }
+      return data;
+    },
+    {
+      enabled: !!selectedProfileId,
+      staleTime: 300000,
+      initialData: selectedProfileId && cachedProfileDetailsMap[selectedProfileId] ? cachedProfileDetailsMap[selectedProfileId] : undefined
+    }
   );
 
   // Local draft states
@@ -121,7 +142,7 @@ const Learning: React.FC = () => {
     distributor: any;
     profile: ProfileDetail | null;
     files: HistoricalFile[];
-  } | null>(null);
+  } | null>(() => selectedProfileId && cachedProfileDetailsMap[selectedProfileId] ? cachedProfileDetailsMap[selectedProfileId] : null);
 
   const [settingsData, setSettingsData] = useState<any>(null);
 
@@ -1124,7 +1145,7 @@ const Learning: React.FC = () => {
             {/* Right Column: Profile details form */}
             <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
               {selectedProfileId !== null ? (
-                loadingDetail ? (
+                loadingDetail && !selectedProfile ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3">
                     <RefreshCw className="animate-spin text-sky" size={24} />
                     <span className="text-xs">Fetching profile details...</span>
@@ -1204,6 +1225,8 @@ const Learning: React.FC = () => {
                             onClick={async () => {
                               try {
                                 await apiClient.put(`/settings/distributors/${selectedProfile.distributor.id}`, selectedProfile.distributor);
+                                window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+                                window.dispatchEvent(new CustomEvent('contacts-updated'));
                                 toastEvent.trigger('Distributor profile updated', 'success');
                                 queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
                               } catch (err) {

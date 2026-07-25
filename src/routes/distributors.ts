@@ -27,17 +27,18 @@ router.post('/distributors', async (req, res) => {
       await db.run(
         `UPDATE distributors 
          SET phone = COALESCE(?, phone),
+             contact = COALESCE(?, contact, phone),
              email = COALESCE(?, email),
              address = COALESCE(?, address),
              gstin = COALESCE(?, gstin)
          WHERE id = ?`,
-        [phone, email, address, gstin, existing.id]
+        [phone, phone, email, address, gstin, existing.id]
       );
       res.json({ success: true, message: 'Distributor updated', id: existing.id });
     } else {
       const result = await db.run(
-        `INSERT INTO distributors (name, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?)`,
-        [name, phone, email, address, gstin]
+        `INSERT INTO distributors (name, phone, contact, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, phone, phone, email, address, gstin]
       );
       res.json({ success: true, message: 'Distributor created', id: result.lastID });
     }
@@ -57,12 +58,13 @@ router.put('/:id', async (req, res) => {
       `UPDATE distributors 
        SET name = COALESCE(?, name),
            phone = COALESCE(?, phone),
+           contact = COALESCE(?, contact, phone),
            email = COALESCE(?, email),
            preferred_file_format = COALESCE(?, preferred_file_format),
            gstin = COALESCE(?, gstin),
            address = COALESCE(?, address)
        WHERE id = ?`,
-      [name, phone, email, preferred_file_format, gstin, address, id]
+      [name, phone, phone, email, preferred_file_format, gstin, address, id]
     );
     res.json({ success: true, message: 'Distributor details updated successfully' });
   } catch (error) {

@@ -198,12 +198,18 @@ router.get('/profiles', async (req, res) => {
     db = await dbManager.getConnection();
     const profiles = await db.all(`
       SELECT d.id as distributor_id, d.name as distributor_name, d.email as distributor_email,
-             COALESCE(NULLIF(d.phone, ''), NULLIF(d.contact, '')) as distributor_phone,
+             d.phone as distributor_phone,
              lp.last_updated,
-             (SELECT COUNT(*) FROM distributor_historical_files WHERE distributor_id = d.id) as files_count,
-             (SELECT status FROM distributor_historical_files WHERE distributor_id = d.id ORDER BY id DESC LIMIT 1) as last_status
+             COALESCE(dhf_agg.files_count, 0) as files_count,
+             dhf.status as last_status
       FROM distributors d
       LEFT JOIN distributor_learning_profiles lp ON d.id = lp.distributor_id
+      LEFT JOIN (
+        SELECT distributor_id, COUNT(*) as files_count, MAX(id) as max_id
+        FROM distributor_historical_files
+        GROUP BY distributor_id
+      ) dhf_agg ON d.id = dhf_agg.distributor_id
+      LEFT JOIN distributor_historical_files dhf ON dhf.id = dhf_agg.max_id
       ORDER BY d.name ASC
     `);
     res.json({ success: true, profiles });
@@ -222,11 +228,14 @@ router.get('/profiles/:distributorId', async (req, res) => {
     db = await dbManager.getConnection();
     const distributor = await db.get('SELECT * FROM distributors WHERE id = ?', [distId]);
     if (!distributor) {
-            return res.status(404).json({ error: 'Distributor not found' });
+      return res.status(404).json({ error: 'Distributor not found' });
     }
     const profile = await db.get('SELECT * FROM distributor_learning_profiles WHERE distributor_id = ?', [distId]);
-    const files = await db.all('SELECT * FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC', [distId]);
-        res.json({
+    const files = await db.all(
+      'SELECT id, distributor_id, filename, file_path, file_type, file_headers, mapping_config, status, created_at FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC',
+      [distId]
+    );
+    res.json({
       success: true,
       distributor,
       profile: profile || null,

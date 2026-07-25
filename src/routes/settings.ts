@@ -312,6 +312,15 @@ router.put('/distributors/:id', async (req, res) => {
     );
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });
+
+    // Also sync pharmarack_distributors table if present
+    try {
+      await db.run(
+        "UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?",
+        [cleanPhone, `%${name.toLowerCase().trim()}%`]
+      );
+    } catch (_) {}
+
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Failed to update distributor:', error);

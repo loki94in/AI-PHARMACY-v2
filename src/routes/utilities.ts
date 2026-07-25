@@ -262,46 +262,32 @@ router.post('/restore', async (_req, res) => {
 // GET /api/utilities/backup/status
 router.get('/backup/status', async (req, res) => {
   try {
-    const status = await backupRecoveryService.checkStartupRestore();
     const db = await dbManager.getConnection();
     
-    // Fetch individual toggles and values
-    const getSetting = async (key: string, def: string) => {
-      const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]);
-      return row ? row.value : def;
-    };
+    // Fetch all relevant toggles and values in a single batched query
+    const rows = await db.all(
+      `SELECT key, value FROM app_settings WHERE key IN (
+        'backup_local_enabled', 'backup_gdrive_enabled', 'backup_telegram_enabled',
+        'backup_auto_enabled', 'backup_is_paused', 'backup_upload_log'
+      )`
+    );
+    const settingsMap: Record<string, string> = {};
+    for (const r of rows) {
+      settingsMap[r.key] = r.value;
+    }
 
-    const localEnabled = await getSetting('backup_local_enabled', 'true') === 'true';
-    const gdriveEnabled = await getSetting('backup_gdrive_enabled', 'false') === 'true';
-    const telegramEnabled = await getSetting('backup_telegram_enabled', 'false') === 'true';
-    const autoEnabled = await getSetting('backup_auto_enabled', 'true') === 'true';
-    const isPaused = await getSetting('backup_is_paused', 'false') === 'true';
+    const localEnabled = (settingsMap['backup_local_enabled'] ?? 'true') === 'true';
+    const gdriveEnabled = (settingsMap['backup_gdrive_enabled'] ?? 'false') === 'true';
+    const telegramEnabled = (settingsMap['backup_telegram_enabled'] ?? 'false') === 'true';
+    const isPaused = (settingsMap['backup_is_paused'] ?? 'false') === 'true';
 
-    // Calculate total size of snapshots and archives
-    const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
-    const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
-    const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
-    
-    let totalSize = 0;
-    const calculateFolderSize = (dir: string) => {
-      if (fs.existsSync(dir)) {
-        fs.readdirSync(dir).forEach(f => {
-          const stats = fs.statSync(path.join(dir, f));
-          if (stats.isFile()) {
-            totalSize += stats.size;
-          }
-        });
-      }
-    };
-    calculateFolderSize(SNAPSHOTS_DIR);
-    calculateFolderSize(ARCHIVES_DIR);
+    let uploadLog: Record<string, { gdrive?: boolean; telegram?: boolean }> = {};
+    try {
+      uploadLog = JSON.parse(settingsMap['backup_upload_log'] || '{}');
+    } catch {}
 
-    // Get last backup & last upload details
-    const archives = backupRecoveryService.listArchives();
+    const archives = backupRecoveryService.listArchives(uploadLog);
     const lastArchive = archives[0];
-    
-    const uploadLogRaw = await getSetting('backup_upload_log', '{}');
-    const uploadLog = JSON.parse(uploadLogRaw);
     
     let lastUploadDate = 'Never';
     let lastBackupDate = 'Never';
@@ -314,6 +300,27 @@ router.get('/backup/status', async (req, res) => {
       }
     }
 
+    // Calculate total size of snapshots and archives
+    const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
+    const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
+    const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
+    
+    let totalSize = 0;
+    const calculateFolderSize = (dir: string) => {
+      if (fs.existsSync(dir)) {
+        fs.readdirSync(dir).forEach(f => {
+          try {
+            const stats = fs.statSync(path.join(dir, f));
+            if (stats.isFile()) {
+              totalSize += stats.size;
+            }
+          } catch {}
+        });
+      }
+    };
+    calculateFolderSize(SNAPSHOTS_DIR);
+    calculateFolderSize(ARCHIVES_DIR);
+
     // Next scheduled backup
     const frequency = await getScheduleConfig();
     let nextScheduledBackup = 'N/A';
@@ -323,7 +330,7 @@ router.get('/backup/status', async (req, res) => {
 
     res.json({
       success: true,
-      showRestorePopup: status.showRestorePopup,
+      showRestorePopup: false,
       availableArchives: archives,
       localBackupStatus: localEnabled ? (isPaused ? 'Paused' : 'Enabled') : 'Disabled',
       gdriveStatus: gdriveEnabled ? (isPaused ? 'Paused' : 'Enabled') : 'Disabled',

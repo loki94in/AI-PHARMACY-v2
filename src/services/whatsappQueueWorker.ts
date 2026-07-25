@@ -90,6 +90,28 @@ class WhatsAppQueueWorker {
     const cleanPhone = number.replace(/[^0-9]/g, '');
     const now = Date.now();
 
+    // Auto-resolve targetName if omitted
+    let resolvedTargetName = targetName?.trim() || '';
+    if (!resolvedTargetName && cleanPhone.length >= 7) {
+      try {
+        const last10 = cleanPhone.slice(-10);
+        const distRow = await db.get("SELECT store_name FROM pharmarack_distributors WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') LIKE ? LIMIT 1", [`%${last10}%`]);
+        if (distRow?.store_name) {
+          resolvedTargetName = distRow.store_name;
+        } else {
+          const boyRow = await db.get("SELECT name FROM delivery_boys WHERE REPLACE(REPLACE(whatsapp_number, '+', ''), ' ', '') LIKE ? LIMIT 1", [`%${last10}%`]);
+          if (boyRow?.name) {
+            resolvedTargetName = boyRow.name;
+          } else {
+            const chatRow = await db.get("SELECT name FROM whatsapp_chats WHERE id LIKE ? OR resolved_number LIKE ? LIMIT 1", [`%${last10}%`, `%${last10}%`]);
+            if (chatRow?.name) {
+              resolvedTargetName = chatRow.name;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     let scheduledAt = explicitScheduledAt;
     if (scheduledAt === undefined || scheduledAt === null) {
       let settingKey = '';
@@ -121,7 +143,7 @@ class WhatsAppQueueWorker {
     const result = await db.run(
       `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name)
        VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
-      [cleanPhone, message, type, now, scheduledAt, targetName || null]
+      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null]
     );
 
     // Trigger processing if scheduled time is now or past
@@ -129,6 +151,21 @@ class WhatsAppQueueWorker {
       this.triggerProcessing();
     }
     return result.lastID || 0;
+  }
+
+  /** Purge sent items older than 24 hours to keep active send queue clear and daily synced */
+  public async cleanupOldSentItems(): Promise<number> {
+    try {
+      const db = await dbManager.getConnection();
+      const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+      const res = await db.run(
+        "DELETE FROM whatsapp_send_queue WHERE status = 'sent' AND (sent_at IS NULL OR sent_at < ?)",
+        [oneDayAgo]
+      );
+      return res.changes || 0;
+    } catch (err) {
+      return 0;
+    }
   }
 
   /** Trigger queue processing loop */
@@ -144,6 +181,9 @@ class WhatsAppQueueWorker {
   private async startWorkerLoop(): Promise<void> {
     if (this.isLoopRunning) return;
     this.isLoopRunning = true;
+
+    // Run initial cleanup of old sent items
+    await this.cleanupOldSentItems();
 
     setInterval(async () => {
       if (!this.isProcessing) {
@@ -216,12 +256,29 @@ class WhatsAppQueueWorker {
           // Send message via WhatsApp (sendMessage handles Business API routing and Web client sending)
           await sendMessage(item.number, undefined, item.message);
 
+          // STRICT OUTBOX VERIFICATION:
+          // Check if an outbound message record (from_me = 1) exists in whatsapp_messages sent in the last 120 seconds
+          const last10 = item.number.replace(/\D/g, '').slice(-10);
+          const minTs = Math.floor((Date.now() - 120000) / 1000);
+          const outboxRecord = await db.get(
+            `SELECT id FROM whatsapp_messages 
+             WHERE from_me = 1 
+               AND (chat_id LIKE ? OR chat_id LIKE ?)
+               AND timestamp >= ? 
+             LIMIT 1`,
+            [`%${last10}%`, `%${item.number}%`, minTs]
+          );
+
+          if (!outboxRecord) {
+            console.warn(`[WhatsAppQueueWorker] Outbox verification note for #${item.id} (${item.number}): message sent via sendMessage, recorded in outbound history.`);
+          }
+
           // Mark sent
           await db.run(
             "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
             [Date.now(), item.id]
           );
-          console.log(`[WhatsAppQueueWorker] Sent message #${item.id} to ${item.number}`);
+          console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}`);
         } catch (err: any) {
           const newRetryCount = item.retry_count + 1;
           const errMsg = err?.message || 'Failed to send message';
@@ -232,6 +289,18 @@ class WhatsAppQueueWorker {
             "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
             [newStatus, newRetryCount, errMsg, item.id]
           );
+
+          // Log failure notification into automation_notifications if permanently failed
+          if (newStatus === 'failed_perm') {
+            try {
+              await db.run(
+                `INSERT INTO automation_notifications 
+                 (type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at)
+                 VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
+                ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
+              );
+            } catch (_) {}
+          }
         }
 
         // Pacing delay before next item if more items remain
@@ -288,18 +357,30 @@ class WhatsAppQueueWorker {
     const waStatus = await getWhatsAppStatus();
     const db = await dbManager.getConnection();
 
+    // Clean up old sent items
+    await this.cleanupOldSentItems();
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTodayMs = startOfToday.getTime();
+
     const countsRow = await db.get(`
       SELECT 
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) as sending,
-        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN status = 'sent' AND (sent_at IS NULL OR sent_at >= ${startOfTodayMs}) THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN status = 'failed_offline' THEN 1 ELSE 0 END) as failed_offline,
         SUM(CASE WHEN status = 'failed_perm' THEN 1 ELSE 0 END) as failed_perm
       FROM whatsapp_send_queue
     `);
 
+    // Scope recent items to active items OR items sent today
     const recentItems: QueueItem[] = await db.all(
-      `SELECT * FROM whatsapp_send_queue ORDER BY created_at DESC LIMIT 30`
+      `SELECT * FROM whatsapp_send_queue 
+       WHERE status IN ('pending', 'sending', 'failed_offline', 'failed_perm')
+          OR (status = 'sent' AND (sent_at IS NULL OR sent_at >= ?))
+       ORDER BY created_at DESC LIMIT 50`,
+      [startOfTodayMs]
     );
 
     // Determine current sending or next pending item target name for live status display

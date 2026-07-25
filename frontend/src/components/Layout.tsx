@@ -763,6 +763,8 @@ const Topbar = ({
     counts: { pending: number; sending: number; sent: number };
   } | null>(null);
 
+  const notifiedFailedQueueIdsRef = useRef<Set<number>>(new Set());
+
   const fetchServicesStatus = useCallback(async () => {
     try {
       const { api } = await import('../services/api.js');
@@ -778,6 +780,16 @@ const Topbar = ({
           activeTargetName: qData.activeTargetName,
           counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
         });
+
+        if (Array.isArray(qData.recentItems)) {
+          qData.recentItems.forEach((item: any) => {
+            if ((item.status === 'failed_perm' || (item.status === 'failed_offline' && item.retry_count >= 3)) && !notifiedFailedQueueIdsRef.current.has(item.id)) {
+              notifiedFailedQueueIdsRef.current.add(item.id);
+              const target = item.target_name || (item.number ? `+${item.number}` : 'Recipient');
+              toastEvent.trigger(`❌ WhatsApp message to ${target} failed: ${item.error_message || 'Permanent send failure'}`, 'error');
+            }
+          });
+        }
       }
     } catch (err) {
       console.warn('[Layout] Failed to fetch services status:', err);

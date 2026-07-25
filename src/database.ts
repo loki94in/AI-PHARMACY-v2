@@ -221,6 +221,7 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_phone ON patient_refills (patient_phone);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_next_refill ON patient_refills (next_refill_date);
+    CREATE INDEX IF NOT EXISTS idx_distributor_hist_files_dist_id ON distributor_historical_files (distributor_id);
   `);
 
   // Safely add new columns to existing tables (SQLite throws if column exists — we catch and ignore)
@@ -1401,6 +1402,14 @@ export async function ensureSchema(dbPath: string) {
   }
 
 
+
+  // Consolidate legacy 'contact' into 'phone' if 'phone' is empty, then ensure 'phone' is the single source of truth
+  try {
+    await db.run("UPDATE distributors SET phone = contact WHERE (phone IS NULL OR phone = '') AND contact IS NOT NULL AND contact != ''");
+    await db.run("UPDATE distributors SET contact = phone WHERE phone IS NOT NULL AND phone != ''");
+  } catch (syncErr) {
+    console.warn('[Database Schema] Distributor phone sync warning:', syncErr);
+  }
 
   // Stamp schema version so subsequent boots skip all DDL
   await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('schema_version', ?)", [String(CURRENT_SCHEMA_VERSION)]);

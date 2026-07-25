@@ -473,18 +473,19 @@ export class BackupRecoveryService {
   /**
    * Lists all local backup archives.
    */
-  public listArchives(): { filename: string; date: string; sizeBytes: number; source: string }[] {
+  public listArchives(uploadLogMap?: Record<string, { gdrive?: boolean; telegram?: boolean }>): { filename: string; date: string; sizeBytes: number; source: string }[] {
     if (!fs.existsSync(ARCHIVES_DIR)) return [];
 
-    const uploadLogRaw = fs.existsSync(getDbPath()) ? '' : '{}'; // Avoid connection during early startup queries if possible
-    let uploadLog: Record<string, { gdrive?: boolean; telegram?: boolean }> = {};
-    try {
-      // Direct load if DB is initialized
-      const db = new Database(getDbPath(), { readonly: true });
-      const row = db.prepare("SELECT value FROM app_settings WHERE key = 'backup_upload_log'").get() as any;
-      uploadLog = JSON.parse(row?.value || '{}');
-      db.close();
-    } catch {}
+    let uploadLog: Record<string, { gdrive?: boolean; telegram?: boolean }> = uploadLogMap || {};
+    if (!uploadLogMap) {
+      try {
+        // Direct load if DB is initialized
+        const db = new Database(getDbPath(), { readonly: true });
+        const row = db.prepare("SELECT value FROM app_settings WHERE key = 'backup_upload_log'").get() as any;
+        uploadLog = JSON.parse(row?.value || '{}');
+        db.close();
+      } catch {}
+    }
 
     return fs.readdirSync(ARCHIVES_DIR)
       .filter(f => f.startsWith('archive_') && f.endsWith('.zip'))

@@ -458,12 +458,12 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               >
                 <div className="flex justify-between items-start mb-1.5">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-xs font-mono text-text">+{item.number}</span>
-                    {item.target_name && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                        {item.target_name}
-                      </span>
-                    )}
+                    <span className="font-bold text-xs text-text">
+                      {item.target_name || (item.type === 'delivery_boy_summary' ? 'Delivery Staff' : 'Distributor')}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted bg-bg3 border border-glass-border/40 px-1.5 py-0.5 rounded">
+                      +{item.number}
+                    </span>
                     <span className="text-[9px] uppercase px-1.5 py-0.5 rounded font-black tracking-wider bg-sky-500/20 text-sky border border-sky-500/30">
                       {item.type || 'Collection'}
                     </span>

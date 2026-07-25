@@ -228,7 +228,7 @@ router.post('/send', async (req, res) => {
       } catch (qErr: any) {
         console.error('[Messaging] Failed to queue timed-out message:', qErr?.message || qErr);
       }
-      return res.status(202).json({ success: true, message: 'Message queued for delivery (client initializing)' });
+      return res.status(202).json({ success: true, queued: true, message: 'Message queued for delivery (client initializing)' });
     }
 
     // Real success
