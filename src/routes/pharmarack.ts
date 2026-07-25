@@ -1637,36 +1637,55 @@ router.post('/check-overstock', async (req, res) => {
     const db = await dbManager.getConnection();
 
     // 1. Clean product name for search
+    // 1. Clean product name & extract core brand tokens
+    const rawClean = productName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
     const { cleaned } = cleanSearchQuery(productName);
-    const searchPattern = `%${cleaned.toLowerCase()}%`;
+    
+    // Extract core brand name & strength digits (e.g. "dolo 650" from "DOLO 650 TAB 15 ()")
+    const brandTokens = rawClean
+      .replace(/\b(new|tab|tabs|tablet|tablets|cap|caps|capsule|inj|syrup|10tab|15tab|10s|15s|10|15|30|60|100)\b/gi, '')
+      .replace(/[\s\-_.\/]+/g, ' ')
+      .trim();
 
-    // 2. Find matching medicine in unified local inventory
-    let localMed = await db.get(
+    const alphaNumericOnly = rawClean.replace(/[^a-z0-9]/g, '');
+
+    // 2. Multi-stage search: Collect ALL matching local medicine IDs
+    let matchingMeds = await db.all(
       `SELECT id, name, generic_name, max_stock_level FROM medicines 
-       WHERE LOWER(name) = ? OR LOWER(generic_name) = ?
-       LIMIT 1`,
-      [productName.toLowerCase(), productName.toLowerCase()]
+       WHERE LOWER(name) = ? OR LOWER(generic_name) = ? OR LOWER(name) = ?`,
+      [productName.toLowerCase(), rawClean, cleaned.toLowerCase()]
     );
 
-    if (!localMed && cleaned.length >= 2) {
-      localMed = await db.get(
+    if (matchingMeds.length === 0 && brandTokens.length >= 2) {
+      matchingMeds = await db.all(
         `SELECT id, name, generic_name, max_stock_level FROM medicines 
          WHERE LOWER(name) LIKE ? OR LOWER(generic_name) LIKE ?
-         ORDER BY LENGTH(name) ASC LIMIT 1`,
-        [searchPattern, searchPattern]
+         ORDER BY LENGTH(name) ASC LIMIT 10`,
+        [`%${brandTokens}%`, `%${brandTokens}%`]
       );
     }
 
-    // Also check medicine_reference mapping if not found directly
-    if (!localMed && cleaned.length >= 2) {
-      const refRow = await db.get(
-        `SELECT name FROM medicine_reference WHERE LOWER(name) LIKE ? LIMIT 1`,
-        [searchPattern]
-      );
-      if (refRow) {
-        localMed = await db.get(
-          `SELECT id, name, generic_name, max_stock_level FROM medicines WHERE LOWER(name) = ? LIMIT 1`,
-          [refRow.name.toLowerCase()]
+    if (matchingMeds.length === 0 && alphaNumericOnly.length >= 3) {
+      const strippedBrand = alphaNumericOnly.replace(/(new|tab|tablet|cap|capsule|inj|syrup|10tab|15tab|10s|15s)/g, '');
+      if (strippedBrand.length >= 3) {
+        matchingMeds = await db.all(
+          `SELECT id, name, generic_name, max_stock_level FROM medicines 
+           WHERE REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name), ' ', ''), '-', ''), '.', ''), '/', '') LIKE ?
+           ORDER BY LENGTH(name) ASC LIMIT 10`,
+          [`%${strippedBrand}%`]
+        );
+      }
+    }
+
+    // First word fallback (e.g. "dolo" or "okacet")
+    if (matchingMeds.length === 0) {
+      const firstWord = rawClean.split(/\s+/)[0];
+      if (firstWord && firstWord.length >= 3 && !['new', 'tab', 'tablet', 'cap', 'capsule'].includes(firstWord)) {
+        matchingMeds = await db.all(
+          `SELECT id, name, generic_name, max_stock_level FROM medicines 
+           WHERE LOWER(name) LIKE ? 
+           ORDER BY LENGTH(name) ASC LIMIT 10`,
+          [`%${firstWord}%`]
         );
       }
     }
@@ -1674,32 +1693,34 @@ router.post('/check-overstock', async (req, res) => {
     let currentStock = 0;
     let maxStockLevel: number | null = null;
     let sales30d = 0;
-    let matchedName = localMed ? localMed.name : productName;
+    let matchedName = matchingMeds.length > 0 ? matchingMeds[0].name : productName;
 
-    if (localMed) {
-      maxStockLevel = localMed.max_stock_level;
+    const matchedIds = matchingMeds.map(m => m.id);
 
-      // Calculate total current stock
+    if (matchedIds.length > 0) {
+      const placeholders = matchedIds.map(() => '?').join(',');
+      
+      // Calculate total current stock across ALL matching medicine IDs
       const stockRow = await db.get(
         `SELECT COALESCE(SUM(quantity), 0) as total_qty, MAX(max_stock_level) as inv_max 
-         FROM inventory_master WHERE medicine_id = ?`,
-        [localMed.id]
+         FROM inventory_master WHERE medicine_id IN (${placeholders})`,
+        matchedIds
       );
       if (stockRow) {
         currentStock = Number(stockRow.total_qty || 0);
-        if (maxStockLevel === null && stockRow.inv_max !== null) {
+        if (stockRow.inv_max !== null) {
           maxStockLevel = Number(stockRow.inv_max);
         }
       }
 
-      // Calculate 30-day sales volume (frequency velocity)
+      // Calculate 30-day sales volume
       const salesRow = await db.get(
         `SELECT COALESCE(SUM(si.quantity), 0) as sales_qty 
          FROM sale_items si
          JOIN sales_invoices inv ON si.invoice_id = inv.id
-         WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = ?)
+         WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id IN (${placeholders}))
          AND inv.date >= datetime('now', '-30 days')`,
-        [localMed.id]
+        matchedIds
       );
       if (salesRow) {
         sales30d = Number(salesRow.sales_qty || 0);
@@ -1711,47 +1732,90 @@ router.post('/check-overstock', async (req, res) => {
     if (maxStockLevel !== null && maxStockLevel > 0) {
       maxLimit = maxStockLevel;
     } else if (sales30d > 0) {
-      // Limit to 1.25x monthly sales velocity (minimum 10)
       maxLimit = Math.max(10, Math.ceil(sales30d * 1.25));
     }
 
-    // 4. Calculate existing cart quantity across distributors (check recent placed orders or session cart)
+    // 4. Historical Price Lookup from purchase_items
+    let lastPurchasePTR: number | null = null;
+    let lowestPurchasePTR: number | null = null;
+    try {
+      if (matchedIds.length > 0) {
+        const placeholders = matchedIds.map(() => '?').join(',');
+        const lastPriceRow = await db.get(
+          `SELECT cost_price FROM purchase_items 
+           WHERE medicine_id IN (${placeholders}) AND cost_price > 0 
+           ORDER BY id DESC LIMIT 1`,
+          matchedIds
+        );
+        if (lastPriceRow && lastPriceRow.cost_price != null) {
+          lastPurchasePTR = Number(lastPriceRow.cost_price);
+        }
+
+        const minPriceRow = await db.get(
+          `SELECT MIN(cost_price) as min_rate FROM purchase_items 
+           WHERE medicine_id IN (${placeholders}) AND cost_price > 0`,
+          matchedIds
+        );
+        if (minPriceRow && minPriceRow.min_rate != null) {
+          lowestPurchasePTR = Number(minPriceRow.min_rate);
+        }
+      }
+    } catch (_) {}
+
+    // 5. Calculate existing cart quantity across distributors
     let cartQty = 0;
     try {
       const settings = await getPharmarackSettings();
       const token = settings['pharmarack_session_token'] || '';
       if (token) {
-        // Fetch current active cart from Pharmarack live API
-        const cartRes = await fetchPharmarack('https://pharmretail-api.pharmarack.com/order/api/v2/cart-list', {
+        const cartRes = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
           method: 'GET',
-          signal: AbortSignal.timeout(4000)
+          signal: AbortSignal.timeout(5000)
         });
         if (cartRes.ok) {
           const cartData: any = await cartRes.json();
-          if (cartData && cartData.data && Array.isArray(cartData.data)) {
-            for (const store of cartData.data) {
-              if (Array.isArray(store.items)) {
-                for (const item of store.items) {
-                  const itemTitle = (item.productName || item.ProductFullName || '').toLowerCase();
-                  if (itemTitle.includes(cleaned.toLowerCase()) || (localMed && itemTitle.includes(localMed.name.toLowerCase()))) {
-                    cartQty += Number(item.qty || item.quantity || 0);
-                  }
-                }
+          const rawList = Array.isArray(cartData?.IList) 
+            ? cartData.IList 
+            : Array.isArray(cartData?.data) 
+            ? cartData.data 
+            : Array.isArray(cartData?.Data)
+            ? cartData.Data
+            : (cartData?.data?.Stores) || (cartData?.Data?.Stores) || [];
+
+          const targetNames = matchingMeds.map(m => m.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
+          targetNames.push(productName.toLowerCase().replace(/[^a-z0-9]/g, ''));
+          targetNames.push(brandTokens.replace(/[^a-z0-9]/g, ''));
+
+          for (const store of rawList) {
+            const items = store.lineItems || store.items || store.Products || store.line_items || [];
+            for (const item of items) {
+              const itemTitle = (item.productName || item.ProductName || item.ProductFullName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              const matchesAny = targetNames.some(tn => tn.length >= 3 && (itemTitle.includes(tn) || tn.includes(itemTitle)));
+              if (matchesAny) {
+                cartQty += Number(item.qty || item.Quantity || item.quantity || 0);
               }
             }
           }
         }
       }
-    } catch (_) {
-      // Non-blocking fallback if cart API fetch times out
-    }
+    } catch (_) {}
 
     const totalInHandAndCart = currentStock + cartQty;
     const reqQtyNum = Number(requestedQty) || 1;
-    const recommendedQty = Math.max(0, maxLimit - totalInHandAndCart);
     const isOverstock = (totalInHandAndCart + reqQtyNum) > maxLimit;
-    const isDuplicateInCart = cartQty > 0;
     const isExistingInStock = currentStock > 0;
+    const isDuplicateInCart = cartQty > 0;
+
+    let warningMessage: string | null = null;
+    if (isOverstock) {
+      warningMessage = `Overstock Notice: You already have ${currentStock} in stock and ${cartQty} in cart. Based on sales velocity (${sales30d}/mo), recommended cap is ${maxLimit} units.`;
+    } else if (isExistingInStock && isDuplicateInCart) {
+      warningMessage = `Note: ${currentStock} units in stock and ${cartQty} units already in cart.`;
+    } else if (isExistingInStock) {
+      warningMessage = `Note: You already have ${currentStock} units in store inventory.`;
+    } else if (isDuplicateInCart) {
+      warningMessage = `Note: ${cartQty} units already added in live cart across distributors.`;
+    }
 
     return res.json({
       success: true,
@@ -1760,15 +1824,13 @@ router.post('/check-overstock', async (req, res) => {
       cartQty,
       sales30d,
       maxLimit,
-      recommendedQty,
+      recommendedQty: Math.max(0, maxLimit - totalInHandAndCart),
       isOverstock,
-      isDuplicateInCart,
       isExistingInStock,
-      warningMessage: isOverstock
-        ? `Overstock Notice: You already have ${currentStock} in stock and ${cartQty} in cart. Based on sales velocity (${sales30d}/mo), recommended cap is ${maxLimit} units.`
-        : (isExistingInStock || isDuplicateInCart)
-        ? `In Stock: ${currentStock} units | Already in Cart: ${cartQty} units`
-        : null
+      isDuplicateInCart,
+      lastPurchasePTR,
+      lowestPurchasePTR,
+      warningMessage
     });
   } catch (err: any) {
     console.error('Error in /api/pharmarack/check-overstock:', err);

@@ -161,6 +161,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     isOverstock: boolean;
     isDuplicateInCart: boolean;
     isExistingInStock: boolean;
+    lastPurchasePTR?: number | null;
+    lowestPurchasePTR?: number | null;
     warningMessage: string | null;
   } | null>(null);
   const [checkingOverstock, setCheckingOverstock] = useState(false);
@@ -772,17 +774,24 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       const hasCache = cachedCartDistributors.length > 0;
-      Promise.allSettled([
-        fetchCart(hasCache),
-        fetchPendingOrders(),
-        fetchPendingRefills(),
-        fetchReconOrders(),
-        fetchAutoRefillItems(),
-        api.checkPharmarackSession().then(data => {
-          cachedPrMode = data.mode || 'Live';
-          setPrMode(cachedPrMode);
-        }).catch(() => setPrMode('Live'))
-      ]);
+      // Prioritize primary cart preview & session mode check immediately
+      fetchCart(hasCache);
+      api.checkPharmarackSession().then(data => {
+        cachedPrMode = data.mode || 'Live';
+        setPrMode(cachedPrMode);
+      }).catch(() => setPrMode('Live'));
+
+      // Stagger secondary background fetches by 350ms to eliminate mount network saturation
+      const bgTimer = setTimeout(() => {
+        Promise.allSettled([
+          fetchPendingOrders(),
+          fetchPendingRefills(),
+          fetchReconOrders(),
+          fetchAutoRefillItems()
+        ]);
+      }, 350);
+
+      return () => clearTimeout(bgTimer);
     }
   }, [isOpen]);
 
@@ -841,7 +850,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       return;
     }
 
-    if (product.trim().length < 3) {
+    if (product.trim().length < 2) {
       setSuggestions([]);
       setShowSuggestions(false);
       return;
@@ -865,33 +874,38 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           });
         } else if (Array.isArray(prData)) {
           if (prData.length === 0) {
-            toastEvent.trigger('No matching distributor offers found.', 'info');
-          }
-          prData.forEach((item: any) => {
             mergedList.push({
-              medicine_name: item.name,
-              mrp: item.mrp,
+              medicine_name: `No distributor offers found for "${product.trim()}"`,
               isPharmarack: true,
-              distributor: item.distributor,
-              rate: item.rate,
-              mapped: item.mapped,
-              packaging: item.packaging,
-              stock: item.stock,
-              scheme: item.scheme,
-              productId: item.productId,
-              storeId: item.storeId,
-              productCode: item.productCode,
-              company: item.company
+              isErrorMessage: true
             });
-          });
+          } else {
+            prData.forEach((item: any) => {
+              mergedList.push({
+                medicine_name: item.name,
+                mrp: item.mrp,
+                isPharmarack: true,
+                distributor: item.distributor,
+                rate: item.rate,
+                mapped: item.mapped,
+                packaging: item.packaging,
+                stock: item.stock,
+                scheme: item.scheme,
+                productId: item.productId,
+                storeId: item.storeId,
+                productCode: item.productCode,
+                company: item.company
+              });
+            });
 
-          // Sort mapped items first, then non-mapped items
-          mergedList.sort((a, b) => {
-            if (a.isErrorMessage || b.isErrorMessage) return 0;
-            if (a.mapped && !b.mapped) return -1;
-            if (!a.mapped && b.mapped) return 1;
-            return 0;
-          });
+            // Sort mapped items first, then non-mapped items
+            mergedList.sort((a, b) => {
+              if (a.isErrorMessage || b.isErrorMessage) return 0;
+              if (a.mapped && !b.mapped) return -1;
+              if (!a.mapped && b.mapped) return 1;
+              return 0;
+            });
+          }
         }
 
         setSuggestions(mergedList);
@@ -1798,26 +1812,60 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-center py-1.5 my-1 bg-bg/40 rounded-lg border border-border/30 font-mono text-[10px]">
+                    <div className="grid grid-cols-4 gap-1.5 text-center py-1.5 my-1 bg-bg/40 rounded-lg border border-border/30 font-mono text-[10px]">
                       <div className="p-1">
-                        <div className="text-muted text-[9px] uppercase">In Store Stock</div>
+                        <div className="text-muted text-[8px] uppercase">In Store Stock</div>
                         <div className={`font-bold text-xs ${overstockInfo.currentStock > 0 ? 'text-emerald-400' : 'text-muted'}`}>
                           {overstockInfo.currentStock} units
                         </div>
                       </div>
-                      <div className="p-1 border-x border-border/30">
-                        <div className="text-muted text-[9px] uppercase">In Cart</div>
+                      <div className="p-1 border-l border-border/30">
+                        <div className="text-muted text-[8px] uppercase">In Cart</div>
                         <div className={`font-bold text-xs ${overstockInfo.cartQty > 0 ? 'text-purple-400' : 'text-muted'}`}>
                           {overstockInfo.cartQty} units
                         </div>
                       </div>
-                      <div className="p-1">
-                        <div className="text-muted text-[9px] uppercase">Rec. Cap</div>
+                      <div className="p-1 border-l border-border/30">
+                        <div className="text-muted text-[8px] uppercase">Rec. Cap</div>
                         <div className="font-bold text-xs text-amber-400">
                           {overstockInfo.maxLimit} units
                         </div>
                       </div>
+                      <div className="p-1 border-l border-border/30">
+                        <div className="text-muted text-[8px] uppercase">Last Paid PTR</div>
+                        <div className={`font-bold text-xs ${overstockInfo.lastPurchasePTR ? 'text-sky' : 'text-muted'}`}>
+                          {overstockInfo.lastPurchasePTR ? `₹${overstockInfo.lastPurchasePTR.toFixed(2)}` : 'N/A'}
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Historical Rate Variance Audit */}
+                    {(() => {
+                      if (!selectedRate || !overstockInfo.lastPurchasePTR) return null;
+                      const current = Number(selectedRate);
+                      const last = Number(overstockInfo.lastPurchasePTR);
+                      const diff = current - last;
+                      const pct = Math.abs((diff / last) * 100).toFixed(1);
+                      if (Math.abs(diff) < 0.05) {
+                        return (
+                          <div className="text-[10px] font-bold text-emerald-400 my-1 flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                            <span>✓ Offered PTR ₹{current.toFixed(2)} perfectly matches last purchase PTR (₹{last.toFixed(2)})</span>
+                          </div>
+                        );
+                      }
+                      if (diff < 0) {
+                        return (
+                          <div className="text-[10px] font-bold text-emerald-400 my-1 flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                            <span>📉 Offered PTR ₹{current.toFixed(2)} is ₹{Math.abs(diff).toFixed(2)} ({pct}% cheaper) than last paid PTR (₹{last.toFixed(2)})</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="text-[10px] font-bold text-amber-400 my-1 flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                          <span>📈 Offered PTR ₹{current.toFixed(2)} is ₹{diff.toFixed(2)} (+{pct}%) higher than last paid PTR (₹{last.toFixed(2)})</span>
+                        </div>
+                      );
+                    })()}
 
                     {overstockInfo.warningMessage && (
                       <p className="text-[10px] text-text/80 my-1 leading-tight">
@@ -1920,7 +1968,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                             <span className="font-medium text-text block truncate" title={item.productName}>
                               {item.productName}
                             </span>
-                            <span className="text-[9px] text-muted flex items-center gap-1 mt-0.5">
+                            <span className="text-[9px] text-muted flex items-center gap-1.5 flex-wrap mt-0.5">
+                              {item.company && (
+                                <span className="text-sky font-bold uppercase text-[8px] bg-sky/10 border border-sky/20 px-1 rounded">
+                                  {item.company}
+                                </span>
+                              )}
                               {item.packaging && <span className="font-mono">{item.packaging}</span>}
                               {item.scheme && (
                                 <span className="text-emerald-400 font-bold uppercase text-[8px] bg-emerald-500/10 px-1 rounded">
