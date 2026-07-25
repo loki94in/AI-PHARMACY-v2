@@ -2,6 +2,9 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Agentation } from 'agentation';
 import { pageImports } from './lib/pageImports';
+import { queryClient } from './lib/queryClient';
+import { api } from './services/api';
+import { getTodayString, getNDaysAgoString } from './utils/date';
 
 // Minimal page-switch loading fallback — renders instantly, no layout shift
 const PageLoader = () => (
@@ -73,7 +76,34 @@ function App() {
         }
       });
     }, 1500);
-    return () => clearTimeout(timer);
+
+    // Pre-fetch data for key pages so they show instantly with no loading spinner on first visit.
+    // Runs 3s after startup to avoid competing with POS initial render.
+    const dataTimer = setTimeout(() => {
+      // Dashboard — single query
+      queryClient.prefetchQuery({
+        queryKey: ['dashboard'],
+        queryFn: () => api.getDashboard(),
+        staleTime: 5 * 60_000,
+      }).catch(() => {});
+
+      // Reports — pre-fetch default sales tab for last 30 days
+      const today = getTodayString();
+      const from30 = getNDaysAgoString(30);
+      queryClient.prefetchQuery({
+        queryKey: ['reports', 'sales', from30, today],
+        queryFn: () => Promise.all([
+          api.getReportsSummary({ type: 'sales', fromDate: from30, toDate: today }),
+          api.getReportsData({ type: 'sales', fromDate: from30, toDate: today }),
+        ]).then(([summary, records]) => ({ summary, records })),
+        staleTime: 5 * 60_000,
+      }).catch(() => {});
+    }, 3000);
+
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(dataTimer);
+    };
   }, []);
 
   return (

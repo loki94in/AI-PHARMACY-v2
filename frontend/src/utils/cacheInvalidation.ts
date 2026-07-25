@@ -1,5 +1,4 @@
 import { QueryClient } from '@tanstack/react-query';
-import { clearInfiniteScrollCache } from '../hooks/useInfiniteScroll';
 
 /**
  * Invalidates all relevant query lists and purges infinite scroll caches
@@ -26,13 +25,12 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: [key] });
   });
 
-  // Force a silent background refetch of active queries immediately
+  // Silently background-refetch all currently-mounted (active) stale queries immediately.
+  // Unmounted pages will refetch on next visit while showing cached data — no wipe, no spinner.
   queryClient.refetchQueries({ queryKey: ['pos-special-orders'] }).catch(() => {});
   queryClient.refetchQueries({ queryKey: ['pos-common-combinations'] }).catch(() => {});
   queryClient.refetchQueries({ queryKey: ['crm-doctors'] }).catch(() => {});
-
-  // Purge all in-memory infinite scroll caches so unmounted pages fetch fresh on mount
-  clearInfiniteScrollCache();
+  queryClient.refetchQueries({ type: 'active', stale: true }).catch(() => {});
 
   // Silently reload client-side compact inventory cache in the background
   import('../services/api.js')
