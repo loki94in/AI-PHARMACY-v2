@@ -958,7 +958,33 @@ router.get('/list', async (req, res) => {
   }
 });
 
-// Search medicine in inventory by Name, Batch, or MRP
+// Helper for Levenshtein distance fuzzy matching
+function computeLevenshteinSim(s1: string, s2: string): number {
+  const a = s1.toLowerCase().replace(/[\s\-_.\/]/g, '');
+  const b = s2.toLowerCase().replace(/[\s\-_.\/]/g, '');
+  if (a.length === 0 || b.length === 0) return 0;
+  if (a === b) return 1.0;
+  if (a.includes(b) || b.includes(a)) return 0.85;
+
+  const maxLen = Math.max(a.length, b.length);
+  const matrix = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  const distance = matrix[a.length][b.length];
+  return 1 - distance / maxLen;
+}
+
+// Search medicine in inventory by Name, Batch, or MRP (with space-insensitivity, word number conversion, and fuzzy matching)
 router.get('/search-medicine', async (req, res) => {
   const query = req.query.q as string;
   if (!query || query.trim().length < 2) {
@@ -1019,7 +1045,6 @@ router.get('/search-medicine', async (req, res) => {
         const mrpVal = parseFloat(normalizedQuery);
         rows = await db.all(sql, [exactQuery, likeQuery, isNaN(mrpVal) ? 0 : mrpVal, likeQuery]);
       } else {
-        // For short terms (length 2), avoid slow infix cast and wildcards
         const prefixQuery = `${cleanQuery}%`;
         const sql = `
           SELECT 
@@ -1100,7 +1125,7 @@ router.get('/search-medicine', async (req, res) => {
       `;
       rows = await db.all(prefixSql, [prefixQuery]);
  
-      // Fall back to general name/item_code infix search only if we got fewer than 15 rows and term is >= 3 chars
+      // Fall back to general name/item_code infix search if we got fewer than 15 rows and term is >= 3 chars
       if (rows.length < 15 && cleanQuery.length >= 3) {
         const likeQuery = `%${cleanQuery}%`;
         const fallbackSql = `
@@ -1147,6 +1172,99 @@ router.get('/search-medicine', async (req, res) => {
             rows.push(row);
             if (rows.length >= 30) break;
           }
+        }
+      }
+
+      // Space & Punctuation Insensitive Fallback + Word Number Translation (e.g. "Dolosixfifty" / "Dolo six fifty" -> "Dolo 650")
+      if (rows.length < 5 && cleanQuery.length >= 3) {
+        let normSearchTerm = cleanQuery.toLowerCase()
+          .replace(/\bsix[\s-]*fifty\b/g, '650')
+          .replace(/\bfive[\s-]*hundred\b/g, '500')
+          .replace(/\btwo[\s-]*hundred\b/g, '200')
+          .replace(/\bone[\s-]*hundred\b/g, '100')
+          .replace(/\bseven[\s-]*fifty\b/g, '750')
+          .replace(/[\s\-_.\/]/g, '');
+
+        const strippedLikeQuery = `%${normSearchTerm}%`;
+        const strippedSql = `
+          SELECT 
+            m.id AS medicine_id, 
+            m.name AS medicine_name, 
+            m.api_reference,
+            m.item_code AS item_code,
+            m.manufacturer AS manufacturer,
+            im.id AS inventory_id, 
+            im.batch_no, 
+            im.expiry_date AS expiry_date, 
+            im.quantity AS quantity, 
+            im.loose_quantity AS loose_quantity,
+            COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            im.unit_price, 
+            COALESCE(im.cost_price, 0) AS cost_price,
+            m.cgst, 
+            m.sgst, 
+            m.igst, 
+            m.hsn_code,
+            0 AS is_out_of_stock
+          FROM inventory_master im
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE REPLACE(REPLACE(REPLACE(REPLACE(LOWER(m.name), ' ', ''), '-', ''), '.', ''), '/', '') LIKE ?
+            AND im.quantity > 0
+          ORDER BY m.name ASC, im.expiry_date ASC
+          LIMIT 30
+        `;
+        const strippedRows = await db.all(strippedSql, [strippedLikeQuery]);
+        const seenIds = new Set(rows.map(r => r.inventory_id));
+        for (const row of strippedRows) {
+          if (!seenIds.has(row.inventory_id)) {
+            rows.push(row);
+            if (rows.length >= 30) break;
+          }
+        }
+      }
+
+      // Fuzzy Levenshtein Fallback (Typo Tolerance)
+      if (rows.length === 0 && cleanQuery.length >= 3) {
+        const normQuery = cleanQuery.toLowerCase()
+          .replace(/\bsix[\s-]*fifty\b/g, '650')
+          .replace(/\bfive[\s-]*hundred\b/g, '500')
+          .replace(/[\s\-_.\/]/g, '');
+
+        const allAvailableMeds = await db.all(`
+          SELECT 
+            m.id AS medicine_id, 
+            m.name AS medicine_name, 
+            m.api_reference,
+            m.item_code AS item_code,
+            m.manufacturer AS manufacturer,
+            im.id AS inventory_id, 
+            im.batch_no, 
+            im.expiry_date AS expiry_date, 
+            im.quantity AS quantity, 
+            im.loose_quantity AS loose_quantity,
+            COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            im.unit_price, 
+            COALESCE(im.cost_price, 0) AS cost_price,
+            m.cgst, 
+            m.sgst, 
+            m.igst, 
+            m.hsn_code,
+            0 AS is_out_of_stock
+          FROM inventory_master im
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE im.quantity > 0
+          LIMIT 300
+        `);
+
+        const fuzzyMatches = allAvailableMeds.map(item => {
+          const sim = computeLevenshteinSim(normQuery, item.medicine_name);
+          return { ...item, sim };
+        }).filter(item => item.sim >= 0.50).sort((a, b) => b.sim - a.sim);
+
+        for (const match of fuzzyMatches) {
+          if (rows.length >= 20) break;
+          const { sim, ...cleanMatch } = match;
+          rows.push(cleanMatch);
         }
       }
     }

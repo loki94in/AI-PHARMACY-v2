@@ -1331,7 +1331,7 @@ const POS = () => {
     }, 120);
   };
 
-  const addMedicineById = async (medicineId: number, lastQty?: number) => {
+  const addMedicineById = async (medicineId: number, lastQty?: number, lastLooseQty?: number) => {
     const compactInventory = getCompactInventoryCache();
     const batches = compactInventory.filter(item => item.medicine_id === medicineId);
     if (batches.length > 0) {
@@ -1344,7 +1344,8 @@ const POS = () => {
       if (grouped.length > 0) {
         const item = {
           ...grouped[0],
-          recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1
+          recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1,
+          recommendedLooseQty: lastLooseQty !== undefined && lastLooseQty !== null ? lastLooseQty : 0
         };
         fetchDetailsAndAddToCart(item);
         return;
@@ -1364,7 +1365,8 @@ const POS = () => {
         salts: details.api_reference || 'Generic',
         packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10,
         quantity: 0,
-        recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1
+        recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1,
+        recommendedLooseQty: lastLooseQty !== undefined && lastLooseQty !== null ? lastLooseQty : 0
       });
     } catch (err) {
       console.error('Failed to add medicine by ID:', err);
@@ -1388,7 +1390,8 @@ const POS = () => {
         batch_quantity: item.batch_quantity,
         loose_quantity: item.loose_quantity,
         alternatives: details.alternatives,
-        recommendedQty: item.recommendedQty
+        recommendedQty: item.recommendedQty,
+        recommendedLooseQty: item.recommendedLooseQty
       });
     } catch (error) {
       console.warn('Failed to load quick details, adding with fallback values:', error);
@@ -1962,9 +1965,9 @@ const POS = () => {
         <div className="flex-1 flex flex-col gap-4 min-h-0 min-w-0">
           
           {/* Patient & Doctor Context Bar */}
-          <div className="glass-panel p-4 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl w-full min-w-0">
+          <div className="glass-panel p-3 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl w-full min-w-0">
             {matchedRefill && (
-              <div className="mb-3 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold flex justify-between items-center">
+              <div className="mb-2.5 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
                   <span>
@@ -1987,16 +1990,16 @@ const POS = () => {
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
               {/* Patient Name */}
               <div className="relative z-20">
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Patient / Customer</label>
-                <div className="flex gap-1 items-center">
+                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Patient / Customer</label>
+                <div className="flex gap-1.5 items-center">
                   <input 
                     id="patient-name-input"
                     type="text" 
                     autoComplete="off"
-                    className="premium-input text-xs h-9 px-3 flex-1 w-full bg-bg2/40 border-border/60 rounded-xl" 
+                    className="premium-input text-sm font-semibold h-10 px-3.5 flex-1 w-full bg-bg2/50 border-border/80 rounded-xl" 
                     placeholder="Walk-in Customer" 
                     value={patientName}
                     onChange={e => { updatePatientName(e.target.value); setPatientHighlightIndex(-1); }}
@@ -2069,21 +2072,21 @@ const POS = () => {
 
                   <button 
                     onClick={() => setShowPatientModal(true)}
-                    className="h-9 w-9 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0"
+                    className="h-10 w-10 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0"
                     title="Manage Patient Profile & Refills"
                   >
-                    <Plus size={14} className="stroke-[3]" />
+                    <Plus size={16} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
 
               {/* WhatsApp Contact */}
               <div>
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">WhatsApp Number</label>
-                <div className="flex gap-2">
+                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">WhatsApp Number</label>
+                <div className="flex gap-1.5">
                   <input 
                     type="text" 
-                    className="premium-input text-xs h-9 px-3 w-full font-mono text-text bg-bg2/40 border-border/60 rounded-xl" 
+                    className="premium-input text-sm font-mono font-semibold h-10 px-3.5 w-full text-text bg-bg2/50 border-border/80 rounded-xl" 
                     placeholder="9876543210"
                     value={patientPhone}
                     onChange={e => setPatientPhone(e.target.value)}
@@ -2091,7 +2094,7 @@ const POS = () => {
                   />
                   <button 
                     onClick={() => setSendWhatsApp(!sendWhatsApp)}
-                    className={`h-9 px-3 rounded-xl border text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 transition-all select-none shrink-0 ${
+                    className={`h-10 px-3 rounded-xl border text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 transition-all select-none shrink-0 ${
                       sendWhatsApp 
                         ? 'bg-green/15 border-green/30 text-green hover:bg-green/25' 
                         : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
@@ -2112,12 +2115,12 @@ const POS = () => {
 
               {/* Doctor */}
               <div className="relative z-20">
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Prescribing Doctor</label>
-                <div className="flex gap-1 relative">
+                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Prescribing Doctor</label>
+                <div className="flex gap-1.5 relative">
                   <input 
                     type="text"
                     autoComplete="off"
-                    className="premium-input text-xs h-9 pl-3 pr-7 bg-bg2/40 border-border/60 w-full text-text focus:border-sky rounded-xl"
+                    className="premium-input text-sm font-semibold h-10 pl-3.5 pr-7 bg-bg2/50 border-border/80 w-full text-text focus:border-sky rounded-xl"
                     placeholder="Type or Select Doctor..."
                     value={doctor}
                     onChange={e => { setDoctor(e.target.value); setDoctorHighlightIndex(-1); }}
@@ -2148,7 +2151,7 @@ const POS = () => {
                     }}
                     title="Select or Type Doctor Name"
                   />
-                  <span className="absolute inset-y-0 right-11 pr-2 flex items-center pointer-events-none text-muted">
+                  <span className="absolute inset-y-0 right-12 pr-2 flex items-center pointer-events-none text-muted">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path>
                     </svg>
@@ -2185,20 +2188,20 @@ const POS = () => {
                   )}
                   <button 
                     onClick={() => setShowDoctorModal(true)}
-                    className="h-9 w-9 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0"
+                    className="h-10 w-10 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0"
                     title="Register New Doctor"
                   >
-                    <Plus size={14} className="stroke-[3]" />
+                    <Plus size={16} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
 
               {/* Date */}
               <div>
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Billing Date</label>
+                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Billing Date</label>
                 <input 
                   type="date" 
-                  className="premium-input text-xs h-9 px-3 text-text w-full font-mono bg-bg2/40 border-border/60 rounded-xl" 
+                  className="premium-input text-sm font-semibold h-10 px-3.5 text-text w-full font-mono bg-bg2/50 border-border/80 rounded-xl" 
                   value={date}
                   onChange={e => setDate(e.target.value)}
                   aria-label="Transaction Date"
@@ -2556,97 +2559,87 @@ const POS = () => {
               </button>
             </div>
 
-            {/* Doctor Combination Suggestions */}
-            {doctorComboSuggestions.length > 0 && (
-              <div className="flex items-center gap-2 bg-bg2/30 border border-border/20 px-3 py-2 rounded-xl w-full min-w-0 overflow-hidden">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider select-none shrink-0">
-                  🤝 Together with:
-                </span>
-                <div className="flex gap-2 overflow-x-auto scrollbar-thin min-w-0 flex-1 w-full">
-                  {doctorComboSuggestions.map(med => (
-                    <button
-                      key={med.id}
-                      onClick={() => addMedicineById(med.id, med.last_qty)}
-                      className="flex items-center gap-1.5 bg-bg border border-border hover:border-primary/50 hover:bg-primary/5 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap"
-                    >
-                      <span className="text-[11px] font-semibold text-text group-hover:text-primary transition-all">
-                        {med.name}
-                        <span className="text-[9px] text-sky ml-1 font-mono font-bold">
-                          (x{med.co_count}{med.last_qty ? `, Last: ${med.last_qty}` : ''})
-                        </span>
-                      </span>
-                      <span className="text-[10px] text-primary font-bold">+</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Quick Add / Doctor Suggestions */}
-            {doctorSuggestions.length > 0 ? (
-              <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
-                  ⚡ {doctor}'s Prescriptions:
-                </span>
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
-                  {doctorSuggestions.map(med => (
-                    <button
-                      key={med.id}
-                      onClick={() => addMedicineById(med.id, med.last_qty)}
-                      className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
-                    >
-                      <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
-                        {med.name}
-                        <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
-                          (x{med.frequency}{med.last_qty ? `, Last: ${med.last_qty}` : ''})
-                        </span>
-                      </span>
-                      <span className="text-[10px] text-primary font-bold">+</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              combinationsControl.mode === 'manual' && !combinationsControl.loaded ? (
-                <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden items-center justify-center py-2.5">
-                  <span className="text-xs text-muted mb-1.5">Quick Add suggestions are deferred.</span>
-                  <button
-                    type="button"
-                    onClick={() => combinationsControl.requestLoad()}
-                    className="px-4 py-1.5 rounded-xl text-xs font-bold bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-all cursor-pointer"
-                  >
-                    Load Suggestions
-                  </button>
-                </div>
-              ) : (
-                commonCombinations.length > 0 && (
-                  <div className="border-t border-border/30 pt-2 flex flex-col gap-1.5 w-full min-w-0 overflow-hidden">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1.5 select-none">
-                      ⚡ Quick Add (Frequently Sold):
-                    </span>
-                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin w-full">
-                      {commonCombinations.map(med => (
+            {/* Combined Single Line Doctor & Prescription Suggestions Bar */}
+            <div className="border-t border-border/30 pt-1.5 flex items-center gap-2 w-full min-w-0 overflow-hidden">
+              <span className="text-[11px] font-extrabold text-muted uppercase tracking-wider flex items-center gap-1 select-none shrink-0">
+                ⚡ Doctor's Suggestions:
+              </span>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-thin flex-1 min-w-0 items-center">
+                {doctorSuggestions.length > 0 ? (
+                  <>
+                    {doctorSuggestions.map(med => {
+                      const reqQty = med.most_common_qty !== undefined && med.most_common_qty !== null ? med.most_common_qty : med.last_qty;
+                      const reqLooseQty = med.most_common_loose_qty !== undefined && med.most_common_loose_qty !== null ? med.most_common_loose_qty : med.last_loose_qty;
+                      const qtyTag = reqQty && reqQty > 0 
+                        ? `${reqQty} Str` 
+                        : (reqLooseQty && reqLooseQty > 0 ? `${reqLooseQty} Tab` : `x${med.frequency}`);
+                      return (
                         <button
-                          key={med.id}
-                          onClick={() => addToCart(med)}
-                          className="flex items-center gap-2.5 bg-bg2 border border-border/50 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded-full transition-all group whitespace-nowrap"
+                          key={`doc_sug_${med.id}`}
+                          type="button"
+                          onClick={() => addMedicineById(med.id, reqQty, reqLooseQty)}
+                          className="flex items-center gap-1.5 bg-bg2 border border-border/60 hover:border-primary/60 hover:bg-primary/10 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
                         >
                           <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
                             {med.name}
-                            {med.recommendationMsg && (
-                              <span className="text-[9px] text-sky ml-1.5 font-mono font-bold">
-                                ({med.recommendedQty > 0 ? `${med.recommendedQty} Str` : `${med.recommendedLooseQty} Tab`})
-                              </span>
-                            )}
+                            <span className="text-[10px] text-sky ml-1 font-mono font-bold">
+                              ({qtyTag})
+                            </span>
                           </span>
                           <span className="text-[10px] text-primary font-bold">+</span>
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              )
-            )}
+                      );
+                    })}
+                    {doctorComboSuggestions.map(med => {
+                      const reqQty = med.most_common_qty !== undefined && med.most_common_qty !== null ? med.most_common_qty : med.last_qty;
+                      const reqLooseQty = med.most_common_loose_qty !== undefined && med.most_common_loose_qty !== null ? med.most_common_loose_qty : med.last_loose_qty;
+                      return (
+                        <button
+                          key={`doc_combo_${med.id}`}
+                          type="button"
+                          onClick={() => addMedicineById(med.id, reqQty, reqLooseQty)}
+                          className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/30 hover:border-purple-500/60 hover:bg-purple-500/20 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          <span className="text-xs font-semibold text-purple-300 transition-all">
+                            {med.name}
+                            <span className="text-[10px] text-purple-400 ml-1 font-mono font-bold">
+                              (x{med.co_count})
+                            </span>
+                          </span>
+                          <span className="text-[10px] text-purple-400 font-bold">+</span>
+                        </button>
+                      );
+                    })}
+                  </>
+                ) : (
+                  commonCombinations.length > 0 ? (
+                    commonCombinations.map(med => {
+                      const qtyTag = med.recommendedQty > 0 
+                        ? `${med.recommendedQty} Str` 
+                        : (med.recommendedLooseQty > 0 ? `${med.recommendedLooseQty} Tab` : '1');
+                      return (
+                        <button
+                          key={`common_${med.id}`}
+                          type="button"
+                          onClick={() => addToCart(med)}
+                          className="flex items-center gap-1.5 bg-bg2 border border-border/60 hover:border-primary/60 hover:bg-primary/10 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
+                            {med.name}
+                            <span className="text-[10px] text-sky ml-1 font-mono font-bold">
+                              ({qtyTag})
+                            </span>
+                          </span>
+                          <span className="text-[10px] text-primary font-bold">+</span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="text-xs text-muted italic">Select a doctor or search medicine above for instant suggestions</span>
+                  )
+                )}
+              </div>
+            </div>
           </div>
 
           {/* B. Cart Panel - Takes up all remaining height */}
@@ -2712,19 +2705,19 @@ const POS = () => {
 
             {/* Cart Table Container */}
             <div className="flex-1 overflow-auto bg-bg/25 scrollbar-thin">
-              <table className="w-full text-left border-collapse text-[16px]">
+              <table className="w-full text-left border-collapse text-xs">
                 <thead className="sticky top-0 bg-bg2/95 backdrop-blur-xl z-10">
                   <tr>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border">Medicine</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border">Batch</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Expiry</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Strip</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
-                    <th className="p-3 text-[13px] font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
-                    <th className="p-3 text-[13px] font-bold text-muted tracking-wider border-b-2 border-border"></th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border">Medicine</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border">Batch</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Expiry</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Strip</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted tracking-wider border-b-2 border-border"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2750,18 +2743,18 @@ const POS = () => {
                     }
 
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all h-[52px]">
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all h-[38px]">
                         {/* Medicine Search/Change */}
-                        <td className="p-3 min-w-[180px] relative">
+                        <td className="py-1 px-2.5 min-w-[180px] relative">
                           <div className="flex items-center">
                             {item.scanImage && (
-                              <div className="relative group/thumb shrink-0 mr-2.5 select-none animate-in fade-in duration-200">
+                              <div className="relative group/thumb shrink-0 mr-2 select-none animate-in fade-in duration-200">
                                 <img
                                   src={item.scanImage}
                                   alt="Scan thumbnail"
                                   loading="lazy"
                                   decoding="async"
-                                  className="w-9 h-9 object-cover rounded-xl border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
+                                  className="w-7 h-7 object-cover rounded-lg border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
                                   onClick={() => setZoomedImage(item.scanImage)}
                                 />
                                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/thumb:block z-[100] bg-bg2 border border-border rounded-xl p-2 shadow-2xl w-48 animate-in fade-in duration-150">
@@ -2775,7 +2768,7 @@ const POS = () => {
                                 id={`row-med-input-${cart.indexOf(item)}`}
                                 type="text" 
                                 autoComplete="off"
-                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-[16px] font-semibold text-text py-1 px-1 rounded"
+                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-sm font-semibold text-text py-0.5 px-1 rounded"
                                 value={activeRowSearchIndex === cart.indexOf(item) ? rowSearchTerm : item.name}
                                 onChange={e => {
                                   const val = e.target.value;
@@ -2838,18 +2831,18 @@ const POS = () => {
                                           const idx = cart.indexOf(item);
                                           fetchDetailsAndChangeRowMedicine(idx, med);
                                         }}
-                                        className={`flex flex-col p-3 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                       >
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                           <span className="font-semibold text-text">{med.medicine_name}</span>
                                           {rowHasPending && (
-                                            <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[13px] font-bold animate-pulse">
+                                            <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[11px] font-bold animate-pulse">
                                               ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
                                             </span>
                                           )}
                                         </div>
-                                        <span className="text-[13px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[13px] text-green font-bold font-mono mt-0.5">
+                                        <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
+                                        <span className="text-[11px] text-green font-bold font-mono mt-0.5">
                                           MRP: ₹{Math.round(med.mrp)} | Stock: {(() => {
                                             const packSize = med.pack_size || 10;
                                             const totalUnits = (med.quantity || 0) * packSize + (med.loose_quantity || med.loose_qty || 0);
@@ -2878,11 +2871,11 @@ const POS = () => {
                         </td>
 
                         {/* Batch Selection */}
-                        <td className="p-3 relative">
+                        <td className="py-1 px-2.5 relative">
                           <div className="relative">
                             <input
                               type="text"
-                              className={`w-28 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] font-mono font-semibold py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
+                              className={`w-24 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-0.5 px-1.5 h-7 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
                               value={item.batch || ''}
                               placeholder="Batch"
                               readOnly
@@ -2917,7 +2910,7 @@ const POS = () => {
                             
                             {activeBatchRowId === item.id && rowBatchesList.length > 1 && (
                               <div className="absolute left-1 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 text-left shadow-2xl">
-                                <div className="p-2.5 border-b border-border/30 bg-bg3/60 text-[13px] font-bold text-muted uppercase tracking-wider">
+                                <div className="p-2 border-b border-border/30 bg-bg3/60 text-[11px] font-bold text-muted uppercase tracking-wider">
                                   Switch Batch:
                                 </div>
                                 {rowBatchesList.map(b => {
@@ -2950,10 +2943,10 @@ const POS = () => {
                                         }));
                                         setActiveBatchRowId(null);
                                       }}
-                                      className={`w-full text-left px-3 py-2 hover:bg-sky/15 border-b border-border/10 text-[16px] font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
+                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-xs font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
                                     >
                                       <span className="font-bold block">{b.batch_no}</span>
-                                      <span className="text-muted block text-[13px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
+                                      <span className="text-muted block text-[11px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}
@@ -2963,26 +2956,26 @@ const POS = () => {
                         </td>
                         
                         {/* Expiry */}
-                        <td className="p-3 text-center">
-                          <div className={`font-mono text-[16px] font-bold px-3 py-1 rounded-lg inline-block shadow-sm ${expBadgeClass}`}>
+                        <td className="py-1 px-2.5 text-center">
+                          <div className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md inline-block shadow-sm ${expBadgeClass}`}>
                             {item.isEmptyRow ? '-' : item.expiry}
                           </div>
                         </td>
 
                         {/* Qty & Stock */}
                         {/* Strip Qty — own column */}
-                        <td className="p-3 text-center">
+                        <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
+                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
                             }
                             return (
                               <div className="flex items-center justify-center">
-                                <div className="flex items-center gap-1.5 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-3 py-1">
+                                <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 h-7">
                                   <input 
                                     id={`row-qty-input-${cart.indexOf(item)}`}
                                     type="number" 
-                                    className="w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-[16px] font-mono font-bold text-text focus:outline-none"
+                                    className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-text focus:outline-none"
                                     value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
                                     onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                                     min="0"
@@ -3006,18 +2999,18 @@ const POS = () => {
                         </td>
 
                         {/* Loose Qty — own column */}
-                        <td className="p-3 text-center">
+                        <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
+                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
                             }
                             return (
                               <div className="flex items-center justify-center">
-                                <div className="flex items-center gap-1.5 bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20 rounded-lg px-3 py-1">
+                                <div className="flex items-center gap-1 bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20 rounded-lg px-2 py-0.5 h-7">
                                   <input 
                                     id={`row-loose-input-${cart.indexOf(item)}`}
                                     type="number" 
-                                    className="w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-[16px] font-mono font-bold text-amber-500 focus:outline-none"
+                                    className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-amber-500 focus:outline-none"
                                     value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
                                     onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                                     min="0"
@@ -3043,10 +3036,10 @@ const POS = () => {
                         </td>
 
                         {/* Live Stock — own column */}
-                        <td className="p-3 text-center">
+                        <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-[16px] font-bold text-muted">-</div>;
+                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
                             }
                             const compactInventory = getCompactInventoryCache();
                             const medicineBatches = compactInventory.filter(inv => inv.medicine_id === item.medicine_id);
@@ -3090,7 +3083,7 @@ const POS = () => {
                               remainingLoose = remainingUnits % packSize;
                             }
                             return (
-                              <div className={`text-[14px] select-none font-bold font-mono px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 ${
+                              <div className={`text-xs select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
                                 (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
                                   ? 'bg-red/5 border-red/20 text-red animate-pulse'
                                   : (typeof remainingStock === 'number' && remainingStock <= 10)
@@ -3104,10 +3097,10 @@ const POS = () => {
                         </td>
 
                         {/* Discount */}
-                        <td className="p-3 text-center">
+                        <td className="py-1 px-2.5 text-center">
                           <input 
                             type="number" 
-                            className={`w-16 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] font-mono font-bold text-sky py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
+                            className={`w-14 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
                             value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
                             onChange={e => updateCartItem(item.id, 'discount', e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
                             min="0"
@@ -3117,10 +3110,10 @@ const POS = () => {
                         </td>
 
                         {/* MRP */}
-                        <td className="p-3 text-right">
+                        <td className="py-1 px-2.5 text-right">
                           <input 
                             type="number" 
-                            className={`w-20 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-[16px] py-1.5 px-2 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
                             onChange={e => updateCartItem(item.id, 'mrp', Math.max(0, Number(e.target.value)))}
@@ -3129,15 +3122,15 @@ const POS = () => {
                         </td>
 
                         {/* Total */}
-                        <td className="p-3 text-right">
-                          <div className="font-mono text-[16px] font-bold text-green pr-1">
+                        <td className="py-1 px-2.5 text-right">
+                          <div className="font-mono text-xs font-bold text-green pr-1">
                             {item.isEmptyRow ? '-' : `₹${Math.round(itemTotal)}`}
                           </div>
                         </td>
 
                         {/* Actions */}
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
+                        <td className="py-1 px-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -3145,16 +3138,16 @@ const POS = () => {
                                 if (item.medicine_id) setEditMedicineId(item.medicine_id);
                               }}
                               disabled={!item.medicine_id}
-                              className={`p-1.5 rounded-lg transition-all ${item.medicine_id ? 'hover:bg-sky/10 text-muted hover:text-sky' : 'opacity-30 cursor-not-allowed text-muted'}`}
+                              className={`p-1 rounded-md transition-all ${item.medicine_id ? 'hover:bg-sky/10 text-muted hover:text-sky' : 'opacity-30 cursor-not-allowed text-muted'}`}
                               title="Quick Edit Medicine"
                             >
-                              <Edit size={16} />
+                              <Edit size={14} />
                             </button>
                             <button 
                               onClick={() => removeFromCart(item.id)}
-                              className="p-1.5 hover:bg-red/10 text-muted hover:text-red rounded-lg transition-all"
+                              className="p-1 hover:bg-red/10 text-muted hover:text-red rounded-md transition-all"
                             >
-                              <Trash2 size={16} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>

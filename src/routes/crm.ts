@@ -240,26 +240,45 @@ router.get('/doctors/:id/suggestions', async (req, res) => {
   const limit = parseInt(req.query.limit as string, 10) || 25;
   try {
     const db = await dbManager.getConnection();
-    // Fetch top most frequently prescribed medicines by this doctor, including last qty
+    // Fetch top most frequently prescribed medicines by this doctor, including statistical MODE for strip & loose qty
     const suggestions = await db.all(
       `SELECT m.id, m.name, COUNT(*) as frequency,
+        COALESCE(
+          (SELECT si.quantity FROM sale_items si
+           JOIN inventory_master im2 ON si.inventory_id = im2.id
+           JOIN sales_invoices s2 ON si.invoice_id = s2.id
+           WHERE im2.medicine_id = m.id AND s2.doctor_id = ?
+           GROUP BY si.quantity
+           ORDER BY COUNT(*) DESC, MAX(si.id) DESC LIMIT 1), 1
+        ) as most_common_qty,
+        COALESCE(
+          (SELECT si.loose_qty FROM sale_items si
+           JOIN inventory_master im2 ON si.inventory_id = im2.id
+           JOIN sales_invoices s2 ON si.invoice_id = s2.id
+           WHERE im2.medicine_id = m.id AND s2.doctor_id = ?
+           GROUP BY si.loose_qty
+           ORDER BY COUNT(*) DESC, MAX(si.id) DESC LIMIT 1), 0
+        ) as most_common_loose_qty,
         (SELECT si.quantity FROM sale_items si
          JOIN inventory_master im2 ON si.inventory_id = im2.id
          WHERE im2.medicine_id = m.id
            AND si.invoice_id IN (SELECT id FROM sales_invoices WHERE doctor_id = ?)
-         ORDER BY si.id DESC LIMIT 1) as last_qty
+         ORDER BY si.id DESC LIMIT 1) as last_qty,
+        (SELECT si.loose_qty FROM sale_items si
+         JOIN inventory_master im2 ON si.inventory_id = im2.id
+         WHERE im2.medicine_id = m.id
+           AND si.invoice_id IN (SELECT id FROM sales_invoices WHERE doctor_id = ?)
+         ORDER BY si.id DESC LIMIT 1) as last_loose_qty
        FROM sale_items si
        JOIN sales_invoices s ON si.invoice_id = s.id
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
        WHERE s.doctor_id = ?
        GROUP BY m.id ORDER BY frequency DESC LIMIT ?`,
-      [doctorId, doctorId, limit]
+      [doctorId, doctorId, doctorId, doctorId, doctorId, limit]
     );
-    await dbManager.close();
     res.json(suggestions);
   } catch (error: any) {
-    await dbManager.close();
     console.error('Failed to fetch doctor suggestions:', error);
     res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
@@ -273,25 +292,51 @@ router.get('/doctors/:id/combinations/:medicineId', async (req, res) => {
     const db = await dbManager.getConnection();
     const combinations = await db.all(
       `SELECT m.id, m.name, COUNT(*) as co_count,
+        COALESCE(
+          (SELECT si2.quantity FROM sale_items si2
+           JOIN inventory_master im3 ON si2.inventory_id = im3.id
+           JOIN sales_invoices s2 ON si2.invoice_id = s2.id
+           WHERE im3.medicine_id = m.id AND s2.doctor_id = ?
+           GROUP BY si2.quantity
+           ORDER BY COUNT(*) DESC, MAX(si2.id) DESC LIMIT 1), 1
+        ) as most_common_qty,
+        COALESCE(
+          (SELECT si2.loose_qty FROM sale_items si2
+           JOIN inventory_master im3 ON si2.inventory_id = im3.id
+           JOIN sales_invoices s2 ON si2.invoice_id = s2.id
+           WHERE im3.medicine_id = m.id AND s2.doctor_id = ?
+           GROUP BY si2.loose_qty
+           ORDER BY COUNT(*) DESC, MAX(si2.id) DESC LIMIT 1), 0
+        ) as most_common_loose_qty,
         (SELECT si2.quantity FROM sale_items si2
          JOIN inventory_master im3 ON si2.inventory_id = im3.id
          WHERE im3.medicine_id = m.id
            AND si2.invoice_id IN (SELECT s2.id FROM sales_invoices s2 WHERE s2.doctor_id = ?)
-         ORDER BY si2.id DESC LIMIT 1) as last_qty
-       FROM sale_items a
-       JOIN sale_items b ON a.invoice_id = b.invoice_id AND a.inventory_id != b.inventory_id
-       JOIN sales_invoices s ON s.id = a.invoice_id
-       JOIN inventory_master im ON im.id = b.inventory_id
+         ORDER BY si2.id DESC LIMIT 1) as last_qty,
+        (SELECT si2.loose_qty FROM sale_items si2
+         JOIN inventory_master im3 ON si2.inventory_id = im3.id
+         WHERE im3.medicine_id = m.id
+           AND si2.invoice_id IN (SELECT s2.id FROM sales_invoices s2 WHERE s2.doctor_id = ?)
+         ORDER BY si2.id DESC LIMIT 1) as last_loose_qty
+       FROM sale_items si
+       JOIN sales_invoices s ON si.invoice_id = s.id
+       JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON m.id = im.medicine_id
-       JOIN inventory_master im_a ON im_a.id = a.inventory_id
-       WHERE s.doctor_id = ? AND im_a.medicine_id = ?
-       GROUP BY m.id ORDER BY co_count DESC LIMIT 10`,
-      [doctorId, doctorId, medicineId]
+       WHERE s.doctor_id = ?
+         AND s.id IN (
+           SELECT s2.id FROM sales_invoices s2
+           JOIN sale_items si2 ON s2.id = si2.invoice_id
+           JOIN inventory_master im2 ON si2.inventory_id = im2.id
+           WHERE im2.medicine_id = ?
+         )
+         AND m.id != ?
+       GROUP BY m.id
+       ORDER BY co_count DESC
+       LIMIT 6`,
+      [doctorId, doctorId, doctorId, doctorId, doctorId, medicineId, medicineId]
     );
-    await dbManager.close();
     res.json(combinations);
   } catch (error: any) {
-    await dbManager.close();
     console.error('Failed to fetch doctor combinations:', error);
     res.status(500).json({ error: 'Internal server error: ' + error.message });
   }

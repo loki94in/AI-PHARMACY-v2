@@ -18,34 +18,7 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 
 const router = express.Router();
 
-async function killOrphanChromeProcesses(keyword: string): Promise<void> {
-  if (process.platform !== 'win32') return;
-  try {
-    const { stdout } = await execAsync(`wmic process where "name='chrome.exe' and CommandLine like '%${keyword}%'" get ProcessId`);
-    const pids = stdout
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(line => line && !line.toLowerCase().includes('processid'))
-      .map(pid => parseInt(pid, 10))
-      .filter(pid => !isNaN(pid));
 
-    for (const pid of pids) {
-      console.log(`[ProcessGuardian] Killing lock-holding Chrome process: ${pid}`);
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch (err) {
-        try {
-          await execAsync(`taskkill /F /PID ${pid}`);
-        } catch (_) {}
-      }
-    }
-    if (pids.length > 0) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  } catch (err: any) {
-    console.error(`[ProcessGuardian] Failed to kill lock-holding Chrome processes for ${keyword}:`, err.message);
-  }
-}
 
 function findChromePath() {
   const paths = [
@@ -878,12 +851,23 @@ router.post('/cart/add', async (req, res) => {
         const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/AddUserProductCartDetail', {
           method: 'POST',
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(15000)
         });
 
         if (response.ok) {
-          const resJson = await response.json();
-          if (resJson && (resJson.StatusCode === 200 || resJson.statusCode === 200 || resJson.status === 200 || resJson.status === 'success' || resJson.success === true)) {
+          const resJson = await response.json().catch(() => ({}));
+          const isOk = resJson && (
+            resJson.StatusCode === 200 || 
+            resJson.statusCode === 200 || 
+            String(resJson.StatusCode) === '200' || 
+            resJson.status === 200 || 
+            resJson.status === 'success' || 
+            resJson.success === true ||
+            (resJson.Message && String(resJson.Message).toLowerCase().includes('success')) ||
+            (resJson.message && String(resJson.message).toLowerCase().includes('success'))
+          );
+
+          if (isOk) {
             cartSuccess = true;
           } else {
             lastError = `AddUserProductCartDetail response: ${resJson.message || resJson.Message || JSON.stringify(resJson)}`;
@@ -1277,33 +1261,47 @@ router.get('/cart', async (req, res) => {
 
     const rawList = Array.isArray(cartData?.IList) 
       ? cartData.IList 
+      : Array.isArray(cartData?.ilist) 
+      ? cartData.ilist
       : Array.isArray(cartData?.data) 
       ? cartData.data 
+      : Array.isArray(cartData?.Data)
+      ? cartData.Data
+      : (cartData?.data && Array.isArray(cartData.data.Stores))
+      ? cartData.data.Stores
+      : (cartData?.Data && Array.isArray(cartData.Data.Stores))
+      ? cartData.Data.Stores
+      : (cartData?.data && Array.isArray(cartData.data.stores))
+      ? cartData.data.stores
       : Array.isArray(cartData?.items) 
       ? cartData.items 
+      : Array.isArray(cartData?.Items)
+      ? cartData.Items
+      : Array.isArray(cartData)
+      ? cartData
       : [];
 
     // Parse rawList → lineItems structure (grouped by distributor)
     const distributors = rawList.map((store: any) => ({
-      storeId: store.StoreId || store.storeId || 0,
-      storeName: store.StoreName || store.storeName || 'Unknown Distributor',
-      lineTotal: store.lineTotal || store.LineTotal || 0,
-      deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || []).map((d: any) => ({
-        name: d.SalesmanName || d.name || '', code: d.SalesmanCode || d.code || ''
+      storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
+      storeName: store.StoreName || store.storeName || store.Name || store.name || 'Unknown Distributor',
+      lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || 0,
+      deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d: any) => ({
+        name: d.SalesmanName || d.name || d.Salesman || '', code: d.SalesmanCode || d.code || ''
       })),
-      items: (store.lineItems || store.items || []).map((item: any) => ({
-        productId: item.ProductId || item.productId,
-        storeId: item.StoreId || item.storeId,
+      items: (store.lineItems || store.items || store.LineItems || store.Products || store.products || []).map((item: any) => ({
+        productId: item.ProductId || item.productId || item.Id || item.id,
+        storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
         productCode: item.ProductCode || item.productCode || '',
-        productName: item.ProductName || item.productName || 'Unknown Product',
+        productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
         company: item.Company || item.company || '',
-        packaging: item.Packing || item.packaging || '',
-        qty: item.Quantity || item.qty || 1,
-        ptr: item.PTR || item.ptr || item.HiddenPTR || 0,
+        packaging: item.Packing || item.packaging || item.CasePacking || '',
+        qty: item.Quantity || item.qty || item.quantity || 1,
+        ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
         mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
         scheme: item.Scheme || item.scheme || '',
         stock: item.Stock ?? item.stock ?? null,
-        amount: item.ProductWiseAmount || item.amount || 0,
+        amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
         cartSource: item.CartSource || item.cartSource || '',
         isChecked: item.IsProductChecked === 1 || item.isChecked === true,
         createdDate: item.CreatedDate || item.createdDate || '',

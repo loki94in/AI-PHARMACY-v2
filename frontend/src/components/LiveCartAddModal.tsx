@@ -751,12 +751,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     setCartError(null);
     try {
       const data = await api.getPharmarackCart();
-      if (data && data.success) {
+      if (data && (data.success || Array.isArray(data.distributors))) {
         cachedCartDistributors = data.distributors || [];
         setCartDistributors(cachedCartDistributors);
       } else {
         if (cachedCartDistributors.length === 0) {
-          setCartError('Failed to retrieve cart details.');
+          setCartError(data?.error || 'Failed to retrieve cart details.');
         }
       }
     } catch (err: any) {
@@ -1642,6 +1642,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                 ) : (
                                   'No Distributor'
                                 )}
+                                {med.company && (
+                                  <span className="ml-1.5 inline-flex items-center text-[9px] font-bold text-sky bg-sky/10 border border-sky/20 px-1.5 py-0.5 rounded uppercase">
+                                    {med.company}
+                                  </span>
+                                )}
                                 {med.packaging ? ` • ${med.packaging}` : ''}
                               </span>
                             )}
@@ -1678,6 +1683,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         }`}>
                           {selectedMapped ? 'Mapped' : 'Non-mapped'}
                         </span>
+                        {selectedCompany && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky/10 text-sky border border-sky/20 uppercase tracking-wide">
+                            {selectedCompany}
+                          </span>
+                        )}
                         {selectedScheme && (
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 uppercase">
                             {selectedScheme}
