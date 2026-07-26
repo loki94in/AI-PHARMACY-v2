@@ -288,7 +288,7 @@ export class MedicineService {
       const firstWord = data.name.split(' ')[0] || '';
       if (firstWord.length >= 3) {
         const candidates = await db.all(
-          'SELECT id, name, api_reference, strength, manufacturer FROM medicines WHERE name LIKE ?',
+          'SELECT id, name, api_reference, manufacturer FROM medicines WHERE name LIKE ?',
           [`${firstWord}%`]
         );
         

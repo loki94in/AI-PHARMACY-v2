@@ -393,12 +393,11 @@ router.get('/recommend-quantity', asyncHandler(async (req: express.Request, res:
       recommendedQty: displayQty,
       type: recommendedType,
       actualUnits: qty,
-    return res.status(400).json({ error: 'medicineName is required' });
+    });
   }
-  const db = await dbManager.getConnection();
-  const result = await salesHistoryService.getRecommendedQuantity(medicineName, db);
+
   await dbManager.close();
-  res.json(result);
+  return res.json({ recommendedQty: 1, type: 'strip', message: 'No matching history found' });
 }));
 
 // Get all held bills

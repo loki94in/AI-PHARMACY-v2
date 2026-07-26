@@ -37,6 +37,8 @@ export interface QueueWorkerState {
 class WhatsAppQueueWorker {
   private isProcessing = false;
   private isLoopRunning = false;
+  private lastWasOffline = false;
+  private lastOfflineLogTime = 0;
   private nextDispatchTimestamp: number | null = null;
   private currentSendingItemId: number | null = null;
   private pacingMinMs = 8000;
@@ -243,7 +245,7 @@ class WhatsAppQueueWorker {
         this.isProcessing = false;
         this.nextDispatchTimestamp = null;
         this.currentSendingItemId = null;
-        return;
+        return false;
       }
 
       console.log(`[WhatsAppQueueWorker] Processing ${pendingItems.length} queued item(s) with ${this.pacingMinMs/1000}s-${this.pacingMaxMs/1000}s pacing...`);
@@ -324,12 +326,15 @@ class WhatsAppQueueWorker {
           await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
       }
+
+      return true;
     } catch (err: any) {
       if (err?.message?.includes('no such table')) {
         // Schema is still initializing on app startup — standby silently until tables exist
       } else {
         console.error('[WhatsAppQueueWorker] Error in processQueue:', err);
       }
+      return false;
     } finally {
       this.isProcessing = false;
       this.currentSendingItemId = null;
