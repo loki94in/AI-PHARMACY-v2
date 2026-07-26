@@ -185,16 +185,26 @@ class WhatsAppQueueWorker {
     // Run initial cleanup of old sent items
     await this.cleanupOldSentItems();
 
-    setInterval(async () => {
-      if (!this.isProcessing) {
-        await this.processQueue();
-      }
-    }, 5000);
+    const scheduleNextRun = () => {
+      setTimeout(async () => {
+        if (!this.isProcessing) {
+          await this.processQueueInternal();
+        }
+        scheduleNextRun();
+      }, this.lastWasOffline ? 30000 : 10000);
+    };
+
+    scheduleNextRun();
   }
 
-  /** Process queue items with randomized 8s-12s pacing */
+  /** External entry point for processing queue */
   public async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
+    await this.processQueueInternal();
+  }
+
+  /** Internal queue processor that returns true if items were actively processed */
+  private async processQueueInternal(): Promise<boolean> {
+    if (this.isProcessing) return false;
     this.isProcessing = true;
 
     try {
@@ -204,9 +214,17 @@ class WhatsAppQueueWorker {
 
       // If client is not ready, leave items pending until user connects WhatsApp on the UI
       if (!useBusiness && !status.isReady) {
-        console.log('[WhatsAppQueueWorker] WhatsApp client offline/disconnected. Leaving items pending in queue until user connects on UI.');
-        return;
+        const now = Date.now();
+        if (!this.lastWasOffline || now - this.lastOfflineLogTime > 600000) {
+          console.log('[WhatsAppQueueWorker] WhatsApp client offline/disconnected. Leaving items pending in queue until user connects on UI.');
+          this.lastOfflineLogTime = now;
+        }
+        this.lastWasOffline = true;
+        this.isProcessing = false;
+        return false;
       }
+
+      this.lastWasOffline = false;
 
       const db = await dbManager.getConnection();
       const now = Date.now();

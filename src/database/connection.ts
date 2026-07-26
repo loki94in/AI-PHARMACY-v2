@@ -53,10 +53,12 @@ class DatabaseManager {
       const isTest = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
       const busyTimeout = isTest ? 5000 : 30000;
 
+      let openSuccess = false;
       try {
         await db.open();
         await db.run(`PRAGMA busy_timeout = ${busyTimeout};`);
         await db.run('PRAGMA journal_mode = WAL;');
+        openSuccess = true;
       } catch (err: any) {
         const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked') || err?.code === 'SQLITE_BUSY';
         if (!isBusy) {
@@ -72,11 +74,17 @@ class DatabaseManager {
 
       if (needsHeal) {
         db = await this.runSelfHealing(dbPath, busyTimeout, initialErrorMsg);
+        openSuccess = true;
       }
 
-      this.setupWriteInterceptor(db);
-      this.connection = db;
-      this.currentDbPath = dbPath;
+      if (openSuccess) {
+        this.setupWriteInterceptor(db);
+        this.connection = db;
+        this.currentDbPath = dbPath;
+      } else {
+        this.connection = null;
+        throw new Error('Database connection is currently busy or unavailable. Please retry.');
+      }
 
       // Run background integrity check if production/pkg and not test
       const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';

@@ -20,10 +20,20 @@ export interface ScispacyResponse {
 
 let sidecarProcess: ChildProcess | null = null;
 
-export function startScispacySidecar() {
-  if (process.env.SCISPAXY_ENABLED !== 'true' && process.env.SCISPACY_ENABLED !== 'true') {
+export function startScispacySidecar(force = false) {
+  const isEnabled = process.env.SCISPAXY_ENABLED === 'true' || process.env.SCISPACY_ENABLED === 'true';
+  const isAutoStart = process.env.SCISPACY_AUTOSTART === 'true';
+
+  if (!isEnabled && !force) {
     return;
   }
+
+  // If enabled but autostart is false, log lazy-loading deferral
+  if (isEnabled && !isAutoStart && !force) {
+    console.log('[scispaCy] Lazy-loading enabled: Python sidecar deferred until prescription scanner request.');
+    return;
+  }
+
   if (sidecarProcess) return;
 
   const __filename = fileURLToPath(import.meta.url);
@@ -75,8 +85,16 @@ export function stopScispacySidecar() {
 }
 
 export async function queryScispacy(text: string): Promise<ScispacyResponse | null> {
-  if (process.env.SCISPAXY_ENABLED !== 'true' && process.env.SCISPACY_ENABLED !== 'true') {
+  const isEnabled = process.env.SCISPAXY_ENABLED === 'true' || process.env.SCISPACY_ENABLED === 'true';
+  if (!isEnabled) {
     return null;
+  }
+
+  // Lazy-load sidecar process on first query if not running
+  if (!sidecarProcess) {
+    startScispacySidecar(true);
+    // Allow brief time for fast sidecar readiness if spawned on-demand
+    await new Promise(r => setTimeout(r, 1500));
   }
 
   const url = process.env.SCISPACY_URL || 'http://localhost:8001/extract';
@@ -87,7 +105,7 @@ export async function queryScispacy(text: string): Promise<ScispacyResponse | nu
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ text }),
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(2500),
     });
 
     if (!response.ok) {

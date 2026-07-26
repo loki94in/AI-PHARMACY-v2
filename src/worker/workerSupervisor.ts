@@ -45,6 +45,11 @@ export class WorkerSupervisor {
 
   /** Starts all configured background workers */
   public start(): void {
+    if (process.env.DISABLE_BACKGROUND_WORKERS === 'true') {
+      console.log('[WorkerSupervisor] Background workers disabled via DISABLE_BACKGROUND_WORKERS=true.');
+      return;
+    }
+
     console.log('[WorkerSupervisor] Starting background worker supervisor...');
     for (const key of Object.keys(this.workers)) {
       this.spawnWorker(key);

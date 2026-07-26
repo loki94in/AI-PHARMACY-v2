@@ -164,6 +164,7 @@ export class TokenRefreshScheduler {
 
   private timeoutId: NodeJS.Timeout | null = null;
   private nextScheduledMinutes: number | null = null;
+  private hasLoggedNoToken = false;
 
   public async logSessionRefresh(
     triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot',
@@ -262,10 +263,14 @@ export class TokenRefreshScheduler {
       const token = tokenRow ? tokenRow.value : '';
 
       if (!token && triggerType !== 'manual_reauth') {
-        console.log('[TokenRefreshScheduler] No token found in app_settings. Skipping auto-refresh.');
+        if (!this.hasLoggedNoToken) {
+          console.log('[TokenRefreshScheduler] No token found in app_settings. Skipping background auto-refresh until user logs in.');
+          this.hasLoggedNoToken = true;
+        }
         this.isRefreshing = false;
         return;
       }
+      this.hasLoggedNoToken = false;
 
       console.log(`[TokenRefreshScheduler] Running token refresh check (trigger=${triggerType})...`);
       resToken = await this.executeRefresh();
