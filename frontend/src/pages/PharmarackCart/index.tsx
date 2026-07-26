@@ -7,6 +7,7 @@ import { toastEvent, liveCartAddEvent } from '../../services/events';
 import { useSearchParams } from 'react-router-dom';
 import NonMappedDistributors from '../NonMappedDistributors';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
+import { findBestCartMatchForOrder, evaluateOrderCartMatch } from '../../utils/orderFuzzyMatcher';
 
 interface CartLineItem {
   productId: number | null;
@@ -109,6 +110,7 @@ export default function PharmarackCart() {
   const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills' | 'history'>('requests');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
+  const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
 
   const [sentDates, setSentDates] = useState<string[]>([]);
   const [selectedSentDate, setSelectedSentDate] = useState<string>('');
@@ -651,18 +653,49 @@ export default function PharmarackCart() {
     }
   };
 
-  const getOrderItemInCart = (order: SpecialOrder) => {
-    const orderNameNorm = order.product.toLowerCase().replace(/[^a-z0-9]/g, '');
-    for (const dist of distributors) {
-      for (const item of dist.items) {
-        const cartNameNorm = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (cartNameNorm.includes(orderNameNorm) || orderNameNorm.includes(cartNameNorm)) {
-          return item;
-        }
-      }
+  const getOrderCartMatch = (order: SpecialOrder) => {
+    const { matchedItem, candidateItem, result } = findBestCartMatchForOrder(order, distributors);
+    if (result && result.score >= 75) {
+      return { item: matchedItem, candidateItem: matchedItem, result, isHighMatch: true, isPartialMatch: false };
+    }
+    if (result && result.score >= 40 && candidateItem) {
+      return { item: null, candidateItem, result, isHighMatch: false, isPartialMatch: true };
     }
     return null;
   };
+
+  const getOrderItemInCart = (order: SpecialOrder) => {
+    const match = getOrderCartMatch(order);
+    return match ? match.item : null;
+  };
+
+  const handleConfirmCandidateMatch = async (order: SpecialOrder, candidateItem: any) => {
+    try {
+      const prodName = candidateItem.productName || candidateItem.name || order.product;
+      const storeName = candidateItem.distributor || candidateItem.storeName || order.pharmarack_distributor;
+      const rate = candidateItem.rate || candidateItem.ptr || order.pharmarack_rate;
+      const mrp = candidateItem.mrp || candidateItem.MRP || order.pharmarack_mrp;
+      const scheme = candidateItem.scheme || order.pharmarack_scheme;
+
+      await api.updateOrder(order.id, {
+        status: 'Ordered',
+        product: prodName,
+        pharmarack_distributor: storeName,
+        pharmarack_rate: rate ? Number(rate) : undefined,
+        pharmarack_mrp: mrp ? Number(mrp) : undefined,
+        pharmarack_scheme: scheme || undefined,
+        pharmarack_mapped: 1
+      });
+
+      toastEvent.trigger(`Confirmed & linked "${prodName}" to order #${order.id}!`, 'success');
+      await fetchPendingOrders();
+      await fetchCart();
+    } catch (err: any) {
+      console.error('Failed to confirm candidate match:', err);
+      toastEvent.trigger('Failed to confirm order match', 'error');
+    }
+  };
+
 
   const handleAddPendingToCart = async (order: SpecialOrder) => {
     setAddingOrderId(order.id);
@@ -964,19 +997,29 @@ export default function PharmarackCart() {
         console.warn('Could not log placed order:', logErr);
       }
     } catch (err: any) {
-      console.warn('Silent WhatsApp send failed:', err);
-      const errMsg = err?.response?.data?.error || err?.message || 'Failed to send message';
-      setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
-      toastEvent.trigger(`❌ WhatsApp order to ${dist.storeName} failed: ${errMsg}`, 'error');
+      console.warn('Silent WhatsApp send fallback to Web tab:', err);
 
-      // Fallback: reuse WhatsApp Web tab if silent send is unavailable
+      // Copy order message to clipboard for instant manual paste if needed
+      try {
+        await navigator.clipboard.writeText(msg);
+      } catch (_) {}
+
+      // Fallback: open/reuse WhatsApp Web tab with pre-filled order message
       const encodedMsg = encodeURIComponent(msg);
       const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
       openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
+      
+      const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
-      toastEvent.trigger(`Opening WhatsApp Web for ${dist.storeName}...`, 'info');
+      setLastSentWaTimeMap(prev => {
+        const next = { ...prev, [dist.storeId]: timeNow };
+        try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+        return next;
+      });
 
-      // Log placed order to DB history even on tab fallback
+      toastEvent.trigger(`Opened WhatsApp Web for ${dist.storeName}! (Order message pre-filled)`, 'success');
+
+      // Log placed order to DB history on tab fallback
       try {
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
@@ -1638,110 +1681,242 @@ export default function PharmarackCart() {
                   </button>
                 </div>
 
+                {/* Auto-hide Cart Items Control Banner */}
+                <div className="flex items-center justify-between px-3 py-1.5 bg-bg3/30 border-b border-glass-border/40 text-[10px] text-muted shrink-0">
+                  <span className="font-semibold text-muted">Auto-hiding items in Live Cart</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-text hover:text-primary">
+                    <input
+                      type="checkbox"
+                      checked={showAddedItems}
+                      onChange={e => setShowAddedItems(e.target.checked)}
+                      className="rounded bg-bg border-glass-border text-primary focus:ring-0 w-3 h-3 cursor-pointer"
+                    />
+                    <span>Show Added ({pendingOrders.filter(o => getOrderItemInCart(o)).length + pendingRefills.filter(r => getRefillItemInCart(r)).length})</span>
+                  </label>
+                </div>
+
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {sidebarTab === 'requests' ? (
-                    pendingOrders.length === 0 ? (
-                      <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                        No pending special requests from yesterday or older.
-                      </div>
-                    ) : (
-                      pendingOrders.map(order => {
+                    (() => {
+                      const displayOrders = pendingOrders.filter(order => {
                         const inCart = getOrderItemInCart(order);
-                        return (
-                          <div
-                            key={order.id}
-                            className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
-                              ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                              : 'bg-red/10 border-red/20 text-red'
+                        if (inCart && !showAddedItems) return false;
+                        return true;
+                      });
+
+                      return displayOrders.length === 0 ? (
+                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
+                          {pendingOrders.length > 0 && !showAddedItems
+                            ? 'All special requests have been added to the Pharmarack cart!'
+                            : 'No pending special requests found.'}
+                        </div>
+                      ) : (
+                        displayOrders.map(order => {
+                          const cartMatch = getOrderCartMatch(order);
+                          const inCart = Boolean(cartMatch?.isHighMatch);
+                          const isPartialMatch = Boolean(cartMatch?.isPartialMatch);
+                          const candidateItem = cartMatch?.candidateItem;
+                          const matchScore = cartMatch?.result?.score || 0;
+                          const matchReasons = cartMatch?.result?.matchReasons || [];
+
+                          const orderDateMs = new Date(order.date).getTime();
+                          const hoursElapsed = !isNaN(orderDateMs) ? (Date.now() - orderDateMs) / (1000 * 60 * 60) : 0;
+                          const isDelayedOver12h = hoursElapsed >= 12 && order.status !== 'Ready' && order.status !== 'Arrived' && order.status !== 'Fulfilled';
+
+                          const handleConfirmOrdered = async () => {
+                            try {
+                              await api.updateOrder(order.id, { status: 'Ordered' });
+                              toastEvent.trigger(`Confirmed & marked "${order.product}" as Ordered!`, 'success');
+                              await fetchPendingOrders();
+                            } catch (err: any) {
+                              toastEvent.trigger('Failed to update status', 'error');
+                            }
+                          };
+
+                          return (
+                            <div
+                              key={order.id}
+                              className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${
+                                isDelayedOver12h
+                                  ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-amber-500/10 animate-pulse'
+                                  : inCart
+                                  ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
+                                  : isPartialMatch
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                                  : 'bg-red/10 border-red/20 text-red'
                               }`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <div 
-                                className="flex flex-col min-w-0 cursor-pointer group"
-                                onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
-                                title="Click to search in Pharmarack and add to cart"
-                              >
-                                <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
-                                  {order.product}
-                                </span>
-                                <span className="text-[9px] text-muted mt-0.5 truncate">
-                                  Customer: {order.requester} (Qty: {order.qty})
-                                </span>
-                                <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                                  Date: {formatDisplayDate(order.date)}
-                                </span>
-                              </div>
-                              {inCart ? (
-                                <span className="shrink-0 text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/20 text-emerald-400 select-none">
-                                  Added
-                                </span>
-                              ) : (
-                                <button
+                            >
+                              <div className="flex justify-between items-start">
+                                <div 
+                                  className="flex flex-col min-w-0 cursor-pointer group flex-1"
                                   onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
-                                  className="shrink-0 text-[9px] font-bold bg-primary/20 hover:bg-primary/35 border border-primary/30 px-2 py-1 rounded-md transition-all active:scale-95 text-primary font-sans flex items-center gap-1 cursor-pointer"
-                                  title="Open Medicine Search & Add to Pharmarack Live Cart"
+                                  title="Click to search in Pharmarack and add to cart"
                                 >
-                                  <Search size={10} />
-                                  <span>Search & Add</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )
-                  ) : sidebarTab === 'refills' ? (
-                    pendingRefills.length === 0 ? (
-                      <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                        No pending out-of-stock refill medicines due.
-                      </div>
-                    ) : (
-                      pendingRefills.map(refill => {
-                        const inCart = getRefillItemInCart(refill);
-                        const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
-                        return (
-                          <div
-                            key={refill.id}
-                            className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
-                              ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                              : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                              }`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <div 
-                                className="flex flex-col min-w-0 cursor-pointer group"
-                                onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
-                                title="Click to search in Pharmarack and add to cart"
-                              >
-                                <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
-                                  {medName}
-                                </span>
-                                <span className="text-[9px] text-muted mt-0.5 truncate">
-                                  Patient: {refill.patient_name}
-                                </span>
-                                <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                                  Due Date: {formatDisplayDate(refill.next_refill_date)}
-                                </span>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
+                                      {order.product}
+                                    </span>
+                                    {isDelayedOver12h && (
+                                      <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0">
+                                        ⏰ {Math.floor(hoursElapsed)}h Shipment Delay
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[9px] text-muted mt-0.5 truncate">
+                                    Customer: {order.requester} (Qty: {order.qty})
+                                  </span>
+                                  {inCart && matchReasons.length > 0 && (
+                                    <span className="text-[8px] text-emerald-400/90 font-medium mt-0.5 truncate" title={matchReasons.join(', ')}>
+                                      Match details: {matchReasons.join(' • ')}
+                                    </span>
+                                  )}
+                                  <span className="text-[8px] text-muted/80 font-mono mt-0.2">
+                                    Logged: {formatDisplayDate(order.date)}
+                                  </span>
+
+                                  {isDelayedOver12h && (
+                                    <span className="text-[9px] font-bold text-amber-400 mt-1 flex items-center gap-1">
+                                      ⚠️ Placed &gt;12h ago — Pending arrival in pharmacy inventory!
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                  {inCart ? (
+                                    <>
+                                      <span className="text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/30 text-emerald-400 select-none flex items-center gap-1">
+                                        <span>✨ In Cart</span>
+                                        <span className="opacity-75">({matchScore}%)</span>
+                                      </span>
+                                      {order.status === 'Pending' && (
+                                        <button
+                                          type="button"
+                                          onClick={handleConfirmOrdered}
+                                          className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm"
+                                          title="Double-check & confirm that this order is placed"
+                                        >
+                                          <Check size={10} />
+                                          <span>Confirm Ordered</span>
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : isPartialMatch && candidateItem ? (
+                                    <>
+                                      <span className="text-[8px] font-extrabold uppercase bg-amber-500/25 px-1.5 py-0.5 rounded-md border border-amber-500/30 text-amber-400 select-none flex items-center gap-1">
+                                        <span>⚡ Possible Match</span>
+                                        <span className="opacity-75">({matchScore}%)</span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConfirmCandidateMatch(order, candidateItem)}
+                                        className="text-[9px] font-bold bg-amber-500 hover:bg-amber-400 text-black px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                                        title={`Confirm "${candidateItem.productName || candidateItem.name}" in cart is this request`}
+                                      >
+                                        <Check size={10} />
+                                        <span>Confirm Added</span>
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
+                                      className="text-[9px] font-bold bg-primary/20 hover:bg-primary/35 border border-primary/30 px-2 py-1 rounded-md transition-all active:scale-95 text-primary font-sans flex items-center gap-1 cursor-pointer"
+                                      title="Open Medicine Search & Add to Pharmarack Live Cart"
+                                    >
+                                      <Search size={10} />
+                                      <span>Search & Add</span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              {inCart ? (
-                                <span className="shrink-0 text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/20 text-emerald-400 select-none">
-                                  Added
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
-                                  className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-1 rounded-md transition-all active:scale-95 text-amber-400 font-sans flex items-center gap-1 cursor-pointer"
-                                  title="Open Medicine Search & Add to Pharmarack Live Cart"
-                                >
-                                  <Search size={10} />
-                                  <span>Search & Add</span>
-                                </button>
+
+                              {/* Partial Candidate Match Banner */}
+                              {isPartialMatch && candidateItem && (
+                                <div className="mt-1 pt-1.5 border-t border-amber-500/20 text-[9px] text-amber-300/90 flex flex-col gap-0.5 bg-amber-500/5 p-1.5 rounded-lg">
+                                  <div className="flex justify-between items-center font-semibold">
+                                    <span className="truncate pr-1" title={candidateItem.productName || candidateItem.name}>
+                                      Candidate: {candidateItem.productName || candidateItem.name}
+                                    </span>
+                                    {candidateItem.distributor && (
+                                      <span className="text-[8px] bg-amber-500/20 px-1 py-0.2 rounded font-mono shrink-0">
+                                        {candidateItem.distributor}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {matchReasons.length > 0 && (
+                                    <span className="text-[8px] text-amber-400/80 truncate">
+                                      Match factors: {matchReasons.join(' • ')}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          </div>
-                        );
-                      })
-                    )
+                          );
+                        })
+
+                      );
+                    })()
+                  ) : sidebarTab === 'refills' ? (
+                    (() => {
+                      const displayRefills = pendingRefills.filter(refill => {
+                        const inCart = getRefillItemInCart(refill);
+                        if (inCart && !showAddedItems) return false;
+                        return true;
+                      });
+
+                      return displayRefills.length === 0 ? (
+                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
+                          {pendingRefills.length > 0 && !showAddedItems
+                            ? 'All refill medicines have been added to the Pharmarack cart!'
+                            : 'No pending out-of-stock refill medicines due.'}
+                        </div>
+                      ) : (
+                        displayRefills.map(refill => {
+                          const inCart = getRefillItemInCart(refill);
+                          const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
+                          return (
+                            <div
+                              key={refill.id}
+                              className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
+                                ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
+                                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div 
+                                  className="flex flex-col min-w-0 cursor-pointer group"
+                                  onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                  title="Click to search in Pharmarack and add to cart"
+                                >
+                                  <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
+                                    {medName}
+                                  </span>
+                                  <span className="text-[9px] text-muted mt-0.5 truncate">
+                                    Patient: {refill.patient_name}
+                                  </span>
+                                  <span className="text-[8px] text-muted/80 font-mono mt-0.2">
+                                    Due Date: {formatDisplayDate(refill.next_refill_date)}
+                                  </span>
+                                </div>
+                                {inCart ? (
+                                  <span className="shrink-0 text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/20 text-emerald-400 select-none">
+                                    Added
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                    className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-1 rounded-md transition-all active:scale-95 text-amber-400 font-sans flex items-center gap-1 cursor-pointer"
+                                    title="Open Medicine Search & Add to Pharmarack Live Cart"
+                                  >
+                                    <Search size={10} />
+                                    <span>Search & Add</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      );
+                    })()
                   ) : (
                     /* ── Missing Phone Distributors in Cart ── */
                     (() => {

@@ -1268,6 +1268,43 @@ router.get('/search-medicine', async (req, res) => {
         }
       }
     }
+
+    // Parenthetical stripping fallback (e.g. "TELMA 40 (15 TAB)" -> "TELMA 40")
+    if (rows.length === 0) {
+      const strippedQuery = cleanQuery.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+      if (strippedQuery.length >= 2 && strippedQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
+        const prefixQuery = `${strippedQuery}%`;
+        const likeQuery = `%${strippedQuery}%`;
+        const fallbackSql = `
+          SELECT 
+            m.id AS medicine_id, 
+            m.name AS medicine_name, 
+            m.api_reference,
+            m.item_code AS item_code,
+            m.manufacturer AS manufacturer,
+            im.id AS inventory_id, 
+            im.batch_no, 
+            im.expiry_date AS expiry_date, 
+            im.quantity AS quantity, 
+            im.loose_quantity AS loose_quantity,
+            COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            im.unit_price, 
+            COALESCE(im.cost_price, 0) AS cost_price,
+            m.cgst, 
+            m.sgst, 
+            m.igst, 
+            m.hsn_code,
+            0 AS is_out_of_stock
+          FROM inventory_master im
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE (m.name LIKE ? OR m.name LIKE ?)
+            AND im.quantity > 0
+          ORDER BY m.name ASC, im.expiry_date ASC
+          LIMIT 30
+        `;
+        rows = await db.all(fallbackSql, [prefixQuery, likeQuery]);
+      }
+    }
     
     // Map SQLite numeric values back to boolean for is_out_of_stock compatibility
     for (const row of rows) {

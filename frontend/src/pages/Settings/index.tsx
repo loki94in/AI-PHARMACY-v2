@@ -55,6 +55,7 @@ interface SettingsData {
   gmailAuthMethod: string;
   emailAutodeleteEnabled: boolean;
   emailAutodeleteLimit: number;
+  emailRetentionLimit: number;
   automationEnabled: boolean;
   adminRemoteMode: boolean;
   adminUsername: string;
@@ -116,6 +117,7 @@ const Settings = () => {
     gmailAuthMethod: 'password',
     emailAutodeleteEnabled: true,
     emailAutodeleteLimit: 10,
+    emailRetentionLimit: 15,
     automationEnabled: false,
     adminRemoteMode: true,
     adminUsername: 'admin',
@@ -415,6 +417,7 @@ const Settings = () => {
   const setGmailAuthMethod = (val: string | ((p: string) => string)) => updateSetting('gmailAuthMethod', val);
   const setEmailAutodeleteEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAutodeleteEnabled', val);
   const setEmailAutodeleteLimit = (val: number | ((p: number) => number)) => updateSetting('emailAutodeleteLimit', val);
+  const setEmailRetentionLimit = (val: number | ((p: number) => number)) => updateSetting('emailRetentionLimit', val);
   const setAutomationEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('automationEnabled', val);
   const setAdminRemoteMode = (val: boolean | ((p: boolean) => boolean)) => updateSetting('adminRemoteMode', val);
   const setAdminUsername = (val: string | ((p: string) => string)) => updateSetting('adminUsername', val);
@@ -568,6 +571,7 @@ const Settings = () => {
     gmailAuthMethod,
     emailAutodeleteEnabled,
     emailAutodeleteLimit,
+    emailRetentionLimit,
     automationEnabled,
     adminRemoteMode,
     adminUsername,
@@ -657,6 +661,7 @@ const Settings = () => {
         gmailAuthMethod: serverSettings.gmail_auth_method || 'password',
         emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
         emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
+        emailRetentionLimit: Number(serverSettings.email_retention_limit) || 15,
         automationEnabled: serverSettings.automation_enabled === 'true',
         adminRemoteMode: serverSettings.admin_remote_mode !== 'false',
         adminUsername: serverSettings.admin_username || 'admin',
@@ -738,6 +743,8 @@ const Settings = () => {
   const handleSaveSettings = async () => {
     const payload = {
       shop_name: pharmacyName,
+      store_name: pharmacyName,
+      medical_name: pharmacyName,
       shop_address: address,
       shop_phone: phone,
       gstin: gstin,
@@ -752,6 +759,7 @@ const Settings = () => {
       gmail_auth_method: gmailAuthMethod,
       email_autodelete_enabled: emailAutodeleteEnabled.toString(),
       email_autodelete_limit: emailAutodeleteLimit.toString(),
+      email_retention_limit: emailRetentionLimit.toString(),
       automation_enabled: automationEnabled.toString(),
       admin_remote_mode: adminRemoteMode.toString(),
       admin_username: adminUsername,
@@ -1530,6 +1538,23 @@ const Settings = () => {
               value={expiryAlertDays}
               onChange={(e) => setExpiryAlertDays(Number(e.target.value))}
             />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="emailRetentionLimit" className="text-xs font-bold text-muted uppercase tracking-wider">
+              Email Retention Limit (Max Stored)
+            </label>
+            <select
+              id="emailRetentionLimit"
+              className="premium-input w-full bg-bg border border-border"
+              value={emailRetentionLimit}
+              onChange={(e) => setEmailRetentionLimit(Number(e.target.value))}
+            >
+              <option value={15}>15 Emails (Default - Recommended)</option>
+              <option value={30}>30 Emails</option>
+              <option value={50}>50 Emails</option>
+              <option value={100}>100 Emails</option>
+            </select>
           </div>
 
           <div className="space-y-2 md:col-span-2">

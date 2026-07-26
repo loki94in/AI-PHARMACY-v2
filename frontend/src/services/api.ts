@@ -496,6 +496,7 @@ export const api = {
     storeId: string | number; 
     qty: number; 
     rate?: number; 
+    mrp?: number;
     scheme?: string;
     productCode?: string;
     company?: string;
@@ -583,9 +584,15 @@ export const api = {
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
+  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number }) =>
+    apiClient.post('/orders/batch', data).then(res => res.data),
   updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
   deleteOrder: (id: number) => apiClient.delete(`/orders/${id}`).then(res => res.data),
   getUncollectedAlerts: () => apiClient.get<SpecialOrder[]>('/orders/uncollected-alerts').then(res => res.data),
+  notifySpecialOrderArrival: (id: number) => apiClient.post(`/orders/${id}/notify-arrival`).then(res => res.data),
+  resendSpecialOrderBooking: (id: number) => apiClient.post(`/orders/${id}/resend-booking`).then(res => res.data),
+  fulfillSpecialOrder: (id: number, data?: { invoiceNo?: string; grandTotal?: number }) =>
+    apiClient.post(`/orders/${id}/fulfill`, data || {}).then(res => res.data),
   convertToRefill: (orderId: number, refillIntervalDays: number) =>
     apiClient.post('/orders/convert-to-refill', { orderId, refillIntervalDays }).then(res => res.data),
 

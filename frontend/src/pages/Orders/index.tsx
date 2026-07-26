@@ -14,7 +14,8 @@ import {
   RefreshCw,
   Mail,
   MessageCircle,
-  User
+  User,
+  ShoppingCart
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { SpecialOrder } from '../../services/api';
@@ -87,6 +88,37 @@ const Orders = () => {
   
 
 
+  const [addingCartId, setAddingCartId] = useState<number | null>(null);
+
+  const handleAddToCartOrder = async (order: SpecialOrder) => {
+    setAddingCartId(order.id);
+    try {
+      const res = await api.addPharmarackCart([{
+        productId: 0,
+        storeId: 0,
+        qty: order.qty || 1,
+        productName: order.product,
+        storeName: order.pharmarack_distributor || undefined,
+        rate: order.pharmarack_rate || undefined,
+        mrp: order.pharmarack_mrp || undefined,
+        scheme: order.pharmarack_scheme || undefined,
+        mapped: order.pharmarack_mapped === 1
+      }]);
+      if (res && res.success) {
+        toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success');
+        await api.updateOrder(order.id, { status: 'Ordered' });
+        queryClient.invalidateQueries({ queryKey: ['orders'] });
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to add to cart', 'error');
+    } finally {
+      setAddingCartId(null);
+    }
+  };
+
   // New Request Form State
   const [product, setProduct] = useState('');
   const [requester, setRequester] = useState('');
@@ -119,8 +151,11 @@ const Orders = () => {
   const [selectedCompany, setSelectedCompany] = useState('');
   const [selectedPackaging, setSelectedPackaging] = useState('');
 
+  const isSelectingPrRef = useRef(false);
+
   // Debounced search for Pharmarack products
   useEffect(() => {
+    if (isSelectingPrRef.current) return;
     if (!product.trim()) {
       setPrSearchResults([]);
       setShowPrDropdown(false);
@@ -128,9 +163,11 @@ const Orders = () => {
     }
 
     const timer = setTimeout(async () => {
+      if (isSelectingPrRef.current) return;
       setLoadingPr(true);
       try {
         const results = await api.searchPharmarack(product);
+        if (isSelectingPrRef.current) return;
         setPrSearchResults(results || []);
         setShowPrDropdown(results && results.length > 0);
       } catch (err) {
@@ -144,7 +181,8 @@ const Orders = () => {
   }, [product]);
 
   const handleSelectPharmarackItem = (item: any) => {
-    setProduct(`${item.name} (${item.packaging})`);
+    isSelectingPrRef.current = true;
+    setProduct(item.name);
     setSelectedDistributor(item.distributor);
     setSelectedRate(item.rate !== null && item.rate !== undefined ? item.rate : '');
     setSelectedMrp(item.mrp !== null && item.mrp !== undefined ? item.mrp : '');
@@ -155,6 +193,7 @@ const Orders = () => {
     setSelectedProductCode(item.productCode || '');
     setSelectedCompany(item.company || '');
     setSelectedPackaging(item.packaging || '');
+    setPrSearchResults([]);
     setShowPrDropdown(false);
   };
 
@@ -224,27 +263,31 @@ const Orders = () => {
 
       showNotification(`Order for "${product}" logged successfully!`, 'success');
 
-      // If it's a Pharmarack product, also add it to the actual Pharmarack cart!
-      if (selectedProductId && selectedStoreId) {
-        try {
-          await api.addPharmarackCart([{
-            productId: selectedProductId,
-            storeId: selectedStoreId,
-            qty: Number(qty),
-            rate: selectedRate !== '' ? Number(selectedRate) : undefined,
-            scheme: selectedScheme || undefined,
-            productCode: selectedProductCode,
-            company: selectedCompany,
-            productName: product.trim(),
-            storeName: selectedDistributor,
-            packaging: selectedPackaging
-          }]);
+      // Also add item to actual Pharmarack cart (backend enriches on-the-fly if productId/storeId is absent)
+      try {
+        const cartRes = await api.addPharmarackCart([{
+          productId: selectedProductId || 0,
+          storeId: selectedStoreId || 0,
+          qty: Number(qty) || 1,
+          rate: selectedRate !== '' ? Number(selectedRate) : undefined,
+          scheme: selectedScheme || undefined,
+          productCode: selectedProductCode || undefined,
+          company: selectedCompany || undefined,
+          productName: product.trim(),
+          storeName: selectedDistributor || undefined,
+          packaging: selectedPackaging || undefined,
+          mapped: selectedMapped
+        }]);
+        if (cartRes && cartRes.success) {
           showNotification(`Added "${product}" to actual Pharmarack cart!`, 'success');
-        } catch (cartErr: any) {
-          console.error(`Failed to add ${product} to actual Pharmarack cart:`, cartErr);
-          const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Unknown error';
-          showNotification(`Could not add "${product}" to Pharmarack cart: ${detailedError}`, 'error');
+          window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+        } else {
+          showNotification(`Order logged, cart notice: ${cartRes?.error || 'Manual cart add required'}`, 'info');
         }
+      } catch (cartErr: any) {
+        console.warn(`Failed to add ${product} to Pharmarack cart:`, cartErr);
+        const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Sync issue';
+        showNotification(`Order logged, cart notice: ${detailedError}`, 'info');
       }
       
       // Reset form
@@ -894,6 +937,14 @@ const Orders = () => {
 
                       {/* Actions */}
                       <td className="p-4 text-center flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => handleAddToCartOrder(order)}
+                          disabled={addingCartId === order.id}
+                          className="p-1.5 hover:bg-primary/20 bg-primary/10 text-primary rounded-lg transition-all"
+                          title="Add item directly to Pharmarack cart"
+                        >
+                          <ShoppingCart size={13} className={addingCartId === order.id ? 'animate-spin' : ''} />
+                        </button>
                         <button
                           onClick={() => {
                             navigate('/mail', {

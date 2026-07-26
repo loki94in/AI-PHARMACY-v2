@@ -15,6 +15,7 @@ import * as XLSX from 'xlsx';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
+import { getEmailRetentionLimit } from './storeSettingsService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2641,83 +2642,9 @@ export class EmailService {
         }
       }
 
-      // 2. Clean up / Auto-delete older emails and attachments if enabled
-      if (autodeleteEnabled) {
-        // Get all UIDs stored in the local DB
-        const dbUidsRows = await db.all('SELECT uid, is_order, is_saved, distributor_name, subject FROM emails');
-        const dbUids = dbUidsRows.map(r => r.uid);
-
-        for (const cachedUid of dbUids) {
-          // If the cached UID is in the latest UIDs, we KEEP it (retention limit)
-          if (latestUids.includes(cachedUid)) {
-            continue;
-          }
-
-          // Otherwise, it is older than the retention limit. Check status.
-          const dbEmail = dbUidsRows.find(r => r.uid === cachedUid);
-          const isOrderEmail = dbEmail ? dbEmail.is_order === 1 : false;
-          const isSavedLocal = dbEmail ? dbEmail.is_saved === 1 : false;
-
-          let shouldDelete = false;
-
-          if (isSavedLocal) {
-            // Already marked as saved in DB, safe to delete
-            console.log(`[Cleanup] Auto-deleting UID ${cachedUid} since it is marked as saved in DB.`);
-            shouldDelete = true;
-          } else if (isOrderEmail) {
-            // For order emails, find if a matching purchase bill has been saved
-            const fullEmail = await db.get('SELECT subject, body FROM emails WHERE uid = ?', [cachedUid]);
-            if (fullEmail) {
-              const processedEmail: ProcessedEmail = {
-                from: '',
-                subject: fullEmail.subject || '',
-                body: fullEmail.body || '',
-                attachments: []
-              };
-              const orderInfo = this.extractOrderInfo(processedEmail);
-              const invoiceNo = orderInfo.invoiceNumber;
-
-              if (invoiceNo && invoiceNo !== 'N/A') {
-                const purchase = await db.get('SELECT id FROM purchases WHERE invoice_no = ? LIMIT 1', [invoiceNo]);
-                if (purchase) {
-                  console.log(`[Cleanup] Auto-deleting UID ${cachedUid} since bill ${invoiceNo} is saved.`);
-                  shouldDelete = true;
-                } else {
-                  console.log(`[Cleanup] Keeping UID ${cachedUid} because bill ${invoiceNo} is not saved yet.`);
-                }
-              } else {
-                console.log(`[Cleanup] Auto-deleting UID ${cachedUid} because it has no extractable invoice.`);
-                shouldDelete = true;
-              }
-            } else {
-              shouldDelete = true;
-            }
-          } else {
-            // Non-order emails are deleted immediately once they exceed the retention limit
-            console.log(`[Cleanup] Auto-deleting UID ${cachedUid} because it is a non-order email.`);
-            shouldDelete = true;
-          }
-
-          if (shouldDelete) {
-            // 1. Delete attachment files from disk
-            const filesToDelete = cachedFiles.filter(f => f.startsWith(`att-${cachedUid}-`));
-            for (const file of filesToDelete) {
-              try {
-                fs.unlinkSync(path.join(uploadsDir, file));
-              } catch (err) {
-                console.error(`Failed to delete cached file ${file}:`, err);
-              }
-            }
-
-            // 2. Delete database records
-            await db.run('DELETE FROM emails WHERE uid = ?', [cachedUid]);
-            await db.run('DELETE FROM email_attachments WHERE uid = ?', [cachedUid]);
-            await db.run('DELETE FROM processed_emails WHERE uid = ?', [cachedUid]);
-          }
-        }
-      }
-
-          } catch (err) {
+      // 2. Clean up / Auto-delete older emails beyond retention limit (saved emails are exempt)
+      await this.pruneOldEmails(db);
+    } catch (err) {
       console.error('[Sync] Error during syncAndCleanAttachments:', err);
     } finally {
       if (connection) {
@@ -2727,6 +2654,74 @@ export class EmailService {
       }
     }
   }
+
+  /**
+   * Automatically prunes old emails beyond the configured retention limit (default: 15).
+   * Exempts emails with is_saved = 1.
+   * Physically deletes unimported attachment files from disk.
+   */
+  public async pruneOldEmails(dbInstance?: any): Promise<{ deletedCount: number }> {
+    try {
+      await ensureSchema(getDbPath());
+      const db = dbInstance || (await dbManager.getConnection());
+      const limit = await getEmailRetentionLimit(db);
+
+      // Fetch non-saved email UIDs ordered by date/synced_at descending (latest first)
+      const nonSavedEmails = await db.all(
+        `SELECT uid FROM emails 
+         WHERE (is_saved IS NULL OR is_saved = 0)
+         ORDER BY datetime(COALESCE(date, synced_at)) DESC, uid DESC`
+      );
+
+      if (nonSavedEmails.length <= limit) {
+        return { deletedCount: 0 };
+      }
+
+      // Emails beyond the limit (oldest ones) to delete
+      const emailsToDelete = nonSavedEmails.slice(limit);
+      const uidsToDelete = emailsToDelete.map((e: any) => e.uid);
+
+      let deletedCount = 0;
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+
+      for (const uid of uidsToDelete) {
+        // Find attachments for this email
+        const attachments = await db.all(
+          'SELECT local_path, filename FROM email_attachments WHERE uid = ?',
+          [uid]
+        );
+
+        for (const att of attachments) {
+          const filePath = att.local_path || (att.filename ? path.join(uploadsDir, att.filename) : null);
+          if (filePath && fs.existsSync(filePath)) {
+            try {
+              fs.unlinkSync(filePath);
+              console.log(`[EmailPruner] Cleaned up attachment file: ${filePath}`);
+            } catch (fileErr) {
+              console.warn(`[EmailPruner] Failed to delete file ${filePath}:`, fileErr);
+            }
+          }
+        }
+
+
+        // Delete records
+        await db.run('DELETE FROM email_attachments WHERE uid = ?', [uid]);
+        await db.run('DELETE FROM processed_emails WHERE uid = ?', [uid]);
+        await db.run('DELETE FROM emails WHERE uid = ?', [uid]);
+        deletedCount++;
+      }
+
+      if (deletedCount > 0) {
+        console.log(`[EmailPruner] Cleaned up ${deletedCount} old email(s). Retained latest ${limit} non-saved emails.`);
+      }
+
+      return { deletedCount };
+    } catch (err) {
+      console.error('[EmailPruner] Error during email pruning:', err);
+      return { deletedCount: 0 };
+    }
+  }
+
 
   /**
    * Returns emails from the LOCAL database (offline-first, instant).

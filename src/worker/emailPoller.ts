@@ -13,6 +13,7 @@ import { emailService } from '../services/emailService.js';
 export function startEmailPoller() {
   // Start polling with default 5-minute interval
   emailService.startPolling(5);
+  emailService.pruneOldEmails().catch(err => console.error('[EmailPoller] Prune on startup failed:', err));
   console.log('Email poller worker started');
 }
 

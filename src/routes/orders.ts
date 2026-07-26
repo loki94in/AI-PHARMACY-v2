@@ -3,6 +3,8 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendMessage } from '../whatsappClient.js';
+import { getStoreMedicalName, getStoreMedicalNameAndPhone } from '../services/storeSettingsService.js';
+import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,6 +92,139 @@ router.get('/', async (_req, res) => {
   }
 });
 
+// Log batch request / orders for multiple items in ONE single WhatsApp notification
+router.post('/batch', async (req, res) => {
+  const { 
+    items, 
+    requester, 
+    phone, 
+    priority = 'Normal', 
+    status = 'Pending',
+    advance_payment = 0
+  } = req.body;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'At least one medicine item is required' });
+  }
+  if (!requester || !phone) {
+    return res.status(400).json({ error: 'Requester name and phone are required' });
+  }
+  const cleanPhone = (phone || '').replace(/\D/g, '');
+  if (cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    await initOrdersTable(db);
+
+    const cleanReqPhone = phone.trim();
+    const cleanReqName = requester.trim();
+    let customerId = req.body.customer_id || null;
+
+    if (!customerId && (cleanReqPhone || cleanReqName)) {
+      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanReqPhone]);
+      if (!cust && cleanReqName && cleanReqName.toLowerCase() !== 'customer') {
+        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanReqName]);
+      }
+      if (cust) {
+        customerId = cust.id;
+      } else if (cleanReqPhone || cleanReqName) {
+        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanReqName, cleanReqPhone]);
+        customerId = custRes.lastID;
+      }
+
+      try {
+        await db.run(
+          `INSERT OR IGNORE INTO customers (name, phone) VALUES (?, ?)`,
+          [cleanReqName, cleanReqPhone]
+        );
+      } catch (_) {}
+    }
+
+    const todayStr = new Date().toISOString();
+    const insertedOrders: Array<{ id: number; product: string; qty: number }> = [];
+
+    await db.run('BEGIN IMMEDIATE TRANSACTION');
+    try {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const medName = (item.product || item.medicine_name || item.name || '').trim();
+        if (!medName) continue;
+        const itemQty = Number(item.qty) || 1;
+        const itemAdv = i === 0 && advance_payment ? Number(advance_payment) : Number(item.advance_payment || 0);
+
+        const result = await db.run(
+          `INSERT INTO special_orders (
+            product, requester, phone, qty, priority, status, date, notified,
+            pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped, pharmarack_scheme, advance_payment
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+          [
+            medName,
+            cleanReqName,
+            cleanPhone,
+            itemQty,
+            item.priority || priority,
+            status,
+            todayStr,
+            item.distributor || item.pharmarack_distributor || null,
+            item.rate !== undefined ? item.rate : (item.pharmarack_rate !== undefined ? item.pharmarack_rate : null),
+            item.mrp !== undefined ? item.mrp : (item.pharmarack_mrp !== undefined ? item.pharmarack_mrp : null),
+            item.mapped ? 1 : (item.pharmarack_mapped ? 1 : 0),
+            item.scheme || item.pharmarack_scheme || null,
+            itemAdv
+          ]
+        );
+
+        insertedOrders.push({
+          id: result.lastID || 0,
+          product: medName,
+          qty: itemQty
+        });
+      }
+      await db.run('COMMIT');
+    } catch (txErr) {
+      await db.run('ROLLBACK');
+      throw txErr;
+    }
+
+    // Send ONE SINGLE CONSOLIDATED WHATSAPP MESSAGE for all items in the order
+    if (insertedOrders.length > 0 && phone) {
+      const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const medicalName = await getStoreMedicalNameAndPhone(db);
+      const totalAdv = Number(advance_payment || 0);
+      const advText = totalAdv > 0 ? `\n💰 Total Advance Paid: ₹${totalAdv.toFixed(2)}` : '';
+
+      let msg = '';
+      if (insertedOrders.length === 1) {
+        const single = insertedOrders[0];
+        msg = `Hi ${cleanReqName}, your order for ${single.product} (Qty: ${single.qty})${totalAdv > 0 ? ` (Advance Paid: ₹${totalAdv.toFixed(2)})` : ''} has been booked at ${medicalName}. We will notify you when it arrives.`;
+      } else {
+        const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} — Qty: ${o.qty}`).join('\n');
+        msg = `Hi ${cleanReqName},\n\nYour special order request for the following ${insertedOrders.length} medicines has been booked at ${medicalName}:\n\n${itemListText}${advText}\n\nWe will notify you as soon as your items arrive. Thank you!`;
+      }
+
+      try {
+        await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_batch', cleanReqName);
+        console.log(`Consolidated special order WhatsApp queued for ${cleanReqName} (${insertedOrders.length} items)`);
+
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['quick_order_batch', cleanReqName, formattedPhone, msg, 'pending', String(insertedOrders[0].id)]
+        );
+      } catch (wsError: any) {
+        console.error(`Failed to enqueue consolidated special order WhatsApp for ${cleanReqName}:`, wsError);
+      }
+    }
+
+    res.json({ success: true, message: `Successfully logged ${insertedOrders.length} request(s)`, count: insertedOrders.length, orders: insertedOrders });
+  } catch (err) {
+    console.error('Create batch order request error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Log a new request / order
 router.post('/', async (req, res) => {
   const { 
@@ -142,31 +277,29 @@ router.post('/', async (req, res) => {
       // Sync customer into unified contacts master table
       try {
         await db.run(
-          `INSERT INTO contacts (name, phone, type, is_active)
-           VALUES (?, ?, 'customer', 1)
-           ON CONFLICT(phone) DO UPDATE SET name = EXCLUDED.name`,
+          `INSERT OR IGNORE INTO customers (name, phone) VALUES (?, ?)`,
           [cleanReqName, cleanReqPhone]
         );
       } catch (_) {}
     }
 
-    const medName = (product || medicine_name || '').trim();
+    const todayStr = new Date().toISOString();
+    const medName = reqProduct.trim();
 
+    // Insert order into SQLite
     const result = await db.run(
       `INSERT INTO special_orders (
-        customer_id, product, medicine_name, requester, phone, qty, priority, status,
-        pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped,
-        pharmarack_scheme, advance_payment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        product, requester, phone, qty, priority, status, date, notified,
+        pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped, pharmarack_scheme, advance_payment
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
       [
-        customerId,
         medName,
-        medName, 
-        requester.trim(), 
-        phone.trim(), 
-        qty, 
-        priority || 'Normal', 
-        status || 'Pending',
+        requester.trim(),
+        cleanPhone,
+        Number(qty) || 1,
+        priority,
+        status,
+        todayStr,
         pharmarack_distributor || null,
         pharmarack_rate !== undefined ? pharmarack_rate : null,
         pharmarack_mrp !== undefined ? pharmarack_mrp : null,
@@ -179,25 +312,21 @@ router.post('/', async (req, res) => {
     // Auto send confirmation message to customer via WhatsApp
     if (phone) {
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-      let medicalName = 'XYZ MEDICAL';
-      const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-      if (nameRow && nameRow.value) {
-        medicalName = nameRow.value;
-      }
+      const medicalName = await getStoreMedicalNameAndPhone(db);
       const advMsg = advance_payment && Number(advance_payment) > 0 ? ` (Advance Paid: ₹${Number(advance_payment).toFixed(2)})` : '';
-      const msg = `Hi ${requester.trim()}, your special order for ${medName} (Qty: ${qty})${advMsg} has been taken in ${medicalName}. We will notify you when it is ready.`;
+      const msg = `Hi ${requester.trim()}, your order for ${medName} (Qty: ${qty})${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
       
       try {
-        await sendMessage(formattedPhone, undefined, msg);
-        console.log(`Special order confirmation WhatsApp sent to ${requester}`);
+        await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', requester.trim());
+        console.log(`Special order confirmation WhatsApp queued for ${requester}`);
         
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['quick_order', requester.trim(), formattedPhone, msg, 'sent', String(result.lastID)]
+          ['quick_order', requester.trim(), formattedPhone, msg, 'pending', String(result.lastID)]
         );
       } catch (wsError: any) {
-        console.error(`Failed to send special order confirmation WhatsApp to ${requester}:`, wsError);
+        console.error(`Failed to enqueue special order confirmation WhatsApp for ${requester}:`, wsError);
         const errMsg = wsError.message || 'Unknown error';
         try {
           await db.run(
@@ -222,6 +351,84 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Trigger WhatsApp Arrival / Status Notification for a special order
+router.post('/:id/notify-arrival', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    await initOrdersTable(db);
+    
+    const order = await db.get('SELECT * FROM special_orders WHERE id = ?', id);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    if (!order.phone) {
+      return res.status(400).json({ error: 'Order has no associated phone number' });
+    }
+
+    const cleanPhone = order.phone.replace(/\D/g, '');
+    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    
+    const medicalName = await getStoreMedicalNameAndPhone(db);
+    const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) has arrived and is ready for collection at ${medicalName}. Please visit us to collect it.`;
+
+    await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
+    
+    // Update order status to 'Ready' and mark notified
+    await db.run('UPDATE special_orders SET status = ?, notified = 1 WHERE id = ?', ['Ready', id]);
+
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['special_order_arrived', order.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+    );
+
+    res.json({ success: true, message: 'Arrival notification queued successfully via WhatsApp' });
+  } catch (err: any) {
+    console.error('Notify arrival error:', err);
+    res.status(500).json({ error: 'Failed to queue WhatsApp message: ' + (err.message || 'Unknown error') });
+  }
+});
+
+// Resend booking WhatsApp notification
+router.post('/:id/resend-booking', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    await initOrdersTable(db);
+    
+    const order = await db.get('SELECT * FROM special_orders WHERE id = ?', id);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    if (!order.phone) {
+      return res.status(400).json({ error: 'Order has no associated phone number' });
+    }
+
+    const cleanPhone = order.phone.replace(/\D/g, '');
+    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    
+    const medicalName = await getStoreMedicalNameAndPhone(db);
+    const advMsg = order.advance_payment && Number(order.advance_payment) > 0 ? ` (Advance Paid: ₹${Number(order.advance_payment).toFixed(2)})` : '';
+    const msg = `Hi ${(order.requester || '').trim()}, your order for ${order.product} (Qty: ${order.qty})${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
+
+    await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
+
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['quick_order_resend', order.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+    );
+
+    res.json({ success: true, message: 'Booking confirmation WhatsApp queued successfully' });
+  } catch (err: any) {
+    console.error('Resend booking notification error:', err);
+    res.status(500).json({ error: 'Failed to queue WhatsApp message: ' + (err.message || 'Unknown error') });
+  }
+});
+
 // Route to fetch uncollected orders (not collected for 2-3 days) and send auto reminders
 router.get('/uncollected-alerts', async (_req, res) => {
   try {
@@ -229,7 +436,6 @@ router.get('/uncollected-alerts', async (_req, res) => {
     await initOrdersTable(db);
     
     // Fetch orders ready or pending collection that are 2 days or older (2-3 days ago) and not collected
-    // SQLite: datetime('now', '-2 days')
     const uncollected = await db.all(
       `SELECT * FROM special_orders 
        WHERE status IN ('Pending', 'Ready', 'Ordered', 'Pending Collection') 
@@ -237,12 +443,13 @@ router.get('/uncollected-alerts', async (_req, res) => {
     );
 
     const alertedOrders = [];
+    const medicalName = await getStoreMedicalNameAndPhone(db);
 
     for (const order of uncollected) {
       if (order.phone && order.notified === 0) {
         const cleanPhone = order.phone.replace(/\D/g, '');
         const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) is ready for collection at AI Pharmacy. Please visit us to collect it.`;
+        const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) is ready for collection at ${medicalName}. Please visit us to collect it.`;
         
         try {
           await sendMessage(formattedPhone, undefined, msg);
@@ -382,6 +589,40 @@ router.post('/convert-to-refill', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to convert order to refill:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Mark special order as Fulfilled / Delivered & send automated WhatsApp notification
+router.post('/:id/fulfill', async (req, res) => {
+  const { id } = req.params;
+  const { invoiceNo, grandTotal } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    await initOrdersTable(db);
+
+    const order = await db.get('SELECT * FROM special_orders WHERE id = ?', id);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    await db.run("UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?", id);
+
+    if (order.phone) {
+      const cleanPhone = order.phone.replace(/\D/g, '');
+      const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const medicalName = await getStoreMedicalNameAndPhone(db);
+
+      const invText = invoiceNo ? ` (Invoice: ${invoiceNo})` : '';
+      const totalText = grandTotal ? ` Total Amount: ₹${Number(grandTotal).toFixed(2)}.` : '';
+      const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) has been successfully dispensed and delivered at ${medicalName}.${invText}${totalText} Thank you for visiting us!`;
+
+      await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_fulfilled', order.requester || 'Customer');
+    }
+
+    res.json({ success: true, message: 'Special order marked as Fulfilled & delivery WhatsApp queued successfully' });
+  } catch (err: any) {
+    console.error('Fulfill order error:', err);
+    res.status(500).json({ error: 'Failed to fulfill order: ' + (err.message || 'Unknown error') });
   }
 });
 

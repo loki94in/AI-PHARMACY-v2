@@ -102,12 +102,25 @@ router.post('/:id/seen', async (req, res) => {
 router.post('/sync', async (req, res) => {
   try {
     const synced = await emailService.syncNewEmailsFromIMAP();
+    await emailService.pruneOldEmails();
     res.json({ success: true, synced, message: `Synced ${synced} new email(s) from Gmail` });
   } catch (error: any) {
     console.error('Manual sync error:', error);
     res.status(500).json({ error: error.message || 'Failed to sync emails' });
   }
 });
+
+// POST /api/email/prune — trigger manual email pruning beyond retention limit
+router.post('/prune', async (_req, res) => {
+  try {
+    const result = await emailService.pruneOldEmails();
+    res.json({ success: true, deletedCount: result.deletedCount, message: `Pruned ${result.deletedCount} old email(s)` });
+  } catch (error: any) {
+    console.error('Manual prune error:', error);
+    res.status(500).json({ error: error.message || 'Failed to prune emails' });
+  }
+});
+
 
 // POST /api/email/:uid/saved — mark an email as saved/processed (turns Grey in UI)
 router.post('/:uid/saved', async (req, res) => {

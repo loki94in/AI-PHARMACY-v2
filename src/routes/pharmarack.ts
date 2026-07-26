@@ -784,7 +784,7 @@ router.post('/cart/add', async (req, res) => {
       // If still missing, query search API on-the-fly
       if (!item.productCode && token) {
         try {
-          let cleanKeyword = (item.product || item.name || '').trim();
+          let cleanKeyword = (item.productName || item.product || item.name || '').trim();
           cleanKeyword = cleanKeyword.replace(/\s*\([^)]*\)\s*$/, '').trim();
           const searchPayload = {
             SearchKeyword: cleanKeyword,
@@ -805,15 +805,17 @@ router.post('/cart/add', async (req, res) => {
           });
           if (searchRes.ok) {
             const searchData: any = await searchRes.json();
-            if (searchData && Array.isArray(searchData.data)) {
+            if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
               const matched = searchData.data.find((p: any) => p.PrProductId === item.productId && p.StoreId === item.storeId) || searchData.data[0];
               if (matched) {
+                item.productId = matched.PrProductId || item.productId || 0;
+                item.storeId = matched.StoreId || item.storeId || 0;
                 item.productCode = matched.ProductCode || '';
-                item.productName = matched.ProductName || matched.ProductFullName || '';
-                item.storeName = matched.StoreName || '';
-                item.company = matched.Company || '';
-                item.mrp = matched.MRP || 0;
-                item.rate = matched.PTR || 0;
+                item.productName = matched.ProductName || matched.ProductFullName || item.productName || item.product || '';
+                item.storeName = matched.StoreName || item.storeName || '';
+                item.company = matched.Company || item.company || '';
+                item.mrp = matched.MRP || item.mrp || 0;
+                item.rate = matched.PTR || item.rate || 0;
               }
             }
           }

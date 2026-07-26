@@ -1177,9 +1177,9 @@ const Topbar = ({
 };
 
 // ──────────────────────────────────────────────
-// Refill Control Sidebar
+// Quick Assist Sidebar
 // ──────────────────────────────────────────────
-const RefillControlSidebar = ({
+const QuickAssistSidebar = ({
   expanded,
   setExpanded,
   refills,
@@ -1235,7 +1235,7 @@ const RefillControlSidebar = ({
       <div
         onClick={() => setExpanded(true)}
         className="w-10 h-full bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-6 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
-        title="Expand Refill Assistant"
+        title="Expand Quick Assist"
       >
         <ChevronLeftIcon size={16} className="text-muted mt-2" />
         <div 
@@ -1243,7 +1243,7 @@ const RefillControlSidebar = ({
           className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest"
         >
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
-          <span>Refill Control</span>
+          <span>Quick Assist</span>
         </div>
         {(refills.length > 0 || notifications.length > 0) && (
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-purple-600/30 animate-pulse">
@@ -1263,7 +1263,7 @@ const RefillControlSidebar = ({
       <div className="p-4 border-b border-glass-border flex items-center justify-between shrink-0 bg-white/[0.01]">
         <div className="flex items-center gap-2">
           <ActivityIcon size={16} className="text-purple-400" />
-          <span className="text-sm font-bold text-text uppercase tracking-wider">Refill Assistant</span>
+          <span className="text-sm font-bold text-text uppercase tracking-wider">Quick Assist</span>
         </div>
         <button
           onClick={() => setExpanded(false)}
@@ -1452,7 +1452,8 @@ export const Layout = ({
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     try {
-      return localStorage.getItem('refill_sidebar_expanded') !== 'false';
+      const stored = localStorage.getItem('quick_assist_sidebar_expanded') ?? localStorage.getItem('refill_sidebar_expanded');
+      return stored !== 'false';
     } catch {
       return true;
     }
@@ -1460,7 +1461,7 @@ export const Layout = ({
 
   useEffect(() => {
     try {
-      localStorage.setItem('refill_sidebar_expanded', String(isSidebarExpanded));
+      localStorage.setItem('quick_assist_sidebar_expanded', String(isSidebarExpanded));
     } catch {}
   }, [isSidebarExpanded]);
 
@@ -1705,15 +1706,13 @@ export const Layout = ({
             {children}
           </main>
           
-          {(location.pathname === '/' || location.pathname === '/pos') && (
-            <RefillControlSidebar
-              expanded={isSidebarExpanded}
-              setExpanded={setIsSidebarExpanded}
-              refills={refills}
-              notifications={stagedNotifications}
-              onActionComplete={fetchRefillData}
-            />
-          )}
+          <QuickAssistSidebar
+            expanded={isSidebarExpanded}
+            setExpanded={setIsSidebarExpanded}
+            refills={refills}
+            notifications={stagedNotifications}
+            onActionComplete={fetchRefillData}
+          />
         </div>
         
         {/* Global Modals */}

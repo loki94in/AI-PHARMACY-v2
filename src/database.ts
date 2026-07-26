@@ -1472,7 +1472,7 @@ export async function ensureSchema(dbPath: string) {
   await ensureMedicinesFts(db);
 
   // Insert default settings if they don't exist
-  await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('medical_name', 'XYZ MEDICAL')");
+  await db.run("DELETE FROM app_settings WHERE key = 'medical_name' AND (value = 'XYZ MEDICAL' OR value = 'XYZ Pharmacy')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('gmail_user', '')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('gmail_pass', '')");
   await db.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('imap_host', '')");

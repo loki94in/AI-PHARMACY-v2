@@ -326,7 +326,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const productInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const lastToastedQueryRef = useRef('');
-  const ignoreNextSearchRef = useRef(false);
+  const isSelectingRef = useRef(false);
 
   // Autofocus on mount
   useEffect(() => {
@@ -360,10 +360,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   // Medicine autocomplete search
   useEffect(() => {
-if (ignoreNextSearchRef.current) {
-      ignoreNextSearchRef.current = false;
-      return;
-    }
+    if (isSelectingRef.current) return;
 
     const query = product.trim();
     if (query.length < 3) {
@@ -377,11 +374,12 @@ if (ignoreNextSearchRef.current) {
   const { data: localSearchData, isLoading: isLocalSearchLoading } = useApiQuery(
     ['medicine-search-local', product.trim()],
     () => api.searchMedicine(product.trim()),
-    { enabled: product.trim().length >= 3, staleTime: 10_000 }
+    { enabled: product.trim().length >= 3 && !isSelectingRef.current, staleTime: 10_000 }
   );
 
   // Process local search results and combine with Pharmarack
   useEffect(() => {
+    if (isSelectingRef.current) return;
     if (!localSearchData || !Array.isArray(localSearchData)) {
       setSuggestions(prev => {
         const prOnly = prev.filter(s => s.isPharmarack);
@@ -440,12 +438,14 @@ if (ignoreNextSearchRef.current) {
 
   // Pharmarack search (keep existing async logic but simplify)
   useEffect(() => {
+    if (isSelectingRef.current) return;
     const query = product.trim();
     if (query.length < 3) return;
 
     let active = true;
 
     const delayDebounce = setTimeout(async () => {
+      if (isSelectingRef.current) return;
       setSearchLoading(true);
       try {
         const prData = await api.searchPharmarack(query).catch((err: any) => {
@@ -453,7 +453,7 @@ if (ignoreNextSearchRef.current) {
           return { isError: true, message: errMsg };
         });
 
-        if (!active) return;
+        if (!active || isSelectingRef.current) return;
 
         const prSuggestions: SuggestionMedicine[] = [];
         if (prData && (prData as any).isError) {
@@ -490,6 +490,7 @@ if (ignoreNextSearchRef.current) {
           });
         }
 
+        if (isSelectingRef.current) return;
         setSuggestions(prev => {
           const localOnly = prev.filter(s => !s.isPharmarack);
           return [...localOnly, ...prSuggestions];
@@ -535,6 +536,7 @@ if (ignoreNextSearchRef.current) {
   };
 
   const handleProductChange = (val: string) => {
+    isSelectingRef.current = false;
     setProduct(val);
     if (selectedProductId || selectedDistributor) {
       setSelectedDistributor('');
@@ -552,9 +554,9 @@ if (ignoreNextSearchRef.current) {
 
   const selectSuggestion = (med: SuggestionMedicine) => {
     if (med.isErrorMessage) return;
-    ignoreNextSearchRef.current = true;
+    isSelectingRef.current = true;
     if (med.isPharmarack) {
-      setProduct(`${med.medicine_name} (${med.packaging})`);
+      setProduct(med.medicine_name);
       setSelectedDistributor(med.distributor || '');
       setSelectedRate(med.rate !== undefined && med.rate !== null ? med.rate : '');
       setSelectedMrp(med.mrp !== undefined && med.mrp !== null ? med.mrp : '');
@@ -578,6 +580,7 @@ if (ignoreNextSearchRef.current) {
       setSelectedCompany('');
       setSelectedPackaging('');
     }
+    setSuggestions([]);
     setShowSuggestions(false);
     setActiveSuggestionIndex(-1);
 
@@ -590,64 +593,49 @@ if (ignoreNextSearchRef.current) {
 
   // Submit Order Form
   const processSubmissionQueue = async (items: any[], customerName: string, customerPhone: string, orderPriority: 'Low' | 'Normal' | 'High', advanceAmt: number) => {
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
+    try {
+      // 1. Log all requested medicines in a single batch call (sends 1 consolidated WhatsApp message to customer)
+      await api.createBatchOrders({
+        items,
+        requester: customerName,
+        phone: customerPhone,
+        priority: orderPriority,
+        advance_payment: advanceAmt
+      });
+
+      toastEvent.trigger(`Successfully logged request for ${items.length} medicine(s)!`, 'success');
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+
+      // 2. Add all items to the actual Pharmarack cart in a single batch call
       try {
-        await api.createOrder({
-          product: item.product,
-          requester: customerName,
-          phone: customerPhone,
+        const pharmarackItems = items.map(item => ({
+          productId: item.productId || 0,
+          storeId: item.storeId || 0,
           qty: item.qty,
-          priority: orderPriority,
-          status: 'Pending',
-          pharmarack_distributor: item.distributor,
-          pharmarack_rate: item.rate,
-          pharmarack_mrp: item.mrp,
-          pharmarack_mapped: item.mapped ? 1 : 0,
-          pharmarack_scheme: item.scheme,
-          advance_payment: i === 0 ? advanceAmt : 0
-        });
-        
-        // Success notification for this individual item
-        toastEvent.trigger(`Logged request: "${item.product}" (${i + 1}/${items.length})`, 'success');
-        
-        // Trigger page refresh so it shows in the table
-        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-
-        // If it's a Pharmarack product, also add it to the actual Pharmarack cart!
-        if (item.productId && item.storeId) {
-          try {
-            const res = await api.addPharmarackCart([{
-              productId: item.productId,
-              storeId: item.storeId,
-              qty: item.qty,
-              rate: item.rate,
-              scheme: item.scheme,
-              productCode: item.productCode,
-              company: item.company,
-              productName: item.product,
-              storeName: item.distributor,
-              packaging: item.packaging
-            }]);
-            toastEvent.trigger(`Added "${item.product}" to actual Pharmarack cart!`, 'success');
-          } catch (cartErr: any) {
-            console.error(`Failed to add ${item.product} to actual Pharmarack cart:`, cartErr);
-            const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Unknown error';
-            toastEvent.trigger(`Could not add "${item.product}" to Pharmarack cart: ${detailedError}`, 'error');
-          }
+          rate: item.rate,
+          scheme: item.scheme,
+          productCode: item.productCode,
+          company: item.company,
+          productName: item.product,
+          storeName: item.distributor,
+          packaging: item.packaging,
+          mapped: item.mapped
+        }));
+        const res = await api.addPharmarackCart(pharmarackItems);
+        if (res && res.success) {
+          toastEvent.trigger(`Added ${items.length} medicine(s) to actual Pharmarack cart!`, 'success');
+          window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+        } else {
+          toastEvent.trigger(`Requests logged, cart notice: ${res?.error || 'Manual cart add required'}`, 'info');
         }
-      } catch (err) {
-        console.error(`Failed to log background request for ${item.product}:`, err);
-        toastEvent.trigger(`Failed to log: "${item.product}"`, 'error');
+      } catch (cartErr: any) {
+        console.warn('Failed to add batch items to actual Pharmarack cart:', cartErr);
+        const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Sync issue';
+        toastEvent.trigger(`Requests logged, Pharmarack cart notice: ${detailedError}`, 'info');
       }
-
-      // If this is not the last item, wait 30 to 45 seconds (human behavior)
-      if (i < items.length - 1) {
-        const delaySec = Math.floor(Math.random() * 16) + 30; // Random seconds between 30 and 45
-        // Show status toast
-        toastEvent.trigger(`Next request will be logged in ${delaySec} seconds...`, 'info');
-        await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
-      }
+    } catch (err: any) {
+      console.error('Failed to log batch request:', err);
+      toastEvent.trigger(`Failed to log order request: ${err?.response?.data?.error || err?.message || 'Error'}`, 'error');
     }
   };
 
@@ -795,7 +783,10 @@ if (ignoreNextSearchRef.current) {
                         return (
                           <li
                             key={index}
-                            onClick={() => selectSuggestion(med)}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              selectSuggestion(med);
+                            }}
                             className={`px-5 py-3 text-sm cursor-pointer flex justify-between items-center transition-all ${
                               med.isErrorMessage
                                 ? 'bg-red-500/10 text-red border-l-2 border-red cursor-default'

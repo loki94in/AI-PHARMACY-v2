@@ -4,6 +4,7 @@ import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clo
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent, liveCartAddEvent } from '../services/events';
 import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
+import { findBestCartMatchForOrder } from '../utils/orderFuzzyMatcher';
 
 interface SuggestionMedicine {
   medicine_name: string;
@@ -150,6 +151,44 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [selectedCompany, setSelectedCompany] = useState('');
   const [selectedPackaging, setSelectedPackaging] = useState('');
   const [selectedMedicineName, setSelectedMedicineName] = useState('');
+
+  // Active Source Order/Refill Context
+  const [activeSourceOrderId, setActiveSourceOrderId] = useState<number | undefined>(sourceOrderId);
+  const [activeSourceRefillId, setActiveSourceRefillId] = useState<number | undefined>(sourceRefillId);
+  const [pendingTargetQty, setPendingTargetQty] = useState<number | null>(initialQty || null);
+
+  // Transfer medicine directly to Medicine Search box
+  const handleTransferToSearch = (medName: string, targetQty: number = 1, srcOrderId?: number, srcRefillId?: number) => {
+    if (!medName) return;
+    ignoreNextSearchRef.current = false;
+    setProduct(medName);
+    
+    // Store target order quantity to be applied when user selects a medicine from suggestions
+    setPendingTargetQty(targetQty || 1);
+
+    setActiveSourceOrderId(srcOrderId);
+    setActiveSourceRefillId(srcRefillId);
+
+    // Clear previous selected distributor metadata so fresh suggestions appear
+    setSelectedDistributor('');
+    setSelectedRate('');
+    setSelectedMrp('');
+    setSelectedMapped(null);
+    setSelectedScheme('');
+    setSelectedProductId('');
+    setSelectedStoreId('');
+    setSelectedProductCode('');
+    setSelectedCompany('');
+    setSelectedPackaging('');
+    setSelectedMedicineName('');
+
+    // Focus product input
+    setTimeout(() => {
+      productInputRef.current?.focus();
+    }, 50);
+
+    toastEvent.trigger(`Transferred "${medName}" to Medicine Search!`, 'info');
+  };
 
   // Overstock & Duplicate Check State
   const [overstockInfo, setOverstockInfo] = useState<{
@@ -505,17 +544,17 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   };
 
-  const getOrderItemInCart = (order: SpecialOrder) => {
-    const orderNameNorm = order.product.toLowerCase().replace(/[^a-z0-9]/g, '');
-    for (const dist of cartDistributors) {
-      for (const item of dist.items) {
-        const cartNameNorm = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (cartNameNorm.includes(orderNameNorm) || orderNameNorm.includes(cartNameNorm)) {
-          return item;
-        }
-      }
+  const getOrderCartMatch = (order: SpecialOrder) => {
+    const { matchedItem, result } = findBestCartMatchForOrder(order, cartDistributors);
+    if (result && result.isMatch) {
+      return { item: matchedItem, result };
     }
     return null;
+  };
+
+  const getOrderItemInCart = (order: SpecialOrder) => {
+    const match = getOrderCartMatch(order);
+    return match ? match.item : null;
   };
 
   const handleSearchDistributorsForOrder = async (order: SpecialOrder) => {
@@ -922,7 +961,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         } else {
           // If Pharmarack live search returned 0 results or error, try local medicines search as fallback
           try {
-            const localData = await api.getMedicinesList(1, 10, cleanQuery);
+            const localData = await api.getMedicines(1, 10, cleanQuery);
             if (localData && Array.isArray(localData.medicines) && localData.medicines.length > 0) {
               localData.medicines.forEach((med: any) => {
                 mergedList.push({
@@ -994,7 +1033,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     // Save current suggestions candidate list for cheaper option cross-checking
     setCandidateOptions(suggestions.filter(s => !s.isErrorMessage));
     
-    setProduct(`${med.medicine_name} (${med.packaging})`);
+    setProduct(med.medicine_name);
     setSelectedDistributor(med.distributor || '');
     setSelectedRate(med.rate !== undefined && med.rate !== null ? med.rate : '');
     setSelectedMrp(med.mrp !== undefined && med.mrp !== null ? med.mrp : '');
@@ -1009,6 +1048,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
     setShowSuggestions(false);
     setActiveSuggestionIndex(-1);
+
+    // Apply last order / pending target quantity upon selecting a medicine from suggestions
+    if (pendingTargetQty && pendingTargetQty > 0) {
+      setQty(pendingTargetQty);
+      setPendingTargetQty(null);
+    }
 
     setTimeout(() => {
       qtyInputRef.current?.focus();
@@ -1101,15 +1146,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       toastEvent.trigger(`Added "${productNameToUse}" directly to live Pharmarack cart!`, 'success');
 
       // Automatically update source order status if opened from pending requests or refills
-      if (sourceOrderId) {
+      if (activeSourceOrderId) {
         try {
-          await api.updateOrder(sourceOrderId, { status: 'Ordered' });
+          await api.updateOrder(activeSourceOrderId, { status: 'Ordered' });
           await fetchPendingOrders();
         } catch (e) {
           console.warn('Failed to update source order status:', e);
         }
       }
-      if (sourceRefillId) {
+      if (activeSourceRefillId) {
         try {
           await fetchPendingRefills();
         } catch (e) {
@@ -1120,6 +1165,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       // Reset form and keep open
       setProduct('');
       setQty(1);
+      setPendingTargetQty(null);
+      setActiveSourceOrderId(undefined);
+      setActiveSourceRefillId(undefined);
       setSelectedDistributor('');
       setSelectedRate('');
       setSelectedMrp('');
@@ -1277,173 +1325,136 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
                     {/* Orders */}
                     {pendingOrders.map(order => {
-                      const inCart = getOrderItemInCart(order);
-                      const isPickingForOrder = distributorPickerOrderId === order.id;
-                      const pickerMinRate = isPickingForOrder && distributorPickerResults.length > 0
-                        ? Math.min(...distributorPickerResults.filter(d => d.rate).map(d => getEffectiveRate(d.rate!, d.scheme, order.qty)))
-                        : Infinity;
+                      const cartMatch = getOrderCartMatch(order);
+                      const inCart = Boolean(cartMatch?.item);
+                      const matchScore = cartMatch?.result?.score || 0;
+
+                      const handleConfirmOrdered = async () => {
+                        try {
+                          await api.updateOrder(order.id, { status: 'Ordered' });
+                          toastEvent.trigger(`Confirmed & marked "${order.product}" as Ordered!`, 'success');
+                          await fetchPendingOrders();
+                        } catch (err: any) {
+                          toastEvent.trigger('Failed to update status', 'error');
+                        }
+                      };
+
                       return (
-                        <React.Fragment key={`order-${order.id}`}>
-                          <tr className={`transition-colors ${
-                            inCart ? 'bg-emerald-500/5' : isPickingForOrder ? 'bg-blue-500/5' : 'hover:bg-bg3/40'
-                          }`}>
-                            <td className="py-2 px-1">
-                              <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Ord</span>
-                            </td>
-                            <td className="py-2 px-1 min-w-0">
-                              <div className={`font-semibold truncate max-w-[130px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={order.product}>
-                                {order.product}
+                        <tr
+                          key={`order-${order.id}`}
+                          className={`transition-colors cursor-pointer ${
+                            inCart ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                          }`}
+                          onClick={() => !inCart && handleTransferToSearch(order.product, order.qty, order.id, undefined)}
+                        >
+                          <td className="py-2 px-1">
+                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Ord</span>
+                          </td>
+                          <td className="py-2 px-1 min-w-0">
+                            <div className={`text-xs font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={order.product}>
+                              {order.product}
+                            </div>
+                            <div className="text-[10px] text-muted truncate max-w-[140px]">{order.requester}</div>
+                          </td>
+                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">{order.qty}</td>
+                          <td className="py-2 px-1 text-right">
+                            {inCart ? (
+                              <div className="flex flex-col items-end gap-0.5">
+                                <span className="text-[8px] font-bold text-emerald-400" title={`Fuzzy match score: ${matchScore}%`}>
+                                  ✓ {matchScore}%
+                                </span>
+                                {order.status === 'Pending' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleConfirmOrdered();
+                                    }}
+                                    className="text-[7.5px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-1.5 py-0.2 rounded transition-all shrink-0 cursor-pointer"
+                                    title="Click to confirm order placed"
+                                  >
+                                    Confirm
+                                  </button>
+                                )}
                               </div>
-                              <div className="text-muted truncate max-w-[130px]">{order.requester}</div>
-                            </td>
-                            <td className="py-2 px-1 text-right text-muted font-mono">{order.qty}</td>
-                            <td className="py-2 px-1 text-right">
-                              {inCart ? (
-                                <span className="text-[8px] font-bold text-emerald-400">✓</span>
-                              ) : isPickingForOrder ? (
-                                <button type="button" onClick={() => { setDistributorPickerOrderId(null); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
-                              ) : (
-                                <button type="button"
-                                  onClick={() => handleSearchDistributorsForOrder(order)}
-                                  disabled={addingOrderId === order.id || distributorPickerLoading}
-                                  className="text-[9px] font-bold text-red hover:text-red/80 disabled:opacity-40 transition-colors">
-                                  {addingOrderId === order.id ? '...' : 'Add'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {/* Distributor Picker Row */}
-                          {isPickingForOrder && (
-                            <tr>
-                              <td colSpan={4} className="pb-2 px-1">
-                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-blue-500/5 border border-blue-500/20 rounded-lg p-2 space-y-1">
-                                  {distributorPickerLoading ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
-                                      <Loader2 size={10} className="animate-spin text-primary" />
-                                      Searching distributors...
-                                    </div>
-                                  ) : distributorPickerResults.length === 0 ? (
-                                    <p className="text-[10px] text-muted py-1">No distributors found.</p>
-                                  ) : distributorPickerResults.map((dist, idx) => {
-                                    const effRate = dist.rate ? getEffectiveRate(dist.rate, dist.scheme, order.qty) : null;
-                                    const isBest = effRate !== null && Math.abs(effRate - pickerMinRate) < 0.01;
-                                    return (
-                                      <button key={idx} type="button"
-                                        onClick={() => handleConfirmOrderDistributor(order, dist)}
-                                        disabled={addingOrderId === order.id}
-                                        className="w-full text-left px-2 py-1.5 rounded-lg bg-bg3/50 hover:bg-primary/10 border border-border hover:border-primary/40 transition-all flex items-center justify-between gap-2 group disabled:opacity-50">
-                                        <div className="flex flex-col min-w-0">
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-[10px] font-semibold text-text truncate group-hover:text-primary">{dist.distributor || 'Unknown'}</span>
-                                            {isBest && <span className="text-[7px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 rounded font-bold"><Sparkles size={6} className="inline" /> Best</span>}
-                                            {dist.stock && <span className={`text-[7px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
-                                          </div>
-                                          {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
-                                        </div>
-                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTransferToSearch(order.product, order.qty, order.id, undefined);
+                                }}
+                                className="text-[9.5px] font-bold text-red hover:text-red/80 transition-colors bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30 cursor-pointer"
+                                title="Transfer medicine to Search box"
+                              >
+                                Add
+                              </button>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
 
                     {/* Refills */}
                     {pendingRefills.map(refill => {
                       const inCart = getRefillItemInCart(refill);
-                      const isPickingForRefill = distributorPickerRefillId === refill.id;
-                      const pickerMinRateRefill = isPickingForRefill && distributorPickerResults.length > 0
-                        ? Math.min(...distributorPickerResults.filter(d => d.rate).map(d => getEffectiveRate(d.rate!, d.scheme, 1)))
-                        : Infinity;
                       return (
-                        <React.Fragment key={`refill-${refill.id}`}>
-                          <tr className={`transition-colors ${
-                            inCart ? 'bg-emerald-500/5' : isPickingForRefill ? 'bg-blue-500/5' : 'hover:bg-bg3/40'
-                          }`}>
-                            <td className="py-2 px-1">
-                              <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
-                            </td>
-                            <td className="py-2 px-1 min-w-0">
-                              <div className={`font-semibold truncate max-w-[130px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={refill.medicine_name}>
-                                {refill.medicine_name}
-                              </div>
-                              <div className="text-muted truncate max-w-[130px]">{refill.patient_name}</div>
-                            </td>
-                            <td className="py-2 px-1 text-right text-muted font-mono">1</td>
-                            <td className="py-2 px-1 text-right">
-                              {inCart ? (
-                                <span className="text-[8px] font-bold text-emerald-400">✓</span>
-                              ) : isPickingForRefill ? (
-                                <button type="button" onClick={() => { setDistributorPickerRefillId(null); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
-                              ) : (
-                                <button type="button"
-                                  onClick={() => handleSearchDistributorsForRefill(refill)}
-                                  disabled={addingRefillId === refill.id || distributorPickerLoading}
-                                  className="text-[9px] font-bold text-amber-400 hover:text-amber-300 disabled:opacity-40 transition-colors">
-                                  {addingRefillId === refill.id ? '...' : 'Add'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {/* Distributor Picker Row */}
-                          {isPickingForRefill && (
-                            <tr>
-                              <td colSpan={4} className="pb-2 px-1">
-                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-blue-500/5 border border-blue-500/20 rounded-lg p-2 space-y-1">
-                                  {distributorPickerLoading ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
-                                      <Loader2 size={10} className="animate-spin text-primary" />
-                                      Searching distributors...
-                                    </div>
-                                  ) : distributorPickerResults.length === 0 ? (
-                                    <p className="text-[10px] text-muted py-1">No distributors found.</p>
-                                  ) : distributorPickerResults.map((dist, idx) => {
-                                    const effRate = dist.rate ? getEffectiveRate(dist.rate, dist.scheme, 1) : null;
-                                    const isBest = effRate !== null && Math.abs(effRate - pickerMinRateRefill) < 0.01;
-                                    return (
-                                      <button key={idx} type="button"
-                                        onClick={() => handleConfirmRefillDistributor(refill, dist)}
-                                        disabled={addingRefillId === refill.id}
-                                        className="w-full text-left px-2 py-1.5 rounded-lg bg-bg3/50 hover:bg-primary/10 border border-border hover:border-primary/40 transition-all flex items-center justify-between gap-2 group disabled:opacity-50">
-                                        <div className="flex flex-col min-w-0">
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-[10px] font-semibold text-text truncate group-hover:text-primary">{dist.distributor || 'Unknown'}</span>
-                                            {isBest && <span className="text-[7px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 rounded font-bold"><Sparkles size={6} className="inline" /> Best</span>}
-                                            {dist.stock && <span className={`text-[7px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
-                                          </div>
-                                          {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
-                                        </div>
-                                        {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
+                        <tr
+                          key={`refill-${refill.id}`}
+                          className={`transition-colors cursor-pointer ${
+                            inCart ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                          }`}
+                          onClick={() => !inCart && handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id)}
+                        >
+                          <td className="py-2 px-1">
+                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
+                          </td>
+                          <td className="py-2 px-1 min-w-0">
+                            <div className={`text-xs font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-amber-300'}`} title={refill.medicine_name}>
+                              {refill.medicine_name}
+                            </div>
+                            <div className="text-[10px] text-muted truncate max-w-[140px]">Patient: {refill.patient_name}</div>
+                          </td>
+                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">1</td>
+                          <td className="py-2 px-1 text-right">
+                            {inCart ? (
+                              <span className="text-[8px] font-bold text-emerald-400">✓ Added</span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id);
+                                }}
+                                className="text-[9.5px] font-bold text-amber-400 hover:text-amber-300 transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 cursor-pointer"
+                                title="Transfer medicine to Search box"
+                              >
+                                Add
+                              </button>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
 
                     {/* Reconcile Orders */}
-                    {reconOrders.map((recon, idx) => {
+                    {reconOrders.flatMap((recon, reconIdx) => {
                       const addedList = addedReconMedicines[recon.email_uid] || [];
-                      const isAllAdded = recon.medicine_names?.length > 0 && addedList.length === recon.medicine_names.length;
-                      const isPickingForRecon = distributorPickerReconIdx === idx;
-                      
-                      return (
-                        <React.Fragment key={`recon-${recon.email_uid || idx}`}>
-                          <tr className={`transition-colors ${
-                            isAllAdded ? 'bg-emerald-500/5' : isPickingForRecon ? 'bg-purple-500/5' : 'hover:bg-bg3/40'
-                          } ${getReconAgeStyle(recon.date)}`}>
+                      const medNames: string[] = recon.medicine_names && recon.medicine_names.length > 0 ? recon.medicine_names : [recon.subject || 'Recon Medicine'];
+
+                      return medNames.map((medName: string, medIdx: number) => {
+                        const isAdded = addedList.includes(medName);
+
+                        return (
+                          <tr
+                            key={`recon-${recon.email_uid || reconIdx}-${medIdx}`}
+                            className={`transition-colors cursor-pointer ${
+                              isAdded ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                            } ${getReconAgeStyle(recon.date)}`}
+                            onClick={() => !isAdded && handleTransferToSearch(medName, 1, undefined, undefined)}
+                          >
                             <td className="py-2 px-1">
-                              <div className="flex flex-col gap-1 items-start">
+                              <div className="flex flex-col gap-0.5 items-start">
                                 <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
                                 {recon.status === 'Bounced' && (
                                   <span className="text-[7px] font-bold uppercase px-1 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Bounced</span>
@@ -1451,164 +1462,68 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               </div>
                             </td>
                             <td className="py-2 px-1 min-w-0">
-                              <div className={`font-semibold truncate max-w-[130px] ${isAllAdded ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={recon.extracted_distributor}>
-                                {recon.extracted_distributor || 'Unknown Dist.'}
+                              <div className={`text-xs font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-emerald-400' : 'text-purple-300'}`} title={medName}>
+                                {medName}
                               </div>
-                              <div className="text-muted truncate max-w-[130px]" title={recon.medicine_names?.join(', ') || recon.subject}>
-                                {recon.medicine_names?.slice(0, 2).join(', ') || recon.subject || '—'}
-                                {recon.medicine_names?.length > 2 && ` +${recon.medicine_names.length - 2}`}
+                              <div className="text-[10px] text-purple-400/80 font-medium truncate max-w-[140px]" title={recon.extracted_distributor}>
+                                {recon.extracted_distributor ? `Dist: ${recon.extracted_distributor}` : recon.subject || 'Email Order'}
                               </div>
                             </td>
-                            <td className="py-2 px-1 text-right text-muted font-mono">—</td>
+                            <td className="py-2 px-1 text-right text-muted font-mono font-bold">1</td>
                             <td className="py-2 px-1 text-right">
-                              {isAllAdded ? (
-                                <span className="text-[8px] font-bold text-emerald-400">✓ All Added</span>
-                              ) : isPickingForRecon ? (
-                                <button type="button" onClick={() => { setDistributorPickerReconIdx(null); setDistributorPickerReconMedicine(''); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
+                              {isAdded ? (
+                                <span className="text-[8px] font-bold text-emerald-400">✓ Added</span>
                               ) : (
-                                <button type="button"
-                                  onClick={() => { setDistributorPickerReconIdx(idx); setDistributorPickerReconMedicine(''); setDistributorPickerResults([]); }}
-                                  className="text-[9px] font-bold text-purple-400 hover:text-purple-300 transition-colors">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTransferToSearch(medName, 1, undefined, undefined);
+                                  }}
+                                  className="text-[9.5px] font-bold text-purple-400 hover:text-purple-300 transition-colors bg-purple-500/10 hover:bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30 cursor-pointer"
+                                  title="Transfer medicine to Search box"
+                                >
                                   Add
                                 </button>
                               )}
                             </td>
                           </tr>
-                          {/* Medicine Dropdown for Recon Order */}
-                          {isPickingForRecon && (
-                            <tr>
-                              <td colSpan={4} className="pb-2 px-1">
-                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-purple-500/5 border border-purple-500/20 rounded-lg p-2 space-y-1">
-                                  <p className="text-[9px] text-muted font-bold uppercase mb-1">Select Medicine to Order:</p>
-                                  {recon.medicine_names?.map((medName: string, medIdx: number) => {
-                                    const isAdded = addedList.includes(medName);
-                                    const isPickingForThisMed = distributorPickerReconMedicine === medName;
-                                    return (
-                                      <div key={medIdx} className="space-y-1">
-                                        <button type="button"
-                                          onClick={() => {
-                                            if (isPickingForThisMed) {
-                                              setDistributorPickerReconMedicine('');
-                                              setDistributorPickerResults([]);
-                                            } else {
-                                              handleReconMedicineSelect(recon, medName);
-                                            }
-                                          }}
-                                          disabled={isAdded}
-                                          className={`w-full text-left px-2 py-1.5 rounded-lg text-[10px] transition-all flex items-center justify-between ${
-                                            isAdded
-                                              ? 'bg-emerald-500/5 text-emerald-400 line-through opacity-60 cursor-default'
-                                              : isPickingForThisMed
-                                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-semibold shadow-sm shadow-purple-500/10'
-                                              : 'bg-bg3/50 hover:bg-purple-500/10 border border-border hover:border-purple-500/40 text-text'
-                                          }`}>
-                                          <span className="truncate">
-                                            {isAdded && <span className="mr-1">✓</span>}
-                                            {medName}
-                                          </span>
-                                        </button>
-                                        
-                                        {/* Distributor Picker List for selected Recon Medicine */}
-                                        {isPickingForThisMed && (
-                                          <div className="pl-3 py-1 space-y-1 border-l-2 border-purple-500/30 ml-2">
-                                            {distributorPickerLoading ? (
-                                              <div className="flex items-center gap-1.5 text-[9px] text-muted py-1">
-                                                <Loader2 size={8} className="animate-spin text-purple-400" />
-                                                Searching Pharmarack...
-                                              </div>
-                                            ) : distributorPickerResults.length === 0 ? (
-                                              <p className="text-[9px] text-muted py-1">No distributors found.</p>
-                                            ) : distributorPickerResults.map((dist, distIdx) => (
-                                              <button key={distIdx} type="button"
-                                                onClick={() => handleConfirmReconDistributor(recon, medName, dist)}
-                                                disabled={addingOrderId === recon.email_uid}
-                                                className="w-full text-left px-2 py-1 rounded bg-bg2 hover:bg-purple-500/10 border border-border/50 hover:border-purple-500/30 transition-all flex items-center justify-between gap-2 text-[9px] disabled:opacity-50">
-                                                <div className="flex flex-col min-w-0">
-                                                  <div className="flex items-center gap-1">
-                                                    <span className="font-semibold text-text truncate group-hover:text-purple-400">{dist.distributor || 'Unknown'}</span>
-                                                    {dist.stock && <span className={`text-[6px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
-                                                  </div>
-                                                  {dist.scheme && <span className="text-[8px] text-amber-400">{dist.scheme}</span>}
-                                                </div>
-                                                {dist.rate != null && <span className="font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
-                                              </button>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
+                        );
+                      });
                     })}
 
                     {/* High-Velocity Low Stock Auto-Refills */}
                     {autoRefillItems.map((item) => {
-                      const isPickingForAuto = distributorPickerAutoRefillId === item.medicine_id;
                       return (
-                        <React.Fragment key={`auto-refill-${item.medicine_id}`}>
-                          <tr className={`transition-colors ${isPickingForAuto ? 'bg-emerald-500/10' : 'hover:bg-bg3/40'}`}>
-                            <td className="py-2 px-1">
-                              <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
-                            </td>
-                            <td className="py-2 px-1 min-w-0">
-                              <div className="font-semibold truncate max-w-[130px] text-text" title={item.medicine_name}>
-                                {item.medicine_name}
-                              </div>
-                              <div className="text-emerald-400 text-[9px] font-mono">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
-                            </td>
-                            <td className="py-2 px-1 text-right text-muted font-mono">{item.recommended_qty}</td>
-                            <td className="py-2 px-1 text-right">
-                              {isPickingForAuto ? (
-                                <button type="button" onClick={() => { setDistributorPickerAutoRefillId(null); setDistributorPickerResults([]); }}
-                                  className="text-[9px] text-muted hover:text-text transition-colors">✕</button>
-                              ) : (
-                                <button type="button"
-                                  onClick={() => handleSearchDistributorsForAutoRefill(item)}
-                                  disabled={addingAutoRefillId === item.medicine_id || distributorPickerLoading}
-                                  className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition-colors">
-                                  {addingAutoRefillId === item.medicine_id ? '...' : 'Add'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {/* Distributor Picker Row for Auto Refill */}
-                          {isPickingForAuto && (
-                            <tr>
-                              <td colSpan={4} className="pb-2 px-1">
-                                <div className="animate-in fade-in slide-in-from-top-1 duration-200 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2 space-y-1">
-                                  {distributorPickerLoading ? (
-                                    <div className="flex items-center gap-1.5 text-[10px] text-muted py-1">
-                                      <Loader2 size={10} className="animate-spin text-emerald-400" />
-                                      Searching distributors...
-                                    </div>
-                                  ) : distributorPickerResults.length === 0 ? (
-                                    <p className="text-[10px] text-muted py-1">No distributors found.</p>
-                                  ) : distributorPickerResults.map((dist, idx) => (
-                                    <button key={idx} type="button"
-                                      onClick={() => handleConfirmAutoRefillDistributor(item, dist)}
-                                      disabled={addingAutoRefillId === item.medicine_id}
-                                      className="w-full text-left px-2 py-1.5 rounded-lg bg-bg3/50 hover:bg-emerald-500/10 border border-border hover:border-emerald-500/40 transition-all flex items-center justify-between gap-2 group disabled:opacity-50">
-                                      <div className="flex flex-col min-w-0">
-                                        <div className="flex items-center gap-1">
-                                          <span className="text-[10px] font-semibold text-text truncate group-hover:text-emerald-400">{dist.distributor || 'Unknown'}</span>
-                                          {dist.stock && <span className={`text-[7px] px-1 rounded font-bold ${getStockStyle(dist.stock)}`}>{dist.stock}</span>}
-                                        </div>
-                                        {dist.scheme && <span className="text-[9px] text-amber-400">{dist.scheme}</span>}
-                                      </div>
-                                      {dist.rate != null && <span className="text-[11px] font-bold text-emerald-400 font-mono shrink-0">₹{dist.rate}</span>}
-                                    </button>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
+                        <tr
+                          key={`auto-refill-${item.medicine_id}`}
+                          className="transition-colors hover:bg-bg3/40 cursor-pointer"
+                          onClick={() => handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined)}
+                        >
+                          <td className="py-2 px-1">
+                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
+                          </td>
+                          <td className="py-2 px-1 min-w-0">
+                            <div className="text-xs font-bold truncate max-w-[140px] text-emerald-400" title={item.medicine_name}>
+                              {item.medicine_name}
+                            </div>
+                            <div className="text-[10px] text-muted font-mono truncate max-w-[140px]">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
+                          </td>
+                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">{item.recommended_qty}</td>
+                          <td className="py-2 px-1 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined);
+                              }}
+                              className="text-[9.5px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30 cursor-pointer"
+                              title="Transfer medicine to Search box"
+                            >
+                              Add
+                            </button>
+                          </td>
+                        </tr>
                       );
                     })}
 

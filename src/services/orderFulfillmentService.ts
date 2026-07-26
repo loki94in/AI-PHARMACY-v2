@@ -1,6 +1,7 @@
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { messagingQueue } from './messagingQueue.js';
+import { getStoreMedicalName, getStoreMedicalNameAndPhone } from './storeSettingsService.js';
 
 export class OrderFulfillmentService {
   private static instance: OrderFulfillmentService;
@@ -100,11 +101,7 @@ export class OrderFulfillmentService {
 
     const requester = readyOrders[0].requester || 'Customer';
     
-    let medicalName = 'XYZ MEDICAL';
-    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-    if (nameRow && nameRow.value) {
-      medicalName = nameRow.value;
-    }
+    const medicalName = await getStoreMedicalNameAndPhone(db);
 
     let productList = '';
     if (readyOrders.length === 1) {

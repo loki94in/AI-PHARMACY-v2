@@ -1,6 +1,7 @@
 import { Database } from 'sqlite';
 import { sendMessage } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
+import { getStoreMedicalName, getStoreMedicalNameAndPhone } from './storeSettingsService.js';
 
 export async function checkAllRefills(db: Database): Promise<void> {
   // Query active refills that are due
@@ -164,7 +165,8 @@ async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
     [invoice_no, temp_label, refill.patient_name, refill.patient_phone, 'AUTO_REFILL_BILL', cart_data]
   );
   
-  const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from XYZ Pharmacy.`;
+  const medicalName = await getStoreMedicalNameAndPhone(db);
+  const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from ${medicalName}.`;
   await db.run(
     `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, needs_confirmation, reference_id)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -229,11 +231,7 @@ export async function sendConsolidatedSpecialOrderNotification(db: Database, pho
 
   const requester = readyOrders[0].requester || 'Customer';
   
-  let medicalName = 'XYZ MEDICAL';
-  const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-  if (nameRow && nameRow.value) {
-    medicalName = nameRow.value;
-  }
+  const medicalName = await getStoreMedicalNameAndPhone(db);
 
   // Format the consolidated list of items
   let productList = '';

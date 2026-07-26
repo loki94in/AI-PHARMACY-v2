@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
 import { 
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
-  Wifi, WifiOff, Edit3, Play, Sliders, ShieldAlert, Settings, ChevronDown, ChevronUp 
+  WifiOff, Edit3, Play, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
@@ -25,14 +24,16 @@ interface WhatsAppQueuePopoverProps {
   onClose: () => void;
 }
 
+type TabType = 'all' | 'special' | 'distributor' | 'delivery' | 'pending' | 'failed';
+
 export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onClose }) => {
   const [queueState, setQueueState] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'failed'>('all');
+  const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [expandedIds, setExpandedIds] = useState<Record<number, boolean>>({});
 
   // Pacing Slider state
   const [pacingSec, setPacingSec] = useState<number>(10);
-  const [savingPacing, setSavingPacing] = useState(false);
 
   // Delay Timers state
   const [delayCreditBill, setDelayCreditBill] = useState<number>(0);
@@ -125,19 +126,6 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
-  const handlePacingChange = async (newSec: number) => {
-    setPacingSec(newSec);
-    setSavingPacing(true);
-    try {
-      await api.updateWhatsAppPacingConfig(newSec, newSec + 4);
-      toastEvent.trigger(`Message pacing set to ${newSec}s - ${newSec + 4}s`, 'success');
-    } catch (err) {
-      toastEvent.trigger('Failed to update pacing', 'error');
-    } finally {
-      setSavingPacing(false);
-    }
-  };
-
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !editPhone.trim()) return;
@@ -158,8 +146,23 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const toggleExpand = (id: number) => {
+    setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const items: QueueItem[] = queueState?.recentItems || [];
+
+  const isSpecialOrder = (t: string) => 
+    t === 'special_order' || t === 'quick_order' || t === 'special_order_arrived' || t === 'quick_order_resend';
+  const isDistributor = (t: string) => 
+    t === 'distributor' || t === 'distributor_collection' || t === 'pharmarack_batch';
+  const isDelivery = (t: string) => 
+    t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff';
+
   const filteredItems = items.filter(item => {
+    if (activeTab === 'special') return isSpecialOrder(item.type);
+    if (activeTab === 'distributor') return isDistributor(item.type);
+    if (activeTab === 'delivery') return isDelivery(item.type);
     if (activeTab === 'pending') return item.status === 'pending' || item.status === 'sending';
     if (activeTab === 'failed') return item.status === 'failed_offline' || item.status === 'failed_perm';
     return true;
@@ -169,14 +172,51 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const pendingTotal = (counts.pending || 0) + (counts.sending || 0);
   const failedTotal = (counts.failed_offline || 0) + (counts.failed_perm || 0);
 
+  const specialCount = items.filter(i => isSpecialOrder(i.type)).length;
+  const distCount = items.filter(i => isDistributor(i.type)).length;
+  const deliveryCount = items.filter(i => isDelivery(i.type)).length;
+
+  const renderTypeBadge = (type: string) => {
+    if (isSpecialOrder(type)) {
+      return (
+        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/35 flex items-center gap-1 shrink-0 animate-pulse">
+          <Zap size={9} className="text-purple-400 fill-purple-400" />
+          <span>Special Order</span>
+        </span>
+      );
+    }
+    if (isDistributor(type)) {
+      return (
+        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/35 flex items-center gap-1 shrink-0">
+          <Building2 size={9} className="text-amber-400" />
+          <span>Distributor</span>
+        </span>
+      );
+    }
+    if (isDelivery(type)) {
+      return (
+        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 flex items-center gap-1 shrink-0">
+          <Truck size={9} className="text-cyan-400" />
+          <span>Delivery Staff</span>
+        </span>
+      );
+    }
+    return (
+      <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 flex items-center gap-1 shrink-0">
+        <MessageSquare size={9} className="text-emerald-400" />
+        <span>Customer</span>
+      </span>
+    );
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-bg border border-glass-border/40 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scaleIn">
+      <div className="relative bg-bg border border-glass-border/40 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scaleIn">
         
         {/* Header */}
-        <div className="p-4 border-b border-glass-border/30 flex justify-between items-center bg-bg2/50">
-          <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-xl border ${
+        <div className="p-4 border-b border-glass-border/30 flex items-center justify-between gap-3 bg-bg2/50 shrink-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className={`p-2 rounded-xl border shrink-0 ${
               !queueState?.isOnline 
                 ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' 
                 : pendingTotal > 0 
@@ -185,34 +225,37 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             }`}>
               {!queueState?.isOnline ? <WifiOff size={18} /> : <Send size={18} />}
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-text flex items-center gap-2">
-                WhatsApp Live Queue Controller
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-sm text-text shrink-0">
+                  WhatsApp Live Queue Controller
+                </h3>
                 {!queueState?.isOnline ? (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">Offline / Reconnecting</span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Offline / Reconnecting</span>
                 ) : (
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">Online</span>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Online</span>
                 )}
-              </h3>
-              <p className="text-[11px] text-muted">
+              </div>
+              <p className="text-[11px] text-muted truncate">
                 {pendingTotal > 0 ? `${pendingTotal} message(s) queued for paced dispatch` : 'All queued messages sent'}
               </p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 hover:bg-bg3 rounded-lg text-muted hover:text-text transition-all"
+            className="p-1.5 hover:bg-bg3 rounded-lg text-muted hover:text-text transition-all shrink-0"
+            title="Close"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Live Status & Pacing Bar */}
-        <div className="p-4 bg-bg3/30 border-b border-glass-border/30 space-y-3">
+        {/* Live Status & Quick Actions Bar */}
+        <div className="p-4 bg-bg3/30 border-b border-glass-border/30 space-y-3 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
             
             {/* Status Pills */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky font-semibold">
                 Pending: {pendingTotal}
               </span>
@@ -245,163 +288,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               )}
             </div>
           </div>
-
-          {/* Pacing Control & Countdown Bar */}
-          <div className="pt-2 border-t border-glass-border/20 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-xs text-muted">
-              <Sliders size={14} className="text-sky" />
-              <span className="font-semibold text-text">Pacing Interval:</span>
-              <input
-                type="range"
-                min="5"
-                max="30"
-                value={pacingSec}
-                onChange={(e) => handlePacingChange(Number(e.target.value))}
-                className="w-24 accent-sky-500 cursor-pointer"
-              />
-              <span className="font-mono text-sky font-bold">{pacingSec}s - {pacingSec + 4}s</span>
-              {savingPacing && <span className="text-[10px] text-muted animate-pulse">(saving...)</span>}
-            </div>
-
-            {queueState?.nextDispatchCountdownMs > 0 && (
-              <div className="flex items-center gap-2 text-xs font-mono font-bold text-sky animate-pulse">
-                <Clock size={13} />
-                <span>Next send in: {queueState.nextDispatchCountdownMs}s</span>
-              </div>
-            )}
-          </div>
-
-          {/* Scheduled Message Delay Timers Quick Config */}
-          <div className="pt-2 border-t border-glass-border/20">
-            <button
-              type="button"
-              onClick={() => setShowDelayConfig(prev => !prev)}
-              className="w-full flex items-center justify-between py-1 text-xs font-bold text-text hover:text-sky transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Clock size={14} className="text-emerald-400" />
-                <span>Message Delay Timers (Credit Bills, Distributors, Delivery Staff)</span>
-                {savingDelay && <span className="text-[10px] text-muted font-normal animate-pulse">(saving...)</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-normal text-muted">
-                  Credit: {delayCreditBill === 0 ? '0m' : `${delayCreditBill}m`} | Dist: {delayDistributor === 0 ? '0m' : `${delayDistributor}m`} | Staff: {delayDeliveryBoy === 0 ? '0m' : `${delayDeliveryBoy}m`}
-                </span>
-                {showDelayConfig ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </div>
-            </button>
-
-            {showDelayConfig && (
-              <div className="mt-2.5 p-3 rounded-xl bg-bg2/60 border border-glass-border space-y-3 animate-fadeIn">
-                <div className="flex items-center justify-between text-[11px] font-semibold text-text border-b border-glass-border/30 pb-1.5">
-                  <span>Configure Post-Save Send Delays</span>
-                  <Link
-                    to="/settings"
-                    onClick={onClose}
-                    className="flex items-center gap-1 text-[10px] font-bold text-sky hover:text-sky-300 transition-colors"
-                  >
-                    <Settings size={11} /> Open Settings Page
-                  </Link>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  {/* Credit Bills */}
-                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
-                    <label className="text-[10px] font-bold text-muted uppercase block">Credit Bills</label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={0}
-                        value={delayCreditBill}
-                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_credit_bill', Math.max(0, Number(e.target.value)))}
-                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
-                      />
-                      <span className="text-[10px] text-muted font-medium">m</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {[0, 5, 15, 60].map(m => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => handleSaveDelayTimer('whatsapp_delay_credit_bill', m)}
-                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
-                            delayCreditBill === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
-                          }`}
-                        >
-                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Distributors */}
-                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
-                    <label className="text-[10px] font-bold text-muted uppercase block">Distributors</label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={0}
-                        value={delayDistributor}
-                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_distributor', Math.max(0, Number(e.target.value)))}
-                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
-                      />
-                      <span className="text-[10px] text-muted font-medium">m</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {[0, 5, 15, 60].map(m => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => handleSaveDelayTimer('whatsapp_delay_distributor', m)}
-                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
-                            delayDistributor === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
-                          }`}
-                        >
-                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Delivery Staff */}
-                  <div className="space-y-1 bg-bg p-2 rounded-lg border border-glass-border/50">
-                    <label className="text-[10px] font-bold text-muted uppercase block">Delivery Staff</label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={0}
-                        value={delayDeliveryBoy}
-                        onChange={(e) => handleSaveDelayTimer('whatsapp_delay_delivery_boy', Math.max(0, Number(e.target.value)))}
-                        className="w-full bg-bg2 text-text border border-glass-border rounded px-1.5 py-0.5 text-xs font-mono"
-                      />
-                      <span className="text-[10px] text-muted font-medium">m</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {[0, 5, 15, 60].map(m => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => handleSaveDelayTimer('whatsapp_delay_delivery_boy', m)}
-                          className={`text-[9px] px-1.5 py-0.5 rounded border transition-all ${
-                            delayDeliveryBoy === m ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-bold' : 'bg-bg2 border-glass-border text-muted hover:text-text'
-                          }`}
-                        >
-                          {m === 0 ? '0m' : m >= 60 ? `${m/60}h` : `${m}m`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Tab Filters */}
-        <div className="flex border-b border-glass-border/30 px-4 bg-bg2/30">
+        {/* Category Filter Tabs */}
+        <div className="flex border-b border-glass-border/30 px-4 bg-bg2/30 overflow-x-auto custom-scrollbar gap-2 shrink-0 items-center">
           <button
             onClick={() => setActiveTab('all')}
-            className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
               activeTab === 'all' 
                 ? 'border-sky text-sky' 
                 : 'border-transparent text-muted hover:text-text'
@@ -410,29 +303,64 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             All Queue ({items.length})
           </button>
           <button
+            onClick={() => setActiveTab('special')}
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+              activeTab === 'special' 
+                ? 'border-purple-400 text-purple-300' 
+                : 'border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <Zap size={11} className="text-purple-400" />
+            <span>Special Orders ({specialCount})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('distributor')}
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+              activeTab === 'distributor' 
+                ? 'border-amber-400 text-amber-300' 
+                : 'border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <Building2 size={11} className="text-amber-400" />
+            <span>Distributors ({distCount})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('delivery')}
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+              activeTab === 'delivery' 
+                ? 'border-cyan-400 text-cyan-300' 
+                : 'border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <Truck size={11} className="text-cyan-400" />
+            <span>Delivery Staff ({deliveryCount})</span>
+          </button>
+          <button
             onClick={() => setActiveTab('pending')}
-            className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
               activeTab === 'pending' 
                 ? 'border-sky text-sky' 
                 : 'border-transparent text-muted hover:text-text'
             }`}
           >
-            Pending / Sending ({pendingTotal})
+            Pending ({pendingTotal})
           </button>
-          <button
-            onClick={() => setActiveTab('failed')}
-            className={`py-2.5 px-4 text-xs font-bold border-b-2 transition-all ${
-              activeTab === 'failed' 
-                ? 'border-rose-500 text-rose-400' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            Failed ({failedTotal})
-          </button>
+          {failedTotal > 0 && (
+            <button
+              onClick={() => setActiveTab('failed')}
+              className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
+                activeTab === 'failed' 
+                  ? 'border-rose-500 text-rose-400' 
+                  : 'border-transparent text-muted hover:text-text'
+              }`}
+            >
+              Failed ({failedTotal})
+            </button>
+          )}
         </div>
 
-        {/* Queue Items List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
+        {/* Streamlined One-Line Queue Items List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
           {loading ? (
             <div className="py-12 text-center text-xs text-muted flex items-center justify-center gap-2">
               <RefreshCw className="animate-spin text-sky" size={16} /> Fetching queue details...
@@ -440,97 +368,119 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           ) : filteredItems.length === 0 ? (
             <div className="py-12 text-center text-xs text-muted flex flex-col items-center gap-2">
               <CheckCircle2 size={24} className="text-emerald-400/40" />
-              No items in this queue filter.
+              No items match this queue category filter.
             </div>
           ) : (
-            filteredItems.map(item => (
-              <div 
-                key={item.id}
-                className={`p-3 rounded-xl border transition-all ${
-                  item.status === 'sending'
-                    ? 'bg-sky-500/10 border-sky-500/30'
-                    : item.status === 'sent'
-                      ? 'bg-bg2/40 border-glass-border/30 opacity-75'
-                      : item.status.includes('failed')
-                        ? 'bg-rose-500/10 border-rose-500/30'
-                        : 'bg-bg2/60 border-glass-border'
-                }`}
-              >
-                <div className="flex justify-between items-start mb-1.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-xs text-text">
-                      {item.target_name || (item.type === 'delivery_boy_summary' ? 'Delivery Staff' : 'Distributor')}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted bg-bg3 border border-glass-border/40 px-1.5 py-0.5 rounded">
-                      +{item.number}
-                    </span>
-                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded font-black tracking-wider bg-sky-500/20 text-sky border border-sky-500/30">
-                      {item.type || 'Collection'}
-                    </span>
-                    {item.retry_count > 0 && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
-                        Retry #{item.retry_count}
+            filteredItems.map(item => {
+              const isExpanded = Boolean(expandedIds[item.id]);
+              const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isDistributor(item.type) ? 'Distributor Pickup' : 'Customer');
+
+              return (
+                <div 
+                  key={item.id}
+                  className={`rounded-xl border transition-all overflow-hidden ${
+                    item.status === 'sending'
+                      ? 'bg-sky-500/10 border-sky-500/30 ring-1 ring-sky-500/20'
+                      : item.status === 'sent'
+                        ? 'bg-bg2/40 border-glass-border/30 opacity-80'
+                        : item.status.includes('failed')
+                          ? 'bg-rose-500/10 border-rose-500/30'
+                          : 'bg-bg2/70 border-glass-border hover:border-glass-border/80'
+                  }`}
+                >
+                  {/* Streamlined Single Line Row */}
+                  <div className="p-2.5 flex items-center justify-between gap-3 text-xs">
+                    
+                    {/* Left: Type Badge & Name / Phone */}
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {renderTypeBadge(item.type)}
+
+                      <span className="font-bold text-text truncate max-w-[200px]" title={displayName}>
+                        {displayName}
                       </span>
-                    )}
+
+                      <span className="text-[10px] font-mono text-muted bg-bg3/80 border border-glass-border/40 px-1.5 py-0.5 rounded shrink-0">
+                        +{item.number}
+                      </span>
+
+                      {item.retry_count > 0 && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono shrink-0">
+                          Retry #{item.retry_count}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Right: Status Pill & Quick Expand Trigger */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.status === 'sending' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky border border-sky-500/30 flex items-center gap-1 animate-pulse">
+                          <RefreshCw size={10} className="animate-spin" /> Sending
+                        </span>
+                      )}
+                      {item.status === 'pending' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                          <Clock size={10} /> Pending
+                        </span>
+                      )}
+                      {item.status === 'sent' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                          <CheckCircle2 size={10} /> Sent
+                        </span>
+                      )}
+                      {item.status === 'failed_offline' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                          <WifiOff size={10} /> Waiting Net
+                        </span>
+                      )}
+                      {item.status === 'failed_perm' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                          <ShieldAlert size={10} /> Failed
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(item.id)}
+                        className="p-1 hover:bg-bg3 text-muted hover:text-text rounded-md transition-colors"
+                        title={isExpanded ? 'Hide message text' : 'View message text'}
+                      >
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Status Badge */}
-                  <div>
-                    {item.status === 'sending' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky border border-sky-500/30 flex items-center gap-1 animate-pulse">
-                        <RefreshCw size={10} className="animate-spin" /> Sending...
-                      </span>
-                    )}
-                    {item.status === 'pending' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        Pending
-                      </span>
-                    )}
-                    {item.status === 'sent' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                        <CheckCircle2 size={10} /> Sent
-                      </span>
-                    )}
-                    {item.status === 'failed_offline' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <WifiOff size={10} /> Waiting Net
-                      </span>
-                    )}
-                    {item.status === 'failed_perm' && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                        <ShieldAlert size={10} /> Failed
-                      </span>
-                    )}
-                  </div>
+                  {/* Expanded Message Content Drawer */}
+                  {isExpanded && (
+                    <div className="px-3 pb-3 pt-1 border-t border-glass-border/20 bg-bg3/30 text-xs space-y-2 animate-fadeIn">
+                      <p className="text-[11px] text-muted font-mono whitespace-pre-wrap leading-relaxed">
+                        {item.message}
+                      </p>
+
+                      {item.error_message && (
+                        <p className="text-[10px] text-rose-400 font-semibold">
+                          ⚠️ Error: {item.error_message}
+                        </p>
+                      )}
+
+                      {item.status.includes('failed') && (
+                        <div className="pt-1 flex justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingItem(item);
+                              setEditPhone(item.number);
+                              setEditMessage(item.message);
+                            }}
+                            className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-sky-500/20"
+                          >
+                            <Edit3 size={11} /> Edit Phone & Resend
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-
-                <p className="text-[11px] text-muted line-clamp-2 font-mono whitespace-pre-wrap">
-                  {item.message}
-                </p>
-
-                {item.error_message && (
-                  <p className="text-[10px] text-rose-400 font-semibold mt-1">
-                    ⚠️ Error: {item.error_message}
-                  </p>
-                )}
-
-                {/* Edit Phone / Resend Action for failed items */}
-                {item.status.includes('failed') && (
-                  <div className="mt-2 pt-2 border-t border-glass-border/20 flex justify-end">
-                    <button
-                      onClick={() => {
-                        setEditingItem(item);
-                        setEditPhone(item.number);
-                        setEditMessage(item.message);
-                      }}
-                      className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-sky-500/20"
-                    >
-                      <Edit3 size={11} /> Edit Phone & Resend
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

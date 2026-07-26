@@ -3,10 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText, Sparkles } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import BrandBanner from '../../components/POS/BrandBanner';
-import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, type SpecialOrder } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
@@ -371,6 +371,24 @@ const POS = () => {
     () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
     { enabled: specialOrdersControl.shouldFetch }
   );
+
+  const matchedCustomerOrders = useMemo(() => {
+    const nameQuery = patientName.trim().toLowerCase();
+    const phoneQuery = patientPhone.replace(/\D/g, '');
+
+    if (!nameQuery && !phoneQuery) return [];
+
+    return (specialOrders || []).filter((order: any) => {
+      if (order.status === 'Fulfilled' || order.status === 'Cancelled' || order.status === 'Completed') return false;
+      const orderName = (order.requester || '').toLowerCase();
+      const orderPhone = (order.phone || '').replace(/\D/g, '');
+
+      const nameMatch = nameQuery.length >= 2 && (orderName.includes(nameQuery) || nameQuery.includes(orderName));
+      const phoneMatch = phoneQuery.length >= 4 && (orderPhone.includes(phoneQuery) || phoneQuery.includes(orderPhone));
+
+      return nameMatch || phoneMatch;
+    });
+  }, [specialOrders, patientName, patientPhone]);
 
   const { data: commonCombinations = [] } = useApiQuery<any[]>(
     'pos-common-combinations',
@@ -1857,6 +1875,17 @@ const POS = () => {
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
+
+      // Auto-fulfill matching special orders for customer & queue WhatsApp delivery notification
+      if (matchedCustomerOrders.length > 0) {
+        for (const order of matchedCustomerOrders) {
+          api.fulfillSpecialOrder(order.id, { invoiceNo, grandTotal }).catch(err => {
+            console.error(`Failed to auto-fulfill special order #${order.id}:`, err);
+          });
+        }
+        queryClient.invalidateQueries({ queryKey: ['pos-special-orders'] });
+        toastEvent.trigger(`Special order for ${patientName || 'Customer'} fulfilled & WhatsApp delivery message queued!`, 'success');
+      }
       
       const isWaSent = paymentMedium === 'CREDIT' || (sendWhatsApp && !!phoneToUse.trim());
 
@@ -2210,6 +2239,127 @@ const POS = () => {
                 />
               </div>
             </div>
+
+            {/* Vibrant Animated Special Order Detection Banner */}
+            {matchedCustomerOrders.length > 0 && (
+              <div className="mt-3 p-3 rounded-2xl bg-gradient-to-r from-purple-900/40 via-indigo-900/40 to-emerald-900/40 border border-purple-500/50 shadow-xl shadow-purple-500/10 space-y-2 animate-fadeIn">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} className="text-purple-400 fill-purple-400 animate-spin" style={{ animationDuration: '4s' }} />
+                    <span className="text-xs font-black uppercase tracking-wider text-purple-200">
+                      ✨ Special Order Booked for Customer ({matchedCustomerOrders.length})
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-purple-300 font-medium">
+                    Auto-populate medicine to bill & credit advance payment
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {matchedCustomerOrders.map(order => {
+                    const advAmount = Number(order.advance_payment || 0);
+
+                    const handleDirectAddToPos = async () => {
+                      try {
+                        const cleanName = (order.product || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+                        let searchResults = await api.searchMedicine(order.product);
+                        if ((!searchResults || searchResults.length === 0) && cleanName && cleanName !== order.product) {
+                          searchResults = await api.searchMedicine(cleanName);
+                        }
+
+                        const targetProductName = cleanName || order.product;
+
+                        if (searchResults && searchResults.length > 0) {
+                          const med = searchResults[0];
+                          addToCart({
+                            id: med.id,
+                            medicine_id: med.medicine_id || med.id,
+                            name: med.medicine_name || med.name || targetProductName,
+                            batch: med.batch_no || 'AUTO',
+                            expiry: med.expiry_date || '12/28',
+                            mrp: med.mrp || Number(order.pharmarack_mrp) || 100,
+                            unitPrice: med.unit_price || med.mrp || Number(order.pharmarack_rate) || 100,
+                            qty: Number(order.qty) || 1,
+                            quantity: Number(order.qty) || 1,
+                            packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 10
+                          });
+                        } else {
+                          addToCart({
+                            name: targetProductName,
+                            batch: 'SPECIAL',
+                            expiry: '12/28',
+                            mrp: Number(order.pharmarack_mrp || 100),
+                            unitPrice: Number(order.pharmarack_rate || order.pharmarack_mrp || 100),
+                            qty: Number(order.qty) || 1,
+                            quantity: Number(order.qty) || 1,
+                            packSize: 1
+                          });
+                        }
+
+                        if (advAmount > 0) {
+                          setDiscount(prev => prev + advAmount);
+                          toastEvent.trigger(`Added "${targetProductName}" & applied ₹${advAmount.toFixed(2)} advance payment credit!`, 'success');
+                        } else {
+                          toastEvent.trigger(`Added "${targetProductName}" to POS cart!`, 'success');
+                        }
+                      } catch (err) {
+                        toastEvent.trigger('Failed to add special order to bill', 'error');
+                      }
+                    };
+
+                    const handleFulfillManual = async () => {
+                      try {
+                        await api.fulfillSpecialOrder(order.id);
+                        toastEvent.trigger(`Marked "${order.product}" as Delivered & sent WhatsApp notification!`, 'success');
+                        queryClient.invalidateQueries({ queryKey: ['pos-special-orders'] });
+                      } catch (err) {
+                        toastEvent.trigger('Failed to mark order fulfilled', 'error');
+                      }
+                    };
+
+                    return (
+                      <div key={order.id} className="p-2.5 rounded-xl bg-bg/85 border border-purple-500/35 flex items-center justify-between gap-3 text-xs shadow-sm">
+                        <div className="flex flex-col min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-extrabold text-text truncate text-xs">{order.product}</span>
+                            <span className="text-[10px] font-mono text-purple-300 bg-purple-500/20 px-1.5 py-0.2 rounded border border-purple-500/30">
+                              Qty: {order.qty}
+                            </span>
+                            {advAmount > 0 && (
+                              <span className="text-[10px] font-extrabold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                💰 Advance Paid: ₹{advAmount.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-muted truncate mt-0.5">
+                            Customer: {order.requester} ({order.phone})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleDirectAddToPos}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition-all active:scale-95 flex items-center gap-1 shadow-sm cursor-pointer"
+                            title="Add medicine to POS bill & deduct advance payment"
+                          >
+                            <Plus size={12} /> Add to Bill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleFulfillManual}
+                            className="px-2 py-1 bg-purple-500/20 hover:bg-purple-500/35 border border-purple-500/30 text-purple-300 font-bold text-[10px] rounded-lg transition-all cursor-pointer"
+                            title="Mark delivered and send instant WhatsApp message"
+                          >
+                            Mark Delivered
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* A. Search & Scan Medicine Area (Header) */}

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { apiClient } from '../../services/api';
+import { apiClient, api } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -62,6 +62,7 @@ function formatDate(dateStr: string) {
 
 const TABS = [
   { key: 'refills', label: 'Refills', icon: <Repeat2 size={15} /> },
+  { key: 'special_orders', label: 'Special Requests', icon: <ClipboardList size={15} /> },
   { key: 'credit', label: 'Customer Credit', icon: <Users size={15} /> },
   { key: 'messages', label: 'Distributor Messages', icon: <Bell size={15} /> },
   { key: 'whatsapp', label: 'WhatsApp Business', icon: <MessageCircle size={15} /> },
@@ -2110,6 +2111,511 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPECIAL REQUESTS SECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface SpecialOrderItem {
+  id: number;
+  customer_id?: number | null;
+  product: string;
+  requester: string;
+  phone: string;
+  qty: number;
+  priority: string;
+  status: string;
+  date: string;
+  notified: number;
+  pharmarack_distributor?: string | null;
+  pharmarack_rate?: number | null;
+  pharmarack_mrp?: number | null;
+  pharmarack_scheme?: string | null;
+  advance_payment?: number | null;
+}
+
+const SpecialOrdersSection: React.FC = () => {
+  const [orders, setOrders] = useState<SpecialOrderItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [notifyingId, setNotifyingId] = useState<number | null>(null);
+  const [resendingId, setResendingId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  // New Request Form State
+  const [newProduct, setNewProduct] = useState('');
+  const [newRequester, setNewRequester] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newQty, setNewQty] = useState(1);
+  const [newAdvance, setNewAdvance] = useState<number | ''>('');
+  const [newPriority, setNewPriority] = useState('Normal');
+  const [formSubmitting, setFormSubmitting] = useState(false);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.getOrders();
+      setOrders(Array.isArray(data) ? data : []);
+    } catch {
+      toastEvent.trigger('Failed to load special requests', 'error', '/crm');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  const handleNotifyArrival = async (order: SpecialOrderItem) => {
+    setNotifyingId(order.id);
+    try {
+      await api.notifySpecialOrderArrival(order.id);
+      toastEvent.trigger(`Arrival WhatsApp sent to ${order.requester}!`, 'success', '/crm');
+      await loadOrders();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to send arrival notification', 'error', '/crm');
+    } finally {
+      setNotifyingId(null);
+    }
+  };
+
+  const handleResendBooking = async (order: SpecialOrderItem) => {
+    setResendingId(order.id);
+    try {
+      await api.resendSpecialOrderBooking(order.id);
+      toastEvent.trigger(`Booking WhatsApp resent to ${order.requester}!`, 'success', '/crm');
+      await loadOrders();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to resend booking message', 'error', '/crm');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const handleUpdateStatus = async (id: number, newStatus: string) => {
+    setUpdatingId(id);
+    try {
+      await api.updateOrder(id, { status: newStatus });
+      toastEvent.trigger(`Status updated to ${newStatus}`, 'success', '/crm');
+      await loadOrders();
+    } catch {
+      toastEvent.trigger('Failed to update order status', 'error', '/crm');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [addingCartId, setAddingCartId] = useState<number | null>(null);
+
+  const handleAddToCart = async (order: SpecialOrderItem) => {
+    setAddingCartId(order.id);
+    try {
+      const res = await api.addPharmarackCart([{
+        productId: 0,
+        storeId: 0,
+        qty: order.qty || 1,
+        productName: order.product,
+        storeName: order.pharmarack_distributor || undefined,
+        rate: order.pharmarack_rate || undefined,
+        mrp: order.pharmarack_mrp || undefined,
+        scheme: order.pharmarack_scheme || undefined
+      }]);
+      if (res && res.success) {
+        toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success', '/crm');
+        await api.updateOrder(order.id, { status: 'Ordered' });
+        await loadOrders();
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error', '/crm');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to add to cart', 'error', '/crm');
+    } finally {
+      setAddingCartId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (id: number, product: string) => {
+    if (!window.confirm(`Are you sure you want to cancel and delete the special order request for "${product}"?`)) return;
+    setDeletingId(id);
+    try {
+      await api.deleteOrder(id);
+      toastEvent.trigger(`Special order for "${product}" cancelled & deleted`, 'success', '/crm');
+      await loadOrders();
+    } catch {
+      toastEvent.trigger('Failed to delete order request', 'error', '/crm');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleCreateRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProduct.trim() || !newRequester.trim() || !newPhone.trim()) {
+      toastEvent.trigger('Product, Customer Name, and Phone are required.', 'error', '/crm');
+      return;
+    }
+    setFormSubmitting(true);
+    try {
+      await api.createOrder({
+        product: newProduct.trim(),
+        requester: newRequester.trim(),
+        phone: newPhone.trim(),
+        qty: Number(newQty) || 1,
+        priority: newPriority,
+        advance_payment: newAdvance !== '' ? Number(newAdvance) : 0
+      });
+
+      // Auto sync to Pharmarack Cart
+      try {
+        await api.addPharmarackCart([{
+          productId: 0,
+          storeId: 0,
+          qty: Number(newQty) || 1,
+          productName: newProduct.trim()
+        }]);
+      } catch (_) {}
+
+      toastEvent.trigger(`Special order for "${newProduct}" logged & added to cart!`, 'success', '/crm');
+      setShowAddModal(false);
+      setNewProduct('');
+      setNewRequester('');
+      setNewPhone('');
+      setNewQty(1);
+      setNewAdvance('');
+      await loadOrders();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to log special request', 'error', '/crm');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  const filteredOrders = orders.filter(o => {
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch = !q || 
+      (o.product && o.product.toLowerCase().includes(q)) ||
+      (o.requester && o.requester.toLowerCase().includes(q)) ||
+      (o.phone && o.phone.includes(q)) ||
+      (o.pharmarack_distributor && o.pharmarack_distributor.toLowerCase().includes(q));
+    
+    if (!matchesSearch) return false;
+    if (statusFilter === 'All') return true;
+    if (statusFilter === 'Pending') return o.status === 'Pending';
+    if (statusFilter === 'Waiting') return o.status === 'Waiting';
+    if (statusFilter === 'Arrived') return o.status === 'Ready' || o.status === 'Arrived';
+    if (statusFilter === 'Not Arrived') return o.status !== 'Ready' && o.status !== 'Arrived' && o.status !== 'Fulfilled';
+    return true;
+  });
+
+  return (
+    <div className="flex flex-col h-full gap-3 overflow-hidden">
+      {/* Top Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-bg2 border border-border rounded-xl shrink-0">
+        <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              type="text"
+              placeholder="Search by medicine, customer name, phone, distributor..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
+            />
+          </div>
+          <div className="flex items-center gap-1 bg-bg3/60 p-1 rounded-xl border border-border">
+            {['All', 'Pending', 'Waiting', 'Arrived', 'Not Arrived'].map(st => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  statusFilter === st ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-text'
+                }`}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadOrders}
+            className="p-2 rounded-xl bg-bg3 hover:bg-bg border border-border text-muted hover:text-text transition-all"
+            title="Refresh special orders"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-md shadow-primary/20 transition-all"
+          >
+            <Plus size={14} />
+            <span>New Special Request</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Orders List Container */}
+      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5">
+        {loading && orders.length === 0 ? (
+          <div className="p-12 text-center text-xs text-muted">Loading special requests...</div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="p-12 text-center text-xs text-muted">No special requests found matching your filter.</div>
+        ) : (
+          filteredOrders.map(order => {
+            const isArrived = order.status === 'Ready' || order.status === 'Arrived';
+            const hasAdvance = order.advance_payment && Number(order.advance_payment) > 0;
+            return (
+              <div
+                key={order.id}
+                className={`p-4 rounded-2xl border transition-all ${
+                  isArrived
+                    ? 'bg-emerald-500/5 border-emerald-500/30'
+                    : order.status === 'Waiting'
+                    ? 'bg-amber-500/5 border-amber-500/30'
+                    : 'bg-bg2 border-border hover:border-primary/40'
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  {/* Left Column: Product & Customer Info */}
+                  <div className="space-y-1.5 flex-1 min-w-[260px]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-sm text-text">{order.product}</h3>
+                      <span className="px-2 py-0.5 rounded-md bg-bg3 border border-border text-[11px] font-bold text-primary">
+                        Qty: {order.qty}
+                      </span>
+                      {hasAdvance && (
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-extrabold flex items-center gap-1">
+                          ✨ Advance Paid: ₹{Number(order.advance_payment).toFixed(2)}
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                        isArrived
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                          : order.status === 'Waiting'
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                          : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                      }`}>
+                        {order.status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
+                      <span className="font-semibold text-text flex items-center gap-1">
+                        <Users size={12} className="text-primary" />
+                        {order.requester}
+                      </span>
+                      <span className="flex items-center gap-1 font-mono">
+                        <Phone size={12} className="text-muted" />
+                        {order.phone}
+                      </span>
+                      {order.pharmarack_distributor && (
+                        <span className="px-2 py-0.5 rounded-md bg-bg3/80 text-[11px] text-muted border border-border font-medium">
+                          Distributor: <strong className="text-text">{order.pharmarack_distributor}</strong>
+                        </span>
+                      )}
+                      <span className="text-[11px]">
+                        Logged: {formatDate(order.date)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Action Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
+                    <button
+                      onClick={() => handleAddToCart(order)}
+                      disabled={addingCartId === order.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                      title="Push special request item directly to Pharmarack Cart"
+                    >
+                      <ShoppingCart size={13} className={addingCartId === order.id ? 'animate-spin' : ''} />
+                      <span>{addingCartId === order.id ? 'Adding...' : 'Add to Cart'}</span>
+                    </button>
+
+                    {!isArrived ? (
+                      <button
+                        onClick={() => handleNotifyArrival(order)}
+                        disabled={notifyingId === order.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+                        title="Mark order as arrived and auto send WhatsApp arrival message to customer"
+                      >
+                        <CheckCircle2 size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
+                        <span>{notifyingId === order.id ? 'Sending...' : 'Mark Arrived & WA'}</span>
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                        <Check size={12} />
+                        <span>Arrived &amp; Customer Notified</span>
+                      </span>
+                    )}
+
+                    {order.status !== 'Waiting' && !isArrived && (
+                      <button
+                        onClick={() => handleUpdateStatus(order.id, 'Waiting')}
+                        disabled={updatingId === order.id}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-all"
+                      >
+                        <Clock size={12} />
+                        <span>Mark Waiting</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleResendBooking(order)}
+                      disabled={resendingId === order.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-bg3 border border-border text-muted hover:text-primary text-xs font-semibold transition-all"
+                      title="Resend booking confirmation WhatsApp"
+                    >
+                      <MessageCircle size={12} />
+                      <span>{resendingId === order.id ? 'Sending...' : 'Resend WA'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteOrder(order.id, order.product)}
+                      disabled={deletingId === order.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold transition-all disabled:opacity-50"
+                      title="Cancel & Delete Special Order Request"
+                    >
+                      <Trash2 size={13} className={deletingId === order.id ? 'animate-spin' : ''} />
+                      <span>{deletingId === order.id ? 'Deleting...' : 'Delete / Cancel'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Add Special Request Modal inside CRM */}
+      {showAddModal && createPortal(
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="glass-panel w-full max-w-lg bg-bg2 rounded-2xl border border-primary/20 p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-border pb-3">
+              <h3 className="font-bold text-sm text-text flex items-center gap-2">
+                <ClipboardList size={16} className="text-primary" />
+                Log Quick Special Request
+              </h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 rounded-lg hover:bg-bg3 text-muted hover:text-text"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRequest} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-text mb-1">Product / Medicine Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Dolo 650mg, Pan D..."
+                  value={newProduct}
+                  onChange={e => setNewProduct(e.target.value)}
+                  className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-text mb-1">Customer Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Customer Name"
+                    value={newRequester}
+                    onChange={e => setNewRequester(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Phone Number (WhatsApp) *</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="10-digit mobile"
+                    value={newPhone}
+                    onChange={e => setNewPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-text mb-1">Quantity *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={newQty}
+                    onChange={e => setNewQty(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Advance Paid (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={newAdvance}
+                    onChange={e => setNewAdvance(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-semibold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Priority</label>
+                  <select
+                    value={newPriority}
+                    onChange={e => setNewPriority(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Normal">Normal</option>
+                    <option value="High">High Priority</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-muted text-[11px]">
+                📱 <strong>Auto WhatsApp Alert:</strong> Logging this request will automatically send a booking confirmation message to the customer (including Advance Payment details if added).
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-xl bg-bg3 border border-border text-muted hover:text-text font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={formSubmitting}
+                  className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-md shadow-primary/20 transition-all disabled:opacity-50"
+                >
+                  {formSubmitting ? 'Logging Request...' : 'Log & Send Booking WA'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOMER CREDIT SECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
 
 
 
@@ -2820,6 +3326,7 @@ const CRM: React.FC = () => {
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'refills' && <RefillsSection />}
+        {activeTab === 'special_orders' && <SpecialOrdersSection />}
         {activeTab === 'credit' && <CustomerCreditSection />}
         {activeTab === 'messages' && <DistributorMessagesSection />}
         {activeTab === 'whatsapp' && <WhatsAppSection />}

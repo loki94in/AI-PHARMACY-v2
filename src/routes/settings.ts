@@ -92,7 +92,15 @@ router.post('/save', async (req, res) => {
       await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [k, v ?? '']);
     }
 
+    if (payload['email_retention_limit'] !== undefined) {
+      try {
+        const { emailService } = await import('../services/emailService.js');
+        emailService.pruneOldEmails(db).catch(err => console.error('Pruning after settings update failed:', err));
+      } catch (err) {}
+    }
+
     const keys = Object.keys(payload);
+
 
     // Sync delivery boys to single DB source location (delivery_boys table)
     const boy1Name = payload['delivery_boy_name'] || payload['delivery_boy_1_name'];
