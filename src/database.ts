@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 21;
+const CURRENT_SCHEMA_VERSION = 22;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -583,6 +583,7 @@ export async function ensureSchema(dbPath: string) {
     ['medicines', 'item_type', 'ALTER TABLE medicines ADD COLUMN item_type TEXT'],
     ['medicines', 'rack', 'ALTER TABLE medicines ADD COLUMN rack TEXT'],
     ['medicines', 'generic_name', 'ALTER TABLE medicines ADD COLUMN generic_name TEXT'],
+    ['medicines', 'strength', 'ALTER TABLE medicines ADD COLUMN strength TEXT'],
     ['medicines', 'pack_unit', 'ALTER TABLE medicines ADD COLUMN pack_unit TEXT'],
     ['medicines', 'cgst_per', 'ALTER TABLE medicines ADD COLUMN cgst_per REAL DEFAULT 0'],
     ['medicines', 'sgst_per', 'ALTER TABLE medicines ADD COLUMN sgst_per REAL DEFAULT 0'],

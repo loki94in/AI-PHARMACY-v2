@@ -19,6 +19,9 @@ export interface MedicineData {
   cgst?: number;
   sgst?: number;
   igst?: number;
+  cgst_per?: number;
+  sgst_per?: number;
+  igst_per?: number;
   rack?: string;
   source?: string;
   possibleDuplicateOf?: number;
@@ -42,6 +45,9 @@ export interface MedicineResult {
   cgst?: number;
   sgst?: number;
   igst?: number;
+  cgst_per?: number;
+  sgst_per?: number;
+  igst_per?: number;
   rack?: string;
   source?: string;
   possibleDuplicateOf?: number;

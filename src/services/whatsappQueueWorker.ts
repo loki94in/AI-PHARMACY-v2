@@ -211,23 +211,6 @@ class WhatsAppQueueWorker {
 
     try {
       await this.loadPacingConfig();
-      const useBusiness = await shouldRouteToBusiness();
-      let status = await getWhatsAppStatus();
-
-      // If client is not ready, leave items pending until user connects WhatsApp on the UI
-      if (!useBusiness && !status.isReady) {
-        const now = Date.now();
-        if (!this.lastWasOffline || now - this.lastOfflineLogTime > 600000) {
-          console.log('[WhatsAppQueueWorker] WhatsApp client offline/disconnected. Leaving items pending in queue until user connects on UI.');
-          this.lastOfflineLogTime = now;
-        }
-        this.lastWasOffline = true;
-        this.isProcessing = false;
-        return false;
-      }
-
-      this.lastWasOffline = false;
-
       const db = await dbManager.getConnection();
       const now = Date.now();
 
@@ -245,8 +228,29 @@ class WhatsAppQueueWorker {
         this.isProcessing = false;
         this.nextDispatchTimestamp = null;
         this.currentSendingItemId = null;
+        this.lastWasOffline = false;
         return false;
       }
+
+      const useBusiness = await shouldRouteToBusiness();
+      let status = await getWhatsAppStatus();
+
+      // If client is not ready, attempt headless init and leave items pending
+      if (!useBusiness && !status.isReady) {
+        if (!status.initializing) {
+          initClient().catch(() => {});
+        }
+        const logNow = Date.now();
+        if (!this.lastWasOffline || logNow - this.lastOfflineLogTime > 600000) {
+          console.log(`[WhatsAppQueueWorker] WhatsApp client offline. Leaving ${pendingItems.length} item(s) pending in queue until user connects on UI.`);
+          this.lastOfflineLogTime = logNow;
+        }
+        this.lastWasOffline = true;
+        this.isProcessing = false;
+        return false;
+      }
+
+      this.lastWasOffline = false;
 
       console.log(`[WhatsAppQueueWorker] Processing ${pendingItems.length} queued item(s) with ${this.pacingMinMs/1000}s-${this.pacingMaxMs/1000}s pacing...`);
 
