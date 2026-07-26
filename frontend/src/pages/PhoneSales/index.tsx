@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { 
   Smartphone, 
   Calendar, 
@@ -115,16 +116,19 @@ export default function PhoneSales() {
     }
   }, []);
 
+  const pageActive = usePageActive();
+
   useEffect(() => {
     fetchStagedSales();
     fetchDeviceData();
-    // Poll data every 8 seconds
+    // Poll data every 8 seconds — paused while this page isn't the one visible.
+    if (!pageActive) return;
     const interval = setInterval(() => {
       fetchStagedSales();
       fetchDeviceData();
     }, 8000);
     return () => clearInterval(interval);
-  }, [fetchStagedSales, fetchDeviceData]);
+  }, [fetchStagedSales, fetchDeviceData, pageActive]);
 
   const handleSelectSale = (sale: StagedSale) => {
     setSelectedSale(sale);
