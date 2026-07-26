@@ -129,6 +129,23 @@ const Learning: React.FC = () => {
     }
   );
 
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const handleUpdateEvents = () => {
+      queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+      if (selectedProfileId) {
+        queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
+      }
+    };
+    window.addEventListener('phone-numbers-updated', handleUpdateEvents);
+    window.addEventListener('contacts-updated', handleUpdateEvents);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handleUpdateEvents);
+      window.removeEventListener('contacts-updated', handleUpdateEvents);
+    };
+  }, [queryClient, selectedProfileId]);
+
   // Settings Query with module caching
   const { data: serverSettings = cachedServerSettings, isLoading: loadingSettings } = useApiQuery<any>(
     'settings',
@@ -146,7 +163,6 @@ const Learning: React.FC = () => {
   );
 
   // Profile Detail Query with module caching and instant hydration
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const { data: serverProfileDetail, isLoading: loadingDetail } = useApiQuery<any>(
     ['learning-profile-detail', selectedProfileId],
     async () => {
@@ -324,7 +340,7 @@ const Learning: React.FC = () => {
     }
     const cleanEmail = extractCleanEmail(newDistEmail);
     try {
-      const res = await apiClient.post('/settings/distributors', {
+      const res = await apiClient.post('/distributors', {
         name: newDistName.trim(),
         phone: newDistPhone.trim(),
         email: cleanEmail
@@ -1263,7 +1279,7 @@ const Learning: React.FC = () => {
                                   ...selectedProfile.distributor,
                                   email: cleanDistEmail
                                 };
-                                await apiClient.put(`/settings/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
+                                await apiClient.put(`/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
                                 setSelectedProfile({
                                   ...selectedProfile,
                                   distributor: updatedDistributor

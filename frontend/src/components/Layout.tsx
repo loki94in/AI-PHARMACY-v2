@@ -30,7 +30,7 @@ import {
   Mail as MailIcon,
   Beaker,
   Smartphone,
-  QrCode,
+  ClipboardPlus,
   RefreshCw,
   Building2,
   Clock,
@@ -1072,10 +1072,10 @@ const Topbar = ({
           <button
             onClick={() => quickOrderEvent.triggerOpen()}
             className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center relative hover:bg-white/5 rounded-xl cursor-pointer"
-            title="Quick Order (Alt+O)"
-            aria-label="Quick order"
+            title="Quick Special Request (Alt+O)"
+            aria-label="Quick special request"
           >
-            <QrCode size={18} />
+            <ClipboardPlus size={18} />
           </button>
 
           {/* Live Cart Shortcut Button */}

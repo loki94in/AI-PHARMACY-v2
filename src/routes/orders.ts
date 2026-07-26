@@ -138,6 +138,16 @@ router.post('/', async (req, res) => {
         const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanReqName, cleanReqPhone]);
         customerId = custRes.lastID;
       }
+
+      // Sync customer into unified contacts master table
+      try {
+        await db.run(
+          `INSERT INTO contacts (name, phone, type, is_active)
+           VALUES (?, ?, 'customer', 1)
+           ON CONFLICT(phone) DO UPDATE SET name = EXCLUDED.name`,
+          [cleanReqName, cleanReqPhone]
+        );
+      } catch (_) {}
     }
 
     const medName = (product || medicine_name || '').trim();

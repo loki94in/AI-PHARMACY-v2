@@ -35,8 +35,25 @@ async function clearDatabase(dbName) {
         continue;
       }
       
+      if (tableName.startsWith('medicines_fts')) {
+        console.log(`- Dropping virtual FTS table/shadow table: ${tableName}`);
+        try {
+          await db.run(`DROP TABLE IF EXISTS "${tableName}"`);
+        } catch (ftsErr) {
+          console.warn(`Warning dropping ${tableName}:`, ftsErr.message);
+        }
+        continue;
+      }
+      
       console.log(`- Clearing table: ${tableName}`);
-      await db.run(`DELETE FROM "${tableName}"`);
+      try {
+        await db.run(`DELETE FROM "${tableName}"`);
+      } catch (tableErr) {
+        console.warn(`Warning clearing table ${tableName}, attempting DROP:`, tableErr.message);
+        try {
+          await db.run(`DROP TABLE IF EXISTS "${tableName}"`);
+        } catch (_) {}
+      }
       
       // Reset sequence for this table
       try {

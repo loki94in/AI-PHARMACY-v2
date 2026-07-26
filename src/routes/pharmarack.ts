@@ -351,55 +351,107 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// Fetch store list grouped by mapped vs non-mapped
+// Fetch store list grouped by mapped vs non-mapped (Strictly from local AI Learning database)
 router.get('/distributors', async (req, res) => {
   try {
-    const settings = await getPharmarackSettings();
-    const token = settings['pharmarack_session_token'] || '';
+    const db = await dbManager.getConnection();
+    
+    // Fetch all local distributors saved in AI learning page & local DB
+    const rows = await db.all(`
+      SELECT 
+        d.id as storeId,
+        d.name as storeName,
+        COALESCE(d.phone, d.contact, '') as mobileNumber,
+        COALESCE(d.email, '') as email,
+        COALESCE(d.address, '') as address,
+        COALESCE(d.gstin, '') as partyCode,
+        p.distributor_id as profileId
+      FROM distributors d
+      INNER JOIN distributor_learning_profiles p ON d.id = p.distributor_id
+      ORDER BY d.name ASC
+    `);
 
-    if (!token) {
-      return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
-    }
-
-    const authHeader = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-    const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/user/api/v2/store-list', {
-      method: 'GET',
-      signal: AbortSignal.timeout(10000)
+    const stores = rows.map((s: any) => {
+      const hasPhone = Boolean(s.mobileNumber && s.mobileNumber.trim());
+      const hasProfile = Boolean(s.profileId);
+      const isMapped = hasPhone || hasProfile;
+      return {
+        storeId: s.storeId,
+        storeName: s.storeName || 'Unknown Store',
+        isMapped,
+        partyCode: s.partyCode || '',
+        address: s.address || '',
+        city: '',
+        mobileNumber: s.mobileNumber || '',
+        email: s.email || '',
+        contactPerson: '',
+        remarks: ''
+      };
     });
-
-    if (response.status === 401 || response.status === 403) {
-      return res.status(401).json({ error: 'Session expired. Please login again.', code: 'NEED_LOGIN' });
-    }
-    if (!response.ok) {
-      return res.status(503).json({ error: `Pharmarack API returned status ${response.status}` });
-    }
-
-    const data: any = await response.json();
-    if (!data || !data.success || !data.data || !Array.isArray(data.data.Stores)) {
-      return res.status(503).json({ error: 'Unexpected response structure from Pharmarack store list API' });
-    }
-
-    const stores = data.data.Stores.map((s: any) => ({
-      storeId: s.StoreId,
-      storeName: s.StoreName || 'Unknown Store',
-      isMapped: s.Ismapped === 1 || s.IsMapped === 1 || s.isMapped === true || s.isMapped === 1 || String(s.Ismapped) === '1' || String(s.IsMapped) === '1',
-      partyCode: s.PartyCode || '',
-      address: s.Address1 || '',
-      city: s.City || '',
-      mobileNumber: s.MobileNumber || '',
-      email: s.Email || '',
-      contactPerson: s.ContactPerson || '',
-      remarks: s.OrderRemarks || ''
-    }));
 
     const mapped = stores.filter((s: any) => s.isMapped);
     const nonMapped = stores.filter((s: any) => !s.isMapped);
 
-    return res.json({ success: true, mapped, nonMapped });
+    return res.json({ success: true, mode: 'Local', mapped, nonMapped });
   } catch (err: any) {
-    console.error('Pharmarack distributors fetch error:', err);
+    console.error('Local distributors fetch error:', err);
     return res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Get all saved Pharmarack store-to-distributor mappings
+router.get('/distributor-mappings', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
+        store_name TEXT PRIMARY KEY,
+        distributor_id INTEGER,
+        phone TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const rows = await db.all(`
+      SELECT m.store_name, m.distributor_id, m.phone, d.name as distributor_name, COALESCE(d.phone, d.contact, m.phone) as distributor_phone
+      FROM pharmarack_distributor_mappings m
+      LEFT JOIN distributors d ON m.distributor_id = d.id
+    `);
+    res.json({ success: true, mappings: rows || [] });
+  } catch (error: any) {
+    console.error('Failed to fetch distributor mappings:', error);
+    res.status(500).json({ error: 'Failed to fetch distributor mappings' });
+  }
+});
+
+// Save or update a Pharmarack store-to-distributor mapping
+router.post('/distributor-mappings', async (req, res) => {
+  const { store_name, distributor_id, phone } = req.body;
+  if (!store_name) {
+    return res.status(400).json({ error: 'store_name is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
+        store_name TEXT PRIMARY KEY,
+        distributor_id INTEGER,
+        phone TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.run(
+      `INSERT INTO pharmarack_distributor_mappings (store_name, distributor_id, phone, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(store_name) DO UPDATE SET
+         distributor_id = EXCLUDED.distributor_id,
+         phone = EXCLUDED.phone,
+         updated_at = CURRENT_TIMESTAMP`,
+      [store_name.trim(), distributor_id || null, phone || '']
+    );
+    res.json({ success: true, message: 'Store mapping saved successfully' });
+  } catch (error: any) {
+    console.error('Failed to save distributor mapping:', error);
+    res.status(500).json({ error: 'Failed to save distributor mapping' });
   }
 });
 
@@ -1876,7 +1928,7 @@ router.get('/auto-refill-suggestions', async (_req, res) => {
       FROM medicines m
       LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
       GROUP BY m.id
-      HAVING current_stock <= 5 AND sales_30d > 0
+      HAVING (current_stock <= COALESCE(reorder_level, 5) OR current_stock = 0) AND sales_30d > 0
       ORDER BY sales_30d DESC
       LIMIT 25
     `);

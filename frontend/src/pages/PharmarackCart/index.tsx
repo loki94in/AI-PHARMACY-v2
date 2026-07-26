@@ -311,6 +311,7 @@ export default function PharmarackCart() {
 
   const [deliveryBoysList, setDeliveryBoysList] = useState<{ id?: number; name: string; whatsapp_number: string; is_active?: number }[]>([]);
   const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
+  const [distributorMappings, setDistributorMappings] = useState<Record<string, { distributorId: number | null; phone: string }>>({});
 
   const fetchSavedDistributors = async () => {
     try {
@@ -320,6 +321,26 @@ export default function PharmarackCart() {
       }
     } catch (err) {
       console.warn('Failed to load saved distributors list:', err);
+    }
+  };
+
+  const fetchDistributorMappings = async () => {
+    try {
+      const res = await apiClient.get('/pharmarack/distributor-mappings');
+      if (res.data && Array.isArray(res.data.mappings)) {
+        const mapObj: Record<string, { distributorId: number | null; phone: string }> = {};
+        res.data.mappings.forEach((m: any) => {
+          if (m.store_name) {
+            mapObj[m.store_name.toLowerCase().trim()] = {
+              distributorId: m.distributor_id || null,
+              phone: m.distributor_phone || m.phone || ''
+            };
+          }
+        });
+        setDistributorMappings(mapObj);
+      }
+    } catch (err) {
+      console.warn('Failed to load distributor mappings:', err);
     }
   };
 
@@ -359,12 +380,14 @@ export default function PharmarackCart() {
 
   useEffect(() => {
     fetchSavedDistributors();
+    fetchDistributorMappings();
     fetchStoreInfo();
     fetchDeliveryBoys();
 
     // Listen to global phone-numbers-updated event to update contacts instantly without page reload
     const handlePhoneUpdate = () => {
       fetchSavedDistributors();
+      fetchDistributorMappings();
       fetchStoreInfo();
       fetchDeliveryBoys();
     };
@@ -401,6 +424,10 @@ export default function PharmarackCart() {
   const [modalPhoneInput, setModalPhoneInput] = useState('');
   const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
+
+  // New distributor inline creation state inside modal
+  const [isAddingNewDistributor, setIsAddingNewDistributor] = useState(false);
+  const [newDistNameInput, setNewDistNameInput] = useState('');
 
   // Missing delivery boy validation prompt state
   const [showMissingBoyModal, setShowMissingBoyModal] = useState(false);
@@ -485,12 +512,21 @@ export default function PharmarackCart() {
   };
 
   const getDistributorPhoneNumber = (dist: Distributor): string => {
-    // 1. Primary source: Central Database (distributors table) — ALWAYS returns latest saved phone number
+    // 1. Primary source: Stored persistent store-to-distributor mapping from SQLite DB
+    const normName = dist.storeName ? dist.storeName.toLowerCase().trim() : '';
+    if (normName && distributorMappings[normName]) {
+      const mappedPhone = distributorMappings[normName].phone;
+      if (mappedPhone && mappedPhone.trim().length > 0) {
+        return mappedPhone.trim();
+      }
+    }
+
+    // 2. Central Database (distributors table) match
     const matched = findSavedDistributorMatch(dist.storeName);
     const dbPhone = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
     if (dbPhone && dbPhone.trim().length > 0) return dbPhone.trim();
 
-    // 2. Fallback to transient memory session override if set in current view
+    // 3. Fallback to transient memory session override
     const custom = customDistributorPhones[dist.storeId];
     if (custom && custom.trim().length > 0) return custom.trim();
 
@@ -1078,25 +1114,35 @@ export default function PharmarackCart() {
   const handleOpenEditModal = (dist: Distributor) => {
     setEditingDistributor(dist);
     setModalSearchTerm(dist.storeName || '');
+    setIsAddingNewDistributor(false);
+    setNewDistNameInput(dist.storeName || '');
 
-    // Check if phone override exists or find matched saved distributor
-    const custom = customDistributorPhones[dist.storeId];
-    const matched = findSavedDistributorMatch(dist.storeName);
+    const normName = dist.storeName ? dist.storeName.toLowerCase().trim() : '';
+    const storedMap = distributorMappings[normName];
 
-    if (custom) {
-      setModalPhoneInput(custom);
-      setSelectedSavedDistId(matched?.id || null);
-    } else if (matched?.phone || matched?.mobile || matched?.whatsapp) {
-      setModalPhoneInput(matched.phone || matched.mobile || matched.whatsapp || '');
-      setSelectedSavedDistId(matched.id);
+    if (storedMap && storedMap.distributorId) {
+      setSelectedSavedDistId(storedMap.distributorId);
+      setModalPhoneInput(storedMap.phone || '');
     } else {
-      setModalPhoneInput('');
-      setSelectedSavedDistId(null);
+      const custom = customDistributorPhones[dist.storeId];
+      const matched = findSavedDistributorMatch(dist.storeName);
+
+      if (custom) {
+        setModalPhoneInput(custom);
+        setSelectedSavedDistId(matched?.id || null);
+      } else if (matched?.phone || matched?.mobile || matched?.whatsapp) {
+        setModalPhoneInput(matched.phone || matched.mobile || matched.whatsapp || '');
+        setSelectedSavedDistId(matched.id);
+      } else {
+        setModalPhoneInput('');
+        setSelectedSavedDistId(null);
+      }
     }
   };
 
   const handleSaveDistributorContact = async () => {
     if (!editingDistributor) return;
+    setIsSavingContact(true);
     const cleanPhone = modalPhoneInput.trim();
     const storeId = editingDistributor.storeId;
     const distName = editingDistributor.storeName;
@@ -1109,43 +1155,75 @@ export default function PharmarackCart() {
     toastEvent.trigger(`Saved WhatsApp contact for ${distName}`, 'success');
     setEditingDistributor(null);
 
-    // 2. Persist to database in background without blocking UI thread
+    // 2. Persist to database in background
     try {
-      if (cleanPhone || selectedSavedDistId) {
-        let saveSuccess = false;
-        if (selectedSavedDistId) {
-          try {
-            await apiClient.put(`/settings/distributors/${selectedSavedDistId}`, {
-              name: distName,
-              phone: cleanPhone
-            });
-            saveSuccess = true;
-          } catch (e) {
-            console.warn('PUT distributor by ID failed, falling back to name upsert:', e);
+      let targetDistId = selectedSavedDistId;
+
+      if (isAddingNewDistributor && newDistNameInput.trim()) {
+        // User clicked '+' to create a brand new distributor in AI Learning DB
+        const createRes = await apiClient.post('/distributors', {
+          name: newDistNameInput.trim(),
+          phone: cleanPhone
+        });
+        if (createRes.data && createRes.data.id) {
+          targetDistId = createRes.data.id;
+        }
+      } else if (selectedSavedDistId) {
+        // Updating an existing selected distributor from directory
+        const foundSaved = savedDistributorsList.find((d: any) => d.id === selectedSavedDistId);
+        try {
+          await apiClient.put(`/distributors/${selectedSavedDistId}`, {
+            name: foundSaved?.name || distName,
+            phone: cleanPhone
+          });
+        } catch (e) {
+          console.warn('PUT distributor by ID failed, falling back to name upsert:', e);
+          const fallbackRes = await apiClient.post('/distributors', {
+            name: foundSaved?.name || distName,
+            phone: cleanPhone
+          });
+          if (fallbackRes.data && fallbackRes.data.id) {
+            targetDistId = fallbackRes.data.id;
           }
         }
-        if (!saveSuccess) {
-          await apiClient.post('/settings/distributors', {
-            name: distName,
-            phone: cleanPhone
-          });
+      } else if (cleanPhone) {
+        // Direct mobile number without directory selection -> create/upsert distributor for this store
+        const createRes = await apiClient.post('/distributors', {
+          name: distName,
+          phone: cleanPhone
+        });
+        if (createRes.data && createRes.data.id) {
+          targetDistId = createRes.data.id;
         }
-        // Save to unified contacts master table
-        try {
-          await api.saveContact({
-            name: distName,
-            type: 'distributor',
-            phone: cleanPhone
-          });
-        } catch (_) {}
       }
 
-      // 3. Broadcast real-time update events & refresh saved distributors list
+      // Save persistent store-to-distributor mapping in SQLite
+      if (distName) {
+        await apiClient.post('/pharmarack/distributor-mappings', {
+          store_name: distName,
+          distributor_id: targetDistId || null,
+          phone: cleanPhone
+        });
+      }
+
+      // Save to unified contacts master table
+      try {
+        await api.saveContact({
+          name: isAddingNewDistributor && newDistNameInput.trim() ? newDistNameInput.trim() : distName,
+          type: 'distributor',
+          phone: cleanPhone
+        });
+      } catch (_) {}
+
+      // 3. Broadcast real-time update events & refresh saved distributors list and mappings
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       window.dispatchEvent(new CustomEvent('contacts-updated'));
       await fetchSavedDistributors();
+      await fetchDistributorMappings();
     } catch (err: any) {
       console.warn('Background save distributor contact error:', err);
+    } finally {
+      setIsSavingContact(false);
     }
   };
 
@@ -1901,11 +1979,7 @@ export default function PharmarackCart() {
 
                             {/* Phone Badge & Contact Search/Edit trigger */}
                             {(() => {
-                              const custom = customDistributorPhones[dist.storeId];
-                              const matched = savedDistributorsList.find(
-                                (d: any) => d.name && dist.storeName && d.name.trim().toLowerCase() === dist.storeName.trim().toLowerCase()
-                              );
-                              const activePhone = custom || matched?.phone || matched?.mobile || matched?.whatsapp || '';
+                              const activePhone = getDistributorPhoneNumber(dist);
 
                               return (
                                 <button
@@ -2221,32 +2295,76 @@ export default function PharmarackCart() {
 
             {/* Modal Content */}
             <div className="p-6 space-y-4">
-              {/* Search / Select Saved Distributor Contact */}
+              {/* Select Saved Directory Distributor or Create New */}
               <div>
-                <label className="block text-xs font-bold text-muted mb-1.5">
-                  Link to Saved Directory Distributor
-                </label>
-                <select
-                  value={selectedSavedDistId || ''}
-                  onChange={(e) => {
-                    const val = e.target.value ? Number(e.target.value) : null;
-                    setSelectedSavedDistId(val);
-                    if (val) {
-                      const found = savedDistributorsList.find((d: any) => d.id === val);
-                      if (found && (found.phone || found.mobile || found.whatsapp)) {
-                        setModalPhoneInput(found.phone || found.mobile || found.whatsapp || '');
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-muted">
+                    {isAddingNewDistributor ? 'Create New AI Learning Distributor' : 'Link to Saved Directory Distributor'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingNewDistributor(!isAddingNewDistributor);
+                      if (!isAddingNewDistributor) {
+                        setNewDistNameInput(editingDistributor.storeName || '');
+                        setSelectedSavedDistId(null);
                       }
-                    }
-                  }}
-                  className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-emerald-500 font-medium"
-                >
-                  <option value="">-- Direct Mobile Number Only --</option>
-                  {savedDistributorsList.map((d: any) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} {d.phone ? `(${d.phone})` : ''}
-                    </option>
-                  ))}
-                </select>
+                    }}
+                    className="text-[11px] font-extrabold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/20 transition-all active:scale-95"
+                  >
+                    {isAddingNewDistributor ? (
+                      <>
+                        <X size={12} /> Use Directory List
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={12} /> Create New
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {isAddingNewDistributor ? (
+                  <div className="space-y-2.5 bg-bg3/50 p-3 rounded-xl border border-emerald-500/30 animate-in fade-in zoom-in-95 duration-150">
+                    <div>
+                      <label className="block text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1">
+                        Distributor Name (AI Learning Page)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. BHIKSHU DISTRIBUTORS"
+                        value={newDistNameInput}
+                        onChange={(e) => setNewDistNameInput(e.target.value)}
+                        className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-emerald-500 font-bold"
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted leading-tight">
+                      This will automatically create a new distributor profile in the <strong className="text-text">AI Learning page</strong>.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedSavedDistId || ''}
+                    onChange={(e) => {
+                      const val = e.target.value ? Number(e.target.value) : null;
+                      setSelectedSavedDistId(val);
+                      if (val) {
+                        const found = savedDistributorsList.find((d: any) => d.id === val);
+                        if (found && (found.phone || found.mobile || found.whatsapp)) {
+                          setModalPhoneInput(found.phone || found.mobile || found.whatsapp || '');
+                        }
+                      }
+                    }}
+                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-emerald-500 font-medium"
+                  >
+                    <option value="">-- Direct Mobile Number Only --</option>
+                    {savedDistributorsList.map((d: any) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} {d.phone ? `(${d.phone})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* WhatsApp Mobile Number Input */}

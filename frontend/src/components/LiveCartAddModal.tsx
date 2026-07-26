@@ -206,6 +206,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Suggestions Search
   const [suggestions, setSuggestions] = useState<SuggestionMedicine[]>([]);
+  const [candidateOptions, setCandidateOptions] = useState<SuggestionMedicine[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -392,9 +393,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const data = await api.getRefills();
       if (Array.isArray(data)) {
         const filtered = data.filter(r => 
-          r.is_active === 1 && 
-          r.status === 'pending' && 
-          r.hold_for_stock === 1
+          Boolean(r.is_active) && 
+          r.status !== 'completed' && 
+          r.status !== 'cancelled' &&
+          (r.status === 'pending' || r.status === 'due' || Boolean(r.hold_for_stock))
         );
         cachedPendingRefills = filtered;
         setPendingRefills(filtered);
@@ -709,13 +711,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       let bestEff = currentEff;
 
       const targetPackaging = `${selectedMedicineName} ${selectedPackaging}`;
+      const searchPool = candidateOptions.length > 0 ? candidateOptions : suggestions;
 
-      suggestions.forEach(item => {
-        // Only suggest from mapped (main) distributors
-        if (item.storeId !== selectedStoreId && item.rate && item.mapped === true) {
+      searchPool.forEach(item => {
+        if (item.storeId !== selectedStoreId && item.rate) {
           // Check stock status: exclude 0 stock or unavailable items
           const stockStr = (item.stock || '').toLowerCase().trim();
-          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock' || stockStr === 'low';
+          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock';
           if (isOutOfStock) return;
 
           // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
@@ -741,7 +743,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     } else {
       setCheaperDistributor(null);
     }
-  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, selectedMedicineName, selectedPackaging]);
+  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, candidateOptions, selectedMedicineName, selectedPackaging]);
 
 
   // Find the minimum effective rate among all suggestions to identify the best rate option
@@ -863,7 +865,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       return;
     }
 
-    if (product.trim().length < 2) {
+    const cleanQuery = product.replace(/\s*\([^)]*\)$/, '').trim();
+
+    if (cleanQuery.length < 2) {
       setSuggestions([]);
       setShowSuggestions(false);
       return;
@@ -872,62 +876,84 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const delayDebounce = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const prData = await api.searchPharmarack(product).catch((err: any) => {
+        const prData = await api.searchPharmarack(cleanQuery).catch((err: any) => {
           const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
         });
 
         const mergedList: SuggestionMedicine[] = [];
 
-        if (prData && (prData as any).isError) {
-          mergedList.push({
-            medicine_name: `⚠️ ${(prData as any).message}`,
-            isPharmarack: true,
-            isErrorMessage: true
-          });
-        } else if (Array.isArray(prData)) {
-          if (prData.length === 0) {
+        if (prData && !(prData as any).isError && Array.isArray(prData) && prData.length > 0) {
+          prData.forEach((item: any) => {
             mergedList.push({
-              medicine_name: `No distributor offers found for "${product.trim()}"`,
+              medicine_name: item.name,
+              mrp: item.mrp,
               isPharmarack: true,
-              isErrorMessage: true
+              distributor: item.distributor,
+              rate: item.rate,
+              mapped: item.mapped,
+              packaging: item.packaging,
+              stock: item.stock,
+              scheme: item.scheme,
+              productId: item.productId,
+              storeId: item.storeId,
+              productCode: item.productCode,
+              company: item.company
             });
-          } else {
-            prData.forEach((item: any) => {
-              mergedList.push({
-                medicine_name: item.name,
-                mrp: item.mrp,
-                isPharmarack: true,
-                distributor: item.distributor,
-                rate: item.rate,
-                mapped: item.mapped,
-                packaging: item.packaging,
-                stock: item.stock,
-                scheme: item.scheme,
-                productId: item.productId,
-                storeId: item.storeId,
-                productCode: item.productCode,
-                company: item.company
+          });
+
+          // Sort mapped items first, then by packaging size & MRP match score ranking
+          mergedList.sort((a, b) => {
+            if (a.isErrorMessage || b.isErrorMessage) return 0;
+            if (a.mapped && !b.mapped) return -1;
+            if (!a.mapped && b.mapped) return 1;
+
+            const scoreA = getMatchScore(
+              { name: cleanQuery, packaging: '' },
+              { name: a.medicine_name, packaging: a.packaging, mrp: a.mrp }
+            );
+            const scoreB = getMatchScore(
+              { name: cleanQuery },
+              { name: b.medicine_name, packaging: b.packaging, mrp: b.mrp }
+            );
+
+            return scoreB - scoreA;
+          });
+        } else {
+          // If Pharmarack live search returned 0 results or error, try local medicines search as fallback
+          try {
+            const localData = await api.getMedicinesList(1, 10, cleanQuery);
+            if (localData && Array.isArray(localData.medicines) && localData.medicines.length > 0) {
+              localData.medicines.forEach((med: any) => {
+                mergedList.push({
+                  medicine_name: med.name,
+                  mrp: med.mrp || med.unit_mrp,
+                  isPharmarack: false,
+                  distributor: 'Local Stock',
+                  rate: med.purchase_price || med.ptr,
+                  mapped: true,
+                  packaging: med.packaging || '',
+                  stock: String(med.current_stock || med.stock || 'In Local Inventory'),
+                  company: med.manufacturer || med.company || ''
+                });
               });
-            });
+            }
+          } catch (_) {}
 
-            // Sort mapped items first, then by packaging size & MRP match score ranking
-            mergedList.sort((a, b) => {
-              if (a.isErrorMessage || b.isErrorMessage) return 0;
-              if (a.mapped && !b.mapped) return -1;
-              if (!a.mapped && b.mapped) return 1;
-
-              const scoreA = getMatchScore(
-                { name: product, packaging: '' },
-                { name: a.medicine_name, packaging: a.packaging, mrp: a.mrp }
-              );
-              const scoreB = getMatchScore(
-                { name: product },
-                { name: b.medicine_name, packaging: b.packaging, mrp: b.mrp }
-              );
-
-              return scoreB - scoreA;
-            });
+          if (mergedList.length === 0) {
+            if (prData && (prData as any).isError) {
+              mergedList.push({
+                medicine_name: `⚠️ ${(prData as any).message}`,
+                isPharmarack: true,
+                isErrorMessage: true
+              });
+            } else {
+              mergedList.push({
+                medicine_name: `No distributor or local matches found for "${cleanQuery}"`,
+                isPharmarack: true,
+                isErrorMessage: true
+              });
+            }
           }
         }
 
@@ -964,6 +990,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const selectSuggestion = (med: SuggestionMedicine) => {
     if (med.isErrorMessage) return;
     ignoreNextSearchRef.current = true;
+    
+    // Save current suggestions candidate list for cheaper option cross-checking
+    setCandidateOptions(suggestions.filter(s => !s.isErrorMessage));
     
     setProduct(`${med.medicine_name} (${med.packaging})`);
     setSelectedDistributor(med.distributor || '');
@@ -1817,7 +1846,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 </div>
 
                 {/* Overstock & Duplicate Inventory Cross-Check Card */}
-                {overstockInfo && (overstockInfo.isOverstock || overstockInfo.isExistingInStock || overstockInfo.isDuplicateInCart) && (
+                {overstockInfo && (
                   <div className={`p-3 rounded-xl border text-xs text-text shadow-md transition-all duration-300 animate-in fade-in slide-in-from-top-2 ${
                     overstockInfo.isOverstock 
                       ? 'bg-amber-500/10 border-amber-500/50 animate-pulse-glow' 

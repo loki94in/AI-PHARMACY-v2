@@ -247,6 +247,26 @@ router.post('/upload-signature', async (req, res) => {
 });
 
 // Create or update a distributor
+// Get all saved distributors with contact details
+router.get('/distributors', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const list = await db.all(`
+      SELECT 
+        d.*,
+        p.distributor_id as profile_id,
+        p.last_updated as profile_last_updated
+      FROM distributors d
+      LEFT JOIN distributor_learning_profiles p ON d.id = p.distributor_id
+      ORDER BY d.name ASC
+    `);
+    res.json({ success: true, data: list });
+  } catch (error: any) {
+    console.error('Failed to fetch settings distributors:', error);
+    res.status(500).json({ error: 'Failed to fetch distributors' });
+  }
+});
+
 router.post('/distributors', async (req, res) => {
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
@@ -256,6 +276,8 @@ router.post('/distributors', async (req, res) => {
     const cleanEmail = extractCleanEmail(email);
     const normName = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+    let targetId: number;
+
     const existing = await db.all(
       `SELECT id FROM distributors WHERE LOWER(name) = LOWER(?) OR (LENGTH(?) > 3 AND LOWER(REPLACE(name, ' ', '')) LIKE ?)`,
       [cleanName, normName, `%${normName}%`]
@@ -263,6 +285,7 @@ router.post('/distributors', async (req, res) => {
 
     if (existing && existing.length > 0) {
       const ids = existing.map(e => e.id);
+      targetId = ids[0];
       const placeholders = ids.map(() => '?').join(',');
       const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
       await db.run(
@@ -275,17 +298,24 @@ router.post('/distributors', async (req, res) => {
          WHERE id IN (${placeholders})`,
         [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', ...ids]
       );
-      const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [ids[0]]);
-      return res.json({ success: true, data: updated });
+    } else {
+      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+      const result = await db.run(
+        `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
+        [cleanName, cleanPhone, cleanPhone, cleanEmail, address || '', state_code || '']
+      );
+      targetId = result.lastID || 0;
     }
 
-    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const result = await db.run(
-      `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
-      [cleanName, cleanPhone, cleanPhone, cleanEmail, address || '', state_code || '']
-    );
-    const id = result.lastID;
-    const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
+    // Automatically register learning profile for local AI learning integration
+    try {
+      await db.run(
+        'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
+        [targetId]
+      );
+    } catch (_) {}
+
+    const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [targetId]);
     res.json({ success: true, data: saved });
   } catch (error: any) {
     console.error('Failed to save distributor:', error);
@@ -313,6 +343,15 @@ router.put('/distributors/:id', async (req, res) => {
        WHERE id = ?`,
       [name, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', id]
     );
+
+    // Auto link learning profile
+    try {
+      await db.run(
+        'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
+        [id]
+      );
+    } catch (_) {}
+
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });
 
@@ -328,6 +367,20 @@ router.put('/distributors/:id', async (req, res) => {
   } catch (error) {
     console.error('Failed to update distributor:', error);
     res.status(500).json({ error: 'Failed to update distributor' });
+  }
+});
+
+// Delete a distributor contact & profile
+router.delete('/distributors/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('DELETE FROM distributor_learning_profiles WHERE distributor_id = ?', [id]);
+    await db.run('DELETE FROM distributors WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Distributor deleted successfully' });
+  } catch (error: any) {
+    console.error('Failed to delete distributor:', error);
+    res.status(500).json({ error: 'Failed to delete distributor: ' + error.message });
   }
 });
 // Disconnect Google account settings

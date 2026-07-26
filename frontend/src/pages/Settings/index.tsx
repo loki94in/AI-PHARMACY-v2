@@ -31,6 +31,7 @@ import {
   Plus,
   Pencil,
   CheckCircle2,
+  ArrowRight,
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { MobileConnectionModal } from '../../components/MobileConnectionModal';
@@ -272,6 +273,91 @@ const Settings = () => {
   const [sessionLogs, setSessionLogs] = useState<{ id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [reauthLoading, setReauthLoading] = useState(false);
+
+  // Distributor Directory state in Settings
+  const [showDistributorModal, setShowDistributorModal] = useState(false);
+  const [editingDistributorItem, setEditingDistributorItem] = useState<any>(null);
+  const [distNameInput, setDistNameInput] = useState('');
+  const [distPhoneInput, setDistPhoneInput] = useState('');
+  const [distEmailInput, setDistEmailInput] = useState('');
+  const [distSaving, setDistSaving] = useState(false);
+
+  // Fetch distributors for Settings
+  const { data: settingsDistributorsData, isLoading: loadingSettingsDistributors } = useApiQuery<any>(
+    'settings-distributors-list',
+    async () => {
+      const res = await apiClient.get('/distributors');
+      return Array.isArray(res.data) ? res.data : res.data?.data || [];
+    }
+  );
+  const settingsDistributorsList = Array.isArray(settingsDistributorsData) ? settingsDistributorsData : [];
+
+  const handleOpenAddDistributor = () => {
+    setEditingDistributorItem(null);
+    setDistNameInput('');
+    setDistPhoneInput('');
+    setDistEmailInput('');
+    setShowDistributorModal(true);
+  };
+
+  const handleOpenEditDistributor = (item: any) => {
+    setEditingDistributorItem(item);
+    setDistNameInput(item.name || '');
+    setDistPhoneInput(item.phone || item.contact || '');
+    setDistEmailInput(item.email || '');
+    setShowDistributorModal(true);
+  };
+
+  const handleSaveDistributorContact = async () => {
+    if (!distNameInput.trim()) {
+      toastEvent.trigger('Distributor name is required', 'error');
+      return;
+    }
+    setDistSaving(true);
+    try {
+      if (editingDistributorItem) {
+        await apiClient.put(`/distributors/${editingDistributorItem.id}`, {
+          name: distNameInput.trim(),
+          phone: distPhoneInput.trim(),
+          email: distEmailInput.trim()
+        });
+        toastEvent.trigger('Distributor contact updated', 'success');
+      } else {
+        await apiClient.post('/distributors', {
+          name: distNameInput.trim(),
+          phone: distPhoneInput.trim(),
+          email: distEmailInput.trim()
+        });
+        toastEvent.trigger('Distributor added & connected to AI Learning', 'success');
+      }
+      queryClient.invalidateQueries({ queryKey: ['settings-distributors-list'] });
+      queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      window.dispatchEvent(new CustomEvent('contacts-updated'));
+      setShowDistributorModal(false);
+      setEditingDistributorItem(null);
+      setDistNameInput('');
+      setDistPhoneInput('');
+      setDistEmailInput('');
+    } catch (err: any) {
+      console.error('Failed to save distributor:', err);
+      toastEvent.trigger('Failed to save distributor contact', 'error');
+    } finally {
+      setDistSaving(false);
+    }
+  };
+
+  const handleDeleteDistributorContact = async (id: number, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This will also remove it from AI Learning.`)) return;
+    try {
+      await apiClient.delete(`/distributors/${id}`);
+      toastEvent.trigger(`Deleted ${name}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['settings-distributors-list'] });
+      queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+    } catch (err) {
+      toastEvent.trigger('Failed to delete distributor contact', 'error');
+    }
+  };
 
   const fetchSessionLogs = async () => {
     setLogsLoading(true);
@@ -1201,6 +1287,28 @@ const Settings = () => {
             <Save size={16} />
             Save Details
           </button>
+        </div>
+      </div>
+
+      {/* ─── Distributors & AI Learning Contacts Directory Notice ─── */}
+      <div className="glass-panel p-6 space-y-3 bg-bg2/40 border border-glass-border rounded-2xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="font-bold text-base flex items-center gap-2 text-text">
+              <Building2 size={18} className="text-emerald-400" />
+              Distributor Layouts & Contact Directory
+            </h3>
+            <p className="text-xs text-muted max-w-2xl leading-relaxed">
+              All distributor names, WhatsApp contact numbers, email addresses, and extraction layouts are now managed centrally in the <strong className="text-text font-semibold">AI Learning & Automation Command Center</strong> under the <strong className="text-emerald-400 font-semibold">Distributor Layouts</strong> tab.
+            </p>
+          </div>
+          <Link
+            to="/learning?tab=distributor_layouts"
+            className="premium-btn bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-2 shrink-0 cursor-pointer text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md active:scale-95"
+          >
+            <span>Go to Distributor Layouts</span>
+            <ArrowRight size={14} />
+          </Link>
         </div>
       </div>
 

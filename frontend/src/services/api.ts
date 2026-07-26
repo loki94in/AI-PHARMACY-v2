@@ -578,7 +578,7 @@ export const api = {
 
   // Distributors
   addDistributor: (data: { name: string; phone?: string; email?: string; address?: string; contact?: string }) =>
-    apiClient.post('/settings/distributors', { name: data.name, phone: data.phone || data.contact, email: data.email, address: data.address }).then(res => res.data),
+    apiClient.post('/distributors', { name: data.name, phone: data.phone || data.contact, email: data.email, address: data.address }).then(res => res.data),
 
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),

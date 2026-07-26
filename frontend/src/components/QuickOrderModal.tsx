@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, ClipboardList, Sparkles, Loader2, ShoppingCart, AlertTriangle } from 'lucide-react';
+import { X, Search, Plus, Minus, ClipboardList, ClipboardPlus, Sparkles, Loader2, ShoppingCart, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent } from '../services/events';
 import { useApiQuery } from '../hooks/useApiQuery';
@@ -173,9 +173,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
       suggestions.forEach(item => {
         if (item.storeId !== selectedStoreId && item.rate) {
-          // Check stock status: exclude 0 stock or unavailable items
           const stockStr = (item.stock || '').toLowerCase().trim();
-          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock' || stockStr === 'low';
+          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock';
           if (isOutOfStock) return;
 
           // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
@@ -740,7 +739,7 @@ if (ignoreNextSearchRef.current) {
         {/* Title */}
         <div className="flex items-center gap-2 mb-4">
           <div className="p-2 bg-primary/10 rounded-lg text-primary border border-primary/20">
-            <ClipboardList size={20} />
+            <ClipboardPlus size={20} />
           </div>
           <div>
             <h3 className="text-lg font-bold text-text flex items-center gap-2">
@@ -1081,7 +1080,7 @@ if (ignoreNextSearchRef.current) {
             <div className="md:col-span-2 border-t md:border-t-0 md:border-l border-glass-border/40 pt-4 md:pt-0 md:pl-4 flex flex-col h-[280px] md:h-auto overflow-hidden">
               <div className="flex items-center justify-between mb-2 select-none flex-shrink-0">
                 <span className="font-semibold text-xs text-muted uppercase tracking-wider flex items-center gap-1.5">
-                  <ClipboardList size={14} className="text-primary" /> Staged Items ({cart.length})
+                  <ClipboardPlus size={14} className="text-primary" /> Staged Items ({cart.length})
                 </span>
                 {cart.length > 0 && (
                   <button

@@ -735,7 +735,7 @@ const Purchases: React.FC = () => {
     setSavingDistributor(true);
     try {
       if (editDistributorId) {
-        const response = await apiClient.put(`/settings/distributors/${editDistributorId}`, newDistributor);
+        const response = await apiClient.put(`/distributors/${editDistributorId}`, newDistributor);
         const saved = response.data.data || response.data;
         queryClient.setQueryData(['distributors'], (old: any) => {
           if (Array.isArray(old)) {
@@ -744,10 +744,11 @@ const Purchases: React.FC = () => {
           return [saved];
         });
         queryClient.invalidateQueries({ queryKey: ['distributors'] });
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
       } else {
-        const response = await apiClient.post('/settings/distributors', newDistributor);
+        const response = await apiClient.post('/distributors', newDistributor);
         const saved = response.data.data || response.data;
         queryClient.setQueryData(['distributors'], (old: any) => {
           if (Array.isArray(old)) {
@@ -756,9 +757,14 @@ const Purchases: React.FC = () => {
           return [saved];
         });
         queryClient.invalidateQueries({ queryKey: ['distributors'] });
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
         setSelectedDistributor(saved.id);
         setDistributorSearch(saved.name);
       }
+
+      // Broadcast real-time update events so AI Learning, Pharmarack Cart & Settings update instantly
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      window.dispatchEvent(new CustomEvent('contacts-updated'));
       
       setNewDistributor({ name: '', phone: '', email: '', address: '', state_code: '' });
       setEditDistributorId(null);
