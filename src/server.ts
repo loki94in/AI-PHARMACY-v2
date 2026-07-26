@@ -284,20 +284,9 @@ app.listen(PORT, async () => {
         console.log('[Boot] Starting background initialization services...');
 
         const initSteps = [
-          // Step 1: WhatsApp automated client (if enabled)
+          // Step 1: WhatsApp client lazy initialization — only started when user visits WhatsApp UI page
           (async () => {
-            const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
-            if (waRow && waRow.value === 'true') {
-              const { shouldRouteToBusiness } = await import('./whatsappClient.js');
-              const useBusiness = await shouldRouteToBusiness();
-              if (!useBusiness) {
-                console.log('[Boot] WhatsApp Web (automated) is enabled, initializing in background...');
-                const { startWhatsAppClient } = await import('./whatsappHandler.js');
-                startWhatsAppClient();
-              } else {
-                console.log('[Boot] WhatsApp Business API is active. Skipping automated client initialization.');
-              }
-            }
+            console.log('[Boot] WhatsApp client is lazy-loaded (will only initialize when user opens WhatsApp page).');
           })(),
 
           // Step 2: Unified Engine background workers
@@ -449,13 +438,6 @@ app.listen(PORT, async () => {
 
         // WhatsApp Queue Worker (started always, lazy-loaded)
         import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
-
-        // Eagerly initialize WhatsApp client immediately so session is active silently in background
-        setTimeout(() => {
-          import('./whatsappClient.js').then(m => m.initClient()).catch(err =>
-            console.warn('[Boot] WhatsApp client eager-init skipped (non-fatal):', err?.message || err)
-          );
-        }, 2000);
 
         // Push notification event listener (lazy-loaded)
         import('./services/pushNotificationService.js').catch(err => console.error('[Boot] Push service load failed:', err));

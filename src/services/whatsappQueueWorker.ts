@@ -202,17 +202,10 @@ class WhatsAppQueueWorker {
       const useBusiness = await shouldRouteToBusiness();
       let status = await getWhatsAppStatus();
 
-      // If not using Business API and client is not ready, try auto-initializing if not already initializing
+      // If client is not ready, leave items pending until user connects WhatsApp on the UI
       if (!useBusiness && !status.isReady) {
-        if (!status.initializing) {
-          try {
-            console.log('[WhatsAppQueueWorker] WhatsApp Web client not ready. Auto-initializing...');
-            await initClient();
-            status = await getWhatsAppStatus();
-          } catch (initErr: any) {
-            console.warn('[WhatsAppQueueWorker] Auto-init attempt failed:', initErr?.message || initErr);
-          }
-        }
+        console.log('[WhatsAppQueueWorker] WhatsApp client offline/disconnected. Leaving items pending in queue until user connects on UI.');
+        return;
       }
 
       const db = await dbManager.getConnection();
@@ -313,8 +306,12 @@ class WhatsAppQueueWorker {
           await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
       }
-    } catch (err) {
-      console.error('[WhatsAppQueueWorker] Error in processQueue:', err);
+    } catch (err: any) {
+      if (err?.message?.includes('no such table')) {
+        // Schema is still initializing on app startup — standby silently until tables exist
+      } else {
+        console.error('[WhatsAppQueueWorker] Error in processQueue:', err);
+      }
     } finally {
       this.isProcessing = false;
       this.currentSendingItemId = null;
