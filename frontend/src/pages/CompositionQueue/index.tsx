@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Beaker, Play, Square, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles, Upload, Download, Search, RotateCcw, ChevronUp } from 'lucide-react';
 import { api } from '../../services/api';
 import { useFetchMode } from '../../hooks/useFetchMode';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 
 interface EnrichmentStatus {
   total: number;
@@ -237,11 +238,13 @@ export default function CompositionQueue() {
   useEffect(() => { loadStatus(); }, [loadStatus]);
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
+  const pageActive = usePageActive();
+
   useEffect(() => {
-    if (!status?.isRunning || !statusPollControl.shouldFetch) return;
+    if (!status?.isRunning || !statusPollControl.shouldFetch || !pageActive) return;
     const timer = setInterval(loadStatus, 3000);
     return () => clearInterval(timer);
-  }, [status?.isRunning, loadStatus, statusPollControl.shouldFetch]);
+  }, [status?.isRunning, loadStatus, statusPollControl.shouldFetch, pageActive]);
 
   useEffect(() => {
     if (!highlightId || loading) return;
