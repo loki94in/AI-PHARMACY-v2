@@ -190,8 +190,16 @@ app.use('/api/investigation', lazyRoute('./routes/investigation.js'));
 app.use('/api/dispatch', lazyRoute('./routes/dispatch.js'));
 app.use('/api', lazyRoute('./routes/medicineAvailability.js'));
 
-
-
+// Serve the built frontend (frontend/dist) for production-style deployments.
+// Local development is unaffected — `npm run dev` still runs the Vite dev server on 5173.
+const frontendDist = path.resolve(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendDist));
+app.use((req, res, next) => {
+  // Let unmatched /api/* requests fall through to notFoundHandler below instead of
+  // being swallowed by the SPA fallback.
+  if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(frontendDist, 'index.html'));
+});
 
 // Initialize services that need startup logic
 // These would be initialized via dependency injection in a complete refactor
