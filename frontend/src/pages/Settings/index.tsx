@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { apiClient, api } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -615,9 +616,11 @@ const Settings = () => {
     }
   }, [serverSettings]);
 
+  const pageActive = usePageActive();
+
   useEffect(() => {
     let timer: any;
-    if (whatsappEnabled && !waStatus.isReady) {
+    if (whatsappEnabled && !waStatus.isReady && pageActive) {
       const fetchQR = async () => {
         if (document.visibilityState !== 'visible') return;
         try {
@@ -643,7 +646,7 @@ const Settings = () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
-  }, [whatsappEnabled, waStatus.isReady]);
+  }, [whatsappEnabled, waStatus.isReady, pageActive]);
 
   const handleSaveSettings = async () => {
     const payload = {
