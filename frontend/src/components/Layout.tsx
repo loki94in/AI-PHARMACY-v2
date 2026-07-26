@@ -1327,6 +1327,63 @@ const QuickAssistSidebar = ({
           )}
         </div>
 
+        {/* Due Soon — patients with upcoming refills (within 5 days) */}
+        {(() => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const cutoff = new Date(today);
+          cutoff.setDate(today.getDate() + 5);
+
+          const dueSoon = refills.filter(r => {
+            if (r.is_active !== 1) return false;
+            if (!r.next_refill_date) return false;
+            const d = new Date(r.next_refill_date);
+            return d >= today && d <= cutoff;
+          });
+
+          if (dueSoon.length === 0) return null;
+
+          return (
+            <div>
+              <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-emerald-400/80">
+                <div className="flex items-center gap-1.5">
+                  <BellRing size={13} className="text-emerald-400" />
+                  <span>Due Soon ({dueSoon.length})</span>
+                </div>
+                <button
+                  onClick={() => navigate('/refills')}
+                  className="text-[9px] font-black text-emerald-400 hover:text-emerald-300 uppercase tracking-widest"
+                >
+                  View All
+                </button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {dueSoon.map(refill => {
+                  const dueDate = new Date(refill.next_refill_date);
+                  const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
+                  const dueLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
+                  return (
+                    <div key={refill.id} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex items-center justify-between gap-2">
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="font-semibold text-xs text-text truncate">{refill.patient_name}</span>
+                        <span className="text-[10px] text-emerald-400 font-mono">{dueLabel}</span>
+                      </div>
+                      <button
+                        onClick={() => handleSend(refill.id)}
+                        className="shrink-0 py-1.5 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer min-w-[60px] justify-center"
+                        title={`Send WhatsApp reminder to ${refill.patient_name}`}
+                      >
+                        <SendIcon size={11} />
+                        Send
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Staged Messages */}
         <div>
           <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
@@ -1349,10 +1406,10 @@ const QuickAssistSidebar = ({
                   <div className="flex items-center gap-1.5 mt-1">
                     <button
                       onClick={() => handleSend(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="flex-1 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                      className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       title="Approve and Send WhatsApp message"
                     >
-                      <SendIcon size={10} />
+                      <SendIcon size={12} />
                       Send
                     </button>
                     <button

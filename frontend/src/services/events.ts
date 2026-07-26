@@ -60,3 +60,13 @@ export const liveCartAddEvent = {
   },
 };
 
+// Fired whenever a special order is created or updated so PharmarackCart
+// can invalidate its module-level cache and re-fetch without a page reload.
+export const specialOrdersEvent = {
+  triggerUpdated: () => window.dispatchEvent(new CustomEvent('app-special-orders-updated')),
+  subscribeUpdated: (callback: () => void) => {
+    window.addEventListener('app-special-orders-updated', callback);
+    return () => window.removeEventListener('app-special-orders-updated', callback);
+  },
+};
+

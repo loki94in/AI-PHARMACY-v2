@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
@@ -367,7 +367,7 @@ router.post('/', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Trigger WhatsApp notification — same mechanism as CRM page (dynamic import + direct sendMessage)
+    // Trigger WhatsApp notification â€” same mechanism as CRM page (dynamic import + direct sendMessage)
     if (sendWhatsApp || paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID') {
       const phoneForWA = (patient_phone || '').trim();
       const nameForWA = (patient_name || 'Customer').trim();
@@ -407,40 +407,40 @@ router.post('/', async (req, res) => {
                 const amt = Number(inv.total_amount || 0);
                 oldDuesSum += amt;
                 const dFormatted = formatDate(inv.date);
-                oldBillsListStr += `• Bill #${inv.invoice_no} (${dFormatted}): ₹${amt.toFixed(2)}\n`;
+                oldBillsListStr += `â€¢ Bill #${inv.invoice_no} (${dFormatted}): â‚¹${amt.toFixed(2)}\n`;
               }
 
               const currentBillAmt = Number(total);
               const finalOutstanding = oldDuesSum + currentBillAmt;
               const todayStr = formatDate(invoiceDateValue);
 
-              waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
-              waMsg += `🧾 *Current Bill (New)*\n`;
-              waMsg += `• Bill No: *#${invoice_no}*\n`;
-              waMsg += `• Date: *${todayStr}*\n`;
-              waMsg += `• Amount: *₹${currentBillAmt.toFixed(2)}*\n\n`;
+              waMsg += `ðŸ“Œ *Credit Purchase Bill & Account Summary*\n\n`;
+              waMsg += `ðŸ§¾ *Current Bill (New)*\n`;
+              waMsg += `â€¢ Bill No: *#${invoice_no}*\n`;
+              waMsg += `â€¢ Date: *${todayStr}*\n`;
+              waMsg += `â€¢ Amount: *â‚¹${currentBillAmt.toFixed(2)}*\n\n`;
 
               if (oldInvoices.length > 0) {
-                waMsg += `📜 *Previous Unpaid Bills (${oldInvoices.length})*\n`;
+                waMsg += `ðŸ“œ *Previous Unpaid Bills (${oldInvoices.length})*\n`;
                 waMsg += `${oldBillsListStr}\n`;
 
-                waMsg += `📊 *Total Calculation Summary*\n`;
-                waMsg += `Previous Dues: ₹${oldDuesSum.toFixed(2)}\n`;
-                waMsg += `Current Bill:  ₹${currentBillAmt.toFixed(2)}\n`;
-                waMsg += `━━━━━━━━━━━━━━━━━━\n`;
-                waMsg += `💰 *Final Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
+                waMsg += `ðŸ“Š *Total Calculation Summary*\n`;
+                waMsg += `Previous Dues: â‚¹${oldDuesSum.toFixed(2)}\n`;
+                waMsg += `Current Bill:  â‚¹${currentBillAmt.toFixed(2)}\n`;
+                waMsg += `â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n`;
+                waMsg += `ðŸ’° *Final Total Outstanding Balance: â‚¹${finalOutstanding.toFixed(2)}*\n\n`;
               } else {
-                waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
+                waMsg += `ðŸ’° *Total Outstanding Balance: â‚¹${finalOutstanding.toFixed(2)}*\n\n`;
               }
 
               waMsg += `This bill has been posted to your credit ledger account.\n`;
               waMsg += `Kindly arrange payment at your convenience.\n\n`;
             } else {
-              waMsg += `📄 *Sale Invoice: #${invoice_no}*\n`;
-              waMsg += `Bill Amount Paid: *₹${total.toFixed(2)}*\n\n`;
+              waMsg += `ðŸ“„ *Sale Invoice: #${invoice_no}*\n`;
+              waMsg += `Bill Amount Paid: *â‚¹${total.toFixed(2)}*\n\n`;
               waMsg += `Thank you for your purchase!\n\n`;
             }
-            waMsg += `— AI Pharmacy OS`;
+            waMsg += `â€” AI Pharmacy OS`;
 
             await sendMessage(phoneForWA, undefined, waMsg);
             console.log(`[POS WhatsApp] Sent credit bill notification for ${invoice_no} to ${phoneForWA}`);
@@ -455,7 +455,7 @@ router.post('/', async (req, res) => {
           }
         })();
       } else {
-        console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} — skipping WhatsApp dispatch.`);
+        console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} â€” skipping WhatsApp dispatch.`);
       }
     }
 
@@ -1019,9 +1019,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1061,9 +1061,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1103,9 +1103,9 @@ router.get('/search-medicine', async (req, res) => {
           COALESCE(im.mrp, m.mrp, 0) AS mrp, 
           im.unit_price, 
           COALESCE(im.cost_price, 0) AS cost_price,
-          m.cgst, 
-          m.sgst, 
-          m.igst, 
+          m.cgst_per, 
+          m.sgst_per, 
+          m.igst_per, 
           m.hsn_code,
           0 AS is_out_of_stock
         FROM inventory_master im
@@ -1143,9 +1143,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1201,9 +1201,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1245,9 +1245,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1290,9 +1290,9 @@ router.get('/search-medicine', async (req, res) => {
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
-            m.cgst, 
-            m.sgst, 
-            m.igst, 
+            m.cgst_per, 
+            m.sgst_per, 
+            m.igst_per, 
             m.hsn_code,
             0 AS is_out_of_stock
           FROM inventory_master im
@@ -1341,7 +1341,7 @@ router.get('/search-medicine', async (req, res) => {
         const altSql = `
           SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                  im.batch_no, MIN(im.expiry_date) AS expiry_date, SUM(im.quantity) AS quantity, COALESCE(im.mrp, m.mrp, 0) AS mrp, im.unit_price, COALESCE(im.cost_price, 0) AS cost_price,
-                 m.cgst, m.sgst, m.igst, m.hsn_code
+                 m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code
           FROM inventory_master im
           JOIN medicines m ON im.medicine_id = m.id
           WHERE im.medicine_id IN (${subPlaceholders})
@@ -1371,7 +1371,7 @@ router.get('/search-medicine', async (req, res) => {
       const altSql = `
         SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                im.batch_no, MIN(im.expiry_date) AS expiry_date, SUM(im.quantity) AS quantity, COALESCE(im.mrp, m.mrp, 0) AS mrp, im.unit_price, COALESCE(im.cost_price, 0) AS cost_price,
-               m.cgst, m.sgst, m.igst, m.hsn_code
+               m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.api_reference IN (${placeholders})
@@ -2091,3 +2091,4 @@ router.post('/staged/:id/reject', async (req, res) => {
 });
 
 export default router;
+

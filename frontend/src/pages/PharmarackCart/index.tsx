@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
-import { toastEvent, liveCartAddEvent } from '../../services/events';
+import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
+
 import { useSearchParams } from 'react-router-dom';
 import NonMappedDistributors from '../NonMappedDistributors';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -1432,6 +1433,17 @@ export default function PharmarackCart() {
     fetchPendingOrders();
     fetchPendingRefills();
   }, []);
+
+  // Re-fetch pending special orders whenever any page creates/updates an order.
+  // This clears the module-level cache so stale data is never shown.
+  useEffect(() => {
+    const unsub = specialOrdersEvent.subscribeUpdated(() => {
+      cachedPendingOrders = [];
+      fetchPendingOrders();
+    });
+    return unsub;
+  }, []);
+
 
   const totalProducts = distributors.reduce((s, d) => s + d.items.length, 0);
   const totalQty = distributors.reduce((s, d) => s + d.items.reduce((q, i) => q + i.qty, 0), 0);

@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { SpecialOrder } from '../../services/api';
-import { toastEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent } from '../../services/events';
+
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
@@ -309,8 +310,10 @@ const Orders = () => {
       setSelectedCompany('');
       setSelectedPackaging('');
       
-      // Refresh list
+      // Refresh list + signal PharmarackCart to re-sync
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+
     } catch (err) {
       console.error('Error creating order:', err);
       showNotification('Failed to register special order.', 'error');
@@ -342,7 +345,9 @@ const Orders = () => {
       } else {
         showNotification('Order details updated.', 'success');
         queryClient.invalidateQueries({ queryKey: ['orders'] });
+        specialOrdersEvent.triggerUpdated();
       }
+
     } catch (err) {
       console.error('Error updating order:', err);
       showNotification('Failed to update order.', 'error');
@@ -359,6 +364,8 @@ const Orders = () => {
       await api.deleteOrder(id);
       showNotification('Special order deleted.', 'success');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+
     } catch (err) {
       console.error('Error deleting order:', err);
       showNotification('Failed to delete order.', 'error');

@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { dbManager } from '../../database/connection.js';
 import { invoiceService } from '../../services/invoiceService.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
@@ -57,7 +57,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
                im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
-               m.cgst, m.sgst, m.igst, m.hsn_code,
+               m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code,
                0 as is_out_of_stock
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
@@ -80,7 +80,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
                im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
-               m.cgst, m.sgst, m.igst, m.hsn_code,
+               m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code,
                0 as is_out_of_stock
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
@@ -103,7 +103,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
              im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
              im.loose_quantity as loose_quantity,
              COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
-             m.cgst, m.sgst, m.igst, m.hsn_code,
+             m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code,
              0 as is_out_of_stock
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
@@ -124,7 +124,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
                im.batch_no, im.expiry_date as expiry_date, im.quantity as quantity, 
                im.loose_quantity as loose_quantity,
                COALESCE(im.mrp, m.mrp, 0) as mrp, im.unit_price, im.cost_price,
-               m.cgst, m.sgst, m.igst, m.hsn_code,
+               m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code,
                0 as is_out_of_stock
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
@@ -159,7 +159,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
     const altSql = `
       SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
              im.batch_no, im.expiry_date, im.quantity, im.mrp, im.unit_price, im.cost_price,
-             m.cgst, m.sgst, m.igst, m.hsn_code
+             m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
       WHERE m.api_reference IN (${placeholders})
@@ -200,7 +200,7 @@ router.get('/search-medicine', asyncHandler(async (req: express.Request, res: ex
         const oosAltSql = `
           SELECT im.id as inventory_id, im.medicine_id, m.name as medicine_name, m.api_reference,
                  im.batch_no, im.expiry_date, im.quantity, im.mrp, im.unit_price, im.cost_price,
-                 m.cgst, m.sgst, m.igst, m.hsn_code
+                 m.cgst_per, m.sgst_per, m.igst_per, m.hsn_code
           FROM inventory_master im
           JOIN medicines m ON im.medicine_id = m.id
           WHERE m.api_reference IN (${placeholders})

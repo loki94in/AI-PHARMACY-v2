@@ -384,7 +384,7 @@ router.get('/staging/inventory', async (req, res) => {
   try {
     const db = await openStagingDb();
     const rows = await db.all(`
-      SELECT m.name as medicine_name, m.api_reference, m.hsn_code, m.manufacturer, m.marketed_by, m.cgst, m.sgst,
+      SELECT m.name as medicine_name, m.api_reference, m.hsn_code, m.manufacturer, m.marketed_by, m.cgst_per AS cgst, m.sgst_per AS sgst,
              i.id, i.batch_no, i.expiry_date, i.quantity, i.loose_quantity, i.mrp, i.cost_price, i.rack_location 
       FROM inventory_master i
       LEFT JOIN medicines m ON i.medicine_id = m.id

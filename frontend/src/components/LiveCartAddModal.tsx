@@ -23,6 +23,31 @@ interface SuggestionMedicine {
   mrp?: number;
 }
 
+// Distributor color palette — high contrast so distributor names are clearly readable
+const DISTRIBUTOR_COLORS = [
+  { border: 'border-l-blue-500',    badge: 'bg-blue-600 text-white border-blue-700' },
+  { border: 'border-l-violet-500',  badge: 'bg-violet-600 text-white border-violet-700' },
+  { border: 'border-l-rose-500',    badge: 'bg-rose-600 text-white border-rose-700' },
+  { border: 'border-l-amber-500',   badge: 'bg-amber-500 text-black border-amber-600' },
+  { border: 'border-l-cyan-500',    badge: 'bg-cyan-600 text-white border-cyan-700' },
+  { border: 'border-l-fuchsia-500', badge: 'bg-fuchsia-600 text-white border-fuchsia-700' },
+  { border: 'border-l-lime-500',    badge: 'bg-lime-500 text-black border-lime-600' },
+  { border: 'border-l-teal-500',    badge: 'bg-teal-600 text-white border-teal-700' },
+  { border: 'border-l-orange-500',  badge: 'bg-orange-500 text-white border-orange-600' },
+  { border: 'border-l-sky-500',     badge: 'bg-sky-600 text-white border-sky-700' },
+];
+
+// Returns a stable color index for a distributor name (same name always → same color)
+const getDistributorColorIndex = (name: string | undefined): number => {
+  if (!name) return 0;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash) + name.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % DISTRIBUTOR_COLORS.length;
+};
+
 const getStockStyle = (stockStr: string | undefined): string => {
   if (!stockStr) return 'bg-bg3 text-muted border border-border';
   const stock = stockStr.trim();
@@ -1237,7 +1262,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30">
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                <span className="text-xs font-bold uppercase tracking-widest text-muted">
                   Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length + autoRefillItems.length})
                 </span>
                 <button
@@ -1312,13 +1337,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   <p className="text-[11px] max-w-[180px] mx-auto mt-0.5">No pending orders, refills, or unreconciled items.</p>
                 </div>
               ) : (
-                <table className="w-full text-[11px] border-collapse">
+                <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr className="text-muted border-b border-glass-border/20">
-                      <th className="text-left py-1.5 px-1 font-semibold w-12">Type</th>
+                      <th className="text-left py-1.5 px-1 font-semibold w-14">Type</th>
                       <th className="text-left py-1.5 px-1 font-semibold">Product / Detail</th>
-                      <th className="text-right py-1.5 px-1 font-semibold w-8">Qty</th>
-                      <th className="text-right py-1.5 px-1 font-semibold w-10">Action</th>
+                      <th className="text-right py-1.5 px-1 font-semibold w-10">Qty</th>
+                      <th className="text-right py-1.5 px-1 font-semibold w-12">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-glass-border/10">
@@ -1347,20 +1372,20 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           }`}
                           onClick={() => !inCart && handleTransferToSearch(order.product, order.qty, order.id, undefined)}
                         >
-                          <td className="py-2 px-1">
-                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Ord</span>
+                          <td className="py-2.5 px-1">
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Ord</span>
                           </td>
-                          <td className="py-2 px-1 min-w-0">
-                            <div className={`text-xs font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={order.product}>
+                          <td className="py-2.5 px-1 min-w-0">
+                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={order.product}>
                               {order.product}
                             </div>
-                            <div className="text-[10px] text-muted truncate max-w-[140px]">{order.requester}</div>
+                            <div className="text-[11px] text-muted truncate max-w-[140px]">{order.requester}</div>
                           </td>
-                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">{order.qty}</td>
-                          <td className="py-2 px-1 text-right">
+                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{order.qty}</td>
+                          <td className="py-2.5 px-1 text-right">
                             {inCart ? (
                               <div className="flex flex-col items-end gap-0.5">
-                                <span className="text-[8px] font-bold text-emerald-400" title={`Fuzzy match score: ${matchScore}%`}>
+                                <span className="text-[9px] font-bold text-emerald-400" title={`Fuzzy match score: ${matchScore}%`}>
                                   ✓ {matchScore}%
                                 </span>
                                 {order.status === 'Pending' && (
@@ -1370,7 +1395,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                       e.stopPropagation();
                                       handleConfirmOrdered();
                                     }}
-                                    className="text-[7.5px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-1.5 py-0.2 rounded transition-all shrink-0 cursor-pointer"
+                                    className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded transition-all shrink-0 cursor-pointer"
                                     title="Click to confirm order placed"
                                   >
                                     Confirm
@@ -1384,7 +1409,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                   e.stopPropagation();
                                   handleTransferToSearch(order.product, order.qty, order.id, undefined);
                                 }}
-                                className="text-[9.5px] font-bold text-red hover:text-red/80 transition-colors bg-red-500/10 hover:bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30 cursor-pointer"
+                                className="text-[10px] font-bold text-red hover:text-red/80 transition-colors bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded border border-red-500/30 cursor-pointer"
                                 title="Transfer medicine to Search box"
                               >
                                 Add
@@ -1406,19 +1431,19 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           }`}
                           onClick={() => !inCart && handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id)}
                         >
-                          <td className="py-2 px-1">
-                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
+                          <td className="py-2.5 px-1">
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
                           </td>
-                          <td className="py-2 px-1 min-w-0">
-                            <div className={`text-xs font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-amber-300'}`} title={refill.medicine_name}>
+                          <td className="py-2.5 px-1 min-w-0">
+                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-amber-300'}`} title={refill.medicine_name}>
                               {refill.medicine_name}
                             </div>
-                            <div className="text-[10px] text-muted truncate max-w-[140px]">Patient: {refill.patient_name}</div>
+                            <div className="text-[11px] text-muted truncate max-w-[140px]">Patient: {refill.patient_name}</div>
                           </td>
-                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">1</td>
-                          <td className="py-2 px-1 text-right">
+                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">1</td>
+                          <td className="py-2.5 px-1 text-right">
                             {inCart ? (
-                              <span className="text-[8px] font-bold text-emerald-400">✓ Added</span>
+                              <span className="text-[9px] font-bold text-emerald-400">✓ Added</span>
                             ) : (
                               <button
                                 type="button"
@@ -1426,7 +1451,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                   e.stopPropagation();
                                   handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id);
                                 }}
-                                className="text-[9.5px] font-bold text-amber-400 hover:text-amber-300 transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 cursor-pointer"
+                                className="text-[10px] font-bold text-amber-400 hover:text-amber-300 transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded border border-amber-500/30 cursor-pointer"
                                 title="Transfer medicine to Search box"
                               >
                                 Add
@@ -1441,6 +1466,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                     {reconOrders.flatMap((recon, reconIdx) => {
                       const addedList = addedReconMedicines[recon.email_uid] || [];
                       const medNames: string[] = recon.medicine_names && recon.medicine_names.length > 0 ? recon.medicine_names : [recon.subject || 'Recon Medicine'];
+                      const distColorIdx = getDistributorColorIndex(recon.extracted_distributor);
+                      const reconDistColor = DISTRIBUTOR_COLORS[distColorIdx];
 
                       return medNames.map((medName: string, medIdx: number) => {
                         const isAdded = addedList.includes(medName);
@@ -1448,31 +1475,35 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         return (
                           <tr
                             key={`recon-${recon.email_uid || reconIdx}-${medIdx}`}
-                            className={`transition-colors cursor-pointer ${
+                            className={`transition-colors cursor-pointer border-l-4 ${reconDistColor.border} ${
                               isAdded ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
                             } ${getReconAgeStyle(recon.date)}`}
                             onClick={() => !isAdded && handleTransferToSearch(medName, 1, undefined, undefined)}
                           >
-                            <td className="py-2 px-1">
+                            <td className="py-2.5 px-1">
                               <div className="flex flex-col gap-0.5 items-start">
-                                <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
+                                <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
                                 {recon.status === 'Bounced' && (
-                                  <span className="text-[7px] font-bold uppercase px-1 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Bounced</span>
+                                  <span className="text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Bounced</span>
                                 )}
                               </div>
                             </td>
-                            <td className="py-2 px-1 min-w-0">
-                              <div className={`text-xs font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-emerald-400' : 'text-purple-300'}`} title={medName}>
+                            <td className="py-2.5 px-1 min-w-0">
+                              <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-emerald-400' : 'text-purple-300'}`} title={medName}>
                                 {medName}
                               </div>
-                              <div className="text-[10px] text-purple-400/80 font-medium truncate max-w-[140px]" title={recon.extracted_distributor}>
-                                {recon.extracted_distributor ? `Dist: ${recon.extracted_distributor}` : recon.subject || 'Email Order'}
-                              </div>
+                              {recon.extracted_distributor ? (
+                                <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border mt-0.5 truncate max-w-[140px] ${reconDistColor.badge}`}>
+                                  {recon.extracted_distributor}
+                                </span>
+                              ) : (
+                                <div className="text-[11px] text-purple-400/80 font-medium truncate max-w-[140px]">{recon.subject || 'Email Order'}</div>
+                              )}
                             </td>
-                            <td className="py-2 px-1 text-right text-muted font-mono font-bold">1</td>
-                            <td className="py-2 px-1 text-right">
+                            <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">1</td>
+                            <td className="py-2.5 px-1 text-right">
                               {isAdded ? (
-                                <span className="text-[8px] font-bold text-emerald-400">✓ Added</span>
+                                <span className="text-[9px] font-bold text-emerald-400">✓ Added</span>
                               ) : (
                                 <button
                                   type="button"
@@ -1480,7 +1511,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                     e.stopPropagation();
                                     handleTransferToSearch(medName, 1, undefined, undefined);
                                   }}
-                                  className="text-[9.5px] font-bold text-purple-400 hover:text-purple-300 transition-colors bg-purple-500/10 hover:bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30 cursor-pointer"
+                                  className="text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors bg-purple-500/10 hover:bg-purple-500/20 px-2 py-1 rounded border border-purple-500/30 cursor-pointer"
                                   title="Transfer medicine to Search box"
                                 >
                                   Add
@@ -1500,17 +1531,17 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           className="transition-colors hover:bg-bg3/40 cursor-pointer"
                           onClick={() => handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined)}
                         >
-                          <td className="py-2 px-1">
-                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
+                          <td className="py-2.5 px-1">
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
                           </td>
-                          <td className="py-2 px-1 min-w-0">
-                            <div className="text-xs font-bold truncate max-w-[140px] text-emerald-400" title={item.medicine_name}>
+                          <td className="py-2.5 px-1 min-w-0">
+                            <div className="text-sm font-bold truncate max-w-[140px] text-emerald-400" title={item.medicine_name}>
                               {item.medicine_name}
                             </div>
-                            <div className="text-[10px] text-muted font-mono truncate max-w-[140px]">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
+                            <div className="text-[11px] text-muted font-mono truncate max-w-[140px]">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
                           </td>
-                          <td className="py-2 px-1 text-right text-muted font-mono font-bold">{item.recommended_qty}</td>
-                          <td className="py-2 px-1 text-right">
+                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{item.recommended_qty}</td>
+                          <td className="py-2.5 px-1 text-right">
                             <button
                               type="button"
                               onClick={(e) => {
