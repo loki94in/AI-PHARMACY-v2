@@ -514,91 +514,9 @@ export class BackupRecoveryService {
    * Restores data from a compressed zip archive.
    */
   public async restoreFromArchive(filename: string): Promise<void> {
-    const sanitized = path.basename(filename);
-    if (!sanitized.endsWith('.zip') && !sanitized.endsWith('.db') && !sanitized.endsWith('.db.gz')) {
-      throw new Error('Invalid file format. Must be .zip archive, .db file, or .db.gz file.');
-    }
-
-    let filePath = '';
-    let isZip = sanitized.endsWith('.zip');
-
-    if (isZip) {
-      filePath = path.join(ARCHIVES_DIR, sanitized);
-    } else {
-      filePath = path.join(BACKUP_DIR, sanitized);
-      if (!fs.existsSync(filePath)) {
-        // Fallback check snapshots directory
-        filePath = path.join(SNAPSHOTS_DIR, sanitized);
-      }
-    }
-
-    // Verify boundary sandbox check (prevent directory traversal)
-    const resolvedPath = path.resolve(filePath);
-    if (!resolvedPath.startsWith(BACKUP_DIR + path.sep)) {
-      throw new Error('Directory traversal access denied');
-    }
-
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Backup file not found: ${sanitized}`);
-    }
-
-    if (isZip) {
-      // Unzip archive
-      const tempExtractDir = path.join(BACKUP_DIR, 'temp_restore');
-      if (fs.existsSync(tempExtractDir)) {
-        fs.rmSync(tempExtractDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(tempExtractDir, { recursive: true });
-
-      const zip = new AdmZip(filePath);
-      zip.extractAllTo(tempExtractDir, true);
-
-      // Find the newest/largest db file inside the unzipped folder
-      const dbFiles = fs.readdirSync(tempExtractDir).filter(f => f.endsWith('.db') || f.endsWith('.db.gz'));
-      if (dbFiles.length === 0) {
-        fs.rmSync(tempExtractDir, { recursive: true, force: true });
-        throw new Error('No valid database file (.db or .db.gz) found inside the archive.');
-      }
-
-      // Sort by size or modification time
-      const targetDbFile = dbFiles[0];
-      const targetDbPath = path.join(tempExtractDir, targetDbFile);
-
-      // Close live database connection
-      await dbManager.close();
-
-      if (targetDbFile.endsWith('.gz')) {
-        const gunzip = zlib.createGunzip();
-        const source = fs.createReadStream(targetDbPath);
-        const destination = fs.createWriteStream(getDbPath());
-        await pipeline(source, gunzip, destination);
-      } else {
-        fs.copyFileSync(targetDbPath, getDbPath());
-      }
-
-      // Clean temp folder
-      fs.rmSync(tempExtractDir, { recursive: true, force: true });
-    } else {
-      // Direct DB file restore
-      await dbManager.close();
-      if (sanitized.endsWith('.gz')) {
-        const gunzip = zlib.createGunzip();
-        const source = fs.createReadStream(filePath);
-        const destination = fs.createWriteStream(getDbPath());
-        await pipeline(source, gunzip, destination);
-      } else {
-        fs.copyFileSync(filePath, getDbPath());
-      }
-    }
-
-    // Re-open database connection and log successful restore
-    const db = await dbManager.getConnection();
-    await db.run(
-      'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-      ['RESTORE_BACKUP', `Database successfully restored from archive/file: ${sanitized}`]
-    );
-
-    this.broadcastNotification('backup_restore_completed', `Database restore completed successfully: ${sanitized}`);
+    const { restoreBackup } = await import('./backupService.js');
+    await restoreBackup(filename);
+    this.broadcastNotification('backup_restore_completed', `Database restore completed successfully: ${path.basename(filename)}`);
   }
 
   /**

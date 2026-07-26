@@ -76,18 +76,34 @@ export function listBackups(): { filename: string; sizeBytes: number; createdAt:
     return [];
   }
 
-  return fs.readdirSync(BACKUP_DIR)
-    .filter(f => f.endsWith('.db') || f.endsWith('.db.gz'))
-    .map(filename => {
-      const filePath = path.join(BACKUP_DIR, filename);
-      const stats = fs.statSync(filePath);
-      return {
-        filename,
-        sizeBytes: stats.size,
-        createdAt: stats.mtime.toISOString(),
-      };
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const results: { filename: string; sizeBytes: number; createdAt: string }[] = [];
+
+  const scanDir = (dir: string) => {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    for (const filename of files) {
+      const filePath = path.join(dir, filename);
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.isFile() && (filename.endsWith('.db') || filename.endsWith('.db.gz') || filename.endsWith('.zip'))) {
+          // Avoid duplicate filenames if same file is listed in root vs subdir
+          if (!results.some(r => r.filename === filename)) {
+            results.push({
+              filename,
+              sizeBytes: stats.size,
+              createdAt: stats.mtime.toISOString(),
+            });
+          }
+        }
+      } catch (_) {}
+    }
+  };
+
+  scanDir(BACKUP_DIR);
+  scanDir(path.join(BACKUP_DIR, 'archives'));
+  scanDir(path.join(BACKUP_DIR, 'snapshots'));
+
+  return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 /**
@@ -97,15 +113,21 @@ export function listBackups(): { filename: string; sizeBytes: number; createdAt:
 export function deleteBackup(filename: string): void {
   // Security: strip any directory traversal from filename
   const sanitized = path.basename(filename);
-  if (!sanitized.endsWith('.db') && !sanitized.endsWith('.db.gz')) {
+  if (!sanitized.endsWith('.db') && !sanitized.endsWith('.db.gz') && !sanitized.endsWith('.zip')) {
     throw new Error('Invalid backup filename');
   }
 
-  const filePath = path.join(BACKUP_DIR, sanitized);
+  let filePath = path.join(BACKUP_DIR, sanitized);
+  if (!fs.existsSync(filePath)) {
+    const archivesPath = path.join(BACKUP_DIR, 'archives', sanitized);
+    const snapshotsPath = path.join(BACKUP_DIR, 'snapshots', sanitized);
+    if (fs.existsSync(archivesPath)) filePath = archivesPath;
+    else if (fs.existsSync(snapshotsPath)) filePath = snapshotsPath;
+  }
 
   // Verify the resolved path is inside BACKUP_DIR
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(BACKUP_DIR + path.sep)) {
+  if (!resolved.startsWith(BACKUP_DIR + path.sep) && resolved !== BACKUP_DIR) {
     throw new Error('Invalid backup path');
   }
 
@@ -122,25 +144,37 @@ export function deleteBackup(filename: string): void {
 export async function restoreBackup(filename: string): Promise<void> {
   // Security: strip any directory traversal from filename
   const sanitized = path.basename(filename);
-  if (!sanitized.endsWith('.db') && !sanitized.endsWith('.db.gz')) {
-    throw new Error('Invalid backup filename');
+  if (!sanitized.endsWith('.db') && !sanitized.endsWith('.db.gz') && !sanitized.endsWith('.zip')) {
+    throw new Error('Invalid backup filename. Must be .db, .db.gz, or .zip');
   }
 
-  const filePath = path.join(BACKUP_DIR, sanitized);
+  let filePath = path.join(BACKUP_DIR, sanitized);
+
+  // Check subdirectories (snapshots and archives) if not found in root BACKUP_DIR
+  if (!fs.existsSync(filePath)) {
+    const archivesPath = path.join(BACKUP_DIR, 'archives', sanitized);
+    const snapshotsPath = path.join(BACKUP_DIR, 'snapshots', sanitized);
+    if (fs.existsSync(archivesPath)) {
+      filePath = archivesPath;
+    } else if (fs.existsSync(snapshotsPath)) {
+      filePath = snapshotsPath;
+    }
+  }
 
   // Verify the resolved path is inside BACKUP_DIR
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(BACKUP_DIR + path.sep)) {
+  if (!resolved.startsWith(BACKUP_DIR + path.sep) && resolved !== BACKUP_DIR) {
     throw new Error('Invalid backup path');
   }
 
   if (!fs.existsSync(filePath)) {
-    throw new Error('Backup file not found');
+    throw new Error(`Backup file not found: ${sanitized}`);
   }
 
   // Unpack to a sibling temp file first: writing straight onto the live path would
   // destroy the current database if decompression failed halfway through.
   const stagedPath = `${DB_PATH}.restoring_${Date.now()}`;
+  let tempExtractDir: string | null = null;
 
   // Background workers must not reopen the database between the close and the swap,
   // or they recreate the -wal we are about to delete.
@@ -156,10 +190,25 @@ export async function restoreBackup(filename: string): Promise<void> {
   }
 
   try {
-    if (sanitized.endsWith('.gz')) {
-      await pipeline(fs.createReadStream(filePath), zlib.createGunzip(), fs.createWriteStream(stagedPath));
+    let dbSourcePath = filePath;
+    if (sanitized.endsWith('.zip')) {
+      const { default: AdmZip } = await import('adm-zip');
+      tempExtractDir = path.join(BACKUP_DIR, `temp_restore_${Date.now()}`);
+      fs.mkdirSync(tempExtractDir, { recursive: true });
+      const zip = new AdmZip(filePath);
+      zip.extractAllTo(tempExtractDir, true);
+
+      const dbFiles = fs.readdirSync(tempExtractDir).filter(f => f.endsWith('.db') || f.endsWith('.db.gz'));
+      if (dbFiles.length === 0) {
+        throw new Error('No valid database file (.db or .db.gz) found inside the zip archive.');
+      }
+      dbSourcePath = path.join(tempExtractDir, dbFiles[0]);
+    }
+
+    if (dbSourcePath.endsWith('.gz')) {
+      await pipeline(fs.createReadStream(dbSourcePath), zlib.createGunzip(), fs.createWriteStream(stagedPath));
     } else {
-      fs.copyFileSync(filePath, stagedPath);
+      fs.copyFileSync(dbSourcePath, stagedPath);
     }
 
     // Never put an unreadable database live.
@@ -208,8 +257,15 @@ export async function restoreBackup(filename: string): Promise<void> {
       } else {
         throw renameErr;
       }
+    } finally {
+      if (tempExtractDir && fs.existsSync(tempExtractDir)) {
+        try { fs.rmSync(tempExtractDir, { recursive: true, force: true }); } catch (_) { }
+      }
     }
   } catch (err) {
+    if (tempExtractDir && fs.existsSync(tempExtractDir)) {
+      try { fs.rmSync(tempExtractDir, { recursive: true, force: true }); } catch (_) { }
+    }
     try { if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath); } catch (_) { }
     try { await dbManager.getConnection(); } catch (_) { }
     if (workers) { try { workers.start(); } catch (_) { } }
