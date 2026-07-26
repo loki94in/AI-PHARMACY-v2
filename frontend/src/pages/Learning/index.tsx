@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { 
   Brain, 
   Database, 
@@ -367,9 +368,11 @@ const Learning: React.FC = () => {
     }
   };
 
+  const qrPollActive = usePageActive();
+
   useEffect(() => {
     let timer: any;
-    if (settingsData?.whatsapp_enabled === 'true' && !waStatus.isReady && qrPollControl.shouldFetch) {
+    if (settingsData?.whatsapp_enabled === 'true' && !waStatus.isReady && qrPollControl.shouldFetch && qrPollActive) {
       const fetchQR = async () => {
         try {
           const { data } = await apiClient.get('/messaging/qr');
@@ -382,7 +385,7 @@ const Learning: React.FC = () => {
       timer = setInterval(fetchQR, 5000);
     }
     return () => clearInterval(timer);
-  }, [settingsData?.whatsapp_enabled, waStatus.isReady, qrPollControl.shouldFetch]);
+  }, [settingsData?.whatsapp_enabled, waStatus.isReady, qrPollControl.shouldFetch, qrPollActive]);
 
   const handleReconnect = async () => {
     try {
@@ -519,6 +522,8 @@ const Learning: React.FC = () => {
     }
   };
 
+  const healthPollActive = usePageActive();
+
   useEffect(() => {
     const initPr = async () => {
       try {
@@ -529,10 +534,11 @@ const Learning: React.FC = () => {
       }
     };
     initPr();
-    
+
+    if (!healthPollActive) return;
     const interval = setInterval(checkPrHealth, 180000); // Poll every 3 minutes
     return () => clearInterval(interval);
-  }, []);
+  }, [healthPollActive]);
 
   const handleAddDoctor = async () => {
     if (!newDocName.trim()) {
