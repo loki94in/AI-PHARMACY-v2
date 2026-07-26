@@ -6,6 +6,7 @@ import { api, apiClient, type SpecialOrder, type Refill } from '../../services/a
 import { toastEvent, liveCartAddEvent } from '../../services/events';
 import { useSearchParams } from 'react-router-dom';
 import NonMappedDistributors from '../NonMappedDistributors';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 
 interface CartLineItem {
   productId: number | null;
@@ -212,8 +213,11 @@ export default function PharmarackCart() {
     } catch (_) { }
   }, [sentWaStatusMap]);
 
+  const pageActive = usePageActive();
+
   // Poll WhatsApp queue status to dynamically sync distributor order badges (queued -> sending -> success / error)
   useEffect(() => {
+    if (!pageActive) return;
     let isMounted = true;
     const syncQueueStatus = async () => {
       try {
@@ -275,7 +279,7 @@ export default function PharmarackCart() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [distributors, sentWaStatusMap]);
+  }, [distributors, sentWaStatusMap, pageActive]);
 
   // Saved distributor contacts, delivery boys, and store settings
   const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; adminPhone: string; deliveryBoyName1: string; deliveryBoyPhone: string; deliveryBoyName2: string; deliveryBoyPhone2: string; invoiceFileFormat: string }>({
