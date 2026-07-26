@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Agentation } from 'agentation';
 import { pageImports } from './lib/pageImports';
+import { KeepAliveOutlet, type KeepAliveRoute } from './lib/keepAlive/KeepAliveOutlet';
 import { queryClient } from './lib/queryClient';
 import { api } from './services/api';
 import { getTodayString, getNDaysAgoString } from './utils/date';
@@ -42,6 +43,34 @@ const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
 const NonMappedDistributorsPage = lazy(pageImports['/non-mapped-distributors']);
+
+// Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
+// NOTE: /non-mapped-distributors redirects to /learning?tab=distributors (see Routes below),
+// so NonMappedDistributorsPage above is intentionally not included here — it wasn't rendered
+// by the old route table either.
+const pageRoutes: KeepAliveRoute[] = [
+  { path: '/dashboard', element: <Dashboard /> },
+  { path: '/inventory', element: <Inventory /> },
+  { path: '/returns', element: <Returns /> },
+  { path: '/pos', element: <POS /> },
+  { path: '/sells', element: <Sells /> },
+  { path: '/phone-sales', element: <PhoneSales /> },
+  { path: '/investigation', element: <InvestigationCenter /> },
+  { path: '/purchases', element: <Purchases /> },
+  { path: '/manual-purchase', element: <Purchases /> },
+  { path: '/purchase-history', element: <PurchaseHistory /> },
+  { path: '/crm', element: <CRM /> },
+  { path: '/orders', element: <Orders /> },
+  { path: '/pharmarack-cart', element: <PharmarackCart /> },
+  { path: '/migration', element: <Migration /> },
+  { path: '/reports', element: <Reports /> },
+  { path: '/license', element: <License /> },
+  { path: '/settings', element: <Settings /> },
+  { path: '/mail', element: <Mail /> },
+  { path: '/learning', element: <Learning /> },
+  { path: '/database', element: <DatabasePage /> },
+  { path: '/composition-queue', element: <CompositionQueue /> },
+];
 
 // ──────────────────────────────────────────────
 // App Component
@@ -113,42 +142,26 @@ function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Navigate to="/pos" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/inventory" element={<Inventory />} />
-              <Route path="/returns" element={<Returns />} />
               <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
-              <Route path="/pos" element={<POS />} />
-              <Route path="/sells" element={<Sells />} />
-              <Route path="/phone-sales" element={<PhoneSales />} />
-              <Route path="/investigation" element={<InvestigationCenter />} />
-              <Route path="/purchases" element={<Purchases />} />
-              <Route path="/manual-purchase" element={<Purchases />} />
-              <Route path="/purchase-history" element={<PurchaseHistory />} />
-              <Route path="/crm" element={<CRM />} />
-              <Route path="/orders" element={<Orders />} />
               <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
               <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
-              <Route path="/pharmarack-cart" element={<PharmarackCart />} />
               <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
               <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />
-              <Route path="/migration" element={<Migration />} />
               <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
               <Route path="/dispatch" element={<Navigate to="/learning?tab=dispatch" replace />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/license" element={<License />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/mail" element={<Mail />} />
               <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
-              <Route path="/learning" element={<Learning />} />
-              <Route path="/database" element={<DatabasePage />} />
-              <Route path="/composition-queue" element={<CompositionQueue />} />
               <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
               <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />
               <Route path="*" element={
-                <div className="flex flex-col items-center justify-center h-full text-muted">
-                  <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>
-                  <p>This module is currently being migrated to React.</p>
-                </div>
+                <KeepAliveOutlet
+                  routes={pageRoutes}
+                  notFoundElement={
+                    <div className="flex flex-col items-center justify-center h-full text-muted">
+                      <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>
+                      <p>This module is currently being migrated to React.</p>
+                    </div>
+                  }
+                />
               } />
             </Routes>
           </Suspense>
