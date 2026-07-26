@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { getLocalDateString, getTodayString } from '../../utils/date';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
   Mail as MailIcon,
   RefreshCw,
@@ -278,6 +279,8 @@ const Mail = () => {
     loadLocalInbox();
   }, [loadLocalInbox]);
 
+  const pageActive = usePageActive();
+
   useDeferredEffect(() => {
     // Only do an immediate IMAP sync on first visit (cold cache).
     // On subsequent visits the page shows cached data instantly with no flicker.
@@ -287,14 +290,15 @@ const Mail = () => {
     }
 
     // Periodic background refresh: re-read local DB every 30s (silent, no loading indicator).
+    // Paused while this page isn't the one visible.
     let refreshInterval: ReturnType<typeof setInterval> | undefined;
-    if (inboxRefreshControl.shouldFetch) {
+    if (inboxRefreshControl.shouldFetch && pageActive) {
       refreshInterval = setInterval(() => silentRefreshLocal(), 30000);
     }
 
-    // Periodic IMAP sync every 2 minutes.
+    // Periodic IMAP sync every 2 minutes. Paused while this page isn't the one visible.
     let syncInterval: ReturnType<typeof setInterval> | undefined;
-    if (imapSyncControl.shouldFetch) {
+    if (imapSyncControl.shouldFetch && pageActive) {
       syncInterval = setInterval(() => triggerSync(), 120000);
     }
 
@@ -303,7 +307,7 @@ const Mail = () => {
       if (refreshInterval) clearInterval(refreshInterval);
       if (syncInterval) clearInterval(syncInterval);
     };
-  }, [triggerSync, silentRefreshLocal, imapSyncControl.shouldFetch, inboxRefreshControl.shouldFetch]);
+  }, [triggerSync, silentRefreshLocal, imapSyncControl.shouldFetch, inboxRefreshControl.shouldFetch, pageActive]);
 
   const handleManualRefresh = () => {
     loadLocalInbox();
