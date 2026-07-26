@@ -2120,6 +2120,7 @@ const POS = () => {
                   <input 
                     type="text"
                     autoComplete="off"
+                    aria-label="Prescribing Doctor"
                     className="premium-input text-sm font-semibold h-10 pl-3.5 pr-7 bg-bg2/50 border-border/80 w-full text-text focus:border-sky rounded-xl"
                     placeholder="Type or Select Doctor..."
                     value={doctor}
@@ -2188,6 +2189,7 @@ const POS = () => {
                   )}
                   <button 
                     onClick={() => setShowDoctorModal(true)}
+                    aria-label="Register New Doctor"
                     className="h-10 w-10 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0"
                     title="Register New Doctor"
                   >
@@ -2220,6 +2222,7 @@ const POS = () => {
                 <input
                   type="text"
                   autoComplete="off"
+                  aria-label="Search medicine by name, composition, batch, or price"
                   placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price..." : "Warming up search index..."}
                   disabled={!inventoryIndexReady}
                   className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait"
@@ -2551,6 +2554,7 @@ const POS = () => {
               
               <button 
                 type="button"
+                aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
                 className="premium-btn bg-primary text-text shadow-[0_4px_14px_rgba(59,130,246,0.25)] hover:bg-teal-500 transition-all flex items-center gap-2 px-5 h-10.5 rounded-2xl shrink-0"
               >
