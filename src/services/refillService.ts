@@ -159,9 +159,9 @@ async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
   });
 
   const billResult = await db.run(
-    `INSERT INTO held_bills (invoice_no, temp_label, patient_name, patient_phone, remarks, cart_data, data)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [invoice_no, temp_label, refill.patient_name, refill.patient_phone, 'AUTO_REFILL_BILL', cart_data, dataBlob]
+    `INSERT INTO held_bills (invoice_no, temp_label, patient_name, patient_phone, remarks, cart_data)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [invoice_no, temp_label, refill.patient_name, refill.patient_phone, 'AUTO_REFILL_BILL', cart_data]
   );
   
   const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from XYZ Pharmacy.`;

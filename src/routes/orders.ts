@@ -94,6 +94,7 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   const { 
     product, 
+    medicine_name,
     requester, 
     phone, 
     qty, 
@@ -107,7 +108,8 @@ router.post('/', async (req, res) => {
     advance_payment
   } = req.body;
 
-  if (!product || !requester || !phone) {
+  const reqProduct = product || medicine_name;
+  if (!reqProduct || !requester || !phone) {
     return res.status(400).json({ error: 'Product, requester name, and phone are required' });
   }
   const cleanPhone = (phone || '').replace(/\D/g, '');
@@ -138,15 +140,18 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const medName = (product || medicine_name || '').trim();
+
     const result = await db.run(
       `INSERT INTO special_orders (
-        customer_id, product, requester, phone, qty, priority, status,
+        customer_id, product, medicine_name, requester, phone, qty, priority, status,
         pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped,
         pharmarack_scheme, advance_payment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customerId,
-        product.trim(), 
+        medName,
+        medName, 
         requester.trim(), 
         phone.trim(), 
         qty, 
@@ -170,7 +175,7 @@ router.post('/', async (req, res) => {
         medicalName = nameRow.value;
       }
       const advMsg = advance_payment && Number(advance_payment) > 0 ? ` (Advance Paid: ₹${Number(advance_payment).toFixed(2)})` : '';
-      const msg = `Hi ${requester.trim()}, your special order for ${product.trim()} (Qty: ${qty})${advMsg} has been taken in ${medicalName}. We will notify you when it is ready.`;
+      const msg = `Hi ${requester.trim()}, your special order for ${medName} (Qty: ${qty})${advMsg} has been taken in ${medicalName}. We will notify you when it is ready.`;
       
       try {
         await sendMessage(formattedPhone, undefined, msg);

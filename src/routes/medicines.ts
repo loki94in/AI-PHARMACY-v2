@@ -183,7 +183,7 @@ router.get('/medicines', async (req, res) => {
 });
 
 router.post('/medicines', async (req, res) => {
-  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, packaging } = req.body;
+  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging } = req.body;
   if (!name) return res.status(400).json({ error: 'Medicine name is required' });
   try {
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
@@ -191,8 +191,8 @@ router.post('/medicines', async (req, res) => {
     const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();
     const result = await db.run(
-      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, packaging)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         adjustedName, 
         generic_name || '', 
@@ -200,7 +200,6 @@ router.post('/medicines', async (req, res) => {
         marketed_by || '', 
         pack_unit || '', 
         finalPackSize, 
-        strength || '', 
         parseFloat(cgst_per) || 0, 
         parseFloat(sgst_per) || 0, 
         hsn_code || '', 
@@ -564,15 +563,28 @@ router.post('/medicines/seed-master', async (req, res) => {
   }
 });
 
-// POST /api/medicines/sync-from-inventory - sync all stored/purchased products to master catalog
-router.post('/medicines/sync-from-inventory', async (req, res) => {
+// DELETE /api/medicines/:id - permanent medicine deletion & cache invalidation
+router.delete('/medicines/:id', async (req, res) => {
+  const { id } = req.params;
   try {
-    const { syncInventoryToMaster } = await import('../services/masterMedicinesSeedService.js');
-    const result = await syncInventoryToMaster();
-    res.json({ success: true, message: `Synced ${result.synced} inventory products into master catalog`, ...result });
+    const db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+    
+    // Purge linked inventory, refills, and aliases
+    await db.run('DELETE FROM inventory_master WHERE medicine_id = ?', [id]);
+    await db.run('DELETE FROM patient_refills WHERE medicine_id = ?', [id]);
+    await db.run('DELETE FROM medicine_aliases WHERE medicine_id = ?', [id]);
+    await db.run('DELETE FROM medicines WHERE id = ?', [id]);
+    
+    await db.run('COMMIT');
+    
+    // Invalidate memory caches
+    inventoryCache.invalidate();
+    
+    res.json({ success: true, message: 'Medicine permanently deleted and caches invalidated' });
   } catch (error: any) {
-    console.error('Failed to sync inventory to master:', error);
-    res.status(500).json({ error: 'Failed to sync inventory: ' + error.message });
+    console.error('Failed to delete medicine:', error);
+    res.status(500).json({ error: 'Internal server error during medicine deletion' });
   }
 });
 

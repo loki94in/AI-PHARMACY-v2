@@ -69,8 +69,23 @@ router.put('/patients/:id', async (req, res) => {
       'UPDATE customers SET name=?, phone=?, address=?, notes=? WHERE id=?',
       [name, phone || '', address || '', notes || '', id]
     );
+
+    // Cascade update linked operational tables (patient_refills, special_orders) to prevent phone/contact inconsistencies
+    if (phone || name) {
+      if (phone && name) {
+        await db.run('UPDATE patient_refills SET patient_name = ?, patient_phone = ? WHERE customer_id = ?', [name, phone, id]);
+        await db.run('UPDATE special_orders SET requester = ?, phone = ? WHERE customer_id = ?', [name, phone, id]);
+      } else if (phone) {
+        await db.run('UPDATE patient_refills SET patient_phone = ? WHERE customer_id = ?', [phone, id]);
+        await db.run('UPDATE special_orders SET phone = ? WHERE customer_id = ?', [phone, id]);
+      } else if (name) {
+        await db.run('UPDATE patient_refills SET patient_name = ? WHERE customer_id = ?', [name, id]);
+        await db.run('UPDATE special_orders SET requester = ? WHERE customer_id = ?', [name, id]);
+      }
+    }
+
     const updated = await db.get('SELECT * FROM customers WHERE id = ?', id);
-        res.json(updated);
+    res.json(updated);
   } catch (error) {
     console.error('Failed to update patient:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -83,7 +98,11 @@ router.delete('/patients/:id', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run('DELETE FROM customers WHERE id = ?', id);
-        res.json({ success: true });
+    // Cascade delete linked operational records to prevent stale unlinked phone references
+    await db.run('DELETE FROM patient_refills WHERE customer_id = ?', [id]);
+    await db.run('DELETE FROM special_orders WHERE customer_id = ?', [id]);
+    await db.run('DELETE FROM held_bills WHERE customer_id = ?', [id]);
+    res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete patient:', error);
     res.status(500).json({ error: 'Internal server error' });

@@ -34,8 +34,8 @@ async function processSampleCatalogs() {
       
       const insertStmt = await db.prepare(`
         INSERT INTO medicines 
-        (name, api_reference, strength, item_type, manufacturer, marketed_by, manufactured_by, schedule_type, packaging)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, api_reference, item_type, manufacturer, marketed_by, schedule_type, packaging)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       
       await db.exec('BEGIN TRANSACTION');
@@ -53,11 +53,9 @@ async function processSampleCatalogs() {
           await insertStmt.run([
             item.name,
             item.api_reference || '',
-            item.strength || '',
             item.packaging_type || 'Unknown',
             item.manufacturer || pdf.name.replace('.pdf', ''),
             item.marketed_by || pdf.name.replace('.pdf', ''),
-            item.manufacturer || pdf.name.replace('.pdf', ''),
             'None',
             'Standard'
           ]);

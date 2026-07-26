@@ -329,8 +329,8 @@ async function seedRealMeds() {
   
   const stmt = await db.prepare(`
     INSERT INTO medicines 
-    (name, api_reference, strength, packaging, item_type, manufacturer, marketed_by, manufactured_by, schedule_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, api_reference, packaging, item_type, manufacturer, marketed_by, schedule_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   let inserted = 0;
@@ -352,11 +352,12 @@ async function seedRealMeds() {
               fullName += ' ' + strength;
             }
           }
+          fullName += ' ' + type;
 
-          let pkg = '10x10 Strips';
-          if (type === 'Syrup' || type === 'Liquid' || type === 'Suspension') pkg = '100ml Bottle';
-          if (type === 'Injection') pkg = '1 Vial/Ampoule';
-          if (type === 'Cream' || type === 'Ointment' || type === 'Gel') pkg = '1 Tube';
+          let pkg = '10 Tabs';
+          if (type === 'Syrup' || type === 'Liquid' || type === 'Suspension' || type === 'Elixir') pkg = '100ml Bottle';
+          if (type === 'Injection' || type === 'Vial' || type === 'Ampoule') pkg = '1 Vial';
+          if (type === 'Cream' || type === 'Ointment' || type === 'Gel') pkg = '15g Tube';
           if (type === 'Drops' || type === 'Eye Drops' || type === 'Ear Drops') pkg = '5ml Bottle';
           if (type === 'Inhaler' || type === 'Spray') pkg = '1 Inhaler';
           if (type === 'Powder' || type === 'Sachet') pkg = '1 Sachet';
@@ -371,10 +372,8 @@ async function seedRealMeds() {
             await stmt.run([
               fullName,
               brand.api,
-              strength,
               pkg,
               type,
-              company.manufacturer,
               company.manufacturer,
               company.manufacturer,
               schedule

@@ -78,8 +78,8 @@ async function insertBatch(db: any, rows: Array<[string, string | null, string |
   await db.run('BEGIN TRANSACTION');
   try {
     const stmt = await db.prepare(
-      `INSERT OR IGNORE INTO medicines (name, generic_name, manufacturer, source, mrp, rate, cgst_per, sgst_per)
-       VALUES (?, ?, ?, ?, 0, 0, 6, 6)`
+      `INSERT OR IGNORE INTO medicines (name, generic_name, manufacturer, source, mrp, cgst_per, sgst_per)
+       VALUES (?, ?, ?, ?, 0, 6, 6)`
     );
     for (const row of rows) {
       await stmt.run(row[0], row[1], row[2], row[3]);
@@ -103,8 +103,8 @@ export async function syncInventoryToMaster(): Promise<{ synced: number }> {
     // Sync from purchase_items
     try {
       const res = await db.run(`
-        INSERT OR IGNORE INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code, source)
-        SELECT DISTINCT medicine_name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code, 'purchase_sync'
+        INSERT OR IGNORE INTO medicines (name, manufacturer, mrp, cgst_per, sgst_per, hsn_code, source)
+        SELECT DISTINCT medicine_name, manufacturer, mrp, cgst_per, sgst_per, hsn_code, 'purchase_sync'
         FROM purchase_items
         WHERE medicine_name IS NOT NULL AND TRIM(medicine_name) != ''
           AND LOWER(TRIM(medicine_name)) NOT IN (SELECT LOWER(TRIM(name)) FROM medicines WHERE name IS NOT NULL)
@@ -153,25 +153,23 @@ export async function upsertMasterMedicine(item: {
 
   try {
     const existing = await db.get(
-      'SELECT id, mrp, rate, hsn_code, manufacturer FROM medicines WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      'SELECT id, mrp, hsn_code, manufacturer FROM medicines WHERE LOWER(name) = LOWER(?) LIMIT 1',
       cleanName
     );
 
     if (!existing) {
       await db.run(
-        `INSERT INTO medicines (name, manufacturer, generic_name, mrp, rate, cgst_per, sgst_per, hsn_code, packaging, strength, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'app_user')`,
+        `INSERT INTO medicines (name, manufacturer, generic_name, mrp, cgst_per, sgst_per, hsn_code, packaging, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'app_user')`,
         [
           cleanName,
           item.manufacturer || null,
           item.generic_name || null,
           item.mrp || 0,
-          item.rate || 0,
           item.cgst_per || 0,
           item.sgst_per || 0,
           item.hsn_code || null,
-          item.packaging || null,
-          item.strength || null
+          item.packaging || null
         ]
       );
     } else {

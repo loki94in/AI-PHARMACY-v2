@@ -651,7 +651,7 @@ router.get('/details/:inventoryId', async (req, res) => {
     const { inventoryId } = req.params;
 
     const inventory = await db.get(
-      `SELECT im.*, m.name AS medicine_name, m.generic_name, m.manufacturer, m.category, m.hsn_code, m.cgst, m.sgst, m.igst
+      `SELECT im.*, m.name AS medicine_name, m.generic_name, m.manufacturer, m.category, m.hsn_code, m.cgst_per, m.sgst_per, m.igst_per
        FROM inventory_master im
        JOIN medicines m ON im.medicine_id = m.id
        WHERE im.id = ?`,

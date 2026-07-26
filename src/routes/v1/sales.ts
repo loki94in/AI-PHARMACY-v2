@@ -393,16 +393,16 @@ router.get('/recommend-quantity', asyncHandler(async (req: express.Request, res:
       recommendedQty: displayQty,
       type: recommendedType,
       actualUnits: qty,
-      message: `Recommended: ${displayQty} ${recommendedType === 'strip' ? 'strip(s)' : 'loose unit(s)'} (based on ${mostFrequent.count} past order(s))`
-    });
+    return res.status(400).json({ error: 'medicineName is required' });
   }
-
+  const db = await dbManager.getConnection();
+  const result = await salesHistoryService.getRecommendedQuantity(medicineName, db);
   await dbManager.close();
-  res.json({ recommendedQty: 1, type: 'strip', message: 'Default: 1 strip recommended' });
+  res.json(result);
 }));
 
-// List all held bills
-router.get('/hold', asyncHandler(async (req: express.Request, res: express.Response) => {
+// Get all held bills
+router.get('/hold', asyncHandler(async (_req: express.Request, res: express.Response) => {
   const db = await dbManager.getConnection();
   const rows = await db.all('SELECT * FROM held_bills ORDER BY date DESC');
   await dbManager.close();
@@ -415,10 +415,10 @@ router.delete('/hold/:id', asyncHandler(async (req: express.Request, res: expres
   const db = await dbManager.getConnection();
   
   // Retrieve the held bill to restore stock
-  const heldBill = await db.get('SELECT data FROM held_bills WHERE id = ?', [id]);
-  if (heldBill && heldBill.data) {
+  const heldBill = await db.get('SELECT cart_data FROM held_bills WHERE id = ?', [id]);
+  if (heldBill && heldBill.cart_data) {
     try {
-      const parsedData = JSON.parse(heldBill.data);
+      const parsedData = JSON.parse(heldBill.cart_data);
       if (parsedData.items && Array.isArray(parsedData.items)) {
         for (const item of parsedData.items) {
           if (item.inventory_id && item.quantity) {

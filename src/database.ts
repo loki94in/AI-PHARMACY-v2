@@ -454,12 +454,23 @@ export async function ensureSchema(dbPath: string) {
       phone TEXT,
       notes TEXT,
       medicine_name TEXT,
+      product TEXT,
+      qty INTEGER DEFAULT 1,
+      priority TEXT DEFAULT 'Normal',
+      status TEXT CHECK(status IN ('pending', 'ordered', 'fulfilled', 'cancelled', 'Pending', 'Ordered', 'Fulfilled', 'Cancelled', 'Ready')) DEFAULT 'Pending',
+      notified INTEGER DEFAULT 0,
+      pharmarack_mapped INTEGER DEFAULT 0,
+      pharmarack_distributor TEXT,
+      pharmarack_rate REAL,
+      pharmarack_mrp REAL,
+      pharmarack_scheme TEXT,
+      advance_payment REAL DEFAULT 0.0,
       distributor_name TEXT,
-      status TEXT CHECK(status IN ('pending', 'ordered', 'fulfilled', 'cancelled')) DEFAULT 'pending',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       source_refill_id INTEGER DEFAULT NULL,
       source TEXT,
+      converted_to_refill_id INTEGER DEFAULT NULL,
       customer_id INTEGER DEFAULT NULL
     );
 
@@ -580,7 +591,7 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE medicines ADD COLUMN pack_unit TEXT`,
     `ALTER TABLE medicines ADD COLUMN cgst_per REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN sgst_per REAL DEFAULT 0`,
-    `ALTER TABLE medicines ADD COLUMN rate REAL DEFAULT 0`,
+    `ALTER TABLE medicines ADD COLUMN igst_per REAL DEFAULT 0`,
     `ALTER TABLE medicines ADD COLUMN item_code TEXT`,
     `ALTER TABLE medicines ADD COLUMN metadata TEXT`,
     // Purchases extra columns
@@ -709,6 +720,18 @@ export async function ensureSchema(dbPath: string) {
     `ALTER TABLE patient_refills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
     `ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL`,
     `ALTER TABLE special_orders ADD COLUMN date DATETIME DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE special_orders ADD COLUMN product TEXT`,
+    `ALTER TABLE special_orders ADD COLUMN medicine_name TEXT`,
+    `ALTER TABLE special_orders ADD COLUMN qty INTEGER DEFAULT 1`,
+    `ALTER TABLE special_orders ADD COLUMN priority TEXT DEFAULT 'Normal'`,
+    `ALTER TABLE special_orders ADD COLUMN notified INTEGER DEFAULT 0`,
+    `ALTER TABLE special_orders ADD COLUMN pharmarack_mapped INTEGER DEFAULT 0`,
+    `ALTER TABLE special_orders ADD COLUMN pharmarack_distributor TEXT`,
+    `ALTER TABLE special_orders ADD COLUMN pharmarack_rate REAL`,
+    `ALTER TABLE special_orders ADD COLUMN pharmarack_mrp REAL`,
+    `ALTER TABLE special_orders ADD COLUMN pharmarack_scheme TEXT`,
+    `ALTER TABLE special_orders ADD COLUMN advance_payment REAL DEFAULT 0.0`,
+    `ALTER TABLE special_orders ADD COLUMN converted_to_refill_id INTEGER DEFAULT NULL`,
     `ALTER TABLE held_bills ADD COLUMN customer_id INTEGER DEFAULT NULL`,
   ];
   for (const stmt of alterStatements) {
@@ -718,6 +741,24 @@ export async function ensureSchema(dbPath: string) {
       // Column already exists — safe to ignore
     }
   }
+
+  // Safely drop pure obsolete / superseded columns from SQLite schema
+  const dropStatements = [
+    `ALTER TABLE medicines DROP COLUMN manufactured_by`,
+    `ALTER TABLE medicines DROP COLUMN strength`,
+    `ALTER TABLE medicines DROP COLUMN cgst`,
+    `ALTER TABLE medicines DROP COLUMN sgst`,
+    `ALTER TABLE medicines DROP COLUMN igst`,
+    `ALTER TABLE medicines DROP COLUMN rate`,
+    `ALTER TABLE inventory_master DROP COLUMN storage_location_id`,
+    `ALTER TABLE held_bills DROP COLUMN data`
+  ];
+  for (const stmt of dropStatements) {
+    try { await db.run(stmt); } catch (_e) {}
+  }
+  try {
+    await db.run("DELETE FROM app_settings WHERE key IN ('delivery_boy_whatsapp', 'dinesh_whatsapp_number')");
+  } catch (_e) {}
 
   // Unify patient contact storage — Backfill customer_id across patient_refills, special_orders, held_bills
   try {
@@ -771,6 +812,14 @@ export async function ensureSchema(dbPath: string) {
         await db.run('UPDATE held_bills SET customer_id = ? WHERE id = ?', [cust.id, bill.id]);
       }
     }
+
+    // Synchronize distributors contact and phone columns
+    await db.run("UPDATE distributors SET phone = contact WHERE (phone IS NULL OR phone = '') AND contact IS NOT NULL AND contact != ''");
+    await db.run("UPDATE distributors SET contact = phone WHERE (contact IS NULL OR contact = '') AND phone IS NOT NULL AND phone != ''");
+
+    // Synchronize special_orders product and medicine_name columns to eliminate column name confusion
+    await db.run("UPDATE special_orders SET product = medicine_name WHERE (product IS NULL OR product = '') AND medicine_name IS NOT NULL AND medicine_name != ''");
+    await db.run("UPDATE special_orders SET medicine_name = product WHERE (medicine_name IS NULL OR medicine_name = '') AND product IS NOT NULL AND product != ''");
 
     // Sanitize distributors contact table: overwrite legacy contact column with phone so old numbers are purged
     await db.run(`

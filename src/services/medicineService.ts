@@ -78,27 +78,25 @@ export class MedicineService {
     return await dbManager.transaction(async (db) => {
       const result = await db.run(
         `INSERT INTO medicines (
-          name, api_reference, strength, mrp, hsn_code, schedule_type, manufacturer,
-          category, marketed_by, manufactured_by, legacy_id, packaging,
-          item_type, cgst, sgst, igst, rack, source, possible_duplicate_of
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          name, api_reference, mrp, hsn_code, schedule_type, manufacturer,
+          category, marketed_by, legacy_id, packaging,
+          item_type, cgst_per, sgst_per, igst_per, rack, source, possible_duplicate_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.name,
           data.apiReference ?? null,
-          data.strength ?? null,
           data.mrp ?? null,
           data.hsnCode ?? null,
           data.scheduleType ?? null,
           data.manufacturer ?? null,
           data.category ?? null,
           data.marketedBy ?? null,
-          data.manufacturedBy ?? null,
           data.legacyId ?? null,
           data.packaging ?? null,
           data.itemType ?? null,
-          data.cgst ?? null,
-          data.sgst ?? null,
-          data.igst ?? null,
+          data.cgst_per ?? 0,
+          data.sgst_per ?? 0,
+          data.igst_per ?? 0,
           data.rack ?? null,
           data.source ?? 'manual',
           data.possibleDuplicateOf ?? null
@@ -331,27 +329,25 @@ export class MedicineService {
     // 3. New record INSERT path
     const result = await db.run(
       `INSERT INTO medicines (
-        name, api_reference, strength, mrp, hsn_code, schedule_type, manufacturer,
-        category, marketed_by, manufactured_by, legacy_id, packaging,
-        item_type, cgst, sgst, igst, rack, source, possible_duplicate_of
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        name, api_reference, mrp, hsn_code, schedule_type, manufacturer,
+        category, marketed_by, legacy_id, packaging,
+        item_type, cgst_per, sgst_per, igst_per, rack, source, possible_duplicate_of
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.name,
         data.apiReference ?? null,
-        data.strength ?? null,
         data.mrp ?? null,
         data.hsnCode ?? null,
         data.scheduleType ?? null,
         data.manufacturer ?? null,
         data.category ?? null,
         data.marketedBy ?? null,
-        data.manufacturedBy ?? null,
         data.legacyId ?? null,
         data.packaging ?? null,
         data.itemType ?? null,
-        data.cgst ?? null,
-        data.sgst ?? null,
-        data.igst ?? null,
+        data.cgst_per ?? 0,
+        data.sgst_per ?? 0,
+        data.igst_per ?? 0,
         data.rack ?? null,
         data.source ?? 'manual',
         data.possibleDuplicateOf ?? null

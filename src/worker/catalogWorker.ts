@@ -766,12 +766,11 @@ export async function runCatalogImport(jobId: number) {
         } else {
           newCount++;
           // Create new product record in Product Master
-          const columns = ['name', 'api_reference', 'strength', 'packaging', 'manufacturer', 'marketed_by', 'hsn_code', 'schedule_type', 'mrp', 'cgst_per', 'sgst_per', 'rack', 'metadata'];
-          const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
+          const columns = ['name', 'api_reference', 'packaging', 'manufacturer', 'marketed_by', 'hsn_code', 'schedule_type', 'mrp', 'cgst_per', 'sgst_per', 'rack', 'metadata'];
+          const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
           const params = [
             item.name,
             item.api_reference || null,
-            item.strength || null,
             item.packaging || null,
             item.manufacturer || null,
             item.marketed_by || null,

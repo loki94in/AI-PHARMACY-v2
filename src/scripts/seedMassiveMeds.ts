@@ -27,8 +27,8 @@ async function seedMassive() {
   
   const stmt = await db.prepare(`
     INSERT INTO medicines 
-    (name, api_reference, strength, packaging, item_type, manufacturer, marketed_by, manufactured_by, schedule_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (name, api_reference, packaging, item_type, manufacturer, marketed_by, schedule_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   const names = new Set();
@@ -45,16 +45,18 @@ async function seedMassive() {
     
     const mfg = random(manufacturers);
     const itemType = random(itemTypes);
-    const pkg = itemType === 'Tablet' || itemType === 'Capsule' ? '10x10 ' + random(['Strips', 'Blister']) : '1 ' + random(['Bottle', 'Tube', 'Vial']);
     
+    let pkg = '10 Strips';
+    if (itemType === 'Syrup' || itemType === 'Suspension') pkg = '100ml Bottle';
+    if (itemType === 'Injection') pkg = '1 Vial';
+    if (itemType === 'Ointment' || itemType === 'Cream') pkg = '15g Tube';
+
     try {
       await stmt.run([
         brandName,
         random(apis) + (Math.random() > 0.7 ? ' + ' + random(apis) : ''),
-        strength,
         pkg,
         itemType,
-        mfg,
         mfg,
         mfg,
         random(schedules)

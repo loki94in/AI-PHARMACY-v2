@@ -31,8 +31,8 @@ async function seedWhoMeds() {
       
       const insertStmt = await db.prepare(`
         INSERT INTO medicines 
-        (name, api_reference, strength, item_type, manufacturer, marketed_by, manufactured_by, schedule_type, packaging)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, api_reference, item_type, manufacturer, marketed_by, schedule_type, packaging)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       
       for (const row of results) {
@@ -64,9 +64,7 @@ async function seedWhoMeds() {
           await insertStmt.run([
             fullName,
             api,
-            strength,
             dosageForm,
-            applicant,
             applicant,
             applicant,
             'None', // default schedule

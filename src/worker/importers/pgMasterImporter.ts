@@ -77,18 +77,20 @@ export async function importDistributor(row: Record<string, string | null>, db: 
       return; // Skip duplicate
   }
 
+  const phoneVal = row['phone'] || row['distributor_sales_phone'] || row['distributor_sales_mobile'] || row['contact'] || row['mobile'] || row['contact_no'] || row['phone_no'] || null;
+
   distributorBatch.push({
     name: name,
     normName: normName,
-    contact: row['contact'] || row['distributor_sales_mobile'] || null,
+    contact: phoneVal,
     legacy_id: legacyId,
-    gstin: row['distributor_gstin'] || null,
+    gstin: row['distributor_gstin'] || row['gstin'] || null,
     address: row['address'] || null,
     city: row['city'] || null,
     email: row['email'] || null,
-    dl_no: row['dlno'] || null,
-    phone: row['distributor_sales_phone'] || row['contact'] || null,
-    state_code: row['gst_state'] || null,
+    dl_no: row['dlno'] || row['dl_no'] || null,
+    phone: phoneVal,
+    state_code: row['gst_state'] || row['state_code'] || null,
   });
 
   if (distributorBatch.length >= 500) {
@@ -197,15 +199,15 @@ let patientBatch: any[] = [];
 
 export async function importPatient(row: Record<string, string | null>, db: Database) {
   const legacyId = row['patient_id'];
-  const name = row['patient_name'];
+  const name = row['patient_name'] || row['name'] || row['customer_name'];
   const deleted = row['deleted'];
   if (!legacyId || !name || deleted === 't') return;
 
   patientBatch.push({
     name,
-    phone: row['patient_phone'] || null,
-    address: row['patient_address'] || null,
-    notes: row['remarks'] || null,
+    phone: row['patient_phone'] || row['phone'] || row['contact'] || row['mobile'] || row['contact_no'] || row['phone_no'] || row['mobile_no'] || null,
+    address: row['patient_address'] || row['address'] || null,
+    notes: row['remarks'] || row['notes'] || null,
     legacy_id: legacyId,
     age: row['age'] || null,
     gender: row['gender'] || null,
@@ -253,15 +255,15 @@ let customerBatch: any[] = [];
 
 export async function importCustomer(row: Record<string, string | null>, db: Database) {
   const legacyId = row['customer_id'];
-  const name = row['customer_name'];
+  const name = row['customer_name'] || row['name'];
   const deleted = row['deleted'];
   if (!legacyId || !name || deleted === 't') return;
 
   customerBatch.push({
     name,
-    phone: row['contact'] || null,
+    phone: row['contact'] || row['phone'] || row['mobile'] || row['patient_phone'] || row['contact_no'] || row['phone_no'] || row['mobile_no'] || null,
     address: row['address'] || null,
-    notes: row['remarks'] || null,
+    notes: row['remarks'] || row['notes'] || null,
     legacy_id: `cust_${legacyId}`, // prefix to avoid clash with patient legacy_ids
     age: null,
     gender: null,
@@ -308,8 +310,8 @@ const MEDICINE_BATCH_SIZE = 5000;
 
 export async function importMedicine(row: Record<string, string | null>, db: Database) {
   const legacyId = row['medicine_id'];
-  // Prefer the detailed full name (includes packaging/dosage) over the base short name
-  const name = row['medicine_name_detailed'] || row['medicine_name'];
+  // Prefer the detailed full name (includes packaging/dosage) over the base short name or product name
+  const name = row['medicine_name_detailed'] || row['medicine_name'] || row['product_name'] || row['name'] || row['product'] || row['prod_name'] || row['item_name'];
   const deleted = row['deleted'];
   if (!legacyId || !name || deleted === 't') return;
 
@@ -336,7 +338,7 @@ export async function importMedicine(row: Record<string, string | null>, db: Dat
   if (row['is_loose'] === 't') metadata.is_loose = true;
   const metadataJson = Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 
-  const packaging = row['medicine_packaging'] || null;
+  const packaging = row['medicine_packaging'] || row['packaging'] || null;
 
   medicineBatch.push({
     name,
@@ -350,7 +352,7 @@ export async function importMedicine(row: Record<string, string | null>, db: Dat
     cgst: parseFloat(row['cgst'] || '0') || 0,
     sgst: parseFloat(row['sgst'] || '0') || 0,
     igst: parseFloat(row['igst'] || '0') || 0,
-    rack: row['rack'] || null,
+    rack: row['rack'] || row['rack_no'] || row['rack_location'] || row['batch_rack'] || null,
     marketed_by: row['marketer_name'] || null,
     schedule_type: row['therapeutic'] || 'None',
     api_reference: apiReference,
@@ -371,9 +373,9 @@ export async function flushMedicines(db: Database) {
     for (const m of medicineBatch) {
       try {
         const result = await db.run(
-          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, cgst, sgst, igst, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.cgst, m.sgst, m.igst, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
+          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
         );
         medicineMap.set(m.legacy_id, result.lastID!);
         medicineImportResult.inserted++;

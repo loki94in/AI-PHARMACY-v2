@@ -55,7 +55,7 @@ export function autoMapColumn(header: string): string {
   if (h.includes('patient') || h.includes('customer')) return 'patient_name';
   if (h.includes('distributor') || h.includes('supplier')) return 'distributor_name';
   if (h.includes('doctor')) return 'doctor_name';
-  if (h.includes('phone') || h.includes('mobile')) return 'phone';
+  if (h.includes('phone') || h.includes('mobile') || h.includes('contact') || h.includes('cell')) return 'phone';
   if (h.includes('address')) return 'address';
   if (h.includes('notes') || h.includes('remark')) return 'notes';
   return '';
