@@ -66,6 +66,19 @@ import { pageImports } from '../lib/pageImports';
 import BackupCenterModal from './BackupCenterModal';
 import { useFetchMode } from '../hooks/useFetchMode';
 
+// Defer non-critical startup work until the browser is idle (falls back to a 2s
+// timeout where requestIdleCallback isn't available, e.g. Safari), so it doesn't
+// compete with first paint / LCP. Returns a cancel function for effect cleanup.
+function deferUntilIdle(fn: () => void): () => void {
+  const ric = (window as any).requestIdleCallback;
+  if (typeof ric === 'function') {
+    const handle = ric(fn, { timeout: 3000 });
+    return () => (window as any).cancelIdleCallback?.(handle);
+  }
+  const timeoutId = setTimeout(fn, 2000);
+  return () => clearTimeout(timeoutId);
+}
+
 // ──────────────────────────────────────────────
 // Notification Types
 // ──────────────────────────────────────────────
@@ -715,9 +728,15 @@ const Topbar = ({
       }
     };
     if (enrichmentPollControl.shouldFetch) {
-      pollEnrichment();
-      const enrichmentPollInterval = setInterval(pollEnrichment, 5000);
-      return () => clearInterval(enrichmentPollInterval);
+      let enrichmentPollInterval: ReturnType<typeof setInterval> | undefined;
+      const cancelDefer = deferUntilIdle(() => {
+        pollEnrichment();
+        enrichmentPollInterval = setInterval(pollEnrichment, 5000);
+      });
+      return () => {
+        cancelDefer();
+        clearInterval(enrichmentPollInterval);
+      };
     }
   }, [enrichmentPollControl.shouldFetch]);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -797,12 +816,18 @@ const Topbar = ({
   }, []);
 
   useEffect(() => {
-    fetchServicesStatus();
     // Poll faster (every 3s) when queue has pending/sending items, otherwise 8s
     const activeQueue = (waQueueDetail?.counts?.pending || 0) > 0 || waQueueDetail?.isProcessing;
     const intervalMs = activeQueue ? 3000 : 8000;
-    const interval = setInterval(fetchServicesStatus, intervalMs);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const cancelDefer = deferUntilIdle(() => {
+      fetchServicesStatus();
+      interval = setInterval(fetchServicesStatus, intervalMs);
+    });
+    return () => {
+      cancelDefer();
+      clearInterval(interval);
+    };
   }, [fetchServicesStatus, waQueueDetail?.counts?.pending, waQueueDetail?.isProcessing]);
 
   useEffect(() => {
