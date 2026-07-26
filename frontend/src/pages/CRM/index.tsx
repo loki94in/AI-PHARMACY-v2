@@ -8,6 +8,7 @@ import {
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1196,18 +1197,24 @@ const WhatsAppSection: React.FC = () => {
     }
   }, []);
 
+  const statusPollActive = usePageActive();
+
   useEffect(() => {
     checkStatus();
     loadChats();
     loadTemplates();
 
-    // Poll status every 5s when not ready (for QR), every 30s when ready (for chat list)
+    // Poll status every 5s when not ready (for QR), every 30s when ready (for chat list) —
+    // paused while this page isn't the one visible (keep-alive keeps it mounted in the background).
+    if (!statusPollActive) return;
     const pollId = setInterval(() => {
       checkStatus();
       if (isReady) loadChats();
     }, 5_000);
     return () => clearInterval(pollId);
-  }, [checkStatus, loadChats, loadTemplates, isReady]);
+  }, [checkStatus, loadChats, loadTemplates, isReady, statusPollActive]);
+
+  const messagePollActive = usePageActive();
 
   // Load Thread Messages when activeChat changes
   useEffect(() => {
@@ -1250,10 +1257,11 @@ const WhatsAppSection: React.FC = () => {
     };
 
     loadMessages(true);
-    // Live polling: refresh messages every 10 s when a chat is open
+    // Live polling: refresh messages every 10s when a chat is open — paused while hidden.
+    if (!messagePollActive) return;
     const msgPollId = setInterval(() => loadMessages(false), 10_000);
     return () => clearInterval(msgPollId);
-  }, [activeChat]);
+  }, [activeChat, messagePollActive]);
 
 function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string): boolean {
   if (!chat) return false;
