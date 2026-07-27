@@ -108,4 +108,29 @@ describe('Utilities routes', () => {
 
     await dbAfter.close();
   });
+
+  test('Medicine Name Sanitizer and Noise Filter cleans HSN and filters drug license noise', async () => {
+    const { cleanMedicineName, isNonMedicineNoise } = await import('../src/services/emailService.js');
+
+    // HSN stripping
+    expect(cleanMedicineName('30049099IBUGESIC PLUS')).toBe('IBUGESIC PLUS');
+    expect(cleanMedicineName('30049099 IBUGESIC PLUS')).toBe('IBUGESIC PLUS');
+    expect(cleanMedicineName('HSN: 30049099 IBUGESIC PLUS')).toBe('IBUGESIC PLUS');
+    expect(cleanMedicineName('ONDEM-MD 4 TAB')).toBe('ONDEM-MD 4 TAB');
+    expect(cleanMedicineName('IBUGESIC PLUS 60ML')).toBe('IBUGESIC PLUS 60ML');
+
+    // Drug license and metadata noise filtering
+    expect(isNonMedicineNoise('DL : 20-411062,')).toBe(true);
+    expect(isNonMedicineNoise('DL NO :')).toBe(true);
+    expect(isNonMedicineNoise('DL NO 20-411062')).toBe(true);
+    expect(isNonMedicineNoise('DRUG LICENCE NO')).toBe(true);
+    expect(isNonMedicineNoise('INVOICE Date : 25-07-2026')).toBe(true);
+    expect(isNonMedicineNoise('computer/auto-generated email')).toBe(true);
+    expect(isNonMedicineNoise('GSTIN: 27AAAAA0000A1Z5')).toBe(true);
+
+    // Valid medicines pass
+    expect(isNonMedicineNoise('IBUGESIC PLUS 60ML')).toBe(false);
+    expect(isNonMedicineNoise('ONDEM-MD 4 TAB')).toBe(false);
+    expect(isNonMedicineNoise('30049099IBUGESIC PLUS')).toBe(false);
+  });
 });

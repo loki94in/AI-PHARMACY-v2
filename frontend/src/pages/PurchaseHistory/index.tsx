@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
-import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Paperclip, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
+import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -11,6 +11,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
+import { toastEvent } from '../../services/events';
 
 interface PurchaseTransaction {
   id: number;
@@ -159,21 +160,30 @@ const PurchaseHistory = () => {
   };
 
   const handleReissue = async (uid: number) => {
-    if (!confirm('Are you sure you want to reprocess this email and reissue the items to inventory? This will record a new purchase invoice.')) {
-      return;
-    }
     try {
       setReissuingUid(uid);
-      const result = await api.reissueOrder(uid);
-      alert(result.message || 'Items successfully reissued to inventory!');
-      await fetchHistory();
-      await fetchReconciliation();
+      const previewData = await api.getReconciliationPreview(uid);
       if (selectedOrder?.email_uid === uid) {
         setSelectedOrder(null);
       }
+      navigate('/purchases', {
+        state: {
+          prefilledPurchase: {
+            distributorName: previewData.distributorName || '',
+            invoiceNo: previewData.invoiceNo || '',
+            date: previewData.date || getTodayString(),
+            totalAmount: previewData.totalAmount || 0,
+            globalCdPer: previewData.globalCdPer || 0,
+            items: previewData.items || []
+          },
+          emailSource: {
+            email_uid: uid
+          }
+        }
+      });
     } catch (err: any) {
-      console.error('Reissue error:', err);
-      alert('Failed to reissue items: ' + (err.response?.data?.error || err.message));
+      console.error('Reissue preview error:', err);
+      navigate('/purchases');
     } finally {
       setReissuingUid(null);
     }
@@ -245,12 +255,6 @@ const PurchaseHistory = () => {
       console.error('Failed to load purchase details:', err);
       alert('Failed to load purchase details.');
     }
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   const getStatusColor = (status?: string) => {
@@ -708,12 +712,16 @@ const PurchaseHistory = () => {
                               <CheckCircle size={10} className="mr-1" /> Reconciled
                             </span>
                           ) : recon.status === 'Matched' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-yellow-500 bg-yellow-500/10 border-yellow-500/20">
-                              <Clock size={10} className="mr-1" /> Unresolved (Matched)
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-green bg-green/10 border-green/20">
+                              <CheckCircle size={10} className="mr-1" /> Matched
+                            </span>
+                          ) : recon.status === 'Bounced' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-yellow-500 bg-yellow-500/10 border-yellow-500/20" title={recon.medicine_names?.join(', ')}>
+                              <AlertCircle size={10} className="mr-1" /> Bounced ({recon.medicine_names?.length || 0})
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-red bg-red/10 border-red/20">
-                              <AlertCircle size={10} className="mr-1" /> Missing
+                              <AlertCircle size={10} className="mr-1" /> Missing Bill
                             </span>
                           )}
                         </td>
@@ -722,7 +730,7 @@ const PurchaseHistory = () => {
                             <button
                               onClick={() => setSelectedOrder(recon)}
                               className="text-muted hover:text-text transition-colors p-1.5 rounded bg-bg3 hover:bg-glass-bg border border-glass-border"
-                              title="Investigate Order Raw Data"
+                              title="Investigate Order Metadata & Match Details"
                             >
                               <Eye size={14} />
                             </button>
@@ -731,7 +739,7 @@ const PurchaseHistory = () => {
                                 onClick={() => handleReissue(recon.email_uid)}
                                 disabled={reissuingUid !== null}
                                 className="text-green hover:text-green-600 transition-colors p-1.5 rounded bg-green/10 hover:bg-green/20 border border-green/20"
-                                title="Reprocess & Reissue items to inventory"
+                                title="Reprocess & Open in Purchases page"
                               >
                                 <RefreshCw size={14} className={reissuingUid === recon.email_uid ? 'animate-spin' : ''} />
                               </button>
@@ -771,27 +779,6 @@ const PurchaseHistory = () => {
             </div>
 
             <div className="p-6 overflow-y-auto max-h-[65vh] space-y-5 text-xs">
-              {/* Metadata Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-bg3/60 p-4 rounded-xl border border-glass-border">
-                <div>
-                  <span className="text-[10px] text-muted uppercase font-bold block mb-1">From (Distributor / Sender)</span>
-                  <strong className="text-text text-sm block">{selectedOrder.extracted_distributor}</strong>
-                  <span className="text-xs text-muted block font-mono mt-0.5">{selectedOrder.from}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted uppercase font-bold block mb-1">Extracted Invoice No.</span>
-                  <strong className="text-text text-sm block font-mono">{selectedOrder.extracted_invoice_no || 'N/A'}</strong>
-                </div>
-              </div>
-
-              {/* Email Subject Line */}
-              <div className="space-y-1.5">
-                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Subject Line</h4>
-                <div className="bg-bg3 p-3 rounded-xl border border-glass-border font-medium text-text">
-                  {selectedOrder.subject}
-                </div>
-              </div>
-
               {/* Raw Body Snippet */}
               {selectedOrder.body_snippet && (
                 <div className="space-y-1.5">
@@ -802,26 +789,11 @@ const PurchaseHistory = () => {
                 </div>
               )}
 
-              {/* Attachments List */}
-              {selectedOrder.attachments && selectedOrder.attachments.length > 0 && (
-                <div className="space-y-1.5">
-                  <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide flex items-center gap-1">
-                    <Paperclip size={12} /> Email Attachments ({selectedOrder.attachments.length})
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {selectedOrder.attachments.map((att: any, i: number) => (
-                      <div key={i} className="bg-bg3 p-2.5 rounded-xl border border-glass-border flex items-center justify-between">
-                        <span className="text-text font-mono text-xs truncate" title={att.filename}>{att.filename}</span>
-                        {att.size && <span className="text-muted text-[10px] font-mono">{formatBytes(att.size)}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Medicines List */}
               <div className="space-y-1.5">
-                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Medicines Detected in Order</h4>
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">
+                  {selectedOrder.status === 'Bounced' ? 'Bounced / Unmatched Medicines' : 'Medicines Detected in Order'}
+                </h4>
                 {selectedOrder.medicine_names && selectedOrder.medicine_names.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {selectedOrder.medicine_names.map((name: string, i: number) => (
@@ -831,71 +803,67 @@ const PurchaseHistory = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-muted text-xs italic bg-bg3 p-3 rounded-xl border border-glass-border">
-                    No medicines detected in this email body or attachment
-                  </div>
+                  <p className="text-muted italic">All items successfully matched or no missing medicines identified.</p>
                 )}
               </div>
 
-              {/* Reconciliation Analysis Card */}
-              <div>
-                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1.5">Reconciliation Status</h4>
-                {selectedOrder.is_saved ? (
-                  <div className="bg-green/10 border border-green/20 p-4 rounded-xl text-green flex items-start gap-3">
-                    <CheckCircle size={18} className="mt-0.5 flex-shrink-0" />
-                    <div>
-                      <strong className="block text-text text-xs">Successfully Reconciled</strong>
-                      <span className="text-xs block mt-0.5 opacity-90">This order is already recorded in the purchase history. No further action is required.</span>
-                    </div>
-                  </div>
-                ) : selectedOrder.status === 'Matched' ? (
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl text-yellow-500 flex items-start gap-3">
-                    <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
-                    <div>
-                      <strong className="block text-text text-xs">Matched in Purchase History</strong>
-                      <span className="text-xs block mt-0.5 opacity-90">An invoice with number <strong>{selectedOrder.extracted_invoice_no}</strong> already exists in the database, but this specific email was not marked as saved. You can mark it as resolved manually.</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-red/10 border border-red/20 p-4 rounded-xl text-red flex items-start gap-3">
-                    <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
-                    <div>
-                      <strong className="block text-text text-xs">Missing Order - Action Required</strong>
-                      <span className="text-xs block mt-0.5 opacity-90">This order exists as a distributor email receipt, but is <strong>NOT</strong> recorded in the purchase history and items have <strong>NOT</strong> been delivered to inventory.</span>
-                      <span className="text-xs block mt-1 text-red font-semibold">
-                        💡 Reissuing this order will automatically update inventory and trigger any pending patient refills for these medicines!
-                      </span>
-                    </div>
-                  </div>
-                )}
+              {/* Matched Purchase Info */}
+              {selectedOrder.matched_purchase && (
+                <div className="bg-bg3 p-4 rounded-xl border border-glass-border space-y-1">
+                  <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Matched DB Purchase Record</h4>
+                  <p className="text-text font-medium">Invoice: #{selectedOrder.matched_purchase.invoice_no || selectedOrder.matched_purchase.app_invoice_no} &middot; Total: ₹{selectedOrder.matched_purchase.total_amount}</p>
+                  <p className="text-[11px] text-muted">Booked on: {new Date(selectedOrder.matched_purchase.date).toLocaleDateString()}</p>
+                </div>
+              )}
+
+              {/* Reconciliation Status / Action */}
+              <div className="bg-bg3 p-4 rounded-xl border border-glass-border">
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1">Reconciliation Status</h4>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    selectedOrder.is_saved ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Matched' ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Bounced' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-red/10 text-red border border-red/20'
+                  }`}>
+                    <CheckCircle size={12} />
+                    {selectedOrder.is_saved ? 'Reconciled & Saved' : selectedOrder.status === 'Matched' ? 'Matched Purchase' : selectedOrder.status === 'Bounced' ? 'Bounced Items Detected' : 'Missing Invoice Bill'}
+                  </span>
+                </div>
               </div>
             </div>
 
             <div className="p-4 border-t border-glass-border bg-bg2 flex flex-wrap gap-3 justify-end">
+              {!selectedOrder.is_saved && (
+                <>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.resolveOrderManually(selectedOrder.email_uid);
+                        toastEvent.trigger('Marked as reconciled', 'success');
+                        setSelectedOrder(null);
+                        fetchReconciliation();
+                      } catch (e) {
+                        toastEvent.trigger('Failed to update status', 'error');
+                      }
+                    }}
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-green/10 hover:bg-green/20 text-green border border-green/20 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <CheckCircle size={14} />
+                    Link & Mark Reconciled
+                  </button>
+                  <button
+                    onClick={() => handleReissue(selectedOrder.email_uid)}
+                    disabled={reissuingUid !== null}
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-primary hover:bg-primary/90 text-text font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {reissuingUid === selectedOrder.email_uid ? 'Opening Purchases...' : 'Reprocess & Open in Purchases'}
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setSelectedOrder(null)}
                 className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
               >
                 Close
               </button>
-              {!selectedOrder.is_saved && (
-                <>
-                  <button
-                    onClick={() => handleResolveManually(selectedOrder.email_uid)}
-                    disabled={resolvingUid !== null}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {resolvingUid === selectedOrder.email_uid ? 'Resolving...' : 'Resolve Manually'}
-                  </button>
-                  <button
-                    onClick={() => handleReissue(selectedOrder.email_uid)}
-                    disabled={reissuingUid !== null}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {reissuingUid === selectedOrder.email_uid ? 'Reissuing...' : 'Reprocess & Reissue to Inventory'}
-                  </button>
-                </>
-              )}
             </div>
           </div>
         </div>,

@@ -337,6 +337,7 @@ export const api = {
   batchLastPurchase: (medicines: Array<{name: string}>, distributorId?: number) =>
     apiClient.post('/purchases/batch-last-purchase', { medicines, distributor_id: distributorId }).then(res => res.data),
   catalogSearch: (q: string) => apiClient.get('/inventory/catalog-search', { params: { q } }).then(res => res.data),
+  getBatchInfo: (medicineId: number, batchNo: string) => apiClient.get('/inventory/batch-info', { params: { medicine_id: medicineId, batch_no: batchNo } }).then(res => res.data),
   createMedicineAlias: (aliasName: string, medicineId: number) => apiClient.post('/inventory/medicines/alias', { alias_name: aliasName, medicine_id: medicineId }).then(res => res.data),
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
   getManufacturers: (q: string) => apiClient.get('/manufacturers', { params: { q } }).then(res => res.data),
@@ -652,8 +653,10 @@ export const api = {
   
   // Reconciliation
   getReconciliationList: () => apiClient.get('/purchases/reconciliation').then(res => res.data),
+  getReconciliationPreview: (emailUid: number) => apiClient.get(`/purchases/reconciliation/preview/${emailUid}`).then(res => res.data),
   reissueOrder: (emailUid: number) => apiClient.post('/purchases/reconciliation/reissue', { email_uid: emailUid }).then(res => res.data),
   resolveOrderManually: (emailUid: number) => apiClient.post('/purchases/reconciliation/resolve', { email_uid: emailUid }).then(res => res.data),
+  saveDistributorMapping: (data: { distributor_id?: number; distributor_name?: string; mapping_config: any }) => apiClient.post('/purchases/reconciliation/learn-mapping', data).then(res => res.data),
 
   // Staged / Offline Sync Review
   getStagedSales: (all?: boolean) => apiClient.get(all ? '/sales/staged?all=true' : '/sales/staged').then(res => res.data),

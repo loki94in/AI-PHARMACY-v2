@@ -1305,23 +1305,24 @@ export class EmailService {
     const date = new Date();
     const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 
-    // Try to extract medicines and quantities
-    const medicines: Array<{ name: string; quantity: string }> = [];
-    const lines = body.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
-      if (qtyMatch) {
-        const qty = qtyMatch[1] || qtyMatch[2];
-        let name = trimmed.replace(qtyMatch[0], '').replace(/[:\-\t\r\n]/g, ' ').trim();
-        if (name && name.length > 3 && isNaN(Number(name))) {
-          medicines.push({ name, quantity: qty });
-        }
+  // Try to extract medicines and quantities
+  const medicines: Array<{ name: string; quantity: string }> = [];
+  const lines = body.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
+    if (qtyMatch) {
+      const qty = qtyMatch[1] || qtyMatch[2];
+      let name = trimmed.replace(qtyMatch[0], '').replace(/[:\-\t\r\n]/g, ' ').trim();
+      name = cleanMedicineName(name);
+      if (name && name.length > 2 && isNaN(Number(name)) && !isNonMedicineNoise(name)) {
+        medicines.push({ name, quantity: qty });
       }
     }
+  }
 
-    const displayMeds = medicines.slice(0, 15);
+  const displayMeds = medicines.slice(0, 15);
 
     return {
       distributorName,
@@ -3280,3 +3281,70 @@ export class EmailService {
 // Export singleton instance
 export const emailService = new EmailService();
 export default emailService;
+
+/**
+ * Helper to sanitize raw medicine name extracted from invoice/email text or attachments.
+ * Strips leading HSN codes (e.g., "30049099IBUGESIC PLUS" -> "IBUGESIC PLUS") and clean surrounding symbols.
+ */
+export function cleanMedicineName(rawName: string): string {
+  if (!rawName || typeof rawName !== 'string') return '';
+  let clean = rawName.trim();
+  // Strip leading HSN code with optional colon or spaces (e.g., "30049099IBUGESIC PLUS", "30049099 IBUGESIC", "HSN: 30049099 IBUGESIC")
+  clean = clean.replace(/^(?:hsn[:\s]*)?\d{4,8}\s*/i, '');
+  clean = clean.replace(/^(\d{4,8})([a-zA-Z].*)/, '$2');
+  // Strip leading/trailing colons, dashes, commas, periods
+  clean = clean.replace(/^[:\-\s,.]+/, '').replace(/[:\-\s,.=]+$/, '').trim();
+  return clean;
+}
+
+/**
+ * Filter helper to detect and exclude non-medicine text (terms, totals, bank info, footers, drug license info)
+ */
+export function isNonMedicineNoise(name: string): boolean {
+  if (!name || typeof name !== 'string') return true;
+  const cleaned = cleanMedicineName(name);
+  if (cleaned.length <= 2) return true;
+  const clean = cleaned.toLowerCase();
+
+  // Pure digits, symbols, or punctuation
+  if (/^[\d\s\-\/\:\.\,\(\)\%\#\$\@\+\=\_]+$/.test(clean)) return true;
+
+  // Drug License patterns (e.g., "DL : 20-411062,", "DL NO :", "DL NO 20B/21B", "DRUG LICENCE NO")
+  if (/^dl\s*[\:\.\-\s_]/i.test(clean) || /^dl\s*no/i.test(clean) || /^d\.l\./i.test(clean) || /drug\s*licen[cs]e/i.test(clean) || /^licen[cs]e\s*no/i.test(clean)) {
+    return true;
+  }
+
+  // Tax / Registration / Invoice Metadata / Header & Footer Noise
+  if (/^(invoice|inv|bill|date|dated|gstin|pan|fssai|tin|cin|state\s*code|lr\s*no|dear\s*sir|greetings|thanks|kindly|computer|auto-generated|subject|re:|fw:|fwd:)\b/i.test(clean) || clean.includes('auto-generated')) {
+    return true;
+  }
+
+  const exactNoise = [
+    'total', 'subtotal', 'sub total', 'grand total', 'net total', 'net amount', 'amount', 'payable', 'round off',
+    'tax', 'cgst', 'sgst', 'igst', 'gst', 'gstin', 'pan', 'dl no', 'dl no :', 'dl :', 'drug license', 'licence', 'license',
+    'bank', 'account', 'ifsc', 'branch', 'upi', 'neft', 'rtgs', 'payment', 'terms', 'conditions',
+    'invoice', 'bill', 'date', 'vessel', 'lr no', 'transporter', 'vehicle', 'dispatch', 'dispatch date',
+    'address', 'phone', 'email', 'website', 'contact', 'thank you', 'page', 'sl no', 'sr no',
+    'particulars', 'description', 'rate', 'disc', 'discount', 'free', 'amount', 'mrp', 'batch',
+    'exp', 'expiry', 'hsn', 'sac', 'qty', 'quantity', 'pack', 'unit', 'gross', 'taxable'
+  ];
+
+  if (exactNoise.includes(clean)) return true;
+
+  const noisePrefixes = [
+    'total ', 'total:', 'subtotal', 'grand total', 'net amount', 'bank account', 'bank details',
+    'gstin:', 'gstin ', 'pan:', 'terms & conditions', 'terms and conditions', 'payment terms',
+    'invoice no', 'bill no', 'dispatch date', 'thank you', 'page ', 'sl no', 'sr no',
+    'dl :', 'dl no', 'dl.no', 'dl-', 'd.l.'
+  ];
+
+  for (const prefix of noisePrefixes) {
+    if (clean.startsWith(prefix)) {
+      if (!/(tab|cap|syrup|inj|gel|cream|drop|ointment|suspension|powder|infusion|solution|lotion)\b/i.test(clean)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}

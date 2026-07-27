@@ -40,6 +40,8 @@ interface Medicine {
   cgst_per: number;
   sgst_per: number;
   hsn_code: string;
+  stock_qty?: number;
+  loose_qty?: number;
 }
 
 interface BillItem {
@@ -50,18 +52,20 @@ interface BillItem {
   manufacturer?: string;
   batch_no: string;
   expiry_date: string;
-  qty: number;
-  free_qty: number;
-  rate: number;
-  mrp: number;
-  cgst_per: number;
-  sgst_per: number;
-  cd_rs: number;
-  cd_per: number;
-  additional_discount: number;
+  qty: number | string;
+  free_qty: number | string;
+  rate: number | string;
+  mrp: number | string;
+  cgst_per: number | string;
+  sgst_per: number | string;
+  cd_rs: number | string;
+  cd_per: number | string;
+  additional_discount: number | string;
   amount: number;
   scheme_paid: number;
   scheme_free: number;
+  stock_qty?: number;
+  loose_qty?: number;
 }
 
 interface Distributor {
@@ -675,14 +679,16 @@ const Purchases: React.FC = () => {
       free_qty: '',
       rate: '',
       mrp: '',
-      cgst_per: '',
-      sgst_per: '',
+      cgst_per: 6,
+      sgst_per: 6,
       cd_rs: '',
       cd_per: globalCdPer || '',
       additional_discount: '',
       amount: 0,
       scheme_paid: 0,
       scheme_free: 0,
+      stock_qty: 0,
+      loose_qty: 0
     };
   }
 
@@ -980,8 +986,10 @@ const Purchases: React.FC = () => {
     item.manufacturer = medicine.manufacturer;
     item.mrp = medicine.mrp;
     item.rate = medicine.rate;
-    item.cgst_per = medicine.cgst_per;
-    item.sgst_per = medicine.sgst_per;
+    item.cgst_per = (medicine.cgst_per !== undefined && medicine.cgst_per !== null && medicine.cgst_per !== 0) ? medicine.cgst_per : 6;
+    item.sgst_per = (medicine.sgst_per !== undefined && medicine.sgst_per !== null && medicine.sgst_per !== 0) ? medicine.sgst_per : 6;
+    item.stock_qty = (medicine as any).stock_qty || 0;
+    item.loose_qty = (medicine as any).loose_qty || 0;
     item.scheme_paid = medicine.scheme_paid;
     item.scheme_free = medicine.scheme_free;
 
@@ -1004,8 +1012,8 @@ const Purchases: React.FC = () => {
       item.expiry_date = formatExpiryToMMYY(lastPurchase.expiry_date || '');
       item.rate = lastPurchase.rate || medicine.rate;
       item.mrp = lastPurchase.mrp || medicine.mrp;
-      item.cgst_per = lastPurchase.cgst_per !== undefined ? lastPurchase.cgst_per : medicine.cgst_per;
-      item.sgst_per = lastPurchase.sgst_per !== undefined ? lastPurchase.sgst_per : medicine.sgst_per;
+      item.cgst_per = (lastPurchase.cgst_per !== undefined && lastPurchase.cgst_per !== 0) ? lastPurchase.cgst_per : item.cgst_per;
+      item.sgst_per = (lastPurchase.sgst_per !== undefined && lastPurchase.sgst_per !== 0) ? lastPurchase.sgst_per : item.sgst_per;
     }
 
     item.amount = calculateItemAmount(item);
@@ -1247,7 +1255,33 @@ const Purchases: React.FC = () => {
     const newItems = [...items];
     const item = newItems[index];
 
-    if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' || 
+    if (field === 'batch_no') {
+      (item as any)[field] = value;
+      if (item.medicine_id && value && typeof value === 'string' && value.trim().length >= 1) {
+        const batchVal = value.trim();
+        api.getBatchInfo(item.medicine_id, batchVal)
+          .then(batchRes => {
+            if (batchRes) {
+              setItems(prevItems => {
+                const updated = [...prevItems];
+                const target = updated[index];
+                if (target) {
+                  if (batchRes.found) {
+                    if (batchRes.rate) target.rate = batchRes.rate;
+                    if (batchRes.mrp) target.mrp = batchRes.mrp;
+                    if (batchRes.expiry_date) target.expiry_date = formatExpiryToMMYY(batchRes.expiry_date);
+                  }
+                  target.cgst_per = batchRes.cgst_per ?? 6;
+                  target.sgst_per = batchRes.sgst_per ?? 6;
+                  target.amount = calculateItemAmount(target);
+                }
+                return updated;
+              });
+            }
+          })
+          .catch(e => console.log('Batch lookup catch:', e));
+      }
+    } else if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' || 
         field === 'cgst_per' || field === 'sgst_per' || field === 'cd_rs' || field === 'cd_per' || field === 'additional_discount') {
       const parsedVal = parseFloat(value);
       (item as any)[field] = value === '' ? '' : (isNaN(parsedVal) ? 0 : parsedVal);
@@ -2041,158 +2075,179 @@ const Purchases: React.FC = () => {
       {/* Items Table */}
       <div className="p-4 pt-3 flex-1 flex flex-col min-h-0">
         <div className="flex-1 overflow-auto">
-          <table className="w-full">
-            <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
-              <tr className="text-left text-gray-300 border-b border-white/20">
-                <th className="pb-3">
-                  <button
-                    onClick={addNewItem}
-                    className="bg-green-600 hover:bg-green-700 text-white p-1 rounded-md flex items-center justify-center transition-colors shadow-sm"
-                    title="Add Row"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-left pl-2">Original Bill Name</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-left">Medicine Name</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-left">Batch</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center">Exp</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-right">Rate</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-right">MRP</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center">Qty</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center">Free</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input SGST">SGST%</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input CGST">CGST%</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-center">CD %</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-right">CD ₹</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-right" title="Additional Discount in Rupees">Add. Disc. (₹)</th>
-                <th className="pb-3 text-xs uppercase tracking-wider text-right pr-2">Amount</th>
-                <th className="pb-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, index) => {
-                const qtyVal = parseFloat(item.qty as any) || 0;
-                const rateVal = parseFloat(item.rate as any) || 0;
-                const mrpVal = parseFloat(item.mrp as any) || 0;
-                const cdRsVal = parseFloat(item.cd_rs as any) || 0;
-                const cdPerVal = parseFloat(item.cd_per as any) || 0;
-                const addDiscVal = parseFloat(item.additional_discount as any) || 0;
-                const cgstPerVal = parseFloat(item.cgst_per as any) || 0;
-                const sgstPerVal = parseFloat(item.sgst_per as any) || 0;
-                const baseAmount = qtyVal * rateVal;
-                const discountAmount = cdRsVal + addDiscVal + (baseAmount * cdPerVal / 100);
-                const taxableAmount = baseAmount - discountAmount;
-                const cgstAmount = taxableAmount * cgstPerVal / 100;
-                const sgstAmount = taxableAmount * sgstPerVal / 100;
-                const rowAmount = taxableAmount + cgstAmount + sgstAmount;
-                return (
-                  <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-white/10">
-                  <td className="py-3 text-gray-300">{index + 1}</td>
-                  <td className="py-3 pr-2">
-                    <span 
-                      className="text-xs font-mono text-muted select-all block max-w-[200px] truncate" 
-                      title={item.original_name || 'No original name'}
-                    >
-                      {item.original_name || '-'}
-                    </span>
-                  </td>
-                  <td className="py-3">
-                    <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative group/search">
-                      <div className="flex gap-1">
-                        <input
-                          type="text"
-                          value={item.medicine_name}
-                          onFocus={() => {
-                            setActiveSearchIndex(index);
-                            searchMedicines(item.medicine_name, index);
-                          }}
-                          onChange={(e) => {
-                            updateItem(index, 'medicine_name', e.target.value);
-                            searchMedicines(e.target.value, index);
-                          }}
-                          onKeyDown={e => {
-                            if (activeSearchIndex !== index || searchResults.length === 0) return;
-                            if (e.key === 'ArrowDown') {
-                              e.preventDefault();
-                              setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
-                            } else if (e.key === 'ArrowUp') {
-                              e.preventDefault();
-                              setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                            } else if (e.key === 'Enter' || e.key === 'Tab') {
-                              if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
-                                e.preventDefault();
-                                selectMedicine(searchResults[searchHighlightIndex], index);
-                              }
-                            } else if (e.key === 'Escape') {
-                              setActiveSearchIndex(null);
-                              setSearchResults([]);
-                              setSearchHighlightIndex(-1);
-                            }
-                          }}
-                          className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
-                          placeholder="Search medicine..."
-                        />
-                        {item.medicine_name && (
-                          <button
-                            onClick={() => fetchPriceHistory(item.medicine_name)}
-                            className="bg-yellow-600 hover:bg-yellow-700 text-white w-7 h-7 rounded text-sm flex-shrink-0"
-                            title="View price history from all distributors"
+          {(() => {
+            const hasOriginalName = items.some(i => Boolean(i.original_name && i.original_name.trim() !== ''));
+            return (
+              <table className="w-full">
+                <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
+                  <tr className="text-left text-gray-300 border-b border-white/20">
+                    <th className="pb-3">
+                      <button
+                        onClick={addNewItem}
+                        className="bg-green-600 hover:bg-green-700 text-white p-1 rounded-md flex items-center justify-center transition-colors shadow-sm"
+                        title="Add Row"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </th>
+                    {hasOriginalName && <th className="pb-3 text-xs uppercase tracking-wider text-left pl-2">Original Bill Name</th>}
+                    <th className="pb-3 text-xs uppercase tracking-wider text-left">Medicine Name</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-left">Batch</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Exp</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right">Rate</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right">MRP</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Qty</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Free</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input SGST">SGST%</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input CGST">CGST%</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center">CD %</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right">CD ₹</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right" title="Additional Discount in Rupees">Add. Disc. (₹)</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right pr-2">Amount</th>
+                    <th className="pb-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, index) => {
+                    const qtyVal = parseFloat(item.qty as any) || 0;
+                    const rateVal = parseFloat(item.rate as any) || 0;
+                    const mrpVal = parseFloat(item.mrp as any) || 0;
+                    const cdRsVal = parseFloat(item.cd_rs as any) || 0;
+                    const cdPerVal = parseFloat(item.cd_per as any) || 0;
+                    const addDiscVal = parseFloat(item.additional_discount as any) || 0;
+                    const cgstPerVal = parseFloat(item.cgst_per as any) || 0;
+                    const sgstPerVal = parseFloat(item.sgst_per as any) || 0;
+                    const baseAmount = qtyVal * rateVal;
+                    const discountAmount = cdRsVal + addDiscVal + (baseAmount * cdPerVal / 100);
+                    const taxableAmount = baseAmount - discountAmount;
+                    const cgstAmount = taxableAmount * cgstPerVal / 100;
+                    const sgstAmount = taxableAmount * sgstPerVal / 100;
+                    const rowAmount = taxableAmount + cgstAmount + sgstAmount;
+                    return (
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-white/10">
+                      <td className="py-3 text-gray-300">{index + 1}</td>
+                      {hasOriginalName && (
+                        <td className="py-3 pr-2">
+                          <span 
+                            className="text-xs font-mono text-muted select-all block max-w-[200px] truncate" 
+                            title={item.original_name || 'No original name'}
                           >
-                            📊
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleOpenEnrichment(item)}
-                          disabled={!item.medicine_id}
-                          className={`w-7 h-7 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all ${
-                            item.medicine_id 
-                              ? 'bg-purple-500/20 hover:bg-purple-500/40 border-purple-500/30 text-purple-400' 
-                              : 'bg-white/5 border-glass-border text-muted cursor-not-allowed opacity-50'
-                          }`}
-                          title={item.medicine_id ? "View Medical Profile & Information" : "Select medicine first"}
-                        >
-                          <BookOpen size={14} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setActiveMedicineIndex(index);
-                            setShowMedicineModal(true);
-                          }}
-                          className="bg-green-600 hover:bg-green-700 text-white w-7 h-7 rounded text-sm font-bold flex-shrink-0"
-                          title="Add new medicine"
-                        >
-                          +
-                        </button>
-                      </div>
-                      {activeSearchIndex === index && (
-                        <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                          {item.original_name && (
-                            <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
-                              📄 Original Bill Name: {item.original_name}
-                            </div>
-                          )}
-                          {searchResults.map((medicine, idx) => (
+                            {item.original_name || '-'}
+                          </span>
+                        </td>
+                      )}
+                      <td className="py-3">
+                        <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative group/search">
+                          <div className="flex gap-1">
+                            <input
+                              type="text"
+                              value={item.medicine_name}
+                              onFocus={() => {
+                                setActiveSearchIndex(index);
+                                searchMedicines(item.medicine_name, index);
+                              }}
+                              onChange={(e) => {
+                                updateItem(index, 'medicine_name', e.target.value);
+                                searchMedicines(e.target.value, index);
+                              }}
+                              onKeyDown={e => {
+                                if (activeSearchIndex !== index || searchResults.length === 0) return;
+                                if (e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                                } else if (e.key === 'ArrowUp') {
+                                  e.preventDefault();
+                                  setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                  if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                                    e.preventDefault();
+                                    selectMedicine(searchResults[searchHighlightIndex], index);
+                                  }
+                                } else if (e.key === 'Escape') {
+                                  setActiveSearchIndex(null);
+                                  setSearchResults([]);
+                                  setSearchHighlightIndex(-1);
+                                }
+                              }}
+                              className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
+                              placeholder="Search medicine..."
+                            />
+                            {item.medicine_name && (
+                              <button
+                                onClick={() => fetchPriceHistory(item.medicine_name)}
+                                className="bg-yellow-600 hover:bg-yellow-700 text-white w-7 h-7 rounded text-sm flex-shrink-0"
+                                title="View price history from all distributors"
+                              >
+                                📊
+                              </button>
+                            )}
                             <button
-                              key={medicine.id}
-                              onClick={() => selectMedicine(medicine, index)}
-                              className={`w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
+                              onClick={() => handleOpenEnrichment(item)}
+                              disabled={!item.medicine_id}
+                              className={`w-7 h-7 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all ${
+                                item.medicine_id 
+                                  ? 'bg-purple-500/20 hover:bg-purple-500/40 border-purple-500/30 text-purple-400' 
+                                  : 'bg-white/5 border-glass-border text-muted cursor-not-allowed opacity-50'
+                              }`}
+                              title={item.medicine_id ? "View Medical Profile & Information" : "Select medicine first"}
                             >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-medium truncate">{medicine.name}</div>
-                                  <div className="text-xs text-muted mt-0.5">
-                                    {medicine.manufacturer && <span>{medicine.manufacturer}</span>}
-                                    {medicine.strength && <span>{medicine.manufacturer ? ' | ' : ''}{medicine.strength}</span>}
-                                    {medicine.pack_unit && <span> | {medicine.pack_unit}</span>}
-                                  </div>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                  <div className="font-mono text-sm">₹{medicine.mrp}</div>
-                                </div>
-                              </div>
+                              <BookOpen size={14} />
                             </button>
-                          ))}
+                            <button
+                              onClick={() => {
+                                setActiveMedicineIndex(index);
+                                setShowMedicineModal(true);
+                              }}
+                              className="bg-green-600 hover:bg-green-700 text-white w-7 h-7 rounded text-sm font-bold flex-shrink-0"
+                              title="Add new medicine"
+                            >
+                              +
+                            </button>
+                          </div>
+                          {item.medicine_id ? (
+                            <div className="text-[10px] text-green-400 font-semibold block mt-0.5">
+                              📦 In Stock: {item.stock_qty || 0} packs {item.loose_qty ? `(${item.loose_qty} loose)` : ''}
+                            </div>
+                          ) : item.medicine_name && item.medicine_name.trim().length > 0 ? (
+                            <div className="text-[10px] text-yellow-400 font-semibold block mt-0.5">
+                              ✨ New Medicine (Will create catalog record)
+                            </div>
+                          ) : null}
+                          {activeSearchIndex === index && (
+                            <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {item.original_name && (
+                                <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
+                                  📄 Original Bill Name: {item.original_name}
+                                </div>
+                              )}
+                              {searchResults.map((medicine, idx) => (
+                                <button
+                                  key={medicine.id}
+                                  onClick={() => selectMedicine(medicine, index)}
+                                  className={`w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-medium truncate flex items-center gap-1.5">
+                                        <span>{medicine.name}</span>
+                                        {(medicine as any).stock_qty !== undefined ? (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-green-500/10 text-green-400 border border-green-500/20">
+                                            📦 {(medicine as any).stock_qty} packs {(medicine as any).loose_qty ? `(${(medicine as any).loose_qty} loose)` : ''}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <div className="text-xs text-muted mt-0.5">
+                                        {medicine.manufacturer && <span>{medicine.manufacturer}</span>}
+                                        {medicine.strength && <span>{medicine.manufacturer ? ' | ' : ''}{medicine.strength}</span>}
+                                        {medicine.pack_unit && <span> | {medicine.pack_unit}</span>}
+                                      </div>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                      <div className="font-mono text-sm">₹{medicine.mrp}</div>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
                           <button
                             type="button"
                             onClick={() => {
@@ -2372,6 +2427,8 @@ const Purchases: React.FC = () => {
               })}
             </tbody>
           </table>
+            );
+          })()}
         </div>
       </div>
 

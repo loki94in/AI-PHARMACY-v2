@@ -549,10 +549,83 @@ router.get('/catalog-search', async (req, res) => {
       }
     }
 
+    if (rows.length > 0) {
+      const idsArr = Array.from(seenIds);
+      const placeholders = idsArr.map(() => '?').join(',');
+      const stockRows = await db.all(
+        `SELECT medicine_id, COALESCE(SUM(quantity), 0) as stock_qty, COALESCE(SUM(loose_quantity), 0) as loose_qty
+         FROM inventory_master
+         WHERE medicine_id IN (${placeholders})
+         GROUP BY medicine_id`,
+        idsArr
+      ).catch(() => []);
+      const stockMap = new Map<number, { stock_qty: number; loose_qty: number }>();
+      for (const s of stockRows) {
+        stockMap.set(s.medicine_id, { stock_qty: s.stock_qty, loose_qty: s.loose_qty });
+      }
+      for (const r of rows) {
+        const s = stockMap.get(r.id);
+        r.stock_qty = s ? s.stock_qty : 0;
+        r.loose_qty = s ? s.loose_qty : 0;
+      }
+    }
+
     res.json(rows);
   } catch (error: any) {
     console.error('Catalog search error:', error.message);
     res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// GET /inventory/batch-info - Fetch batch info for a medicine and auto-fill rate, MRP, expiry, and GST
+router.get('/batch-info', async (req, res) => {
+  let db;
+  try {
+    const medicine_id = req.query.medicine_id ? parseInt(req.query.medicine_id as string, 10) : null;
+    const batch_no = (req.query.batch_no as string || '').trim();
+
+    if (!medicine_id || !batch_no) {
+      return res.status(400).json({ error: 'medicine_id and batch_no are required' });
+    }
+
+    db = await dbManager.getConnection();
+
+    const batchRow = await db.get(
+      `SELECT im.batch_no, im.expiry_date, im.cost_price as rate, im.mrp, m.cgst_per, m.sgst_per
+       FROM inventory_master im
+       JOIN medicines m ON im.medicine_id = m.id
+       WHERE im.medicine_id = ? AND LOWER(im.batch_no) = LOWER(?)
+       ORDER BY im.id DESC LIMIT 1`,
+      [medicine_id, batch_no]
+    );
+
+    const medRow = await db.get('SELECT rate, mrp, cgst_per, sgst_per FROM medicines WHERE id = ?', [medicine_id]);
+
+    const defaultCgst = (medRow?.cgst_per !== undefined && medRow?.cgst_per !== null && medRow?.cgst_per !== 0) ? medRow.cgst_per : 6;
+    const defaultSgst = (medRow?.sgst_per !== undefined && medRow?.sgst_per !== null && medRow?.sgst_per !== 0) ? medRow.sgst_per : 6;
+
+    if (batchRow) {
+      return res.json({
+        found: true,
+        batch_no: batchRow.batch_no,
+        expiry_date: batchRow.expiry_date,
+        rate: batchRow.rate || medRow?.rate || 0,
+        mrp: batchRow.mrp || medRow?.mrp || 0,
+        cgst_per: (batchRow.cgst_per !== undefined && batchRow.cgst_per !== null && batchRow.cgst_per !== 0) ? batchRow.cgst_per : defaultCgst,
+        sgst_per: (batchRow.sgst_per !== undefined && batchRow.sgst_per !== null && batchRow.sgst_per !== 0) ? batchRow.sgst_per : defaultSgst
+      });
+    }
+
+    return res.json({
+      found: false,
+      rate: medRow?.rate || 0,
+      mrp: medRow?.mrp || 0,
+      cgst_per: defaultCgst,
+      sgst_per: defaultSgst
+    });
+  } catch (error) {
+    console.error('Fetch batch info error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

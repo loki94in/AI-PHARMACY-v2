@@ -688,6 +688,7 @@ export async function ensureSchema(dbPath: string) {
     ['distributors', 'phone', 'ALTER TABLE distributors ADD COLUMN phone TEXT'],
     ['distributors', 'state_code', 'ALTER TABLE distributors ADD COLUMN state_code TEXT'],
     ['distributors', 'preferred_file_format', 'ALTER TABLE distributors ADD COLUMN preferred_file_format TEXT DEFAULT NULL'],
+    ['distributors', 'mapping_config', 'ALTER TABLE distributors ADD COLUMN mapping_config TEXT DEFAULT NULL'],
     ['doctors', 'send_daily_summary', 'ALTER TABLE doctors ADD COLUMN send_daily_summary INTEGER DEFAULT 0'],
     ['customers', 'legacy_id', 'ALTER TABLE customers ADD COLUMN legacy_id TEXT'],
     ['customers', 'age', 'ALTER TABLE customers ADD COLUMN age TEXT'],
@@ -1601,7 +1602,7 @@ export async function ensureSchema(dbPath: string) {
           const unpopulated = await backgroundDb.all('SELECT uid, subject, body, from_addr FROM emails WHERE is_order = 1 AND medicine_names IS NULL');
           if (unpopulated.length > 0) {
             console.log(`[Database Migration] Populating medicine names for ${unpopulated.length} emails in background...`);
-            const { emailService } = await import('./services/emailService.js');
+            const { emailService, isNonMedicineNoise, cleanMedicineName } = await import('./services/emailService.js');
             const fs = await import('fs');
             for (const email of unpopulated) {
               try {
@@ -1630,7 +1631,7 @@ export async function ensureSchema(dbPath: string) {
                     parsedItems.push({ name: med.name });
                   }
                 }
-                const medNames = Array.from(new Set(parsedItems.map(i => i.name).filter(Boolean)));
+                const medNames = Array.from(new Set(parsedItems.map(i => cleanMedicineName(i.name)).filter(n => Boolean(n) && !isNonMedicineNoise(n))));
                 await backgroundDb.run('UPDATE emails SET medicine_names = ? WHERE uid = ?', [JSON.stringify(medNames), email.uid]);
               } catch (err) {
                 console.error(`[Database Migration] Failed to populate medicine names for email ${email.uid}:`, err);

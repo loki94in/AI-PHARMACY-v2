@@ -104,7 +104,7 @@ export async function getEmailRetentionLimit(dbInstance?: any): Promise<number> 
   } catch (err) {
     console.warn('[StoreSettings] Error resolving email retention limit:', err);
   }
-  return 15;
+  return 50;
 }
 
 /**

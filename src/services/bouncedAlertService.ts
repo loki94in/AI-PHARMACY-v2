@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { emailService } from './emailService.js';
+import { emailService, isNonMedicineNoise, cleanMedicineName } from './emailService.js';
 import { sendMessage } from '../whatsappClient.js';
 import fs from 'fs';
 
@@ -76,10 +76,13 @@ export class BouncedAlertService {
               const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
               if (resParse && resParse.success && resParse.items && resParse.items.length > 0) {
                 for (const item of resParse.items) {
-                  expectedItems.push({
-                    name: item.name,
-                    quantity: Number(item.quantity) || 0
-                  });
+                  const cleaned = cleanMedicineName(item.name);
+                  if (cleaned && !isNonMedicineNoise(cleaned)) {
+                    expectedItems.push({
+                      name: cleaned,
+                      quantity: Number(item.quantity) || 0
+                    });
+                  }
                 }
                 attachmentParsed = true;
               }
