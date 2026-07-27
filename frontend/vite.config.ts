@@ -11,6 +11,10 @@ export default defineConfig({
     },
   },
   server: {
+    // Windows sometimes resolves 'localhost' to the IPv6 loopback only,
+    // binding Vite to [::1] while browser requests race to 127.0.0.1 and
+    // hang instead of failing fast — pin to IPv4 loopback to avoid that.
+    host: '127.0.0.1',
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3000',
