@@ -559,6 +559,52 @@ export async function ensureSchema(dbPath: string) {
       extracted_invoice_no TEXT,
       extracted_distributor TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS medicine_lifecycle (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      medicine_id INTEGER,
+      order_id INTEGER,
+      status TEXT DEFAULT 'CREATED',
+      source_type TEXT DEFAULT 'special_order',
+      source_id INTEGER,
+      source_distributor_id INTEGER,
+      quantity REAL,
+      cost_price REAL,
+      mrp REAL,
+      batch_no TEXT,
+      expiry_date TEXT,
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME,
+      notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_med_lifecycle_status ON medicine_lifecycle(status);
+    CREATE INDEX IF NOT EXISTS idx_med_lifecycle_order ON medicine_lifecycle(order_id);
+
+    CREATE TABLE IF NOT EXISTS order_overlaps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      special_order_id INTEGER,
+      purchase_id INTEGER,
+      purchase_item_id INTEGER,
+      inventory_master_id INTEGER,
+      medicine_id INTEGER,
+      match_type TEXT DEFAULT 'exact_name',
+      match_confidence REAL DEFAULT 1.0,
+      overlap_status TEXT DEFAULT 'detected',
+      detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      user_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_overlaps_special_order ON order_overlaps(special_order_id);
+    CREATE INDEX IF NOT EXISTS idx_order_overlaps_status ON order_overlaps(overlap_status);
+
+    CREATE TABLE IF NOT EXISTS order_tracking_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER,
+      event_type TEXT DEFAULT 'created',
+      event_detail TEXT,
+      performed_by TEXT DEFAULT 'system',
+      performed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_tracking_events_order ON order_tracking_events(order_id);
   `);
 
   // Safely add new columns to existing tables (SQLite throws if column exists — we catch and ignore)
@@ -602,6 +648,8 @@ export async function ensureSchema(dbPath: string) {
     ['purchases', 'cn_amount', 'ALTER TABLE purchases ADD COLUMN cn_amount REAL DEFAULT 0'],
     ['purchases', 'cn_number', 'ALTER TABLE purchases ADD COLUMN cn_number TEXT DEFAULT NULL'],
     ['purchases', 'original_amount', 'ALTER TABLE purchases ADD COLUMN original_amount REAL DEFAULT NULL'],
+    ['special_orders', 'lifecycle_status', 'ALTER TABLE special_orders ADD COLUMN lifecycle_status TEXT DEFAULT \'CREATED\''],
+    ['special_orders', 'last_checked_at', 'ALTER TABLE special_orders ADD COLUMN last_checked_at DATETIME'],
     ['sales_invoices', 'doctor_id', 'ALTER TABLE sales_invoices ADD COLUMN doctor_id INTEGER'],
     ['sales_invoices', 'payment_medium', 'ALTER TABLE sales_invoices ADD COLUMN payment_medium TEXT'],
     ['sales_invoices', 'roff', 'ALTER TABLE sales_invoices ADD COLUMN roff REAL DEFAULT 0'],

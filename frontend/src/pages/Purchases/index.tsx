@@ -1648,7 +1648,7 @@ const Purchases: React.FC = () => {
   }, [distributors, distributorSearch]);
 
   return (
-    <div className="h-full flex flex-col px-6 pt-0 pb-0 animate-in fade-in duration-500">
+    <div className="h-full flex flex-col animate-in fade-in duration-500 min-h-0">
 
 
       {/* ── Email Source Banner ── */}
@@ -1692,8 +1692,10 @@ const Purchases: React.FC = () => {
         </div>
       )}
 
-      {/* Header Section */}
-      <div className="relative z-30 bg-white/10 backdrop-blur-lg rounded-t-xl p-4 pb-3 border border-white/20 border-b-0">
+      {/* ── Main Purchase Card Container ── */}
+      <div className="flex-1 flex flex-col min-h-0 bg-glass-bg border border-glass-border rounded-2xl overflow-hidden backdrop-blur-xl">
+        {/* Header Section */}
+        <div className="relative z-30 p-4 pb-3 border-b border-glass-border bg-white/[0.02]">
         {/* Purchases Tabs Bar */}
         <div className="p-2 border-b border-glass-border/30 flex items-center justify-between gap-3 bg-black/10 flex-nowrap mb-3 rounded-lg">
           <div className="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 scrollbar-thin py-0.5">
@@ -1956,7 +1958,7 @@ const Purchases: React.FC = () => {
       </div>
 
       {/* Items Table */}
-      <div className="bg-white/10 backdrop-blur-lg rounded-none p-4 pt-3 border border-white/20 flex-1 flex flex-col min-h-0">
+      <div className="p-4 pt-3 flex-1 flex flex-col min-h-0">
         <div className="flex-1 overflow-auto">
           <table className="w-full">
             <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
@@ -2293,37 +2295,30 @@ const Purchases: React.FC = () => {
       </div>
 
       {/* ── Auto-updating Bill Summary ── */}
-      <div className="bg-white/10 backdrop-blur-lg rounded-b-xl border border-white/20 border-t-0 overflow-hidden shrink-0 mt-0">
-        {/* Summary rows */}
+      <div className="border-t border-glass-border bg-white/[0.02] overflow-hidden shrink-0 mt-0">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-white/10">
-          {/* Gross Amount */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gross Amt</span>
             <span className="text-base font-bold text-white">₹{totals.grossAmount.toFixed(2)}</span>
           </div>
-          {/* Cash Discount */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-yellow-400 uppercase tracking-widest">
               Discount (CD)
             </span>
             <span className="text-base font-bold text-red-400">-₹{totals.totalCd.toFixed(2)}</span>
           </div>
-          {/* Taxable Subtotal */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Taxable Value</span>
             <span className="text-base font-bold text-white">₹{totals.subtotal.toFixed(2)}</span>
           </div>
-          {/* CGST */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">CGST</span>
             <span className="text-base font-bold text-white">₹{totals.totalCgst.toFixed(2)}</span>
           </div>
-          {/* SGST */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">SGST</span>
             <span className="text-base font-bold text-white">₹{totals.totalSgst.toFixed(2)}</span>
           </div>
-          {/* Credit Note (CN) */}
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">CN Applied</span>
             <span className="text-base font-bold text-red-400" title={cnNumber ? `CN Ref: ${cnNumber}` : undefined}>
@@ -2332,7 +2327,6 @@ const Purchases: React.FC = () => {
           </div>
         </div>
 
-        {/* Grand Total + Save */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-white/20 bg-white/5">
           <div>
             <p className="text-xs text-gray-400 mb-0.5">Grand Total (incl. GST)</p>
@@ -2341,7 +2335,7 @@ const Purchases: React.FC = () => {
             </p>
           </div>
           <button
-            onClick={savePurchase}
+            onClick={handleSave}
             disabled={saving}
             className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 disabled:opacity-50 transition-all"
           >

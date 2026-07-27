@@ -1275,9 +1275,9 @@ const QuickAssistSidebar = ({
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
           <span>Quick Assist</span>
         </div>
-        {(refills.length > 0 || notifications.length > 0 || specialOrders.filter(s => s.status === 'Pending').length > 0) && (
+        {(refills.length > 0 || notifications.length > 0 || (Array.isArray(specialOrders) && specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length > 0)) && (
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-purple-600/30 animate-pulse">
-            {refills.length + notifications.length + specialOrders.filter(s => s.status === 'Pending').length}
+            {refills.length + notifications.length + (Array.isArray(specialOrders) ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length : 0)}
           </span>
         )}
       </div>
@@ -1286,7 +1286,9 @@ const QuickAssistSidebar = ({
 
   const activeRefills = refills.filter(r => r.is_active === 1);
   const inactiveRefills = refills.filter(r => r.is_active === 0);
-  const pendingSpecialOrders = specialOrders.filter(s => s.status === 'Pending');
+  const activeSpecialOrders = Array.isArray(specialOrders) 
+    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled') 
+    : [];
 
   return (
     <div className="w-80 bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full shrink-0 z-20 transition-all duration-300">
@@ -1420,7 +1422,7 @@ const QuickAssistSidebar = ({
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-400">
             <div className="flex items-center gap-1.5">
               <Package size={14} className="text-amber-400" />
-              <span>Quick Special Requests ({pendingSpecialOrders.length})</span>
+              <span>Quick Special Requests ({activeSpecialOrders.length})</span>
             </div>
             <button
               onClick={() => navigate('/orders')}
@@ -1429,11 +1431,11 @@ const QuickAssistSidebar = ({
               View All
             </button>
           </div>
-          {pendingSpecialOrders.length === 0 ? (
-            <p className="text-xs text-muted/50 italic pl-2 py-1">No pending special requests</p>
+          {activeSpecialOrders.length === 0 ? (
+            <p className="text-xs text-muted/50 italic pl-2 py-1">No active special requests</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {pendingSpecialOrders.map(order => (
+              {activeSpecialOrders.map(order => (
                 <div key={order.id} className="p-3 rounded-xl bg-amber-500/[0.04] border border-amber-500/20 flex flex-col gap-2">
                   <div className="flex items-start justify-between gap-1">
                     <span className="font-bold text-xs text-text truncate">{order.product}</span>
@@ -1443,17 +1445,67 @@ const QuickAssistSidebar = ({
                   </div>
                   <div className="text-[10px] text-muted flex items-center justify-between">
                     <span className="truncate">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                    <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider">{order.priority || 'Normal'}</span>
+                    <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                      order.status === 'Ready' 
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                        : order.status === 'Ordered' 
+                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {order.status || 'Pending'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5 mt-1">
-                    <button
-                      onClick={() => handleSendSpecialOrder(order)}
-                      className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                      title="Send WhatsApp Order for this Special Request"
-                    >
-                      <SendIcon size={12} />
-                      Send Order
-                    </button>
+                    {order.status === 'Ready' ? (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await apiClient.post(`/orders/${order.id}/status`, { status: 'Completed' });
+                            toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
+                            window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+                            window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
+                            onActionComplete();
+                          } catch (err) {
+                            console.error('Failed to complete order:', err);
+                            toastEvent.trigger('Failed to update status', 'error');
+                          }
+                        }}
+                        className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                        title="Mark special request as Completed"
+                      >
+                        <Check size={12} />
+                        Complete
+                      </button>
+                    ) : order.status === 'Ordered' ? (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await apiClient.post(`/orders/${order.id}/status`, { status: 'Ready' });
+                            toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
+                            window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+                            window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
+                            onActionComplete();
+                          } catch (err) {
+                            console.error('Failed to mark order as ready:', err);
+                            toastEvent.trigger('Failed to update status', 'error');
+                          }
+                        }}
+                        className="flex-1 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                        title="Mark order as Ready for customer"
+                      >
+                        <Check size={12} />
+                        Mark Ready
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleSendSpecialOrder(order)}
+                        className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                        title="Send WhatsApp Order for this Special Request"
+                      >
+                        <SendIcon size={12} />
+                        Send Order
+                      </button>
+                    )}
                     <button
                       onClick={() => handleAddToCartSpecialOrder(order)}
                       className="py-1.5 px-2.5 rounded bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
@@ -1593,16 +1645,23 @@ export const Layout = ({
   const [refills, setRefills] = useState<any[]>([]);
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
 
-  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<any[]>({
-    queryKey: ['special-orders-quick-assist'],
-    queryFn: () => api.getOrders().catch(() => []),
-    refetchInterval: 15000,
-  });
+  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<any[]>(
+    'orders',
+    async () => {
+      const data = await api.getOrders();
+      return Array.isArray(data) ? data : [];
+    },
+    { refetchInterval: 15000, staleTime: 5000 }
+  );
 
   useEffect(() => {
     const handleRefresh = () => refetchSpecialOrders();
     window.addEventListener('refresh-special-orders', handleRefresh);
-    return () => window.removeEventListener('refresh-special-orders', handleRefresh);
+    window.addEventListener('app-special-orders-updated', handleRefresh);
+    return () => {
+      window.removeEventListener('refresh-special-orders', handleRefresh);
+      window.removeEventListener('app-special-orders-updated', handleRefresh);
+    };
   }, [refetchSpecialOrders]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     try {

@@ -174,6 +174,7 @@ app.use('/api/returns', lazyRoute('./routes/returns.js'));
 app.use('/api/customer-returns', lazyRoute('./routes/customerReturns.js'));
 app.use('/api/credit-notes', lazyRoute('./routes/creditNotes.js'));
 app.use('/api/orders', lazyRoute('./routes/orders.js'));
+app.use('/api/quick-assistant', lazyRoute('./routes/quickAssistant.js'));
 app.use('/api/expiry', lazyRoute('./routes/expiry.js'));
 app.use('/api/reports', lazyRoute('./routes/reports.js'));
 app.use('/api/compliance', lazyRoute('./routes/compliance.js'));
@@ -601,7 +602,14 @@ async function setupCrons(db: any) {
         whatsappIntentService.handleOcrComplete(event.payload);
       }
     });
-    console.log('[Boot] WhatsApp OCR intent service registered.');
+    // Register autoMatchWorker for special order inventory auto-matching
+    try {
+      const { autoMatchWorker } = await import('./worker/autoMatchWorker.js');
+      autoMatchWorker.start(900000); // 15-minute scan interval
+      console.log('[Boot] AutoMatchWorker for special orders initialized.');
+    } catch (amErr) {
+      console.warn('[Boot] AutoMatchWorker initialization skipped:', amErr);
+    }
   } catch (err) {
     console.warn('[Boot] WhatsApp intent service registration skipped:', err);
   }

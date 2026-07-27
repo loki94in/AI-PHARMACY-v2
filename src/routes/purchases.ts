@@ -905,21 +905,22 @@ router.post('/manual', async (req, res) => {
       }
     }
 
-    // Auto-update matching pending special requests in special_orders table to status = 'Ordered'
-    for (const item of items) {
-      const nameToMatch = (item.medicine || item.medicine_name || '').trim();
-      if (nameToMatch) {
-        try {
-          await db.run(
-            `UPDATE special_orders 
-             SET status = 'Ordered', notified = 1 
-             WHERE status = 'Pending' AND (LOWER(product) = LOWER(?) OR LOWER(product) LIKE LOWER(?))`,
-            [nameToMatch, `%${nameToMatch}%`]
-          );
-        } catch (specErr) {
-          console.warn('Failed to update special orders for purchase item:', nameToMatch, specErr);
+    // Trigger overlap detection service for purchase items
+    try {
+      const { overlapDetectionService } = await import('../services/overlapDetectionService.js');
+      for (const item of items) {
+        const medName = (item.medicine || item.medicine_name || '').trim();
+        if (medName) {
+          await overlapDetectionService.detectOverlap({
+            medicineName: medName,
+            distributorId: distId ? Number(distId) : undefined,
+            purchaseId,
+            quantity: Number(item.qty) || 1
+          });
         }
       }
+    } catch (ovErr) {
+      console.warn('Overlap detection trigger warning in manual purchase:', ovErr);
     }
     
     if (distId && source_filename && mapping_config) {

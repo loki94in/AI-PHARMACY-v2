@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
@@ -457,9 +457,34 @@ router.post('/', async (req, res) => {
       } else {
         console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} â€” skipping WhatsApp dispatch.`);
       }
+    // Match special orders for each item in the saved POS bill
+    const matchedSpecialOrders: any[] = [];
+    try {
+      for (const item of items) {
+        const medName = (item.medicine_name || '').trim();
+        if (medName) {
+          const matching = await db.all(
+            `SELECT id as order_id, product as medicine, qty as qty_ordered, requester, phone as customer_phone, status as order_status
+             FROM special_orders
+             WHERE (LOWER(TRIM(product)) = LOWER(TRIM(?)) OR LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)))
+               AND status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`,
+            [medName, medName]
+          );
+          if (matching && matching.length > 0) {
+            matching.forEach(m => {
+              matchedSpecialOrders.push({
+                ...m,
+                qty_sold: Number(item.quantity) || 1,
+                whatsapp_template: `Hi ${m.requester || 'Customer'}, your special order for ${m.medicine} (Qty: ${item.quantity || 1}) has been billed/fulfilled. Thank you!`
+              });
+            });
+          }
+        }
+    } catch (mErr) {
+      console.warn('[POS Sale] Failed to lookup matched special orders:', mErr);
     }
 
-    res.json({ success: true, invoice_no, total, tax });
+    res.json({ success: true, invoice_no, total, tax, matched_special_orders: matchedSpecialOrders });
   } catch (error) {
     if (db) {
       try {
