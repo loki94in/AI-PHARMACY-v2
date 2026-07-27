@@ -587,6 +587,7 @@ export const api = {
   createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number }) =>
     apiClient.post('/orders/batch', data).then(res => res.data),
   updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
+  updateOrderStatus: (id: number, status: string) => apiClient.post(`/orders/${id}/status`, { status }).then(res => res.data),
   deleteOrder: (id: number) => apiClient.delete(`/orders/${id}`).then(res => res.data),
   getUncollectedAlerts: () => apiClient.get<SpecialOrder[]>('/orders/uncollected-alerts').then(res => res.data),
   notifySpecialOrderArrival: (id: number) => apiClient.post(`/orders/${id}/notify-arrival`).then(res => res.data),

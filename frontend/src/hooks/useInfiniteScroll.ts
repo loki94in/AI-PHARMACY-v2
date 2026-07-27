@@ -99,9 +99,9 @@ export function useInfiniteScroll<T>({
       }
       return currentPage + 1;
     },
-    staleTime: 5 * 60 * 1000,     // 5 minutes — data stays fresh across quick page switches
+    staleTime: 1 * 60 * 1000,     // 1 minute
     gcTime: 8 * 60 * 60 * 1000,   // 8 hours — never evict during a full working day
-    refetchOnMount: false,          // serve module cache instantly; invalidation triggers background refetch
+    refetchOnMount: true,          // serve module cache instantly, refetch in background if needed
   });
 
   // Sync React Query data with local state & module cache

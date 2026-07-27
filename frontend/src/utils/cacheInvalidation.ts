@@ -1,10 +1,13 @@
 import { QueryClient } from '@tanstack/react-query';
+import { clearInfiniteScrollCache } from '../hooks/useInfiniteScroll';
 
 /**
  * Invalidates all relevant query lists and purges infinite scroll caches
  * after a write/mutation to stock, sales, returns, or purchases occurs.
  */
 export function invalidateAfterStockWrite(queryClient: QueryClient) {
+  clearInfiniteScrollCache();
+
   const keys = [
     'sells-list',
     'inventory-list',

@@ -122,13 +122,13 @@ router.get('/', async (req, res) => {
     if (limit === 0) {
       const rows = await db.all(`
         SELECT im.*, 
-               m.name as name, 
-               m.name as medicine_name, 
+               COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as name, 
+               COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
                im.batch_no as batch_number, 
                im.quantity as stock_quantity, 
                m.item_code as item_code
         ${baseQuery}
-        ORDER BY m.name ASC, im.id DESC
+        ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       `, params);
       return res.json({ data: rows, totalPages: 1, currentPage: 1, totalItems: rows.length });
     }
@@ -142,13 +142,13 @@ router.get('/', async (req, res) => {
 
     const rows = await db.all(`
       SELECT im.*, 
-             m.name as name, 
-             m.name as medicine_name, 
+             COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as name, 
+             COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
              im.batch_no as batch_number, 
              im.quantity as stock_quantity, 
              m.item_code as item_code
       ${baseQuery}
-      ORDER BY m.name ASC, im.id DESC
+      ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       LIMIT ? OFFSET ?
     `, [...params, limit, offset]);
     

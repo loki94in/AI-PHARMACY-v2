@@ -438,7 +438,7 @@ const Mail = () => {
 
       const invoiceNoMatch = selectedEmail.subject.match(/INV-\d+-\d+/i) || selectedEmail.subject.match(/\b([A-Z0-9_\-\/]{4,15})\b/);
 
-      navigate('/manual-purchase', {
+      navigate('/purchases', {
         state: {
           prefilledPurchase: {
             distributorName: parsedDistributorName || selectedEmail.distributorName || '',

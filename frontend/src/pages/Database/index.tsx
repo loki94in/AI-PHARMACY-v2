@@ -195,18 +195,23 @@ const DatabasePage = () => {
     if (!window.confirm(`Are you sure you want to delete "${name}" from the database? This cannot be undone.`)) {
       return;
     }
+    // Optimistically remove from state so the user can continue working immediately without page reload
+    setMedicines(prev => prev.filter(m => m.id !== id));
+    if (cachedMedicines) cachedMedicines = cachedMedicines.filter(m => m.id !== id);
+    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    setTotalItems(prev => Math.max(0, prev - 1));
+
     try {
       await api.deleteMedicine(id);
-      alert('Medicine deleted successfully');
-      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
-      setPage(1);
-      loadDatabase();
+      queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
     } catch (err: any) {
       console.error(err);
       const errorMsg = err.response?.data?.error || 'Failed to delete medicine.';
       alert(errorMsg);
+      // Revert on error
+      queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
     }
   };
 
@@ -236,10 +241,20 @@ const DatabasePage = () => {
       return;
     }
     
-    setLoading(true);
+    const idsToDeleteSet = new Set(selectedIds);
+
+    // Optimistically remove deleted rows from state so page doesn't reset or flash full loading screen
+    if (!allSelectedAcrossPages) {
+      setMedicines(prev => prev.filter(m => !idsToDeleteSet.has(m.id)));
+      if (cachedMedicines) cachedMedicines = cachedMedicines.filter(m => !idsToDeleteSet.has(m.id));
+      setTotalItems(prev => Math.max(0, prev - idsToDeleteSet.size));
+    }
+    setSelectedIds(new Set());
+    setAllSelectedAcrossPages(false);
+
     try {
       const res = await api.bulkDeleteMedicines({
-        ids: allSelectedAcrossPages ? undefined : Array.from(selectedIds),
+        ids: allSelectedAcrossPages ? undefined : Array.from(idsToDeleteSet),
         all: allSelectedAcrossPages,
         productName: productNameTerm,
         mrpFilter: mrpTerm,
@@ -248,21 +263,15 @@ const DatabasePage = () => {
         distributorFilter: distributorTerm,
       });
 
-      setLoading(false);
-      setSelectedIds(new Set());
-      setAllSelectedAcrossPages(false);
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
-      setPage(1);
-      loadDatabase();
+      queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
 
       const successCount = res.successCount || 0;
       const failCount = res.failCount || 0;
       const failedNames = res.failedNames || [];
 
-      if (failCount === 0) {
-        alert(`Successfully deleted all ${successCount} selected medicines.`);
-      } else {
+      if (failCount > 0) {
         alert(
           `Deleted ${successCount} medicines.\n` +
           `Failed to delete ${failCount} medicines because they have associated transactions:\n` +
@@ -272,9 +281,9 @@ const DatabasePage = () => {
       }
     } catch (err: any) {
       console.error(err);
-      setLoading(false);
       const errorMsg = err.response?.data?.error || 'Failed to bulk delete medicines.';
       alert(errorMsg);
+      queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
     }
   };
 
@@ -364,10 +373,10 @@ const DatabasePage = () => {
 
   useEffect(() => {
     if (queryIsFetching) {
-      if (page === 1) setLoading(true);
-      else setAppending(true);
+      if (page === 1 && medicines.length === 0) setLoading(true);
+      else if (page > 1) setAppending(true);
     }
-  }, [queryIsFetching, page]);
+  }, [queryIsFetching, page, medicines.length]);
 
   useEffect(() => {
     if (pageData) {

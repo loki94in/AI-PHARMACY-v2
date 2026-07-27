@@ -764,7 +764,8 @@ export default function PharmarackCart() {
         pharmarack_rate: rate ? Number(rate) : undefined,
         pharmarack_mrp: mrp ? Number(mrp) : undefined,
         pharmarack_scheme: scheme || undefined,
-        pharmarack_mapped: 1
+        pharmarack_mapped: 1,
+        cart_add_error: null
       });
 
       toastEvent.trigger(`Confirmed & linked "${prodName}" to order #${order.id}!`, 'success');
@@ -1922,6 +1923,14 @@ export default function PharmarackCart() {
                                   {isDelayedOver12h && (
                                     <span className="text-[9px] font-bold text-amber-400 mt-1 flex items-center gap-1">
                                       ⚠️ Placed &gt;12h ago — Pending arrival in pharmacy inventory!
+                                    </span>
+                                  )}
+                                  {order.cart_add_error && (
+                                    <span
+                                      className="text-[9px] font-semibold text-red mt-1 flex items-start gap-1"
+                                      title={order.cart_add_error}
+                                    >
+                                      ⚠️ Last attempt failed: {order.cart_add_error}
                                     </span>
                                   )}
                                 </div>

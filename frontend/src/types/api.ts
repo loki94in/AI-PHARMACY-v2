@@ -74,6 +74,7 @@ export interface SpecialOrder {
   pharmarack_mapped?: number;
   pharmarack_scheme?: string;
   advance_payment?: number;
+  cart_add_error?: string | null;
 }
 
 export interface Refill {

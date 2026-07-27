@@ -117,8 +117,57 @@ const getInitialPurchasesTabs = () => {
     try {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const validTabs = parsed.filter(t => t && typeof t === 'object');
-        if (validTabs.length > 0) return validTabs;
+        const validTabs = parsed.filter(t => t && typeof t === 'object' && Array.isArray(t.items));
+        if (validTabs.length > 0) {
+          return validTabs.map(tab => ({
+            ...tab,
+            id: tab.id || 'bill_' + Date.now(),
+            name: tab.name || 'Bill 1',
+            items: (Array.isArray(tab.items) && tab.items.length > 0)
+              ? tab.items.map((item: any) => ({
+                  id: item?.id || generateUUID(),
+                  medicine_id: item?.medicine_id ?? null,
+                  medicine_name: item?.medicine_name || '',
+                  original_name: item?.original_name || '',
+                  manufacturer: item?.manufacturer || '',
+                  batch_no: item?.batch_no || '',
+                  expiry_date: item?.expiry_date || '',
+                  qty: item?.qty !== undefined ? item.qty : '',
+                  free_qty: item?.free_qty !== undefined ? item.free_qty : '',
+                  rate: item?.rate !== undefined ? item.rate : '',
+                  mrp: item?.mrp !== undefined ? item.mrp : '',
+                  cgst_per: item?.cgst_per !== undefined ? item.cgst_per : '',
+                  sgst_per: item?.sgst_per !== undefined ? item.sgst_per : '',
+                  cd_rs: item?.cd_rs !== undefined ? item.cd_rs : '',
+                  cd_per: item?.cd_per !== undefined ? item.cd_per : '',
+                  additional_discount: item?.additional_discount !== undefined ? item.additional_discount : '',
+                  amount: typeof item?.amount === 'number' ? item.amount : 0,
+                  scheme_paid: typeof item?.scheme_paid === 'number' ? item.scheme_paid : 0,
+                  scheme_free: typeof item?.scheme_free === 'number' ? item.scheme_free : 0,
+                }))
+              : [{
+                  id: generateUUID(),
+                  medicine_id: null,
+                  medicine_name: '',
+                  original_name: '',
+                  manufacturer: '',
+                  batch_no: '',
+                  expiry_date: '',
+                  qty: '',
+                  free_qty: '',
+                  rate: '',
+                  mrp: '',
+                  cgst_per: '',
+                  sgst_per: '',
+                  cd_rs: '',
+                  cd_per: '',
+                  additional_discount: '',
+                  amount: 0,
+                  scheme_paid: 0,
+                  scheme_free: 0,
+                }]
+          }));
+        }
       }
     } catch (e) {
       console.error('Failed to parse saved Purchases tabs:', e);
@@ -286,7 +335,29 @@ const Purchases: React.FC = () => {
   const [cnNumber, setCnNumber] = useState(initialActiveTab?.cnNumber || '');
   const [reconcileExpiryReturnId, setReconcileExpiryReturnId] = useState<number | null>(initialActiveTab?.reconcileExpiryReturnId || null);
   const [showCreditNotesPanel, setShowCreditNotesPanel] = useState(false);
-  const [items, setItems] = useState<BillItem[]>(initialActiveTab?.items || []);
+  const [items, setItems] = useState<BillItem[]>(
+    Array.isArray(initialActiveTab?.items) && initialActiveTab.items.length > 0 
+      ? initialActiveTab.items 
+      : [{
+          id: generateUUID(),
+          medicine_id: null,
+          medicine_name: '',
+          batch_no: '',
+          expiry_date: '',
+          qty: '',
+          free_qty: '',
+          rate: '',
+          mrp: '',
+          cgst_per: '',
+          sgst_per: '',
+          cd_rs: '',
+          cd_per: '',
+          additional_discount: '',
+          amount: 0,
+          scheme_paid: 0,
+          scheme_free: 0,
+        }]
+  );
   const [sourceFilename, setSourceFilename] = useState(initialActiveTab?.sourceFilename || '');
   const [sourceFileHeaders, setSourceFileHeaders] = useState<string[]>(initialActiveTab?.sourceFileHeaders || []);
   const [mappingConfig, setMappingConfig] = useState<Record<string, string>>(initialActiveTab?.mappingConfig || {});
@@ -1401,6 +1472,8 @@ const Purchases: React.FC = () => {
     }
   };
 
+  const handleSave = savePurchase;
+
   const handleFileUpload = async () => {
     if (!uploadedFile) return;
 
@@ -2343,6 +2416,7 @@ const Purchases: React.FC = () => {
           </button>
         </div>
       </div>
+    </div>
 
       {/* Upload Modal */}
       {showUploadModal && createPortal(

@@ -1843,7 +1843,7 @@ export class EmailService {
           
           if (firstField === 'H') {
             isRecordType = true;
-            const csvRecords = parse(fileBuffer, { columns: false, skip_empty_lines: true, relax_column_count: true });
+            const csvRecords = parse(fileBuffer, { columns: false, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, bom: true, trim: true });
             recordData = parseRecordTypeInvoice(csvRecords, filePath);
             distributor_name = recordData.distributor_name;
             invoice_no = recordData.invoice_no;
@@ -1851,7 +1851,7 @@ export class EmailService {
             total_amount = recordData.total_amount;
             items = recordData.items;
           } else {
-            records = parse(fileBuffer, { columns: true, skip_empty_lines: true, relax_column_count: true });
+            records = parse(fileBuffer, { columns: true, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, bom: true, trim: true });
           }
         } else {
           const fileBuffer = fs.readFileSync(filePath);

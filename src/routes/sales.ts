@@ -457,6 +457,8 @@ router.post('/', async (req, res) => {
       } else {
         console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} â€” skipping WhatsApp dispatch.`);
       }
+    }
+
     // Match special orders for each item in the saved POS bill
     const matchedSpecialOrders: any[] = [];
     try {
@@ -480,6 +482,7 @@ router.post('/', async (req, res) => {
             });
           }
         }
+      }
     } catch (mErr) {
       console.warn('[POS Sale] Failed to lookup matched special orders:', mErr);
     }

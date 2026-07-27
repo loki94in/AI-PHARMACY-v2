@@ -32,7 +32,8 @@ async function initOrdersTable(db: any) {
       pharmarack_scheme TEXT,
       advance_payment REAL DEFAULT 0.0,
       source TEXT,
-      source_refill_id INTEGER DEFAULT NULL
+      source_refill_id INTEGER DEFAULT NULL,
+      cart_add_error TEXT DEFAULT NULL
     )
   `);
   // Try adding columns if they do not exist
@@ -71,6 +72,9 @@ async function initOrdersTable(db: any) {
   } catch (_) {}
   try {
     await db.exec('ALTER TABLE special_orders ADD COLUMN advance_payment REAL DEFAULT 0.0');
+  } catch (_) {}
+  try {
+    await db.exec('ALTER TABLE special_orders ADD COLUMN cart_add_error TEXT DEFAULT NULL');
   } catch (_) {}
 }
 
@@ -493,10 +497,10 @@ router.get('/uncollected-alerts', async (_req, res) => {
 // Update order status/details
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { 
+  const {
     status, priority, qty, product, requester, phone,
     pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped,
-    advance_payment
+    advance_payment, cart_add_error
   } = req.body;
   try {
     const db = await dbManager.getConnection();
@@ -519,32 +523,92 @@ router.put('/:id', async (req, res) => {
     const newMrp = pharmarack_mrp !== undefined ? pharmarack_mrp : existing.pharmarack_mrp;
     const newMapped = pharmarack_mapped !== undefined ? (pharmarack_mapped ? 1 : 0) : existing.pharmarack_mapped;
     const newAdvancePayment = advance_payment !== undefined ? advance_payment : existing.advance_payment;
+    const newCartAddError = cart_add_error !== undefined ? cart_add_error : existing.cart_add_error;
 
     await db.run(
-      `UPDATE special_orders 
+      `UPDATE special_orders
        SET status = ?, priority = ?, qty = ?, product = ?, requester = ?, phone = ?,
            pharmarack_distributor = ?, pharmarack_rate = ?, pharmarack_mrp = ?, pharmarack_mapped = ?,
-           advance_payment = ?
+           advance_payment = ?, cart_add_error = ?
        WHERE id = ?`,
-      [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, id]
+      [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, newCartAddError, id]
     );
 
-    // If status changes to 'Ready' and the customer wasn't notified, auto send consolidated WhatsApp
-    if (newStatus === 'Ready' && existing.status !== 'Ready' && newPhone) {
+    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller
+    if (newStatus === 'Ready' && newPhone) {
       try {
-        const { sendConsolidatedSpecialOrderNotification } = await import('../services/refillService.js');
-        await sendConsolidatedSpecialOrderNotification(db, newPhone);
+        const cleanPhone = String(newPhone).replace(/\D/g, '');
+        if (cleanPhone.length >= 10) {
+          const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+          const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db);
+          await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', newRequester || existing.requester || 'Customer');
+          await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ['special_order_arrived', newRequester || existing.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+          );
+        }
       } catch (err) {
-        console.error(`Failed to send consolidated notification from status change handler:`, err);
+        console.error(`Failed to enqueue WhatsApp arrival alert from status change handler:`, err);
       }
     }
 
-        res.json({ success: true, message: 'Order updated successfully' });
+    res.json({ success: true, message: 'Order updated successfully' });
   } catch (err) {
     console.error('Update order error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Update order status specifically (supports POST /:id/status and PUT /:id/status)
+const handleStatusUpdate = async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!status) {
+    return res.status(400).json({ error: 'status is required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    await initOrdersTable(db);
+
+    const existing = await db.get('SELECT * FROM special_orders WHERE id = ?', id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    await db.run('UPDATE special_orders SET status = ? WHERE id = ?', [status, id]);
+
+    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller
+    if (status === 'Ready' && existing.phone) {
+      try {
+        const cleanPhone = String(existing.phone).replace(/\D/g, '');
+        if (cleanPhone.length >= 10) {
+          const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+          const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db);
+          await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', existing.requester || 'Customer');
+          await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ['special_order_arrived', existing.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+          );
+        }
+      } catch (err) {
+        console.error(`Failed to enqueue WhatsApp arrival alert from status change handler:`, err);
+      }
+    }
+
+    res.json({ success: true, message: `Order status updated to ${status}` });
+  } catch (err: any) {
+    console.error('Update order status error:', err);
+    res.status(500).json({ error: 'Internal server error: ' + (err?.message || '') });
+  }
+};
+
+router.post('/:id/status', handleStatusUpdate);
+router.put('/:id/status', handleStatusUpdate);
 
 // Delete an order
 router.delete('/:id', async (req, res) => {

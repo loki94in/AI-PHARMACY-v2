@@ -2297,7 +2297,7 @@ const POS = () => {
                         }
 
                         if (advAmount > 0) {
-                          setDiscount(prev => prev + advAmount);
+                          setDiscount((prev: number) => prev + advAmount);
                           toastEvent.trigger(`Added "${targetProductName}" & applied ₹${advAmount.toFixed(2)} advance payment credit!`, 'success');
                         } else {
                           toastEvent.trigger(`Added "${targetProductName}" to POS cart!`, 'success');
@@ -3772,6 +3772,48 @@ const POS = () => {
               <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
                 <span className="text-muted font-medium">Total Amount:</span>
                 <span className="font-mono font-black text-primary text-sm">₹{lastSavedGrandTotal}</span>
+              </div>
+            </div>
+
+            {/* Hidden printable bill container for window.print() */}
+            <div id="printable-bill" className="hidden">
+              <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#000' }}>AI PHARMACY OS</h2>
+                <p style={{ fontSize: '12px', color: '#555', margin: '0' }}>Tax Invoice / Retail Counter Receipt</p>
+                <div style={{ borderBottom: '1px solid #ddd', margin: '10px 0' }}></div>
+              </div>
+              <div style={{ fontSize: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', color: '#000' }}>
+                <div>
+                  <p style={{ margin: '2px 0' }}><strong>Invoice No:</strong> #{lastSavedInvoiceNo}</p>
+                  <p style={{ margin: '2px 0' }}><strong>Customer:</strong> {lastSavedPatientName}</p>
+                  {lastSavedPatientPhone && <p style={{ margin: '2px 0' }}><strong>Phone:</strong> {lastSavedPatientPhone}</p>}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ margin: '2px 0' }}><strong>Date:</strong> {new Date().toLocaleDateString()}</p>
+                  <p style={{ margin: '2px 0' }}><strong>Payment:</strong> {lastSavedPaymentMedium}</p>
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '15px', color: '#000' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #000', textTransform: 'uppercase' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 0' }}>Item Name</th>
+                    <th style={{ textAlign: 'left', padding: '6px 0' }}>Batch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lastSavedItems.map((item: any, idx: number) => (
+                    <tr key={idx} style={{ borderBottom: '1px border-dotted #ccc' }}>
+                      <td style={{ padding: '6px 0' }}>{item.name}</td>
+                      <td style={{ padding: '6px 0' }}>{item.batch}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#000' }}>
+                Grand Total: ₹{Number(lastSavedGrandTotal).toFixed(2)}
+              </div>
+              <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '11px', color: '#777' }}>
+                Thank you for your visit! &middot; Get Well Soon
               </div>
             </div>
 

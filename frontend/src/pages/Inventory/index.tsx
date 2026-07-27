@@ -556,7 +556,7 @@ const Inventory = () => {
                   >
                     {/* Medicine — always visible */}
                     <td className="p-4 text-sm font-semibold flex-1 flex items-center gap-2 truncate">
-                      <span className="truncate">{item.name}</span>
+                      <span className="truncate">{item.name || item.medicine_name || item.batch_number || 'Unnamed Item'}</span>
                       {hasPending && (
                         <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold animate-pulse shrink-0">
                           ⚠️ Requested ({pendingMatches[0].qty})

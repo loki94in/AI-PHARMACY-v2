@@ -43,7 +43,7 @@ export function KeepAliveOutlet({ routes, notFoundElement }: Props) {
         if (!route) return null;
         const isActive = path === currentPath;
         return (
-          <div key={path} style={{ display: isActive ? 'contents' : 'none' }}>
+          <div key={path} style={{ display: isActive ? 'flex' : 'none' }} className="h-full w-full flex-1 flex flex-col min-h-0">
             <PageActiveProvider value={isActive}>
               <PageErrorBoundary pagePath={path}>
                 {route.element}

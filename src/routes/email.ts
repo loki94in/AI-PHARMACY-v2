@@ -257,9 +257,18 @@ router.post('/attachments/parse', async (req, res) => {
     return res.status(400).json({ error: 'filename is required' });
   }
   try {
-    const filePath = path.resolve(getUploadsDir(), filename);
+    let filePath = path.resolve(getUploadsDir(), filename);
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Attachment file not found' });
+      const db = await dbManager.getConnection();
+      const att = await db.get(
+        'SELECT local_path FROM email_attachments WHERE filename = ? OR filename LIKE ? OR local_path LIKE ?',
+        [filename, `%${filename}%`, `%${filename}%`]
+      );
+      if (att && att.local_path && fs.existsSync(att.local_path)) {
+        filePath = att.local_path;
+      } else {
+        return res.status(404).json({ error: 'Attachment file not found' });
+      }
     }
 
     const result = await emailService.parseAndImportAttachment(filePath, importData);
@@ -268,7 +277,7 @@ router.post('/attachments/parse', async (req, res) => {
   } catch (error: any) {
     console.error('Failed to parse attachment:', error);
     eventService.broadcast('email_update', { success: false, error: error.message || 'Failed to parse attachment' });
-    res.status(500).json({ error: 'Failed to parse attachment' });
+    res.status(500).json({ error: 'Failed to parse attachment: ' + (error.message || '') });
   }
 });
 

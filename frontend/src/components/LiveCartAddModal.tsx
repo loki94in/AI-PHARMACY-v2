@@ -589,7 +589,14 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const searchResults = await api.searchPharmarack(order.product);
       if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${order.product}"`, 'error');
+        const reason = `No Pharmarack matches found for "${order.product}"`;
+        toastEvent.trigger(reason, 'error');
+        try {
+          await api.updateOrder(order.id, { cart_add_error: reason });
+          window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        } catch (persistErr) {
+          console.error('Failed to persist cart_add_error on order:', persistErr);
+        }
         setDistributorPickerOrderId(null);
         return;
       }
@@ -611,7 +618,14 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       setDistributorPickerResults(mapped);
     } catch (err: any) {
       console.error('Failed to search distributors for order:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
+      const reason = err?.response?.data?.error || 'Failed to search distributors';
+      toastEvent.trigger(reason, 'error');
+      try {
+        await api.updateOrder(order.id, { cart_add_error: `Search failed: ${reason}` });
+        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      } catch (persistErr) {
+        console.error('Failed to persist cart_add_error on order:', persistErr);
+      }
       setDistributorPickerOrderId(null);
     } finally {
       setDistributorPickerLoading(false);
@@ -637,18 +651,32 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const res = await api.addPharmarackCart(payload);
       if (res && res.success) {
         toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success');
-        await api.updateOrder(order.id, { status: 'Ordered' });
+        await api.updateOrder(order.id, { status: 'Ordered', cart_add_error: null });
         setDistributorPickerOrderId(null);
         setDistributorPickerResults([]);
         await fetchCart();
         await fetchPendingOrders();
         window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
       } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
+        const reason = res?.error || 'Failed to add item to cart';
+        toastEvent.trigger(reason, 'error');
+        try {
+          await api.updateOrder(order.id, { cart_add_error: reason });
+          window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        } catch (persistErr) {
+          console.error('Failed to persist cart_add_error on order:', persistErr);
+        }
       }
     } catch (err: any) {
       console.error('Failed to add pending order to cart:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
+      const reason = err?.response?.data?.error || 'Failed to add item to cart';
+      toastEvent.trigger(reason, 'error');
+      try {
+        await api.updateOrder(order.id, { cart_add_error: reason });
+        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      } catch (persistErr) {
+        console.error('Failed to persist cart_add_error on order:', persistErr);
+      }
     } finally {
       setAddingOrderId(null);
     }
@@ -1429,7 +1457,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           className={`transition-colors cursor-pointer ${
                             inCart ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
                           }`}
-                          onClick={() => !inCart && handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id)}
+                          onClick={() => !inCart && handleTransferToSearch(refill.medicine_name || '', 1, undefined, refill.id)}
                         >
                           <td className="py-2.5 px-1">
                             <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
@@ -1449,7 +1477,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleTransferToSearch(refill.medicine_name, 1, undefined, refill.id);
+                                  handleTransferToSearch(refill.medicine_name || '', 1, undefined, refill.id);
                                 }}
                                 className="text-[10px] font-bold text-amber-400 hover:text-amber-300 transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded border border-amber-500/30 cursor-pointer"
                                 title="Transfer medicine to Search box"

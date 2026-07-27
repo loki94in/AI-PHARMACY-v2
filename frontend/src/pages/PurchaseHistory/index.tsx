@@ -213,7 +213,7 @@ const PurchaseHistory = () => {
   const openEdit = async (id: number) => {
     try {
       const data = await api.getPurchase(id);
-      navigate('/manual-purchase', {
+      navigate('/purchases', {
         state: {
           prefilledPurchase: {
             editPurchaseId: data.purchase.id,
@@ -308,30 +308,30 @@ const PurchaseHistory = () => {
   };
 
   return (
-    <div className="h-full flex flex-col pt-1 px-4 gap-0 pb-4 animate-in fade-in duration-500">
+    <div className="h-full flex-1 flex flex-col pt-1 px-4 gap-0 pb-4 animate-in fade-in duration-500 min-h-0">
       {/* Tabs */}
-      <div className="flex border-b border-glass-border/30 mb-0">
+      <div className="flex border-b border-glass-border/30 mb-0 select-none">
         <button
           onClick={() => setActiveTab('history')}
-          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
             activeTab === 'history'
               ? 'border-primary text-primary'
-              : 'border-transparent text-gray-400 hover:text-white'
+              : 'border-transparent text-muted hover:text-text'
           }`}
         >
           Purchase History
         </button>
         <button
           onClick={() => setActiveTab('reconciliation')}
-          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 ${
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
             activeTab === 'reconciliation'
               ? 'border-primary text-primary'
-              : 'border-transparent text-gray-400 hover:text-white'
+              : 'border-transparent text-muted hover:text-text'
           }`}
         >
           Reconcile Distributor Orders
           {getUnreconciledCount() > 0 && (
-            <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
+            <span className="bg-red text-white text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
               {getUnreconciledCount()} Missing
             </span>
           )}
@@ -339,60 +339,77 @@ const PurchaseHistory = () => {
       </div>
 
       {activeTab === 'history' ? (
-        <>
-          {/* Purchase History Tab */}
-          {/* Purchase Analytics */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-white/10 backdrop-blur-lg border border-white/20 border-b-0 rounded-t-xl z-30 relative">
-            <div className="p-5 border-r border-white/10">
-              <p className="text-gray-400 text-sm mb-1">Total Purchases</p>
-              <p className="text-2xl font-bold text-white">{totalPurchases}</p>
+        <div className="glass-panel flex-1 flex flex-col overflow-hidden mt-3">
+          {/* Purchase Analytics Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-bg2/40 border-b border-glass-border text-xs shrink-0 select-none">
+            <div className="p-4 border-r border-glass-border/30 flex flex-col gap-0.5">
+              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Purchases</span>
+              <span className="text-xl font-bold text-text font-mono">{totalPurchases}</span>
             </div>
-            <div className="p-5 border-r border-white/10">
-              <p className="text-gray-400 text-sm mb-1">Total Value</p>
-              <p className="text-2xl font-bold text-primary">₹{totalAmount.toFixed(2)}</p>
+            <div className="p-4 border-r border-glass-border/30 flex flex-col gap-0.5">
+              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Value</span>
+              <span className="text-xl font-bold text-primary font-mono">₹{totalAmount.toFixed(2)}</span>
             </div>
-            <div className="p-5">
-              <p className="text-gray-400 text-sm mb-1">Total Paid</p>
-              <p className="text-2xl font-bold text-green-400">₹{paidAmount.toFixed(2)}</p>
+            <div className="p-4 flex flex-col gap-0.5">
+              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Paid</span>
+              <span className="text-xl font-bold text-green font-mono">₹{paidAmount.toFixed(2)}</span>
             </div>
           </div>
 
-          {/* Filters & Search */}
-          <div className="bg-white/10 backdrop-blur-lg rounded-none p-5 border border-white/20 border-b-0 relative z-20 flex flex-col md:flex-row gap-4 items-center">
-            <div className="flex-1 w-full relative">
+          {/* Search bar */}
+          <div className="px-4 py-3 border-b border-glass-border/30 bg-bg3/30 flex items-center justify-between gap-3 shrink-0">
+            <div className="flex-1 relative">
               <input
                 type="text"
                 placeholder="Search by order ID, invoice number, or product name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-3 bg-black/20 border border-glass-border rounded-xl text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all shadow-inner"
+                className="w-full px-4 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleExport('csv')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                title="Export to CSV"
+              >
+                <Download size={13} />
+                CSV
+              </button>
+              <button
+                onClick={() => handleExport('pdf')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                title="Export to PDF"
+              >
+                <Download size={13} />
+                PDF
+              </button>
             </div>
           </div>
 
-          {/* Table */}
-          <div className="bg-white/10 backdrop-blur-lg rounded-b-xl border border-white/20 flex-1 flex flex-col min-h-0 relative z-10 overflow-hidden shadow-2xl">
+          {/* Table Container */}
+          <div className="flex-1 flex flex-col min-h-0 relative overflow-hidden">
             {isFetching && items.length === 0 ? (
-              <div className="p-8 text-center text-gray-400">
+              <div className="p-8 text-center text-muted font-semibold">
                 <div className="flex justify-center items-center gap-2">
-                  <Loader2 size={20} className="animate-spin text-primary" />
+                  <Loader2 size={18} className="animate-spin text-primary" />
                   Loading history...
                 </div>
               </div>
             ) : items.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-12">
-                <AlertCircle size={48} className="mb-4 opacity-20" />
-                <p className="text-lg font-bold text-white">No transactions found</p>
-                <p className="text-sm opacity-70">Try adjusting your search or filters</p>
+              <div className="flex-1 flex flex-col items-center justify-center text-muted p-12">
+                <AlertCircle size={40} className="mb-3 opacity-30 text-muted" />
+                <p className="text-base font-bold text-text">No transactions found</p>
+                <p className="text-xs opacity-70 mt-1">Try adjusting your search or filters</p>
               </div>
             ) : (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <InfiniteTable
                   totalSize={rowVirtualizer.getTotalSize()}
                   containerRef={parentRef}
-                  className="border-0 bg-transparent text-sm"
+                  className="border-0 bg-transparent text-xs"
                   header={
-                    <tr className="flex items-center min-w-[1000px] bg-black/40 border-b border-glass-border/50 text-sm font-semibold text-gray-300 select-none align-top">
+                    <tr className="flex items-center min-w-[1000px] bg-bg2/95 border-b border-glass-border text-xs font-bold text-muted uppercase tracking-wider select-none align-top">
                       <th className="w-32 shrink-0 px-6 py-4">
                         <div className="flex flex-col gap-1.5">
                           <span>Purchase ID</span>
@@ -496,32 +513,32 @@ const PurchaseHistory = () => {
                           size={virtualRow.size}
                           className="min-w-[1000px] border-b border-glass-border/30 hover:bg-white/5 transition-colors items-center flex"
                         >
-                          <td className="w-32 shrink-0 px-6 py-4 text-gray-300 font-mono">
+                          <td className="w-32 shrink-0 px-6 py-4 text-muted font-mono">
                             #{tx.id.toString().padStart(6, '0')}
                           </td>
-                          <td className="flex-1 min-w-[200px] px-6 py-4 text-white font-medium truncate" title={tx.distributor_name}>
+                          <td className="flex-1 min-w-[200px] px-6 py-4 text-text font-medium truncate" title={tx.distributor_name}>
                             {tx.distributor_name || '-'}
                           </td>
-                          <td className="w-40 shrink-0 px-6 py-4 text-gray-300 font-mono text-xs truncate" title={tx.invoice_no}>
+                          <td className="w-40 shrink-0 px-6 py-4 text-muted font-mono text-xs truncate" title={tx.invoice_no}>
                             {tx.invoice_no || '-'}
                           </td>
-                          <td className="w-48 shrink-0 px-6 py-4 text-gray-400 whitespace-nowrap">
+                          <td className="w-48 shrink-0 px-6 py-4 text-muted whitespace-nowrap">
                             {formatDisplayDate(tx.date)}
-                            <div className="text-xs text-gray-500 mt-0.5">
+                            <div className="text-xs text-muted/60 mt-0.5">
                               {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
                           </td>
-                          <td className="w-28 shrink-0 text-right px-6 py-4 text-gray-300 font-medium">
+                          <td className="w-28 shrink-0 text-right px-6 py-4 text-muted font-medium">
                             {tx.total_qty || 0}
                           </td>
                           <td className="w-40 shrink-0 text-right px-6 py-4 whitespace-nowrap">
                             {tx.cn_amount && tx.cn_amount > 0 ? (
                               <div className="flex flex-col items-end">
                                 <div className="flex items-center gap-1.5 justify-end">
-                                  <span className="text-xs text-gray-500 line-through">
+                                  <span className="text-xs text-muted/60 line-through">
                                     ₹{(tx.original_amount || (tx.total_amount + tx.cn_amount)).toFixed(2)}
                                   </span>
-                                  <span className="text-white font-medium">
+                                  <span className="text-text font-medium">
                                     ₹{tx.total_amount?.toFixed(2) || '0.00'}
                                   </span>
                                 </div>
@@ -530,17 +547,17 @@ const PurchaseHistory = () => {
                                 </span>
                               </div>
                             ) : (
-                              <span className="text-white font-medium">
+                              <span className="text-text font-medium">
                                 ₹{tx.total_amount?.toFixed(2) || '0.00'}
                               </span>
                             )}
                           </td>
                           <td className="w-32 shrink-0 text-center px-6 py-4">
                             <div className="flex items-center justify-center gap-2">
-                              <button onClick={() => openView(tx.id)} className="text-gray-400 hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
+                              <button onClick={() => openView(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
                                 <Eye size={16} />
                               </button>
-                              <button onClick={() => openEdit(tx.id)} className="text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-blue-400/10" title="Edit Purchase">
+                              <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-blue-400 transition-colors p-1 rounded hover:bg-blue-400/10" title="Edit Purchase">
                                 <Edit size={16} />
                               </button>
                               <button 
@@ -554,7 +571,7 @@ const PurchaseHistory = () => {
                                     });
                                   }
                                 }}
-                                className="text-gray-400 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10" title="Delete Purchase"
+                                className="text-muted hover:text-red transition-colors p-1 rounded hover:bg-red/10" title="Delete Purchase"
                               >
                                 <Trash2 size={16} />
                               </button>
@@ -580,7 +597,7 @@ const PurchaseHistory = () => {
               </div>
             )}
           </div>
-        </>
+        </div>
       ) : (
         <>
           {/* Reconciliation Tab */}
