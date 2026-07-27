@@ -926,7 +926,8 @@ export default function PharmarackCart() {
   };
 
   const buildDistributorOrderMessage = (dist: Distributor) => {
-    const deliveryStaff = dist.deliveryPersons.length > 0 ? dist.deliveryPersons[0] : null;
+    // Use system-registered delivery boy (has whatsapp_number) as the pickup staff
+    const registeredBoy = deliveryBoysList.length > 0 ? deliveryBoysList[0] : null;
 
     const formatPhone = (raw: string) => {
       if (!raw) return '';
@@ -943,7 +944,8 @@ export default function PharmarackCart() {
     const email = storeInfo.email || 'him.94.walhekar@gmail.com';
     const fileFormat = storeInfo.invoiceFileFormat ? storeInfo.invoiceFileFormat.replace(' File Format', '') : 'CSV';
 
-    let msg = `🏬 NEW STOCK ORDER – ${storeName}\n\n`;
+    // ponytail: header is fixed app name, not the pharmacy store name
+    let msg = `AI Pharmacy Genius OS\n\n`;
     msg += `📋 Pharmacy Details\n`;
     msg += `• Store: ${storeName}\n`;
     msg += `• Phone: ${storePhone}\n`;
@@ -956,10 +958,10 @@ export default function PharmarackCart() {
     }
     msg += `• Requested Format: ${fileFormat}\n`;
 
-    // Dynamic Delivery Boy & Pickup Staff Contacts section if registered
-    if (deliveryStaff?.name) {
-      const staffPhone = formatPhone((deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || '');
-      msg += `• Staff: ${deliveryStaff.name}${staffPhone ? ` (${staffPhone})` : ''}\n`;
+    // Delivery boy section: use system-registered boy (has name + whatsapp_number)
+    if (registeredBoy?.name) {
+      const staffPhone = formatPhone(registeredBoy.whatsapp_number || '');
+      msg += `• Delivery Boy: ${registeredBoy.name}${staffPhone ? ` (${staffPhone})` : ''}\n`;
     }
 
     msg += `\n📦 Order Details\n`;
