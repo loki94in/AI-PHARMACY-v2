@@ -8,7 +8,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, liveCartAddEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
@@ -639,7 +639,8 @@ const RefillsSection: React.FC = () => {
                         {/* Edit Frequency Slider Button */}
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingRefill({ id: med.id, currentInterval: med.refill_interval_days || 30, name: med.medicine_name });
                             setEditIntervalVal(med.refill_interval_days || 30);
                           }}
@@ -653,7 +654,10 @@ const RefillsSection: React.FC = () => {
                         {/* Pause / Resume Toggle Button */}
                         <button
                           type="button"
-                          onClick={() => handleTogglePauseRefill(med.id, med.is_active !== 0)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTogglePauseRefill(med.id, med.is_active !== 0);
+                          }}
                           className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
                             med.is_active !== 0
                               ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-400'
@@ -668,7 +672,10 @@ const RefillsSection: React.FC = () => {
                         {!isCanceled && (
                           <button
                             type="button"
-                            onClick={() => handleCancelRefill(med.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelRefill(med.id);
+                            }}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-bold transition-all cursor-pointer"
                             title="Cancel and archive this refill schedule"
                           >
@@ -696,7 +703,10 @@ const RefillsSection: React.FC = () => {
 
                         <button
                           type="button"
-                          onClick={() => handleAddRefillShortageToCart(med.medicine_name, cartOrderQty)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddRefillShortageToCart(med.medicine_name, cartOrderQty);
+                          }}
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-[10px] font-bold transition-all cursor-pointer shadow-xs"
                           title={`Add ${cartOrderQty} unit(s) of "${med.medicine_name}" directly to Pharmarack Live Cart`}
                         >

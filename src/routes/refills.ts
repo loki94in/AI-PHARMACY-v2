@@ -125,7 +125,7 @@ router.put('/:id', async (req, res) => {
     const updatedMedicineId = medicine_id !== undefined ? medicine_id : refill.medicine_id;
     const updatedInterval = refill_interval_days !== undefined ? parseIntervalDays(refill_interval_days) : refill.refill_interval_days;
     const updatedNextDate = next_refill_date !== undefined ? next_refill_date : refill.next_refill_date;
-    const updatedStatus = status !== undefined ? status : refill.status;
+    const updatedStatus = (status !== undefined && (status === 'pending' || status === 'notified')) ? status : refill.status;
     const updatedHold = hold_for_stock !== undefined ? parseInt(hold_for_stock, 10) : refill.hold_for_stock;
     const updatedIsActive = is_active !== undefined ? (is_active ? 1 : 0) : (refill.is_active !== undefined ? refill.is_active : 1);
     const updatedIsReady = req.body.is_ready !== undefined ? (req.body.is_ready ? 1 : 0) : refill.is_ready;
@@ -300,7 +300,7 @@ router.get('/panel', async (req, res) => {
         hold_for_stock: row.hold_for_stock || 0,
         is_ready: row.is_ready || 0,
         is_active: row.is_active !== undefined ? row.is_active : 1,
-        status: row.status || (row.is_active === 0 ? 'paused' : 'active'),
+        status: row.is_active === 0 ? 'paused' : (row.status || 'pending'),
         quick_bill_id: row.quick_bill_id
       });
     }
@@ -323,15 +323,18 @@ router.post('/:id/toggle-pause', async (req, res) => {
       return res.status(404).json({ error: 'Refill record not found' });
     }
 
-    const newIsActive = refill.is_active === 1 ? 0 : 1;
-    const newStatus = newIsActive === 1 ? 'active' : 'paused';
+    const newIsActive = (refill.is_active === 0) ? 1 : 0;
 
     await db.run(
-      'UPDATE patient_refills SET is_active = ?, status = ? WHERE id = ?',
-      [newIsActive, newStatus, id]
+      'UPDATE patient_refills SET is_active = ? WHERE id = ?',
+      [newIsActive, id]
     );
 
-    res.json({ success: true, is_active: newIsActive, status: newStatus, message: `Refill schedule ${newStatus === 'paused' ? 'paused' : 'resumed'} successfully` });
+    res.json({
+      success: true,
+      is_active: newIsActive,
+      message: `Refill schedule ${newIsActive === 0 ? 'paused' : 'resumed'} successfully`
+    });
   } catch (err: any) {
     console.error('Failed to toggle refill pause:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
@@ -345,7 +348,7 @@ router.post('/:id/cancel', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     await db.run(
-      "UPDATE patient_refills SET is_active = 0, status = 'canceled' WHERE id = ?",
+      'UPDATE patient_refills SET is_active = 0 WHERE id = ?',
       [id]
     );
     res.json({ success: true, message: 'Refill schedule canceled successfully' });
