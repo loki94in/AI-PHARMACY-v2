@@ -1674,11 +1674,19 @@ router.get('/reconciliation', async (req, res) => {
     // Cap query to emails from the last 30 days
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     
-    // Fetch all emails that are flagged as orders
+    // Fetch all emails that are flagged as orders or have order/invoice indicators
     const orderEmails = await db.all(`
       SELECT uid, from_addr, subject, body, date, is_seen, is_saved, distributor_name, has_attachments, medicine_names, extracted_invoice_no, extracted_distributor
       FROM emails 
-      WHERE is_order = 1 AND date >= ?
+      WHERE (is_order = 1 
+         OR has_attachments = 1 
+         OR LOWER(subject) LIKE '%invoice%' 
+         OR LOWER(subject) LIKE '%inv%' 
+         OR LOWER(subject) LIKE '%bill%' 
+         OR LOWER(subject) LIKE '%order%' 
+         OR LOWER(subject) LIKE '%dispatch%'
+         OR LOWER(subject) LIKE '%tax%')
+        AND date >= ?
       ORDER BY uid DESC
     `, [thirtyDaysAgo]);
 
@@ -1704,6 +1712,7 @@ router.get('/reconciliation', async (req, res) => {
       email_uid: number;
       from: string;
       subject: string;
+      body_snippet: string;
       date: string;
       is_seen: boolean;
       is_saved: boolean;
@@ -1789,11 +1798,14 @@ router.get('/reconciliation', async (req, res) => {
         content_type: a.content_type
       }));
 
+      const bodySnippet = (email.body || '').replace(/\s+/g, ' ').substring(0, 300);
+
       if (!grouped.has(key)) {
         grouped.set(key, {
           email_uid: email.uid,
           from: email.from_addr,
           subject: email.subject,
+          body_snippet: bodySnippet,
           date: email.date,
           is_seen: email.is_seen === 1,
           is_saved: email.is_saved === 1,
@@ -1923,6 +1935,7 @@ router.get('/reconciliation', async (req, res) => {
         email_uid: group.email_uid,
         from: group.from,
         subject: group.subject,
+        body_snippet: group.body_snippet,
         date: group.date,
         is_seen: group.is_seen,
         is_saved: group.is_saved,
@@ -1959,7 +1972,7 @@ router.post('/reconciliation/resolve', async (req, res) => {
     const db = await dbManager.getConnection();
     const email = await db.get('SELECT * FROM emails WHERE uid = ?', [email_uid]);
     if (!email) {
-            return res.status(404).json({ error: 'Email not found' });
+      return res.status(404).json({ error: 'Email not found' });
     }
 
     await db.run('UPDATE emails SET is_saved = 1, is_seen = 1 WHERE uid = ?', [email_uid]);
@@ -1967,7 +1980,7 @@ router.post('/reconciliation/resolve', async (req, res) => {
       'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
       ['EMAIL_ORDER_RESOLVED_MANUALLY', `Manually reconciled email order from: ${email.from_addr}, subject: ${email.subject}`]
     );
-        res.json({ success: true, message: 'Email order marked as reconciled' });
+    res.json({ success: true, message: 'Email order marked as reconciled' });
   } catch (error) {
     console.error('Resolve email order error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -1987,7 +2000,7 @@ router.post('/reconciliation/reissue', async (req, res) => {
     // 1. Fetch the email
     const email = await db.get('SELECT * FROM emails WHERE uid = ?', [email_uid]);
     if (!email) {
-            return res.status(404).json({ error: 'Email not found' });
+      return res.status(404).json({ error: 'Email not found' });
     }
 
     // 2. Fetch attachments
@@ -2030,8 +2043,8 @@ router.post('/reconciliation/reissue', async (req, res) => {
         parsedItems.push({
           name: item.name,
           quantity: parseInt(item.quantity) || 10,
-          rate: 10,
-          mrp: 15,
+          rate: 0,
+          mrp: 0,
           batch_no: 'B-REISSUE-' + Date.now().toString().slice(-4),
           expiry_date: '2028-12-31',
           free_qty: 0
@@ -2040,7 +2053,7 @@ router.post('/reconciliation/reissue', async (req, res) => {
     }
 
     if (parsedItems.length === 0) {
-            return res.status(400).json({ error: 'No items could be parsed from email body or attachments.' });
+      return res.status(400).json({ error: 'No items could be parsed from email body or attachments.' });
     }
 
     // 5. Begin transaction to reissue order
@@ -2084,22 +2097,15 @@ router.post('/reconciliation/reissue', async (req, res) => {
       }
     }
 
-    // Calculate total amount
-    let subtotal = 0;
-    for (const item of parsedItems) {
-      const qty = item.quantity || 10;
-      const rate = item.rate || 10;
-      subtotal += (qty * rate);
-    }
-
-    // Insert purchase
+    // Insert purchase initial record
     const purchRes = await db.run(
       `INSERT INTO purchases (distributor_id, invoice_no, app_invoice_no, date, total_amount, cgst_value, sgst_value) 
-       VALUES (?, ?, ?, ?, ?, 0, 0)`,
-      [distId, invoiceNo, appInvoiceNo, email.date || new Date().toISOString(), subtotal]
+       VALUES (?, ?, ?, ?, 0, 0, 0)`,
+      [distId, invoiceNo, appInvoiceNo, email.date || new Date().toISOString()]
     );
     const purchaseId = purchRes.lastID;
 
+    let subtotal = 0;
     const uniqueMedicineIds = new Set<number>();
 
     // Process items & update inventory
@@ -2109,7 +2115,13 @@ router.post('/reconciliation/reissue', async (req, res) => {
       if (aliasRow) {
         medId = aliasRow.medicine_id;
       } else {
-        let med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
+        let med = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?) LIMIT 1', [item.name]);
+        if (!med) {
+          med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`${item.name}%`]);
+        }
+        if (!med) {
+          med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
+        }
         if (med) {
           medId = med.id;
         } else {
@@ -2125,8 +2137,35 @@ router.post('/reconciliation/reissue', async (req, res) => {
       const rawExpiry = item.expiry_date || '2028-12-31';
       const qty = item.quantity || 10;
       const freeQty = item.free_qty || 0;
-      const rate = item.rate || 10;
-      const mrp = item.mrp || 15;
+
+      // Price lookup: if rate or mrp is missing/0, retrieve historical pricing from inventory or previous purchase items
+      let rate = Number(item.rate) || 0;
+      let mrp = Number(item.mrp) || 0;
+
+      if (!rate || rate <= 0 || !mrp || mrp <= 0) {
+        const histInv = await db.get(
+          'SELECT cost_price, mrp FROM inventory_master WHERE medicine_id = ? AND cost_price > 0 ORDER BY id DESC LIMIT 1',
+          [medId]
+        );
+        if (histInv && histInv.cost_price > 0) {
+          if (!rate || rate <= 0) rate = Number(histInv.cost_price);
+          if (!mrp || mrp <= 0) mrp = Number(histInv.mrp);
+        } else {
+          const histPur = await db.get(
+            'SELECT cost_price, mrp FROM purchase_items WHERE medicine_id = ? AND cost_price > 0 ORDER BY id DESC LIMIT 1',
+            [medId]
+          );
+          if (histPur && histPur.cost_price > 0) {
+            if (!rate || rate <= 0) rate = Number(histPur.cost_price);
+            if (!mrp || mrp <= 0) mrp = Number(histPur.mrp);
+          }
+        }
+      }
+
+      if (!rate) rate = 0;
+      if (!mrp) mrp = rate > 0 ? parseFloat((rate * 1.2).toFixed(2)) : 0;
+
+      subtotal += (qty * rate);
 
       // Insert purchase_items
       await db.run(`
@@ -2148,6 +2187,9 @@ router.post('/reconciliation/reissue', async (req, res) => {
         `, [medId, totalQty, rawBatch, rawExpiry, rate, mrp]);
       }
     }
+
+    // Update purchases total amount with computed subtotal
+    await db.run('UPDATE purchases SET total_amount = ? WHERE id = ?', [subtotal, purchaseId]);
 
     // Mark email as saved and seen
     await db.run('UPDATE emails SET is_saved = 1, is_seen = 1 WHERE uid = ?', [email_uid]);

@@ -42,7 +42,6 @@ const PurchaseHistory = () => {
   const [colFilterDate, setColFilterDate] = useState('');
   const [colFilterMinAmount, setColFilterMinAmount] = useState('');
   const [colFilterMaxAmount, setColFilterMaxAmount] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
 
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'purchase-history-date-range',
@@ -356,9 +355,9 @@ const PurchaseHistory = () => {
             </div>
           </div>
 
-          {/* Search bar */}
-          <div className="px-4 py-3 border-b border-glass-border/30 bg-bg3/30 flex items-center justify-between gap-3 shrink-0">
-            <div className="flex-1 relative">
+          {/* Search bar & Filter Toolbar */}
+          <div className="px-4 py-3 border-b border-glass-border/30 bg-bg3/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="flex-1 min-w-[260px] relative">
               <input
                 type="text"
                 placeholder="Search by order ID, invoice number, or product name..."
@@ -367,10 +366,36 @@ const PurchaseHistory = () => {
                 className="w-full px-4 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 bg-bg3 border border-glass-border rounded-xl px-3 py-1.5 text-xs text-text">
+                <Calendar size={13} className="text-muted" />
+                <span className="text-muted text-[10px] uppercase font-bold">From:</span>
+                <input
+                  type="date"
+                  value={dateRangeHelper.dateRange.from}
+                  onChange={(e) => dateRangeHelper.handleFromChange(e.target.value)}
+                  className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
+                />
+                <span className="text-muted text-[10px] uppercase font-bold ml-1">To:</span>
+                <input
+                  type="date"
+                  value={dateRangeHelper.dateRange.to}
+                  onChange={(e) => dateRangeHelper.handleToChange(e.target.value)}
+                  className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
+                />
+                {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
+                  <button
+                    onClick={() => dateRangeHelper.clearFilters()}
+                    className="text-[10px] text-red font-bold hover:underline ml-1 cursor-pointer"
+                    title="Clear Date Range"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <button
                 onClick={() => handleExport('csv')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
                 title="Export to CSV"
               >
                 <Download size={13} />
@@ -378,7 +403,7 @@ const PurchaseHistory = () => {
               </button>
               <button
                 onClick={() => handleExport('pdf')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
                 title="Export to PDF"
               >
                 <Download size={13} />
@@ -511,7 +536,7 @@ const PurchaseHistory = () => {
                           ref={rowVirtualizer.measureElement}
                           start={virtualRow.start}
                           size={virtualRow.size}
-                          className="min-w-[1000px] border-b border-glass-border/30 hover:bg-white/5 transition-colors items-center flex"
+                          className="min-w-[1000px] border-b border-glass-border/30 hover:bg-glass-bg transition-colors items-center flex"
                         >
                           <td className="w-32 shrink-0 px-6 py-4 text-muted font-mono">
                             #{tx.id.toString().padStart(6, '0')}
@@ -542,7 +567,7 @@ const PurchaseHistory = () => {
                                     ₹{tx.total_amount?.toFixed(2) || '0.00'}
                                   </span>
                                 </div>
-                                <span className="text-[10px] text-sky-400 font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 mt-1 transition-all hover:bg-sky-500/25">
+                                <span className="text-[10px] text-primary font-semibold px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 mt-1 transition-all">
                                   CN Applied: -₹{tx.cn_amount.toFixed(2)}
                                 </span>
                               </div>
@@ -557,7 +582,7 @@ const PurchaseHistory = () => {
                               <button onClick={() => openView(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
                                 <Eye size={16} />
                               </button>
-                              <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-blue-400 transition-colors p-1 rounded hover:bg-blue-400/10" title="Edit Purchase">
+                              <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="Edit Purchase">
                                 <Edit size={16} />
                               </button>
                               <button 
@@ -601,27 +626,27 @@ const PurchaseHistory = () => {
       ) : (
         <>
           {/* Reconciliation Tab */}
-          <div className="flex justify-between items-center bg-white/10 backdrop-blur-lg border border-white/20 border-b-0 p-5 rounded-t-xl relative z-20">
+          <div className="flex justify-between items-center bg-bg2 border border-glass-border border-b-0 p-5 rounded-t-xl mt-3">
             <div>
-              <h3 className="text-white font-semibold text-base">Unreconciled Distributor Orders</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <h3 className="text-text font-semibold text-base">Unreconciled Distributor Orders</h3>
+              <p className="text-xs text-muted mt-0.5">
                 Automatically scans incoming email receipts to check if they have been successfully booked to inventory.
               </p>
             </div>
             <button
               onClick={fetchReconciliation}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-glass-border text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+              className="p-2 rounded-lg bg-bg3 hover:bg-glass-bg border border-glass-border text-text text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
             >
               <RefreshCw size={14} className={loadingRecon ? 'animate-spin' : ''} />
               Reload List
             </button>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-lg rounded-b-xl border border-white/20 flex-1 flex flex-col min-h-0 relative z-10 overflow-hidden shadow-2xl">
+          <div className="bg-bg2 rounded-b-xl border border-glass-border flex-1 flex flex-col min-h-0 overflow-hidden shadow-xl">
             <div className="flex-1 overflow-auto">
               <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
-                  <tr className="bg-black/40 border-b border-glass-border/50 text-sm font-semibold text-gray-300">
+                <thead className="sticky top-0 z-10 bg-bg2 border-b border-glass-border">
+                  <tr className="text-xs font-bold text-muted uppercase tracking-wider select-none">
                     <th className="px-6 py-4 whitespace-nowrap">Received Date</th>
                     <th className="px-6 py-4 whitespace-nowrap">Distributor / Sender</th>
                     <th className="px-6 py-4 whitespace-nowrap">Subject Line</th>
@@ -631,63 +656,63 @@ const PurchaseHistory = () => {
                     <th className="px-6 py-4 whitespace-nowrap text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-glass-border/30 text-sm">
+                <tbody className="divide-y divide-glass-border/30 text-xs">
                   {loadingRecon ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center text-gray-400">
+                      <td colSpan={7} className="px-6 py-8 text-center text-muted">
                         <div className="flex justify-center items-center gap-2">
-                          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                          <Loader2 size={18} className="animate-spin text-primary" />
                           Analyzing email receipts...
                         </div>
                       </td>
                     </tr>
                   ) : reconciliationList.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
+                      <td colSpan={7} className="px-6 py-12 text-center text-muted">
                         <div className="flex flex-col items-center justify-center">
-                          <CheckCircle size={48} className="text-green-500 mb-4 opacity-40" />
-                          <p className="text-base font-bold text-white">All Clear!</p>
+                          <CheckCircle size={48} className="text-green mb-4 opacity-40" />
+                          <p className="text-base font-bold text-text">All Clear!</p>
                           <p className="text-xs opacity-70 mt-1">No unreconciled or missing distributor orders detected from emails.</p>
                         </div>
                       </td>
                     </tr>
                   ) : (
                     reconciliationList.map((recon, idx) => (
-                      <tr key={recon.email_uid || idx} className={`hover:bg-white/5 transition-colors ${recon.is_saved ? 'opacity-60' : ''}`}>
-                        <td className="px-6 py-4 text-gray-400 whitespace-nowrap font-mono text-xs">
+                      <tr key={recon.email_uid || idx} className={`hover:bg-glass-bg transition-colors ${recon.is_saved ? 'opacity-60' : ''}`}>
+                        <td className="px-6 py-4 text-muted whitespace-nowrap font-mono">
                           {new Date(recon.date).toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 text-white font-medium">
+                        <td className="px-6 py-4 text-text font-medium">
                           {recon.extracted_distributor}
-                          <div className="text-xs text-gray-500 font-normal mt-0.5 truncate max-w-[200px]">{recon.from}</div>
+                          <div className="text-xs text-muted font-normal mt-0.5 truncate max-w-[200px]">{recon.from}</div>
                         </td>
-                        <td className="px-6 py-4 text-gray-300 max-w-xs truncate">
+                        <td className="px-6 py-4 text-text/80 max-w-xs truncate">
                           {recon.subject}
                         </td>
-                        <td className="px-6 py-4 font-mono text-white text-xs">
+                        <td className="px-6 py-4 font-mono text-text text-xs">
                           {recon.extracted_invoice_no || 'N/A'}
                         </td>
                         <td className="px-6 py-4">
                           {recon.medicine_names && recon.medicine_names.length > 0 ? (
-                            <div className="text-gray-300 max-w-xs truncate" title={recon.medicine_names.join(', ')}>
+                            <div className="text-text/80 max-w-xs truncate" title={recon.medicine_names.join(', ')}>
                               {recon.medicine_names.slice(0, 3).join(', ')}
                               {recon.medicine_names.length > 3 && ` +${recon.medicine_names.length - 3} more`}
                             </div>
                           ) : (
-                            <span className="text-gray-500 text-xs italic">No medicines detected</span>
+                            <span className="text-muted text-xs italic">No medicines detected</span>
                           )}
                         </td>
                         <td className="px-6 py-4 text-center">
                           {recon.is_saved ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border text-green-400 bg-green-400/10 border-green-400/20">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-green bg-green/10 border-green/20">
                               <CheckCircle size={10} className="mr-1" /> Reconciled
                             </span>
                           ) : recon.status === 'Matched' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border text-yellow-400 bg-yellow-400/10 border-yellow-400/20">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-yellow-500 bg-yellow-500/10 border-yellow-500/20">
                               <Clock size={10} className="mr-1" /> Unresolved (Matched)
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border text-red-400 bg-red-400/10 border-red-400/20">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border text-red bg-red/10 border-red/20">
                               <AlertCircle size={10} className="mr-1" /> Missing
                             </span>
                           )}
@@ -696,22 +721,20 @@ const PurchaseHistory = () => {
                           <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => setSelectedOrder(recon)}
-                              className="text-gray-400 hover:text-white transition-colors p-1.5 rounded bg-white/5 hover:bg-white/10 border border-glass-border/30"
-                              title="Investigate Order"
+                              className="text-muted hover:text-text transition-colors p-1.5 rounded bg-bg3 hover:bg-glass-bg border border-glass-border"
+                              title="Investigate Order Raw Data"
                             >
                               <Eye size={14} />
                             </button>
                             {!recon.is_saved && (
-                              <>
-                                <button
-                                  onClick={() => handleReissue(recon.email_uid)}
-                                  disabled={reissuingUid !== null}
-                                  className="text-green-400 hover:text-green-300 transition-colors p-1.5 rounded bg-green-500/10 hover:bg-green-500/20 border border-green-500/20"
-                                  title="Reprocess & Reissue items to inventory"
-                                >
-                                  <RefreshCw size={14} className={reissuingUid === recon.email_uid ? 'animate-spin' : ''} />
-                                </button>
-                              </>
+                              <button
+                                onClick={() => handleReissue(recon.email_uid)}
+                                disabled={reissuingUid !== null}
+                                className="text-green hover:text-green-600 transition-colors p-1.5 rounded bg-green/10 hover:bg-green/20 border border-green/20"
+                                title="Reprocess & Reissue items to inventory"
+                              >
+                                <RefreshCw size={14} className={reissuingUid === recon.email_uid ? 'animate-spin' : ''} />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -727,93 +750,120 @@ const PurchaseHistory = () => {
 
       {/* Investigation Modal */}
       {selectedOrder && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-bg/80 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="glass-panel w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in duration-200">
-            <div className="p-6 border-b border-glass-border/30 flex justify-between items-start">
+            <div className="p-6 border-b border-glass-border flex justify-between items-start bg-bg2">
               <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <h3 className="text-lg font-bold text-text flex items-center gap-2">
                   <AlertCircle size={20} className="text-primary" />
-                  Investigate Distributor Order
+                  Investigate Distributor Order Metadata
                 </h3>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted mt-1">
                   Email UID: #{selectedOrder.email_uid} &middot; Received {new Date(selectedOrder.date).toLocaleString()}
                 </p>
               </div>
               <button
                 onClick={() => setSelectedOrder(null)}
-                className="text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-lg border border-glass-border/30 transition-all text-xl font-bold"
+                className="text-muted hover:text-text bg-bg3 hover:bg-glass-bg p-1.5 rounded-lg border border-glass-border transition-all text-xl font-bold"
               >
                 &times;
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6 text-sm">
+            <div className="p-6 overflow-y-auto max-h-[65vh] space-y-5 text-xs">
               {/* Metadata Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-black/20 p-4 rounded-xl border border-glass-border/20">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-bg3/60 p-4 rounded-xl border border-glass-border">
                 <div>
-                  <span className="text-xs text-gray-400 block mb-1">From (Distributor)</span>
-                  <strong className="text-white text-base">{selectedOrder.extracted_distributor}</strong>
-                  <span className="text-[10px] text-gray-500 block font-mono mt-0.5">{selectedOrder.from}</span>
+                  <span className="text-[10px] text-muted uppercase font-bold block mb-1">From (Distributor / Sender)</span>
+                  <strong className="text-text text-sm block">{selectedOrder.extracted_distributor}</strong>
+                  <span className="text-xs text-muted block font-mono mt-0.5">{selectedOrder.from}</span>
                 </div>
                 <div>
-                  <span className="text-xs text-gray-400 block mb-1">Extracted Invoice No.</span>
-                  <strong className="text-white text-base">{selectedOrder.extracted_invoice_no || 'N/A'}</strong>
+                  <span className="text-[10px] text-muted uppercase font-bold block mb-1">Extracted Invoice No.</span>
+                  <strong className="text-text text-sm block font-mono">{selectedOrder.extracted_invoice_no || 'N/A'}</strong>
                 </div>
               </div>
 
               {/* Email Subject Line */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-sky uppercase tracking-wide">Subject Line</h4>
-                <div className="bg-black/30 p-3 rounded-lg border border-glass-border/10 font-medium text-white">
+              <div className="space-y-1.5">
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Subject Line</h4>
+                <div className="bg-bg3 p-3 rounded-xl border border-glass-border font-medium text-text">
                   {selectedOrder.subject}
                 </div>
               </div>
 
+              {/* Raw Body Snippet */}
+              {selectedOrder.body_snippet && (
+                <div className="space-y-1.5">
+                  <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Raw Email Body Snippet</h4>
+                  <div className="bg-bg3 p-3 rounded-xl border border-glass-border text-muted font-mono text-[11px] leading-relaxed max-h-28 overflow-y-auto">
+                    {selectedOrder.body_snippet}...
+                  </div>
+                </div>
+              )}
+
+              {/* Attachments List */}
+              {selectedOrder.attachments && selectedOrder.attachments.length > 0 && (
+                <div className="space-y-1.5">
+                  <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide flex items-center gap-1">
+                    <Paperclip size={12} /> Email Attachments ({selectedOrder.attachments.length})
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {selectedOrder.attachments.map((att: any, i: number) => (
+                      <div key={i} className="bg-bg3 p-2.5 rounded-xl border border-glass-border flex items-center justify-between">
+                        <span className="text-text font-mono text-xs truncate" title={att.filename}>{att.filename}</span>
+                        {att.size && <span className="text-muted text-[10px] font-mono">{formatBytes(att.size)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Medicines List */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-sky uppercase tracking-wide">Medicines in Order</h4>
+              <div className="space-y-1.5">
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Medicines Detected in Order</h4>
                 {selectedOrder.medicine_names && selectedOrder.medicine_names.length > 0 ? (
-                  <div className="space-y-1.5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {selectedOrder.medicine_names.map((name: string, i: number) => (
-                      <div key={i} className="bg-white/5 border border-glass-border/20 p-3 rounded-xl flex justify-between items-center">
-                        <span className="font-medium text-xs text-gray-300">{name}</span>
+                      <div key={i} className="bg-bg3 border border-glass-border p-2.5 rounded-xl flex justify-between items-center">
+                        <span className="font-medium text-xs text-text">{name}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-gray-500 text-xs italic bg-white/5 p-3 rounded-xl border border-glass-border/20">
-                    No medicines detected in this order
+                  <div className="text-muted text-xs italic bg-bg3 p-3 rounded-xl border border-glass-border">
+                    No medicines detected in this email body or attachment
                   </div>
                 )}
               </div>
 
               {/* Reconciliation Analysis Card */}
               <div>
-                <h4 className="text-xs font-bold text-sky uppercase tracking-wide mb-2">Reconciliation Analysis</h4>
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1.5">Reconciliation Status</h4>
                 {selectedOrder.is_saved ? (
-                  <div className="bg-green-500/10 border border-green-500/20 p-4 rounded-xl text-green-400 flex items-start gap-3">
+                  <div className="bg-green/10 border border-green/20 p-4 rounded-xl text-green flex items-start gap-3">
                     <CheckCircle size={18} className="mt-0.5 flex-shrink-0" />
                     <div>
-                      <strong className="block text-white text-xs">Successfully Reconciled</strong>
-                      <span className="text-xs block mt-0.5">This order is already recorded in the purchase history. No further action is required.</span>
+                      <strong className="block text-text text-xs">Successfully Reconciled</strong>
+                      <span className="text-xs block mt-0.5 opacity-90">This order is already recorded in the purchase history. No further action is required.</span>
                     </div>
                   </div>
                 ) : selectedOrder.status === 'Matched' ? (
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl text-yellow-400 flex items-start gap-3">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl text-yellow-500 flex items-start gap-3">
                     <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
                     <div>
-                      <strong className="block text-white text-xs">Matched in Purchase History</strong>
-                      <span className="text-xs block mt-0.5">An invoice with number <strong>{selectedOrder.extracted_invoice_no}</strong> already exists in the database, but this specific email was not marked as saved. You can mark it as resolved manually.</span>
+                      <strong className="block text-text text-xs">Matched in Purchase History</strong>
+                      <span className="text-xs block mt-0.5 opacity-90">An invoice with number <strong>{selectedOrder.extracted_invoice_no}</strong> already exists in the database, but this specific email was not marked as saved. You can mark it as resolved manually.</span>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-red-400 flex items-start gap-3">
+                  <div className="bg-red/10 border border-red/20 p-4 rounded-xl text-red flex items-start gap-3">
                     <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
                     <div>
-                      <strong className="block text-white text-xs">Missing Order - Action Required</strong>
-                      <span className="text-xs block mt-0.5">This order exists as a distributor email receipt, but is <strong>NOT</strong> recorded in the purchase history and items have <strong>NOT</strong> been delivered to inventory.</span>
-                      <span className="text-xs block mt-1 text-red-300 font-semibold">
-                        💡 Reissuing this order will automatically update inventory and trigger any pending patient refills for these medicines, generating pre-filled checkout bills!
+                      <strong className="block text-text text-xs">Missing Order - Action Required</strong>
+                      <span className="text-xs block mt-0.5 opacity-90">This order exists as a distributor email receipt, but is <strong>NOT</strong> recorded in the purchase history and items have <strong>NOT</strong> been delivered to inventory.</span>
+                      <span className="text-xs block mt-1 text-red font-semibold">
+                        💡 Reissuing this order will automatically update inventory and trigger any pending patient refills for these medicines!
                       </span>
                     </div>
                   </div>
@@ -821,10 +871,10 @@ const PurchaseHistory = () => {
               </div>
             </div>
 
-            <div className="p-6 border-t border-glass-border/30 bg-black/20 flex flex-wrap gap-3 justify-end">
+            <div className="p-4 border-t border-glass-border bg-bg2 flex flex-wrap gap-3 justify-end">
               <button
                 onClick={() => setSelectedOrder(null)}
-                className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-glass-border/40 transition-all"
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
               >
                 Close
               </button>
@@ -833,14 +883,14 @@ const PurchaseHistory = () => {
                   <button
                     onClick={() => handleResolveManually(selectedOrder.email_uid)}
                     disabled={resolvingUid !== null}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 transition-all flex items-center gap-1.5"
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     {resolvingUid === selectedOrder.email_uid ? 'Resolving...' : 'Resolve Manually'}
                   </button>
                   <button
                     onClick={() => handleReissue(selectedOrder.email_uid)}
                     disabled={reissuingUid !== null}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold shadow-lg shadow-green-500/20 transition-all flex items-center gap-1.5"
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     {reissuingUid === selectedOrder.email_uid ? 'Reissuing...' : 'Reprocess & Reissue to Inventory'}
                   </button>
@@ -854,73 +904,73 @@ const PurchaseHistory = () => {
 
       {/* View Purchase Modal */}
       {viewPurchase && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-bg/80 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="glass-panel w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in duration-200">
-            <div className="p-6 border-b border-glass-border/30 flex justify-between items-center bg-black/40">
+            <div className="p-6 border-b border-glass-border flex justify-between items-center bg-bg2">
               <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <h3 className="text-lg font-bold text-text flex items-center gap-2">
                   <Eye size={20} className="text-primary" />
                   View Purchase Invoice: {viewPurchase.purchase.invoice_no || 'N/A'}
                 </h3>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted mt-1">
                   Distributor: {viewPurchase.purchase.distributor_name} &middot; Date: {formatDisplayDate(viewPurchase.purchase.date)}
                 </p>
               </div>
               <button
                 onClick={() => setViewPurchase(null)}
-                className="text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-lg border border-glass-border/30 transition-all text-xl font-bold"
+                className="text-muted hover:text-text bg-bg3 hover:bg-glass-bg p-1.5 rounded-lg border border-glass-border transition-all text-xl font-bold"
               >
                 &times;
               </button>
             </div>
             
             <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-black/20 p-4 rounded-xl border border-glass-border/20">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-bg3 p-4 rounded-xl border border-glass-border">
                  <div>
-                    <span className="text-xs text-gray-500 block mb-1">Invoice No.</span>
-                    <strong className="text-white text-sm">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
+                    <span className="text-xs text-muted block mb-1">Invoice No.</span>
+                    <strong className="text-text text-sm font-mono">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
                  </div>
                  <div>
-                    <span className="text-xs text-gray-500 block mb-1">Date</span>
-                    <strong className="text-white text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
+                    <span className="text-xs text-muted block mb-1">Date</span>
+                    <strong className="text-text text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
                  </div>
                  <div>
-                    <span className="text-xs text-gray-500 block mb-1">Distributor</span>
-                    <strong className="text-white text-sm">{viewPurchase.purchase.distributor_name}</strong>
+                    <span className="text-xs text-muted block mb-1">Distributor</span>
+                    <strong className="text-text text-sm">{viewPurchase.purchase.distributor_name}</strong>
                  </div>
                  <div>
-                    <span className="text-xs text-gray-500 block mb-1">Total Amount</span>
-                    <strong className="text-green-400 text-sm font-bold">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
+                    <span className="text-xs text-muted block mb-1">Total Amount</span>
+                    <strong className="text-green text-sm font-bold font-mono">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
                  </div>
               </div>
 
               {viewPurchase.purchase.cn_amount > 0 && (
-                <div className="bg-sky-950/20 border border-sky-500/20 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 font-bold text-lg font-mono">
+                    <div className="w-10 h-10 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-lg font-mono">
                       CN
                     </div>
                     <div>
-                      <span className="text-xs text-sky-300 font-semibold block">Credit Note Applied</span>
-                      <span className="text-xs text-gray-400 font-mono">No: {viewPurchase.purchase.cn_number || 'N/A'}</span>
+                      <span className="text-xs text-primary font-semibold block">Credit Note Applied</span>
+                      <span className="text-xs text-muted font-mono">No: {viewPurchase.purchase.cn_number || 'N/A'}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="text-right">
-                      <span className="text-xs text-gray-500 block">Original Bill Total</span>
-                      <span className="text-sm text-gray-300 font-medium line-through">
+                      <span className="text-xs text-muted block">Original Bill Total</span>
+                      <span className="text-sm text-muted font-medium line-through">
                         ₹{(viewPurchase.purchase.original_amount || (viewPurchase.purchase.total_amount + viewPurchase.purchase.cn_amount)).toFixed(2)}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs text-sky-400 block">CN Discount</span>
-                      <span className="text-sm text-sky-400 font-semibold">
+                      <span className="text-xs text-primary block">CN Discount</span>
+                      <span className="text-sm text-primary font-semibold">
                         -₹{viewPurchase.purchase.cn_amount.toFixed(2)}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs text-gray-400 block">Net Amount Paid</span>
-                      <span className="text-sm text-green-400 font-bold">
+                      <span className="text-xs text-muted block">Net Amount Paid</span>
+                      <span className="text-sm text-green font-bold">
                         ₹{viewPurchase.purchase.total_amount.toFixed(2)}
                       </span>
                     </div>
@@ -929,10 +979,10 @@ const PurchaseHistory = () => {
               )}
 
               <div>
-                <h4 className="text-sm font-bold text-gray-300 mb-3">Items</h4>
-                <div className="border border-glass-border/20 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-black/40 text-gray-400 border-b border-glass-border/20 text-xs uppercase">
+                <h4 className="text-sm font-bold text-text mb-3">Items</h4>
+                <div className="border border-glass-border rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-bg3 text-muted border-b border-glass-border uppercase font-semibold">
                       <tr>
                         <th className="px-4 py-3">Medicine</th>
                         <th className="px-4 py-3">Batch</th>
@@ -943,16 +993,16 @@ const PurchaseHistory = () => {
                         <th className="px-4 py-3 text-right">MRP</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-glass-border/10">
+                    <tbody className="divide-y divide-glass-border/30">
                       {viewPurchase.items && viewPurchase.items.map((item: any, i: number) => (
-                        <tr key={i} className="hover:bg-white/5">
-                          <td className="px-4 py-3 text-white font-medium">{item.medicine_name}</td>
-                          <td className="px-4 py-3 text-gray-300 font-mono text-xs">{item.batch_no || '-'}</td>
-                          <td className="px-4 py-3 text-gray-300 text-xs">{item.expiry_date || '-'}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">{item.quantity}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">{item.free_qty || 0}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">₹{(Number(item.cost_price) || 0).toFixed(2)}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">₹{(Number(item.mrp) || 0).toFixed(2)}</td>
+                        <tr key={i} className="hover:bg-glass-bg">
+                          <td className="px-4 py-3 text-text font-medium">{item.medicine_name}</td>
+                          <td className="px-4 py-3 text-muted font-mono">{item.batch_no || '-'}</td>
+                          <td className="px-4 py-3 text-muted">{item.expiry_date || '-'}</td>
+                          <td className="px-4 py-3 text-right text-muted">{item.quantity}</td>
+                          <td className="px-4 py-3 text-right text-muted">{item.free_qty || 0}</td>
+                          <td className="px-4 py-3 text-right text-muted font-mono">₹{(Number(item.cost_price) || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right text-muted font-mono">₹{(Number(item.mrp) || 0).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -961,10 +1011,10 @@ const PurchaseHistory = () => {
               </div>
             </div>
             
-            <div className="p-5 border-t border-glass-border/30 bg-black/20 flex justify-end gap-3">
+            <div className="p-5 border-t border-glass-border bg-bg2 flex justify-end gap-3">
               <button
                 onClick={() => setViewPurchase(null)}
-                className="px-5 py-2 text-sm font-bold rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-glass-border/40 transition-all"
+                className="px-5 py-2 text-xs font-bold rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
               >
                 Close Preview
               </button>
@@ -974,7 +1024,7 @@ const PurchaseHistory = () => {
                   setViewPurchase(null);
                   openEdit(idToEdit);
                 }}
-                className="px-5 py-2 text-sm font-bold rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 transition-all flex items-center gap-2"
+                className="px-5 py-2 text-xs font-bold rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-all flex items-center gap-2 cursor-pointer"
               >
                 <Edit size={16} />
                 Edit Purchase
@@ -983,81 +1033,6 @@ const PurchaseHistory = () => {
           </div>
         </div>,
         document.body
-      )}
-          {/* Floating Action Buttons */}
-      {activeTab === 'history' && (
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
-          {/* Drop-up Filter Menu */}
-          {showFilters && (
-            <div className="bg-[#18181b]/95 backdrop-blur-xl border border-glass-border rounded-2xl p-5 shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col gap-4 min-w-[320px]">
-              <div className="flex justify-between items-center mb-1">
-                <h3 className="text-white font-semibold flex items-center gap-2">
-                  <Filter size={16} className="text-primary" />
-                  Filter Records
-                </h3>
-                <button onClick={() => setShowFilters(false)} className="text-gray-400 hover:text-white transition-colors">
-                  <XCircle size={18} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-gray-400 text-sm">Date Range</label>
-                <div className="flex items-center gap-2 bg-black/40 border border-glass-border rounded-xl p-2.5">
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.from}
-                    onChange={(e) => dateRangeHelper.handleFromChange(e.target.value)}
-                    className="w-full bg-transparent text-white text-sm focus:outline-none"
-                  />
-                  <span className="text-gray-500">to</span>
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.to}
-                    onChange={(e) => dateRangeHelper.handleToChange(e.target.value)}
-                    className="w-full bg-transparent text-white text-sm focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <button 
-                onClick={() => { 
-                  dateRangeHelper.clearFilters();
-                }}
-                className="w-full mt-2 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl text-sm font-semibold transition-colors border border-white/10"
-              >
-                Clear Filters
-              </button>
-            </div>
-          )}
-
-          <div className="flex items-center gap-3 relative">
-            <button 
-              onClick={() => setShowFilters(!showFilters)}
-              className={`relative flex items-center gap-2 px-5 py-3 rounded-full text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10 ${showFilters ? 'bg-white/20' : 'bg-glass-panel hover:bg-white/10'}`}
-            >
-              <Filter size={18} />
-              Filter
-              {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
-                <span className="w-2 h-2 rounded-full bg-primary absolute top-0 right-0 animate-pulse"></span>
-              )}
-            </button>
-
-            <button 
-              onClick={() => handleExport('csv')}
-              className="flex items-center gap-2 bg-gradient-to-r from-primary to-blue-600 hover:shadow-[0_0_20px_rgba(37,99,235,0.4)] px-5 py-3 rounded-full text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10"
-            >
-              <Download size={18} />
-              Export CSV
-            </button>
-            <button 
-              onClick={() => handleExport('pdf')}
-              className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] px-5 py-3 rounded-full text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10"
-            >
-              <Download size={18} />
-              Export PDF
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );

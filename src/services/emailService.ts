@@ -1216,20 +1216,38 @@ export class EmailService {
    * Detects if email is order-related
    */
   private isOrderRelatedEmail(email: ProcessedEmail): boolean {
-    const orderKeywords = ['order', 'purchase', 'invoice', 'delivery', 'consignment', 'bill', 'receipt'];
-    const distributorKeywords = ['distributor', 'supplier', 'wholesale', 'pharma', 'agency', 'medical'];
+    const orderKeywords = ['order', 'purchase', 'invoice', 'delivery', 'consignment', 'bill', 'receipt', 'tax invoice', 'dispatch', 'sale bill', 'cash memo'];
+    const distributorKeywords = ['distributor', 'supplier', 'wholesale', 'pharma', 'agency', 'medical', 'agencies', 'traders', 'chemists', 'enterprises', 'marketing'];
     
-    const content = (email.subject + ' ' + email.body).toLowerCase();
-    return orderKeywords.some(k => content.includes(k)) && 
-           distributorKeywords.some(k => content.includes(k));
+    const content = (email.subject + ' ' + (email.body || '')).toLowerCase();
+    
+    const hasOrderKeyword = orderKeywords.some(k => content.includes(k));
+    const hasDistributorKeyword = distributorKeywords.some(k => content.includes(k));
+    
+    if (hasOrderKeyword && hasDistributorKeyword) return true;
+    
+    if (/(?:tax\s*invoice|invoice|inv[_\-\s]?\d+|bill[_\-\s]?\d+|order\s*ack)/i.test(email.subject)) return true;
+    
+    if (email.attachments && email.attachments.length > 0) {
+      const invoiceExts = ['.pdf', '.csv', '.xlsx', '.xls', '.dbf', '.xml', '.txt'];
+      const hasInvoiceAttachment = email.attachments.some(att => {
+        const lowerName = (att.filename || '').toLowerCase();
+        return invoiceExts.some(ext => lowerName.endsWith(ext));
+      });
+      if (hasInvoiceAttachment && (hasOrderKeyword || hasDistributorKeyword || /inv|bill|tax/i.test(content))) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   /**
    * Extracts order info from email
    */
   public extractOrderInfo(email: ProcessedEmail) {
-    const subject = email.subject;
-    const body = email.body;
+    const subject = email.subject || '';
+    const body = email.body || '';
 
     // Detect distributor name
     let distributorName = 'Unknown Distributor';
@@ -1237,14 +1255,14 @@ export class EmailService {
     if (mfgMatch) {
       distributorName = mfgMatch[1].toUpperCase();
     } else {
-      const fromMatch = email.from.match(/([^<]+)/);
+      const fromMatch = (email.from || '').match(/([^<]+)/);
       if (fromMatch && fromMatch[1].trim()) {
         distributorName = fromMatch[1].trim().replace(/['"]/g, '');
       }
     }
 
     // Clean up distributorName based on typical distributors in the inbox
-    const lowerFrom = email.from.toLowerCase();
+    const lowerFrom = (email.from || '').toLowerCase();
     if (lowerFrom.includes('senior')) {
       distributorName = 'Senior Agency';
     } else if (lowerFrom.includes('mahalaxmi')) {
@@ -1270,6 +1288,16 @@ export class EmailService {
       const codeMatch = subject.match(/\b([A-Z0-9_\-\/]{4,15})\b/);
       if (codeMatch) {
         invoiceNumber = codeMatch[1];
+      }
+    }
+
+    if (invoiceNumber === 'N/A' && email.attachments && email.attachments.length > 0) {
+      for (const att of email.attachments) {
+        const attMatch = (att.filename || '').match(/(?:inv|bill|invoice|vou)[_\-\s]*([a-zA-Z0-9_\-\/]+)/i);
+        if (attMatch && attMatch[1]) {
+          invoiceNumber = attMatch[1].replace(/\.(pdf|csv|xlsx|xls|txt)$/i, '');
+          break;
+        }
       }
     }
 

@@ -1272,25 +1272,60 @@ const QuickAssistSidebar = ({
   };
 
   if (!expanded) {
+    const activeRefillsCount = Array.isArray(refills) ? refills.filter(r => r.is_active === 1).length : 0;
+    const activeSpecialOrdersCount = Array.isArray(specialOrders) 
+      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length 
+      : 0;
+    const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
+
     return (
       <div
         onClick={() => setExpanded(true)}
-        className="w-10 h-full bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-6 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
+        className="w-10 h-full bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-4 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
         title="Expand Quick Assist"
       >
-        <ChevronLeftIcon size={16} className="text-muted mt-2" />
+        <ChevronLeftIcon size={16} className="text-muted mt-1" />
+        
+        {/* 3 Distinct Category Count Badges at TOP */}
+        <div className="flex flex-col gap-1.5 items-center mt-1">
+          {/* 1. Automations / Refills (Purple) */}
+          {activeRefillsCount > 0 && (
+            <div 
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/20 text-purple-400 text-[9px] font-black border border-purple-500/40 shadow-sm"
+              title={`Automations / Refills: ${activeRefillsCount}`}
+            >
+              {activeRefillsCount}
+            </div>
+          )}
+
+          {/* 2. Quick Special Requests (Amber) */}
+          {activeSpecialOrdersCount > 0 && (
+            <div 
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-black border border-amber-500/40 shadow-sm animate-pulse"
+              title={`Quick Special Requests: ${activeSpecialOrdersCount}`}
+            >
+              {activeSpecialOrdersCount}
+            </div>
+          )}
+
+          {/* 3. Staged Messages / Notifications (Emerald) */}
+          {stagedNotificationsCount > 0 && (
+            <div 
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black border border-emerald-500/40 shadow-sm"
+              title={`Staged Messages: ${stagedNotificationsCount}`}
+            >
+              {stagedNotificationsCount}
+            </div>
+          )}
+        </div>
+
         <div 
           style={{ writingMode: 'vertical-rl' }}
-          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest"
+          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest my-auto"
         >
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
           <span>Quick Assist</span>
         </div>
-        {(refills.length > 0 || notifications.length > 0 || (Array.isArray(specialOrders) && specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length > 0)) && (
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-purple-600/30 animate-pulse">
-            {refills.length + notifications.length + (Array.isArray(specialOrders) ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length : 0)}
-          </span>
-        )}
       </div>
     );
   }
@@ -1712,20 +1747,22 @@ export const Layout = ({
       refetchSpecialOrders();
     });
 
-    const handleFocusOrVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        fetchRefillData();
-        refetchSpecialOrders();
-      }
+    const handleDataRefresh = () => {
+      fetchRefillData();
+      refetchSpecialOrders();
     };
 
-    window.addEventListener('focus', handleFocusOrVisibility);
-    document.addEventListener('visibilitychange', handleFocusOrVisibility);
+    window.addEventListener('focus', handleDataRefresh);
+    document.addEventListener('visibilitychange', handleDataRefresh);
+    window.addEventListener('refresh-special-orders', handleDataRefresh);
+    window.addEventListener('app-purchases-updated', handleDataRefresh);
 
     return () => {
       unsubRefill();
-      window.removeEventListener('focus', handleFocusOrVisibility);
-      document.removeEventListener('visibilitychange', handleFocusOrVisibility);
+      window.removeEventListener('focus', handleDataRefresh);
+      document.removeEventListener('visibilitychange', handleDataRefresh);
+      window.removeEventListener('refresh-special-orders', handleDataRefresh);
+      window.removeEventListener('app-purchases-updated', handleDataRefresh);
     };
   }, [fetchRefillData, refetchSpecialOrders]);
 
