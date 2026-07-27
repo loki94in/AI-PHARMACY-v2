@@ -1388,6 +1388,7 @@ const Purchases: React.FC = () => {
     }
 
     setSaving(true);
+    toastEvent.trigger('Saving purchase bill & updating inventory stock...', 'info', '/purchases');
     try {
       const payload = {
         distributor_id: distIdToSave,
@@ -1442,6 +1443,12 @@ const Purchases: React.FC = () => {
         batch: item.batch_no || 'N/A'
       })));
       setShowBarcodeModal(true);
+
+      toastEvent.trigger(`Purchase bill ${savedInvoiceNo} saved successfully! Inventory stock updated.`, 'success', '/purchases');
+      if (typeof (window as any).refreshStagedCounts === 'function') {
+        (window as any).refreshStagedCounts(true);
+      }
+      window.dispatchEvent(new CustomEvent('app-purchases-updated'));
       
       const nextGrn = `P-${Math.floor(100 + Math.random()*900)}`;
       setItems([createEmptyItem()]);
@@ -1466,6 +1473,7 @@ const Purchases: React.FC = () => {
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
+      toastEvent.trigger(errMsg, 'error', '/purchases');
       alert(errMsg);
     } finally {
       setSaving(false);

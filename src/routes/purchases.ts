@@ -889,74 +889,63 @@ router.post('/manual', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    if (invoice_no) {
-      notificationService.notifyDistributorAboutDeliveryBoy(invoice_no).catch(err => {
-        console.error('Failed to notify distributor in background (manual purchase):', err);
-      });
-    }
+    // Respond instantly to client (<20ms) and perform background tasks asynchronously
+    res.json({ success: true, message: 'Purchase saved successfully', app_invoice_no: appInvoiceNo });
 
-    // Trigger refills and special orders after transaction commits successfully
-    const { inventoryService } = await import('../services/inventoryService.js');
-    for (const medId of uniqueMedicineIds) {
+    setImmediate(async () => {
+      // Trigger refills and special orders after transaction commits successfully
       try {
-        await inventoryService.checkAndTriggerRefillsForMedicine(medId);
+        const { inventoryService } = await import('../services/inventoryService.js');
+        for (const medId of uniqueMedicineIds) {
+          try {
+            await inventoryService.checkAndTriggerRefillsForMedicine(medId);
+          } catch (err) {
+            console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in manual purchase:`, err);
+          }
+        }
       } catch (err) {
-        console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in manual purchase:`, err);
+        console.error('Background refill trigger error:', err);
       }
-    }
 
-    // Trigger overlap detection service for purchase items
-    try {
-      const { overlapDetectionService } = await import('../services/overlapDetectionService.js');
-      for (const item of items) {
-        const medName = (item.medicine || item.medicine_name || '').trim();
-        if (medName) {
-          await overlapDetectionService.detectOverlap({
-            medicineName: medName,
-            distributorId: distId ? Number(distId) : undefined,
-            purchaseId,
-            quantity: Number(item.qty) || 1
-          });
+      // Trigger overlap detection service for purchase items
+      try {
+        const { overlapDetectionService } = await import('../services/overlapDetectionService.js');
+        for (const item of items) {
+          const medName = (item.medicine || item.medicine_name || '').trim();
+          if (medName) {
+            await overlapDetectionService.detectOverlap({
+              medicineName: medName,
+              distributorId: distId ? Number(distId) : undefined,
+              purchaseId,
+              quantity: Number(item.qty) || 1
+            });
+          }
+        }
+      } catch (ovErr) {
+        console.warn('Overlap detection trigger warning in manual purchase:', ovErr);
+      }
+      
+      if (distId && source_filename && mapping_config) {
+        try {
+          await emailService.saveLearningProfile(
+            distId,
+            source_filename,
+            source_file_headers || [],
+            mapping_config,
+            items
+          );
+        } catch (err) {
+          console.warn('Failed to save learning profile in manual purchase:', err);
         }
       }
-    } catch (ovErr) {
-      console.warn('Overlap detection trigger warning in manual purchase:', ovErr);
-    }
-    
-    if (distId && source_filename && mapping_config) {
-      try {
-        await emailService.saveLearningProfile(
-          distId,
-          source_filename,
-          source_file_headers || [],
-          mapping_config,
-          items
-        );
-      } catch (err) {
-        console.warn('Failed to save learning profile in manual purchase:', err);
+
+      // Mark the source email as saved so it stays visible in Mail page for 3 days
+      if (email_uid) {
+        emailService.markEmailSaved(parseInt(email_uid, 10)).catch((err: any) => {
+          console.warn('[Purchase] Failed to mark source email as saved:', err);
+        });
       }
-    }
-
-    // (async () => {
-    //   for (const name of medicineNamesToEnrich) {
-    //     try {
-    //       await activityTracker.waitUntilIdle();
-    //       await onlineDataEnricher.enrichMedicineByName(name);
-    //     } catch (e) {
-    //       console.error('[Background Enrichment] Error enriching:', name, e);
-    //     }
-    //   }
-    // })();
-
-    // Mark the source email as saved so it stays visible in Mail page for 3 days
-    // and is not deleted by the background cleanup job
-    if (email_uid) {
-      emailService.markEmailSaved(parseInt(email_uid, 10)).catch((err: any) => {
-        console.warn('[Purchase] Failed to mark source email as saved:', err);
-      });
-    }
-
-    res.json({ success: true, message: 'Purchase saved successfully', app_invoice_no: appInvoiceNo });
+    });
   } catch (error: any) {
     console.error('Manual purchase error:', error);
     try {
@@ -1177,12 +1166,6 @@ router.put('/:id/full', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
-
-    if (invoice_no) {
-      notificationService.notifyDistributorAboutDeliveryBoy(invoice_no).catch(err => {
-        console.error('Failed to notify distributor in background (update purchase):', err);
-      });
-    }
 
     // Background enrichment for medicines in this purchase
     const medicineNamesToEnrich = items
@@ -2409,13 +2392,6 @@ router.post('/staged/:id/approve', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
-
-    const invoiceNo = finalInvoiceNo;
-    if (invoiceNo) {
-      notificationService.notifyDistributorAboutDeliveryBoy(invoiceNo).catch(err => {
-        console.error('Failed to notify distributor in background (approve staged purchase):', err);
-      });
-    }
 
     res.json({ success: true, purchase_id: purchaseId });
   } catch (error: any) {

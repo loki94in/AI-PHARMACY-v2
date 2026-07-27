@@ -55,7 +55,7 @@ import {
 } from 'lucide-react';
 
 
-import { toastEvent, quickOrderEvent, liveCartAddEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
@@ -63,6 +63,7 @@ import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { api, apiClient } from '../services/api';
+import { useOnClickOutside } from '../hooks/useOnClickOutside';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
 import BackupCenterModal from './BackupCenterModal';
@@ -1196,10 +1197,18 @@ const QuickAssistSidebar = ({
   onActionComplete: () => void;
 }) => {
   const navigate = useNavigate();
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  useOnClickOutside(sidebarRef, () => {
+    if (expanded) {
+      setExpanded(false);
+    }
+  });
 
   const handleAcknowledge = async (id: number) => {
     try {
       await api.acknowledgeRefill(id);
+      refillEvent.triggerRefresh();
       onActionComplete();
     } catch (e) {
       console.error('Failed to acknowledge refill:', e);
@@ -1209,6 +1218,7 @@ const QuickAssistSidebar = ({
   const handleSend = async (id: number) => {
     try {
       await api.sendRefillNow(id);
+      refillEvent.triggerRefresh();
       onActionComplete();
     } catch (e) {
       console.error('Failed to send refill message:', e);
@@ -1218,6 +1228,7 @@ const QuickAssistSidebar = ({
   const handlePause = async (id: number) => {
     try {
       await api.updateRefill(id, { is_active: 0 });
+      refillEvent.triggerRefresh();
       onActionComplete();
     } catch (e) {
       console.error('Failed to pause refill:', e);
@@ -1227,6 +1238,7 @@ const QuickAssistSidebar = ({
   const handleSkip = async (id: number) => {
     try {
       await api.skipRefill(id);
+      refillEvent.triggerRefresh();
       onActionComplete();
     } catch (e) {
       console.error('Failed to skip refill:', e);
@@ -1290,7 +1302,7 @@ const QuickAssistSidebar = ({
     : [];
 
   return (
-    <div className="w-80 bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full shrink-0 z-20 transition-all duration-300">
+    <div ref={sidebarRef} className="w-80 bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full shrink-0 z-20 transition-all duration-300">
       {/* Header */}
       <div className="p-4 border-b border-glass-border flex items-center justify-between shrink-0 bg-white/[0.01]">
         <div className="flex items-center gap-2">
@@ -1695,7 +1707,27 @@ export const Layout = ({
 
   useEffect(() => {
     fetchRefillData();
-  }, [fetchRefillData]);
+    const unsubRefill = refillEvent.subscribeRefresh(() => {
+      fetchRefillData();
+      refetchSpecialOrders();
+    });
+
+    const handleFocusOrVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRefillData();
+        refetchSpecialOrders();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleFocusOrVisibility);
+
+    return () => {
+      unsubRefill();
+      window.removeEventListener('focus', handleFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleFocusOrVisibility);
+    };
+  }, [fetchRefillData, refetchSpecialOrders]);
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [isBackupStartupMode, setIsBackupStartupMode] = useState(false);

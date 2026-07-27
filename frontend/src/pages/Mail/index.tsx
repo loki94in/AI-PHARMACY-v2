@@ -438,6 +438,8 @@ const Mail = () => {
 
       const invoiceNoMatch = selectedEmail.subject.match(/INV-\d+-\d+/i) || selectedEmail.subject.match(/\b([A-Z0-9_\-\/]{4,15})\b/);
 
+      toastEvent.trigger('Imported invoice data from email! Review items and click Save Purchase.', 'info', '/purchases');
+
       navigate('/purchases', {
         state: {
           prefilledPurchase: {

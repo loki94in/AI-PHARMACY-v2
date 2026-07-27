@@ -322,6 +322,14 @@ app.listen(PORT, async () => {
 
           // Step 3: Startup catch-up check & cron schedules (Refills, overdue credit notes, return processing)
           (async () => {
+            console.log('[Boot] Running startup evaluation for patient refills and credit notes...');
+            try {
+              const { checkAllRefills } = await import('./services/refillService.js');
+              await checkAllRefills(db);
+            } catch (refillErr) {
+              console.error('[Boot] Refill startup evaluation error:', refillErr);
+            }
+
             if (isAutoEnabled) {
               const d = new Date();
               const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -330,9 +338,7 @@ app.listen(PORT, async () => {
               if (!lastCheckRow || lastCheckRow.value !== todayStr) {
                 console.log(`[Boot] Daily check missed today (${todayStr}). Running catch-up daily check...`);
                 try {
-                  const { checkAllRefills } = await import('./services/refillService.js');
                   const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
-                  await checkAllRefills(db);
                   await checkOverdueCreditNotes(db);
                   
                   // Auto expiry return on 18th, 19th, 20th of the month

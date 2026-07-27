@@ -4,6 +4,19 @@ import { telegramBotService } from '../telegramBot.js';
 import { getStoreMedicalName, getStoreMedicalNameAndPhone } from './storeSettingsService.js';
 
 export async function checkAllRefills(db: Database): Promise<void> {
+  // Clean up paused refills (is_active = 0) so they don't remain marked ready or held
+  try {
+    await db.run(`UPDATE patient_refills SET is_ready = 0, hold_for_stock = 0 WHERE is_active = 0`);
+    await db.run(
+      `UPDATE automation_notifications SET lifecycle_status = 'skipped' 
+       WHERE type = 'refill_collection' AND lifecycle_status = 'staged' AND reference_id IN (
+         SELECT CAST(id AS TEXT) FROM patient_refills WHERE is_active = 0
+       )`
+    );
+  } catch (cleanErr) {
+    console.warn('[RefillService] Cleanup of paused refills warning:', cleanErr);
+  }
+
   // Query active refills that are due
   const activeRefills = await db.all(
     `SELECT pr.*, m.name as medicine_name FROM patient_refills pr

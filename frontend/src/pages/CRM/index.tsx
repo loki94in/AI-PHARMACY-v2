@@ -8,10 +8,13 @@ import {
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent, liveCartAddEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+
+// ─── Module-level Cache (SPA Performance Contract) ──────────────────────
+let cachedRefillsData: RefillPatient[] = [];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,8 +116,8 @@ const emptyRow = (): MedicineRow => ({
 
 const RefillsSection: React.FC = () => {
   const navigate = useNavigate();
-  const [data, setData] = useState<RefillPatient[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<RefillPatient[]>(cachedRefillsData);
+  const [loading, setLoading] = useState(cachedRefillsData.length === 0);
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState<string | null>(null);
   const [runningCheck, setRunningCheck] = useState(false);
@@ -142,12 +145,16 @@ const RefillsSection: React.FC = () => {
     return val;
   }, [freqMode, addInterval, customValue, customUnit]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent && cachedRefillsData.length === 0) setLoading(true);
     try {
       const r = await apiClient.get<RefillPatient[]>('/refills/panel');
-      setData(Array.isArray(r.data) ? r.data : []);
-    } catch { toastEvent.trigger('Failed to load refills', 'error', '/crm'); }
+      const list = Array.isArray(r.data) ? r.data : [];
+      cachedRefillsData = list;
+      setData(list);
+    } catch { 
+      if (!silent) toastEvent.trigger('Failed to load refills', 'error', '/crm'); 
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -163,7 +170,8 @@ const RefillsSection: React.FC = () => {
       await apiClient.put(`/refills/${editingRefill.id}/frequency`, { refill_interval_days: editIntervalVal });
       toastEvent.trigger(`Updated refill frequency to ${editIntervalVal} days for "${editingRefill.name}"`, 'success', '/crm');
       setEditingRefill(null);
-      await load();
+      refillEvent.triggerRefresh();
+      await load(true);
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to update frequency', 'error', '/crm');
     } finally {
@@ -175,7 +183,8 @@ const RefillsSection: React.FC = () => {
     try {
       const res = await apiClient.post(`/refills/${refillId}/toggle-pause`);
       toastEvent.trigger(res.data?.message || `Refill ${currentIsActive ? 'paused' : 'resumed'}`, 'success', '/crm');
-      await load();
+      refillEvent.triggerRefresh();
+      await load(true);
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to toggle pause state', 'error', '/crm');
     }
@@ -186,7 +195,8 @@ const RefillsSection: React.FC = () => {
     try {
       await apiClient.post(`/refills/${refillId}/cancel`);
       toastEvent.trigger('Refill schedule canceled and preserved in history', 'success', '/crm');
-      await load();
+      refillEvent.triggerRefresh();
+      await load(true);
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to cancel refill', 'error', '/crm');
     }
@@ -208,7 +218,11 @@ const RefillsSection: React.FC = () => {
     toastEvent.trigger(`Pre-filled refill renewal form for ${patient.patient_name}`, 'info', '/crm');
   };
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const unsub = refillEvent.subscribeRefresh(() => load(true));
+    return () => unsub();
+  }, [load]);
 
   useEffect(() => {
     if (!showAddModal) return;
@@ -226,7 +240,8 @@ const RefillsSection: React.FC = () => {
     try {
       await apiClient.post('/refills/check');
       toastEvent.trigger('Refill check triggered', 'success', '/crm');
-      await load();
+      refillEvent.triggerRefresh();
+      await load(true);
     } catch { toastEvent.trigger('Failed to run check', 'error', '/crm'); }
     finally { setRunningCheck(false); }
   };
@@ -488,7 +503,7 @@ const RefillsSection: React.FC = () => {
           <RefreshCw size={14} className={runningCheck ? 'animate-spin' : ''} />
           {runningCheck ? 'Checking…' : 'Run Check'}
         </button>
-        <button onClick={load} className="p-2 bg-bg2 border border-border rounded-lg hover:bg-bg3 transition-colors">
+        <button onClick={() => load()} className="p-2 bg-bg2 border border-border rounded-lg hover:bg-bg3 transition-colors">
           <RefreshCw size={14} className={loading ? 'animate-spin text-muted' : 'text-muted'} />
         </button>
         <div className="ml-auto flex gap-3 text-xs text-muted">

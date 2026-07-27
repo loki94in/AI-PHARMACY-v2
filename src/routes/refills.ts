@@ -266,10 +266,14 @@ router.get('/panel', async (req, res) => {
     }
 
     const rows = await db.all(
-      `SELECT pr.*, m.name as medicine_name, 
-              (SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = pr.medicine_id) as in_stock_qty 
+      `SELECT pr.*, m.name as medicine_name, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
+       LEFT JOIN (
+         SELECT medicine_id, SUM(quantity) as in_stock_qty 
+         FROM inventory_master 
+         GROUP BY medicine_id
+       ) inv ON inv.medicine_id = pr.medicine_id
        ORDER BY pr.next_refill_date ASC`
     );
 
@@ -325,10 +329,25 @@ router.post('/:id/toggle-pause', async (req, res) => {
 
     const newIsActive = (refill.is_active === 0) ? 1 : 0;
 
-    await db.run(
-      'UPDATE patient_refills SET is_active = ? WHERE id = ?',
-      [newIsActive, id]
-    );
+    if (newIsActive === 0) {
+      await db.run(
+        `UPDATE patient_refills SET is_active = 0, is_ready = 0, hold_for_stock = 0 WHERE id = ?`,
+        [id]
+      );
+      await db.run(
+        `UPDATE automation_notifications SET lifecycle_status = 'skipped' 
+         WHERE type = 'refill_collection' AND reference_id = ? AND lifecycle_status = 'staged'`,
+        [String(id)]
+      );
+    } else {
+      await db.run(
+        'UPDATE patient_refills SET is_active = 1 WHERE id = ?',
+        [id]
+      );
+    }
+
+    // Re-run check to recalculate ready state or staged notifications
+    await checkAllRefills(db);
 
     res.json({
       success: true,
@@ -348,9 +367,15 @@ router.post('/:id/cancel', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     await db.run(
-      'UPDATE patient_refills SET is_active = 0 WHERE id = ?',
+      'UPDATE patient_refills SET is_active = 0, is_ready = 0, hold_for_stock = 0 WHERE id = ?',
       [id]
     );
+    await db.run(
+      `UPDATE automation_notifications SET lifecycle_status = 'skipped' 
+       WHERE type = 'refill_collection' AND reference_id = ? AND lifecycle_status = 'staged'`,
+      [String(id)]
+    );
+    await checkAllRefills(db);
     res.json({ success: true, message: 'Refill schedule canceled successfully' });
   } catch (err: any) {
     console.error('Failed to cancel refill:', err);
@@ -383,6 +408,8 @@ router.put('/:id/frequency', async (req, res) => {
       'UPDATE patient_refills SET refill_interval_days = ?, next_refill_date = ? WHERE id = ?',
       [interval, nextDateStr, id]
     );
+
+    await checkAllRefills(db);
 
     res.json({ success: true, message: `Refill frequency updated to ${interval} days (due on ${nextDateStr.substring(0, 10)})`, next_refill_date: nextDateStr });
   } catch (err: any) {

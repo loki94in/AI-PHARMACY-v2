@@ -6,7 +6,7 @@ import {
   Users, Phone, Calendar, Clock, CheckCircle2, AlertCircle, ShoppingCart, 
   Send, RefreshCw, Check, Search, ArrowRight, ShieldAlert, BadgeCheck
 } from 'lucide-react';
-import { toastEvent, liveCartAddEvent } from '../../services/events';
+import { toastEvent, liveCartAddEvent, refillEvent } from '../../services/events';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
@@ -31,25 +31,29 @@ interface GroupedRefillPatient {
   medicines: GroupedRefillMedicine[];
 }
 
+let cachedGroupedRefills: GroupedRefillPatient[] = [];
+
 const RefillsPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [groupedRefills, setGroupedRefills] = useState<GroupedRefillPatient[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [groupedRefills, setGroupedRefills] = useState<GroupedRefillPatient[]>(cachedGroupedRefills);
+  const [loading, setLoading] = useState(cachedGroupedRefills.length === 0);
   const [searchQuery, setSearchQuery] = useState('');
   const [runningCheck, setRunningCheck] = useState(false);
   const [noticeDays, setNoticeDays] = useState(3);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
   const [sendingReminderPhone, setSendingReminderPhone] = useState<string | null>(null);
 
-  const fetchRefillsPanel = async () => {
-    setLoading(true);
+  const fetchRefillsPanel = async (silent = false) => {
+    if (!silent && cachedGroupedRefills.length === 0) setLoading(true);
     try {
       const response = await apiClient.get<GroupedRefillPatient[]>('/refills/panel');
-      setGroupedRefills(Array.isArray(response.data) ? response.data : []);
+      const data = Array.isArray(response.data) ? response.data : [];
+      cachedGroupedRefills = data;
+      setGroupedRefills(data);
     } catch (err: any) {
       console.error('Failed to load refills panel:', err);
-      toastEvent.trigger('Failed to load refills data.', 'error', '/refills');
+      if (!silent) toastEvent.trigger('Failed to load refills data.', 'error', '/refills');
     } finally {
       setLoading(false);
     }
@@ -69,6 +73,8 @@ const RefillsPage = () => {
   useEffect(() => {
     fetchRefillsPanel();
     fetchNoticeDays();
+    const unsub = refillEvent.subscribeRefresh(() => fetchRefillsPanel(true));
+    return () => unsub();
   }, []);
 
   const handleManualCheck = async () => {
@@ -76,7 +82,8 @@ const RefillsPage = () => {
     try {
       await apiClient.post('/refills/check');
       toastEvent.trigger('Manual refill evaluation triggered successfully.', 'success', '/refills');
-      await fetchRefillsPanel();
+      refillEvent.triggerRefresh();
+      await fetchRefillsPanel(true);
     } catch (err: any) {
       console.error('Failed manual check:', err);
       toastEvent.trigger('Manual check failed: ' + (err.response?.data?.error || err.message), 'error', '/refills');
@@ -95,7 +102,8 @@ const RefillsPage = () => {
         'success',
         '/refills'
       );
-      await fetchRefillsPanel();
+      refillEvent.triggerRefresh();
+      await fetchRefillsPanel(true);
     } catch (err: any) {
       console.error('Failed toggle override:', err);
       toastEvent.trigger('Failed to update override.', 'error', '/refills');

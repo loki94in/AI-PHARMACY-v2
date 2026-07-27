@@ -60,6 +60,22 @@ export const liveCartAddEvent = {
   },
 };
 
+export const refillEvent = {
+  triggerRefresh: () => {
+    window.dispatchEvent(new CustomEvent('refresh-refills'));
+    window.dispatchEvent(new CustomEvent('app-refills-updated'));
+  },
+  subscribeRefresh: (callback: () => void) => {
+    const handler = () => callback();
+    window.addEventListener('refresh-refills', handler);
+    window.addEventListener('app-refills-updated', handler);
+    return () => {
+      window.removeEventListener('refresh-refills', handler);
+      window.removeEventListener('app-refills-updated', handler);
+    };
+  },
+};
+
 // Fired whenever a special order is created or updated so PharmarackCart
 // can invalidate its module-level cache and re-fetch without a page reload.
 export const specialOrdersEvent = {

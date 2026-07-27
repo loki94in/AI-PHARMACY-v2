@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import type { Refill, AutomationNotification } from '../../services/api';
-import { toastEvent } from '../../services/events';
+import { toastEvent, refillEvent } from '../../services/events';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -272,6 +272,7 @@ const AutomationCenter = () => {
     try {
       await api.updateRefill(refill.id, { is_active: nextActive });
       showToast(`Refill schedule is now ${nextActive === 1 ? 'Active' : 'Paused'}.`, 'success');
+      refillEvent.triggerRefresh();
       queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
     } catch (err) {
       console.error('Failed to toggle active status:', err);
