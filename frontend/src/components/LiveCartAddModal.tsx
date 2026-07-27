@@ -454,14 +454,55 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   const fetchPendingRefills = async () => {
     try {
+      const data = await api.getRefillsPanel();
+      if (Array.isArray(data)) {
+        const refillList: Refill[] = [];
+        const today = new Date();
+
+        data.forEach((patient: any) => {
+          if (!patient.medicines || !Array.isArray(patient.medicines)) return;
+
+          patient.medicines.forEach((m: any) => {
+            if (m.status === 'canceled' || m.is_active === 0) return;
+
+            const dueDate = new Date(patient.next_refill_date);
+            const diffMs = dueDate.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            const reqQty = Number(m.quantity_needed || 10);
+            const stockQty = Number(m.in_stock_qty || 0);
+
+            if (stockQty < reqQty || diffDays <= 14 || m.hold_for_stock === 1) {
+              refillList.push({
+                id: m.id,
+                patient_name: patient.patient_name,
+                patient_phone: patient.patient_phone,
+                medicine_id: m.medicine_id || m.id,
+                medicine_name: m.medicine_name,
+                refill_interval_days: m.refill_interval_days || 30,
+                last_refill_date: '',
+                next_refill_date: patient.next_refill_date,
+                status: m.status || 'active',
+                hold_for_stock: m.hold_for_stock || 0,
+                is_active: m.is_active !== undefined ? m.is_active : 1,
+                quantity_needed: reqQty,
+                in_stock_qty: stockQty
+              });
+            }
+          });
+        });
+
+        cachedPendingRefills = refillList;
+        setPendingRefills(refillList);
+        return;
+      }
+    } catch (err) {
+      console.warn('Failed to load refill panel in modal, trying fallback:', err);
+    }
+
+    try {
       const data = await api.getRefills();
       if (Array.isArray(data)) {
-        const filtered = data.filter(r => 
-          Boolean(r.is_active) && 
-          r.status !== 'completed' && 
-          r.status !== 'cancelled' &&
-          (r.status === 'pending' || r.status === 'due' || Boolean(r.hold_for_stock))
-        );
+        const filtered = data.filter(r => Boolean(r.is_active) && r.status !== 'completed' && r.status !== 'canceled');
         cachedPendingRefills = filtered;
         setPendingRefills(filtered);
       }

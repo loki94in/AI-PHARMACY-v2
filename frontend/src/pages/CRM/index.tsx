@@ -21,6 +21,7 @@ interface RefillPatient {
   next_refill_date: string;
   medicines: {
     id: number;
+    medicine_id?: number;
     medicine_name: string;
     quantity_needed: number;
     refill_interval_days?: number;
@@ -28,6 +29,7 @@ interface RefillPatient {
     is_ready: number;
     acknowledged: number;
     hold_for_stock: number;
+    is_active?: number;
     status: string;
     quick_bill_id: number | null;
   }[];
@@ -149,6 +151,7 @@ const RefillsSection: React.FC = () => {
     finally { setLoading(false); }
   }, []);
 
+  const [statusTab, setStatusTab] = useState<'all' | 'active' | 'paused' | 'canceled'>('all');
   const [editingRefill, setEditingRefill] = useState<{ id: number; currentInterval: number; name: string } | null>(null);
   const [editIntervalVal, setEditIntervalVal] = useState<number>(30);
   const [updatingFreq, setUpdatingFreq] = useState(false);
@@ -166,6 +169,43 @@ const RefillsSection: React.FC = () => {
     } finally {
       setUpdatingFreq(false);
     }
+  };
+
+  const handleTogglePauseRefill = async (refillId: number, currentIsActive: boolean) => {
+    try {
+      const res = await apiClient.post(`/refills/${refillId}/toggle-pause`);
+      toastEvent.trigger(res.data?.message || `Refill ${currentIsActive ? 'paused' : 'resumed'}`, 'success', '/crm');
+      await load();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to toggle pause state', 'error', '/crm');
+    }
+  };
+
+  const handleCancelRefill = async (refillId: number) => {
+    if (!window.confirm('Are you sure you want to cancel this refill schedule? (It will stay preserved in your history)')) return;
+    try {
+      await apiClient.post(`/refills/${refillId}/cancel`);
+      toastEvent.trigger('Refill schedule canceled and preserved in history', 'success', '/crm');
+      await load();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to cancel refill', 'error', '/crm');
+    }
+  };
+
+  const handleRenewRefill = (patient: RefillPatient) => {
+    setShowAddModal(true);
+    setAddPatientName(patient.patient_name);
+    setAddPatientPhone(patient.patient_phone);
+    setMedicineRows(patient.medicines.map(m => ({
+      medicineId: m.medicine_id || m.id,
+      medicineName: m.medicine_name,
+      searchTerm: m.medicine_name,
+      suggestions: [],
+      isOpen: false,
+      quantity_needed: m.quantity_needed || 10,
+      inStockQty: m.in_stock_qty || 0
+    })));
+    toastEvent.trigger(`Pre-filled refill renewal form for ${patient.patient_name}`, 'info', '/crm');
   };
 
   useEffect(() => { load(); }, [load]);
@@ -382,10 +422,21 @@ const RefillsSection: React.FC = () => {
     } finally { setSubmitting(false); }
   };
 
-  const filtered = data.filter(p =>
-    p.patient_name?.toLowerCase().includes(search.toLowerCase()) ||
-    p.patient_phone?.includes(search)
-  );
+  const filtered = data.filter(p => {
+    const matchesSearch = p.patient_name?.toLowerCase().includes(search.toLowerCase()) || p.patient_phone?.includes(search);
+    if (!matchesSearch) return false;
+
+    if (statusTab === 'active') {
+      return p.medicines.some(m => m.is_active !== 0 && m.status !== 'canceled');
+    }
+    if (statusTab === 'paused') {
+      return p.medicines.some(m => m.is_active === 0 || m.status === 'paused');
+    }
+    if (statusTab === 'canceled') {
+      return p.medicines.some(m => m.status === 'canceled');
+    }
+    return true; // 'all'
+  });
 
   const overdue = filtered.filter(p => new Date(p.next_refill_date) < new Date());
   const upcoming = filtered.filter(p => new Date(p.next_refill_date) >= new Date());
@@ -399,10 +450,29 @@ const RefillsSection: React.FC = () => {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search patient…"
+            placeholder="Search patient or phone…"
             className="w-full pl-8 pr-3 py-2 bg-bg2 border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
           />
         </div>
+
+        {/* Refill Status Filter Tabs */}
+        <div className="flex items-center bg-bg2 border border-border rounded-xl p-0.5 shrink-0">
+          {(['all', 'active', 'paused', 'canceled'] as const).map(tab => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setStatusTab(tab)}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all capitalize cursor-pointer ${
+                statusTab === tab
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-muted hover:text-text hover:bg-bg3'
+              }`}
+            >
+              {tab === 'all' ? 'All Refills' : tab}
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-2 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors"
@@ -437,7 +507,7 @@ const RefillsSection: React.FC = () => {
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center h-40 text-muted gap-2">
             <CheckCircle2 size={32} className="text-green-500/50" />
-            <p className="text-sm">No pending refills found</p>
+            <p className="text-sm">No refill records found for this filter tab</p>
           </div>
         )}
         {[...overdue, ...upcoming].map((patient) => {
@@ -502,6 +572,16 @@ const RefillsSection: React.FC = () => {
                     <Calendar size={10} />
                     {isOverdue ? 'Overdue · ' : 'Due · '}{formatDate(patient.next_refill_date)}
                   </div>
+                  {/* Renew Schedule */}
+                  <button
+                    type="button"
+                    onClick={() => handleRenewRefill(patient)}
+                    title="Renew or duplicate this patient's refill schedule into new entry"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Repeat2 size={12} />
+                    <span>Renew Schedule</span>
+                  </button>
                   {/* Remind Now — always active */}
                   <button
                     onClick={() => handleRemindNow(patient.patient_phone)}
@@ -524,19 +604,35 @@ const RefillsSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Medicines with Shortage Calculation, Inline Freq Slider & Direct Live Cart Button */}
+              {/* Medicines with Shortage Calculation, Inline Freq Slider, Pause/Resume & Direct Live Cart Button */}
               <div className="space-y-1.5">
                 {patient.medicines.map(med => {
                   const reqQty = Number(med.quantity_needed || 1);
                   const stockQty = Number(med.in_stock_qty || 0);
                   const shortageQty = Math.max(0, reqQty - stockQty);
                   const cartOrderQty = shortageQty > 0 ? shortageQty : reqQty;
+                  const isPaused = med.is_active === 0 || med.status === 'paused';
+                  const isCanceled = med.status === 'canceled';
 
                   return (
-                    <div key={med.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-bg3/50 rounded-xl border border-border/40 flex-wrap">
+                    <div key={med.id} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border flex-wrap transition-all ${
+                      isCanceled ? 'bg-red-500/5 border-red-500/20 opacity-75' :
+                      isPaused ? 'bg-amber-500/5 border-amber-500/20' :
+                      'bg-bg3/50 border-border/40'
+                    }`}>
                       <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                        <Package size={13} className="text-primary flex-shrink-0" />
-                        <span className="text-xs font-semibold text-text truncate">{med.medicine_name}</span>
+                        <Package size={13} className={isCanceled ? 'text-red-400' : isPaused ? 'text-amber-400' : 'text-primary'} />
+                        <span className={`text-xs font-semibold text-text truncate ${isCanceled ? 'line-through opacity-70' : ''}`}>{med.medicine_name}</span>
+                        {isPaused && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                            ⏸️ Paused
+                          </span>
+                        )}
+                        {isCanceled && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/30">
+                            ❌ Canceled
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap">
@@ -553,6 +649,33 @@ const RefillsSection: React.FC = () => {
                           <Sliders size={10} className="text-accent" />
                           <span>{med.refill_interval_days || 30}d Cycle (Edit)</span>
                         </button>
+
+                        {/* Pause / Resume Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePauseRefill(med.id, med.is_active !== 0)}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                            med.is_active !== 0
+                              ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-400'
+                              : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-400'
+                          }`}
+                          title={med.is_active !== 0 ? 'Pause refill notifications and orders for this medicine' : 'Resume refill schedule for this medicine'}
+                        >
+                          {med.is_active !== 0 ? '⏸️ Pause' : '▶️ Resume'}
+                        </button>
+
+                        {/* Cancel Button */}
+                        {!isCanceled && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelRefill(med.id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-bold transition-all cursor-pointer"
+                            title="Cancel and archive this refill schedule"
+                          >
+                            <X size={10} />
+                            <span>Cancel</span>
+                          </button>
+                        )}
 
                         <span className="text-[11px] font-medium text-muted">
                           Req: <strong className="text-text">{reqQty}</strong>

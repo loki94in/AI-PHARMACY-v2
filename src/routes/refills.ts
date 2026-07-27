@@ -270,7 +270,6 @@ router.get('/panel', async (req, res) => {
               (SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = pr.medicine_id) as in_stock_qty 
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
-       WHERE pr.is_active = 1
        ORDER BY pr.next_refill_date ASC`
     );
 
@@ -300,7 +299,8 @@ router.get('/panel', async (req, res) => {
         acknowledged: row.acknowledged || 0,
         hold_for_stock: row.hold_for_stock || 0,
         is_ready: row.is_ready || 0,
-        status: row.status,
+        is_active: row.is_active !== undefined ? row.is_active : 1,
+        status: row.status || (row.is_active === 0 ? 'paused' : 'active'),
         quick_bill_id: row.quick_bill_id
       });
     }
@@ -308,6 +308,49 @@ router.get('/panel', async (req, res) => {
     res.json(Object.values(patientGroups));
   } catch (err: any) {
     console.error('Failed to fetch refill panel:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Toggle pause/resume on a refill record
+router.post('/:id/toggle-pause', async (req, res) => {
+  const { id } = req.params;
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [id]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill record not found' });
+    }
+
+    const newIsActive = refill.is_active === 1 ? 0 : 1;
+    const newStatus = newIsActive === 1 ? 'active' : 'paused';
+
+    await db.run(
+      'UPDATE patient_refills SET is_active = ?, status = ? WHERE id = ?',
+      [newIsActive, newStatus, id]
+    );
+
+    res.json({ success: true, is_active: newIsActive, status: newStatus, message: `Refill schedule ${newStatus === 'paused' ? 'paused' : 'resumed'} successfully` });
+  } catch (err: any) {
+    console.error('Failed to toggle refill pause:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Soft-cancel a refill record
+router.post('/:id/cancel', async (req, res) => {
+  const { id } = req.params;
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    await db.run(
+      "UPDATE patient_refills SET is_active = 0, status = 'canceled' WHERE id = ?",
+      [id]
+    );
+    res.json({ success: true, message: 'Refill schedule canceled successfully' });
+  } catch (err: any) {
+    console.error('Failed to cancel refill:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });
