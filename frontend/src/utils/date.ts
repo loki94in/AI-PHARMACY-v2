@@ -54,3 +54,69 @@ export const formatDisplayDate = (
 
   return `${day}/${month}/${year} ${formattedHours}:${minutes} ${ampm}`;
 };
+
+/**
+ * Sanitizes and formats an expiry date string to MM/YY format.
+ * Guarantees month is strictly clamped between 01 and 12, and year is formatted as 2 digits.
+ */
+export const sanitizeMonth = (mStr: string): string => {
+  let m = parseInt(mStr, 10);
+  if (isNaN(m) || m < 1) m = 1;
+  if (m > 12) m = 12;
+  return m < 10 ? `0${m}` : `${m}`;
+};
+
+export const formatExpiryToMMYY = (val: string): string => {
+  if (!val) return '';
+  let cleaned = val.trim().replace(/\s+/g, '');
+
+  // Handle ISO YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
+    const parts = cleaned.substring(0, 10).split('-');
+    const mm = sanitizeMonth(parts[1]);
+    const yy = parts[0].substring(2, 4);
+    return `${mm}/${yy}`;
+  }
+
+  // Handle MM/YYYY
+  if (/^\d{1,2}\/\d{4}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    const yy = parts[1].substring(2, 4);
+    return `${mm}/${yy}`;
+  }
+
+  // Handle MM/YY
+  if (/^\d{1,2}\/\d{2}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    const yy = parts[1];
+    return `${mm}/${yy}`;
+  }
+
+  // 4 digits: MMYY
+  if (/^\d{4}$/.test(cleaned)) {
+    const mm = sanitizeMonth(cleaned.substring(0, 2));
+    const yy = cleaned.substring(2, 4);
+    return `${mm}/${yy}`;
+  }
+
+  // 6 digits: MMYYYY
+  if (/^\d{6}$/.test(cleaned)) {
+    const mm = sanitizeMonth(cleaned.substring(0, 2));
+    const yy = cleaned.substring(4, 6);
+    return `${mm}/${yy}`;
+  }
+
+  // Fallback slash format M/YY or M/YYYY
+  if (cleaned.includes('/')) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    let yy = parts[1] || '';
+    if (yy.length >= 4) yy = yy.substring(2, 4);
+    else if (yy.length === 1) yy = `0${yy}`;
+    if (yy.length === 2) return `${mm}/${yy}`;
+  }
+
+  return cleaned;
+};

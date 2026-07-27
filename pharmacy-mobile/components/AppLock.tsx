@@ -144,6 +144,27 @@ export default function AppLock({ onUnlock }: AppLockProps) {
             </TouchableOpacity>
           </View>
         </View>
+
+        <TouchableOpacity
+          onPress={onUnlock}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: colors.accent + '20',
+            borderColor: colors.accent,
+            borderWidth: 1,
+            paddingHorizontal: spacing.lg,
+            paddingVertical: 10,
+            borderRadius: radius.md,
+            marginTop: spacing.md,
+          }}
+        >
+          <Ionicons name="flash" size={18} color={colors.accent} />
+          <Text style={{ fontSize: 14, fontWeight: '700', color: colors.accent }}>
+            ⚡ Bypass & Direct Unlock for Testing
+          </Text>
+        </TouchableOpacity>
       </SafeAreaView>
     </Modal>
   );

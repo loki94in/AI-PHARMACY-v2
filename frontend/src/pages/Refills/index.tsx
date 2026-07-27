@@ -119,7 +119,9 @@ const RefillsPage = () => {
           patientName,
           patientPhone,
           medicineId: med.medicine_id,
-          quantity: med.quantity_needed || 10
+          quantity: med.quantity_needed || 10,
+          refillPatient: true,
+          refillId: med.id
         }
       }
     });

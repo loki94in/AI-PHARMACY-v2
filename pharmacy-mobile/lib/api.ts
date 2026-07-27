@@ -9,6 +9,8 @@ const OFFLINE_QUEUE_KEY = 'offline_sales_queue';
 const PURCHASES_QUEUE_KEY = 'offline_purchases_queue';
 const OFFLINE_STOCK_KEY = 'offline_stock_updates';
 const MOBILE_AUTOMATION_KEY = 'mobile_automation_tasks';
+const OFFLINE_SPECIAL_ORDERS_KEY = 'offline_special_orders_queue';
+const CUSTOMERS_CACHE_KEY = 'cached_customers_master';
 
 let cachedBaseUrl: string | null = null;
 
@@ -574,6 +576,23 @@ export async function syncOfflineSalesAndRefresh(): Promise<{ syncedCount: numbe
     }
   }
 
+  // 4. Sync Special Orders
+  const specialOrdersQueue = await getOfflineSpecialOrdersQueue();
+  if (specialOrdersQueue.length > 0) {
+    try {
+      let syncedOrders = 0;
+      for (const order of specialOrdersQueue) {
+        await createSpecialOrder(order);
+        syncedOrders++;
+      }
+      await clearOfflineSpecialOrdersQueue();
+      syncedCount += syncedOrders;
+    } catch (e: any) {
+      console.error('Failed to sync offline special orders:', e);
+      warnings.push(`Special Orders Sync failed: ${e.message}`);
+    }
+  }
+
   // Update inventories
   try {
     await getInventory();
@@ -585,6 +604,28 @@ export async function syncOfflineSalesAndRefresh(): Promise<{ syncedCount: numbe
   } catch {}
 
   return { syncedCount, warnings };
+}
+
+export interface RecentSale {
+  id: number;
+  invoice_no: string;
+  date: string;
+  total_amount: number;
+  customer_name?: string;
+  customer_phone?: string;
+  payment_medium?: string;
+}
+
+export async function fetchRecentSales(limit = 20): Promise<RecentSale[]> {
+  try {
+    const res = await request<any>(`/sales?limit=${limit}`);
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res.invoices)) return res.invoices;
+    return [];
+  } catch (err) {
+    console.warn('Failed to fetch recent sales:', err);
+    return [];
+  }
 }
 
 // ─── Purchases ──────────────────────────────────────────────────────────────
@@ -1196,3 +1237,110 @@ export async function disconnectGoogleAuthServer(): Promise<{ success: boolean; 
     throw err;
   }
 }
+
+// ─── Customer & Special Order Helpers ─────────────────────────────────────
+
+export interface CustomerData {
+  id?: number;
+  name: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+}
+
+export async function fetchCustomers(q?: string): Promise<CustomerData[]> {
+  try {
+    const endpoint = q ? `/crm/patients?q=${encodeURIComponent(q)}` : '/crm/patients';
+    const patients = await request<CustomerData[]>(endpoint);
+    if (patients && Array.isArray(patients)) {
+      try {
+        await AsyncStorage.setItem(CUSTOMERS_CACHE_KEY, JSON.stringify(patients));
+      } catch {}
+    }
+    return patients;
+  } catch (err) {
+    console.warn('Online customer fetch failed, using offline cache:', err);
+    try {
+      const cached = await AsyncStorage.getItem(CUSTOMERS_CACHE_KEY);
+      if (!cached) return [];
+      const list: CustomerData[] = JSON.parse(cached);
+      if (!q) return list;
+      const lower = q.toLowerCase();
+      return list.filter(
+        c => c.name.toLowerCase().includes(lower) || (c.phone && c.phone.includes(lower))
+      );
+    } catch {
+      return [];
+    }
+  }
+}
+
+export async function createCustomer(data: CustomerData): Promise<CustomerData> {
+  try {
+    return await request<CustomerData>('/crm/patients', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  } catch (err) {
+    console.warn('Online customer creation failed:', err);
+    throw err;
+  }
+}
+
+export interface SpecialOrderPayload {
+  product: string;
+  requester?: string;
+  phone?: string;
+  qty?: number;
+  priority?: string;
+}
+
+export async function getOfflineSpecialOrdersQueue(): Promise<SpecialOrderPayload[]> {
+  try {
+    const data = await AsyncStorage.getItem(OFFLINE_SPECIAL_ORDERS_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch (e) {
+    console.error('Failed to get offline special orders queue:', e);
+    return [];
+  }
+}
+
+export async function queueOfflineSpecialOrder(payload: SpecialOrderPayload): Promise<void> {
+  try {
+    const currentQueue = await getOfflineSpecialOrdersQueue();
+    currentQueue.push(payload);
+    await AsyncStorage.setItem(OFFLINE_SPECIAL_ORDERS_KEY, JSON.stringify(currentQueue));
+  } catch (e) {
+    console.error('Failed to queue offline special order:', e);
+  }
+}
+
+export async function clearOfflineSpecialOrdersQueue(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(OFFLINE_SPECIAL_ORDERS_KEY);
+  } catch (e) {
+    console.error('Failed to clear offline special orders queue:', e);
+  }
+}
+
+export async function createSpecialOrder(payload: SpecialOrderPayload): Promise<{ success: boolean; id?: number; isOffline?: boolean }> {
+  try {
+    const res = await request<any>('/orders', {
+      method: 'POST',
+      body: JSON.stringify({
+        product: payload.product,
+        requester: payload.requester || 'Mobile App',
+        phone: payload.phone || '',
+        qty: payload.qty || 1,
+        priority: payload.priority || 'NORMAL',
+        source: 'Mobile App',
+      }),
+    });
+    return { success: true, id: res.id || res.lastID };
+  } catch (err) {
+    console.warn('Online special order failed, queueing offline:', err);
+    await queueOfflineSpecialOrder(payload);
+    return { success: true, isOffline: true };
+  }
+}
+

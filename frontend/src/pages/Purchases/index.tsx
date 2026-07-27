@@ -4,7 +4,7 @@ import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { api, apiClient } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { PriceIntelPanel } from '../../components/PriceIntelPanel';
@@ -89,12 +89,45 @@ interface PurchaseHistory {
 let cachedMasterCatalog: Medicine[] = [];
 let isMasterCatalogHydrating = false;
 
-const filterLocalCatalog = (query: string, catalog: Medicine[]): Medicine[] => {
-  if (!query || !query.trim()) return catalog.slice(0, 30);
+const getMergedCatalog = (): Medicine[] => {
+  const compact = getCompactInventoryCache();
+  if (compact.length === 0) return cachedMasterCatalog;
+  const map = new Map<number, Medicine>();
+  for (const m of cachedMasterCatalog) {
+    if (m && m.id) map.set(m.id, m);
+  }
+  for (const item of compact) {
+    const medId = item.medicine_id || item.id;
+    if (medId && !map.has(medId)) {
+      map.set(medId, {
+        id: medId,
+        name: item.name,
+        generic_name: item.salts || '',
+        manufacturer: item.manufacturer || '',
+        pack_unit: item.packaging || '',
+        strength: '',
+        mrp: item.mrp || 0,
+        rate: item.unit_price || item.cost_price || 0,
+        scheme_paid: 0,
+        scheme_free: 0,
+        cgst_per: 0,
+        sgst_per: 0,
+        hsn_code: '',
+        stock_qty: item.stock_qty,
+        loose_qty: item.loose_quantity
+      });
+    }
+  }
+  return Array.from(map.values());
+};
+
+const filterLocalCatalog = (query: string, catalog?: Medicine[]): Medicine[] => {
+  if (!query || !query.trim()) return [];
   const term = query.trim().toLowerCase();
+  const sourceCatalog = (catalog && catalog.length > 0) ? catalog : getMergedCatalog();
   
   // Prefix matches first
-  const prefixes = catalog.filter(m =>
+  const prefixes = sourceCatalog.filter(m =>
     (m.name && m.name.toLowerCase().startsWith(term)) ||
     (m.generic_name && m.generic_name.toLowerCase().startsWith(term)) ||
     (m.manufacturer && m.manufacturer.toLowerCase().startsWith(term))
@@ -105,7 +138,7 @@ const filterLocalCatalog = (query: string, catalog: Medicine[]): Medicine[] => {
   }
 
   // Infix matches second
-  const infixes = catalog.filter(m =>
+  const infixes = sourceCatalog.filter(m =>
     ((m.name && m.name.toLowerCase().includes(term)) ||
      (m.generic_name && m.generic_name.toLowerCase().includes(term)) ||
      (m.manufacturer && m.manufacturer.toLowerCase().includes(term))) &&
@@ -267,32 +300,66 @@ const INDIAN_STATE_CODES = [
   { code: '19', name: 'WEST BENGAL' }
 ];
 
+const sanitizeMonth = (mStr: string): string => {
+  let m = parseInt(mStr, 10);
+  if (isNaN(m) || m < 1) m = 1;
+  if (m > 12) m = 12;
+  return m < 10 ? `0${m}` : `${m}`;
+};
+
 const formatExpiryToMMYY = (val: string): string => {
   if (!val) return '';
-  val = val.trim().replace(/\s+/g, '');
-  if (/^\d{4}$/.test(val)) {
-    const mm = val.substring(0, 2);
-    const yy = val.substring(2, 4);
+  let cleaned = val.trim().replace(/\s+/g, '');
+
+  // Handle ISO YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
+    const parts = cleaned.substring(0, 10).split('-');
+    const mm = sanitizeMonth(parts[1]);
+    const yy = parts[0].substring(2, 4);
     return `${mm}/${yy}`;
   }
-  if (/^\d{6}$/.test(val)) {
-    const mm = val.substring(0, 2);
-    const yyyy = val.substring(2, 6);
-    return `${mm}/${yyyy.substring(2, 4)}`;
+
+  // Handle MM/YYYY
+  if (/^\d{1,2}\/\d{4}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    const yy = parts[1].substring(2, 4);
+    return `${mm}/${yy}`;
   }
-  if (/^\d{2}\/\d{4}$/.test(val)) {
-    const mm = val.substring(0, 2);
-    const yyyy = val.substring(3, 7);
-    return `${mm}/${yyyy.substring(2, 4)}`;
+
+  // Handle MM/YY
+  if (/^\d{1,2}\/\d{2}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    const yy = parts[1];
+    return `${mm}/${yy}`;
   }
-  if (/^\d{2}\/\d{2}$/.test(val)) {
-    return val;
+
+  // 4 digits: MMYY
+  if (/^\d{4}$/.test(cleaned)) {
+    const mm = sanitizeMonth(cleaned.substring(0, 2));
+    const yy = cleaned.substring(2, 4);
+    return `${mm}/${yy}`;
   }
-  if (/^\d{4}-\d{2}-\d{2}/.test(val)) {
-    const parts = val.substring(0, 10).split('-');
-    return `${parts[1]}/${parts[0].substring(2, 4)}`;
+
+  // 6 digits: MMYYYY
+  if (/^\d{6}$/.test(cleaned)) {
+    const mm = sanitizeMonth(cleaned.substring(0, 2));
+    const yy = cleaned.substring(4, 6);
+    return `${mm}/${yy}`;
   }
-  return val;
+
+  // Fallback slash format M/YY or M/YYYY
+  if (cleaned.includes('/')) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    let yy = parts[1] || '';
+    if (yy.length >= 4) yy = yy.substring(2, 4);
+    else if (yy.length === 1) yy = `0${yy}`;
+    if (yy.length === 2) return `${mm}/${yy}`;
+  }
+
+  return cleaned;
 };
 
 let cachedDistributors: any[] | null = null;
@@ -370,6 +437,21 @@ const Purchases: React.FC = () => {
   const emailSource = location.state?.emailSource || null;
   // Track which row has the price intel panel open (by item id)
   const [openIntelPanels, setOpenIntelPanels] = useState<Record<string, boolean>>({});
+  
+  // Mapped distributors filter & state
+  const [mappedDistributorIds, setMappedDistributorIds] = useState<Set<number>>(new Set());
+  const [onlyMappedFilter, setOnlyMappedFilter] = useState(true);
+
+  useEffect(() => {
+    api.getPharmarackDistributorMappings()
+      .then(res => {
+        if (res && Array.isArray(res.mappings)) {
+          const ids = new Set(res.mappings.map(m => m.distributor_id).filter(Boolean));
+          setMappedDistributorIds(ids as Set<number>);
+        }
+      })
+      .catch(() => {});
+  }, []);
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
@@ -923,26 +1005,29 @@ const Purchases: React.FC = () => {
     setActiveSearchIndex(index);
     setActiveMedicineIndex(index);
 
-    // Step 1: INSTANT (<1ms) in-memory filter from local module cache
-    if (cachedMasterCatalog.length > 0) {
-      const instantMatches = filterLocalCatalog(term, cachedMasterCatalog);
-      setSearchResults(instantMatches);
+    const cleanTerm = (term || '').trim();
+    if (!cleanTerm) {
+      setSearchResults([]);
       setSearchHighlightIndex(-1);
+      return;
     }
+
+    // Step 1: INSTANT (<1ms) in-memory filter from local catalog & compact inventory cache
+    const instantMatches = filterLocalCatalog(cleanTerm);
+    setSearchResults(instantMatches);
+    setSearchHighlightIndex(-1);
 
     // Step 2: Asynchronous backend query to update and merge master catalog
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const response = await api.catalogSearch(term || '');
+        const response = await api.catalogSearch(cleanTerm);
         if (Array.isArray(response) && response.length > 0) {
           // Merge newly fetched items into cachedMasterCatalog
           const seen = new Set(cachedMasterCatalog.map(m => m.id));
-          let added = false;
           for (const item of response) {
             if (!seen.has(item.id)) {
               seen.add(item.id);
               cachedMasterCatalog.push(item);
-              added = true;
             }
           }
           setSearchResults(response);
@@ -1754,13 +1839,29 @@ const Purchases: React.FC = () => {
   const totals = calculateTotals();
 
   const filteredDistributors = useMemo(() => {
-    const term = distributorSearch.toLowerCase();
-    if (!term) return distributors;
-    return distributors.filter((d) => {
+    const term = distributorSearch.toLowerCase().trim();
+    let list = distributors;
+    
+    // Sort mapped distributors first
+    list = [...list].sort((a, b) => {
+      const aMapped = mappedDistributorIds.has(a.id) ? 1 : 0;
+      const bMapped = mappedDistributorIds.has(b.id) ? 1 : 0;
+      return bMapped - aMapped;
+    });
+
+    if (onlyMappedFilter && mappedDistributorIds.size > 0) {
+      const mapped = list.filter(d => mappedDistributorIds.has(d.id));
+      if (mapped.length > 0) {
+        list = mapped;
+      }
+    }
+
+    if (!term) return list;
+    return list.filter((d) => {
       const distName = d.name || d.distributor_name || '';
       return distName.toLowerCase().includes(term);
     });
-  }, [distributors, distributorSearch]);
+  }, [distributors, distributorSearch, onlyMappedFilter, mappedDistributorIds]);
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500 min-h-0">
@@ -1872,14 +1973,35 @@ const Purchases: React.FC = () => {
                   placeholder="Type to search distributor..."
                 />
                 {showDistributorDropdown && (
-                  <div className="absolute z-dropdown w-full mt-1 bg-[#18181b]/95 backdrop-blur border border-glass-border rounded-xl overflow-hidden max-h-60 overflow-y-auto shadow-2xl">
+                  <div className="absolute z-dropdown w-full mt-1 bg-[#18181b]/95 backdrop-blur border border-glass-border rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl">
+                    <div className="px-3 py-1.5 bg-bg2 border-b border-glass-border/40 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Distributor List</span>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setOnlyMappedFilter(prev => !prev);
+                        }}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-all ${
+                          onlyMappedFilter
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-white/5 text-muted border-glass-border'
+                        }`}
+                      >
+                        {onlyMappedFilter ? '⚡ Only Mapped' : 'All Distributors'}
+                      </button>
+                    </div>
+
                     {filteredDistributors.length === 0 ? (
-                      <div className="px-4 py-2 text-muted text-sm">
-                        {distributorSearch === '' ? 'No distributors available' : 'No match found. Click + to add.'}
+                      <div className="px-4 py-3 text-muted text-xs">
+                        {onlyMappedFilter
+                          ? 'No mapped distributors match. Toggle "All Distributors" above or click + to add.'
+                          : distributorSearch === '' ? 'No distributors available' : 'No match found. Click + to add.'}
                       </div>
                     ) : (
                       filteredDistributors.slice(0, 50).map((dist) => {
                         const distName = dist.name || dist.distributor_name || 'Unnamed Distributor';
+                        const isMapped = mappedDistributorIds.has(dist.id);
                         return (
                           <button
                             key={dist.id}
@@ -1889,10 +2011,17 @@ const Purchases: React.FC = () => {
                               setDistributorSearch(distName);
                               setShowDistributorDropdown(false);
                             }}
-                            className="w-full text-left px-4 py-2 hover:bg-white/10 text-text text-sm"
+                            className="w-full text-left px-4 py-2 hover:bg-white/10 text-text text-sm flex items-center justify-between"
                           >
-                            {distName}
-                            {dist.phone && <span className="text-gray-400 ml-2">({dist.phone})</span>}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-semibold truncate">{distName}</span>
+                              {dist.phone && <span className="text-gray-400 text-xs truncate">({dist.phone})</span>}
+                            </div>
+                            {isMapped && (
+                              <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                Mapped 🔗
+                              </span>
+                            )}
                           </button>
                         );
                       })
@@ -2144,7 +2273,7 @@ const Purchases: React.FC = () => {
                               value={item.medicine_name}
                               onFocus={() => {
                                 setActiveSearchIndex(index);
-                                searchMedicines(item.medicine_name, index);
+                                setActiveMedicineIndex(index);
                               }}
                               onChange={(e) => {
                                 updateItem(index, 'medicine_name', e.target.value);
@@ -2213,7 +2342,7 @@ const Purchases: React.FC = () => {
                               ✨ New Medicine (Will create catalog record)
                             </div>
                           ) : null}
-                          {activeSearchIndex === index && (
+                          {activeSearchIndex === index && searchResults.length > 0 && (
                             <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                               {item.original_name && (
                                 <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
@@ -2228,13 +2357,18 @@ const Purchases: React.FC = () => {
                                 >
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0 flex-1">
-                                      <div className="font-medium truncate flex items-center gap-1.5">
+                                      <div className="font-medium truncate flex flex-wrap items-center gap-1.5">
                                         <span>{medicine.name}</span>
                                         {(medicine as any).stock_qty !== undefined ? (
                                           <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-green-500/10 text-green-400 border border-green-500/20">
                                             📦 {(medicine as any).stock_qty} packs {(medicine as any).loose_qty ? `(${(medicine as any).loose_qty} loose)` : ''}
                                           </span>
                                         ) : null}
+                                        {(medicine as any).pharmarack_rate && (medicine as any).pharmarack_rate < (medicine.mrp || 99999) && (
+                                           <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                             ⚡ Pharmarack Rate: ₹{(medicine as any).pharmarack_rate} ({(medicine as any).pharmarack_distributor || 'Mapped Distributor'})
+                                           </span>
+                                         )}
                                       </div>
                                       <div className="text-xs text-muted mt-0.5">
                                         {medicine.manufacturer && <span>{medicine.manufacturer}</span>}
@@ -2285,6 +2419,7 @@ const Purchases: React.FC = () => {
                       placeholder="MM/YY"
                       value={item.expiry_date}
                       onChange={(e) => updateItem(index, 'expiry_date', e.target.value)}
+                      onBlur={(e) => updateItem(index, 'expiry_date', formatExpiryToMMYY(e.target.value))}
                       className="w-full bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm font-mono text-center"
                     />
                   </td>

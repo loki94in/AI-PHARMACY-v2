@@ -40,6 +40,44 @@ function normalizeDateToYYYYMMDD(dateStr: string): string {
   return '';
 }
 
+function formatExpiryToMMYY(val: string): string {
+  if (!val) return '';
+  let cleaned = val.trim().replace(/\s+/g, '');
+  const sanitizeMonth = (mStr: string) => {
+    let m = parseInt(mStr, 10);
+    if (isNaN(m) || m < 1) m = 1;
+    if (m > 12) m = 12;
+    return m < 10 ? `0${m}` : `${m}`;
+  };
+  if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
+    const parts = cleaned.substring(0, 10).split('-');
+    return `${sanitizeMonth(parts[1])}/${parts[0].substring(2, 4)}`;
+  }
+  if (/^\d{1,2}\/\d{4}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    return `${sanitizeMonth(parts[0])}/${parts[1].substring(2, 4)}`;
+  }
+  if (/^\d{1,2}\/\d{2}$/.test(cleaned)) {
+    const parts = cleaned.split('/');
+    return `${sanitizeMonth(parts[0])}/${parts[1]}`;
+  }
+  if (/^\d{4}$/.test(cleaned)) {
+    return `${sanitizeMonth(cleaned.substring(0, 2))}/${cleaned.substring(2, 4)}`;
+  }
+  if (/^\d{6}$/.test(cleaned)) {
+    return `${sanitizeMonth(cleaned.substring(0, 2))}/${cleaned.substring(4, 6)}`;
+  }
+  if (cleaned.includes('/')) {
+    const parts = cleaned.split('/');
+    const mm = sanitizeMonth(parts[0]);
+    let yy = parts[1] || '';
+    if (yy.length >= 4) yy = yy.substring(2, 4);
+    else if (yy.length === 1) yy = `0${yy}`;
+    if (yy.length === 2) return `${mm}/${yy}`;
+  }
+  return cleaned;
+}
+
 function extractDiscountAndTotalFromText(text: string) {
   const cleanLines = text.split('\n').map(l => l.trim()).filter(Boolean);
   let global_cd_per = 0;
@@ -789,7 +827,7 @@ router.post('/manual', async (req, res) => {
       const medInputName = medicine || item.medicine_name;
       const medInputId = medicine_id;
       const rawBatch = item.batch !== undefined ? item.batch : (batch_no || '');
-      const rawExpiry = item.expiry !== undefined ? item.expiry : (expiry_date || '');
+      const rawExpiry = formatExpiryToMMYY(item.expiry !== undefined ? item.expiry : (expiry_date || ''));
       const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       const rawFreeQty = parseFloat(free_qty !== undefined ? free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
       const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price) || 0;
@@ -829,12 +867,31 @@ router.post('/manual', async (req, res) => {
         if (dbMed) {
           medId = dbMed.id;
         } else {
-          // Auto-create missing medicine in local medicines table so purchase bill save succeeds
-          const insMed = await db.run(
-            'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '']
-          );
-          medId = insMed.lastID;
+          // 1. Check learned medicine aliases
+          const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = LOWER(?)', [cleanName]);
+          if (aliasRow?.medicine_id) {
+            medId = aliasRow.medicine_id;
+          } else {
+            // 2. Check OCR corrections mapping
+            const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
+            if (ocrRow?.target_name) {
+              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
+              if (targetMed?.id) medId = targetMed.id;
+            }
+            // 3. Fallback: Prefix fuzzy match if cleanName >= 4 characters
+            if (!medId && cleanName.length >= 4) {
+              const fuzzyMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) LIKE LOWER(?) LIMIT 1', [`${cleanName}%`]);
+              if (fuzzyMed?.id) medId = fuzzyMed.id;
+            }
+            // 4. Auto-create new medicine if no existing match exists
+            if (!medId) {
+              const insMed = await db.run(
+                'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '']
+              );
+              medId = insMed.lastID;
+            }
+          }
         }
       }
 
@@ -1101,7 +1158,7 @@ router.put('/:id/full', async (req, res) => {
       const medInputName = medicine || item.medicine_name;
       const medInputId = medicine_id;
       const rawBatch = item.batch !== undefined ? item.batch : (batch_no || '');
-      const rawExpiry = item.expiry !== undefined ? item.expiry : (expiry_date || '');
+      const rawExpiry = formatExpiryToMMYY(item.expiry !== undefined ? item.expiry : (expiry_date || ''));
       const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       const rawFreeQty = parseFloat(free_qty !== undefined ? free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
       const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price) || 0;
@@ -1123,13 +1180,30 @@ router.put('/:id/full', async (req, res) => {
           }
         }
       } else if (medName) {
-        const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE alias_name = ?', [medName]);
-        if (aliasRow) {
-          medId = aliasRow.medicine_id;
-        } else {
-          await db.run('INSERT OR IGNORE INTO medicines (name) VALUES (?)', [medName]);
-          const dbMed = await db.get('SELECT id FROM medicines WHERE name = ?', [medName]);
+        const cleanName = medName.trim();
+        let dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [cleanName]);
+        if (dbMed) {
           medId = dbMed.id;
+        } else {
+          const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = LOWER(?)', [cleanName]);
+          if (aliasRow?.medicine_id) {
+            medId = aliasRow.medicine_id;
+          } else {
+            const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
+            if (ocrRow?.target_name) {
+              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
+              if (targetMed?.id) medId = targetMed.id;
+            }
+            if (!medId && cleanName.length >= 4) {
+              const fuzzyMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) LIKE LOWER(?) LIMIT 1', [`${cleanName}%`]);
+              if (fuzzyMed?.id) medId = fuzzyMed.id;
+            }
+            if (!medId) {
+              await db.run('INSERT OR IGNORE INTO medicines (name) VALUES (?)', [cleanName]);
+              const newMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [cleanName]);
+              if (newMed) medId = newMed.id;
+            }
+          }
         }
       }
 

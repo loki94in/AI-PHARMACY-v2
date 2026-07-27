@@ -12,6 +12,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { useFetchMode } from '../../hooks/useFetchMode';
+import { StagedQueueFloatingWidget } from '../../components/StagedQueueFloatingWidget';
+import { stagedQueueService, type StagedItem } from '../../services/stagedQueueService';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -339,21 +341,23 @@ const POS = () => {
             }
             if (cartItems.length > 0) setCart(cartItems);
           } else if (prefill.medicineId) {
-            // Legacy single-medicine path
-            const matched = await api.getQuickEditMedicine(Number(prefill.medicineId));
-            if (matched) {
+            // Single-medicine path (e.g. Refills panel "Sell Now")
+            const response = await api.getQuickEditMedicine(Number(prefill.medicineId));
+            const med = response?.medicine || response;
+            const inv = response?.inventory || {};
+            if (med && (med.id || med.name)) {
               setCart([{
-                id: matched.id,
-                name: matched.name,
-                batch: matched.batch_no || matched.batch_number || 'AUTO',
-                expiry: matched.expiry_date || '12/28',
-                mrp: matched.mrp || 100,
+                id: med.id || Number(prefill.medicineId),
+                name: med.name || 'Refill Medicine',
+                batch: inv.batch_no || med.batch_no || 'AUTO',
+                expiry: inv.expiry_date || med.expiry_date || '12/28',
+                mrp: med.mrp || 100,
                 qty: Number(prefill.quantity) || 1,
                 quantity: Number(prefill.quantity) || 1,
-                unitPrice: matched.unit_price || matched.mrp || 100,
+                unitPrice: med.rate || med.mrp || 100,
                 looseQty: 0,
                 discount: 0,
-                packSize: matched.pack_size || 10
+                packSize: med.pack_size || 10
               }]);
             }
           }
@@ -2031,7 +2035,58 @@ const POS = () => {
     }
   };
 
-  // Doctors are defined at the top using useMemo
+  const handleLoadStagedItemIntoPOS = (stagedItem: StagedItem) => {
+    if (!stagedItem) return;
+    let rawItems: any[] = [];
+    try {
+      rawItems = typeof stagedItem.items_json === 'string'
+        ? JSON.parse(stagedItem.items_json)
+        : (stagedItem.items_json || stagedItem.items || []);
+    } catch {
+      rawItems = [];
+    }
+
+    const posItems = rawItems.map((it: any, idx: number) => ({
+      id: it.inventory_id || it.id || (1000 + idx),
+      medicine_id: it.medicine_id || 0,
+      name: it.name || it.medicine_name || 'Unknown',
+      qty: it.quantity || it.qty || 1,
+      looseQty: it.loose_quantity || it.loose_qty || 0,
+      unit_price: it.unit_price || it.rate || it.mrp || 0,
+      mrp: it.mrp || 0,
+      costPrice: it.cost_price || 0,
+      batch: it.batch_number || it.batch || '',
+      expiry: it.expiry_date || it.expiry || '',
+      salts: it.salts || 'Generic',
+      packSize: it.pack_size || 10,
+      availableStock: 999,
+      isEmptyRow: false,
+    }));
+
+    setTabs(prev => prev.map(t => {
+      if (t.id === activeTabId) {
+        return {
+          ...t,
+          patientName: stagedItem.patient_name || '',
+          patientPhone: stagedItem.patient_phone || '',
+          doctor: stagedItem.doctor_name || '',
+          discount: Number(stagedItem.discount || 0),
+          paymentMedium: stagedItem.payment_medium || 'CASH',
+          items: posItems,
+        };
+      }
+      return t;
+    }));
+
+    toastEvent.trigger(`⚡ Loaded staged order for ${stagedItem.patient_name || 'Customer'} into POS`, 'success');
+  };
+
+  useEffect(() => {
+    const current = stagedQueueService.getCurrentItem();
+    if (current) {
+      handleLoadStagedItemIntoPOS(current);
+    }
+  }, []);
 
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden pb-2 bg-bg text-text">
@@ -2288,127 +2343,6 @@ const POS = () => {
                 />
               </div>
             </div>
-
-            {/* Vibrant Animated Special Order Detection Banner */}
-            {matchedCustomerOrders.length > 0 && (
-              <div className="mt-3 p-3 rounded-2xl bg-gradient-to-r from-purple-900/40 via-indigo-900/40 to-emerald-900/40 border border-purple-500/50 shadow-xl shadow-purple-500/10 space-y-2 animate-fadeIn">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={16} className="text-purple-400 fill-purple-400 animate-spin" style={{ animationDuration: '4s' }} />
-                    <span className="text-xs font-black uppercase tracking-wider text-purple-200">
-                      ✨ Special Order Booked for Customer ({matchedCustomerOrders.length})
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-purple-300 font-medium">
-                    Auto-populate medicine to bill & credit advance payment
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {matchedCustomerOrders.map(order => {
-                    const advAmount = Number(order.advance_payment || 0);
-
-                    const handleDirectAddToPos = async () => {
-                      try {
-                        const cleanName = (order.product || '').replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
-                        let searchResults = await api.searchMedicine(order.product);
-                        if ((!searchResults || searchResults.length === 0) && cleanName && cleanName !== order.product) {
-                          searchResults = await api.searchMedicine(cleanName);
-                        }
-
-                        const targetProductName = cleanName || order.product;
-
-                        if (searchResults && searchResults.length > 0) {
-                          const med = searchResults[0];
-                          addToCart({
-                            id: med.id,
-                            medicine_id: med.medicine_id || med.id,
-                            name: med.medicine_name || med.name || targetProductName,
-                            batch: med.batch_no || 'AUTO',
-                            expiry: med.expiry_date || '12/28',
-                            mrp: med.mrp || Number(order.pharmarack_mrp) || 100,
-                            unitPrice: med.unit_price || med.mrp || Number(order.pharmarack_rate) || 100,
-                            qty: Number(order.qty) || 1,
-                            quantity: Number(order.qty) || 1,
-                            packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 10
-                          });
-                        } else {
-                          addToCart({
-                            name: targetProductName,
-                            batch: 'SPECIAL',
-                            expiry: '12/28',
-                            mrp: Number(order.pharmarack_mrp || 100),
-                            unitPrice: Number(order.pharmarack_rate || order.pharmarack_mrp || 100),
-                            qty: Number(order.qty) || 1,
-                            quantity: Number(order.qty) || 1,
-                            packSize: 1
-                          });
-                        }
-
-                        if (advAmount > 0) {
-                          setDiscount((prev: number) => prev + advAmount);
-                          toastEvent.trigger(`Added "${targetProductName}" & applied ₹${advAmount.toFixed(2)} advance payment credit!`, 'success');
-                        } else {
-                          toastEvent.trigger(`Added "${targetProductName}" to POS cart!`, 'success');
-                        }
-                      } catch (err) {
-                        toastEvent.trigger('Failed to add special order to bill', 'error');
-                      }
-                    };
-
-                    const handleFulfillManual = async () => {
-                      try {
-                        await api.fulfillSpecialOrder(order.id);
-                        toastEvent.trigger(`Marked "${order.product}" as Delivered & sent WhatsApp notification!`, 'success');
-                        queryClient.invalidateQueries({ queryKey: ['pos-special-orders'] });
-                      } catch (err) {
-                        toastEvent.trigger('Failed to mark order fulfilled', 'error');
-                      }
-                    };
-
-                    return (
-                      <div key={order.id} className="p-2.5 rounded-xl bg-bg/85 border border-purple-500/35 flex items-center justify-between gap-3 text-xs shadow-sm">
-                        <div className="flex flex-col min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-extrabold text-text truncate text-xs">{order.product}</span>
-                            <span className="text-[10px] font-mono text-purple-300 bg-purple-500/20 px-1.5 py-0.2 rounded border border-purple-500/30">
-                              Qty: {order.qty}
-                            </span>
-                            {advAmount > 0 && (
-                              <span className="text-[10px] font-extrabold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                💰 Advance Paid: ₹{advAmount.toFixed(2)}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-muted truncate mt-0.5">
-                            Customer: {order.requester} ({order.phone})
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={handleDirectAddToPos}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition-all active:scale-95 flex items-center gap-1 shadow-sm cursor-pointer"
-                            title="Add medicine to POS bill & deduct advance payment"
-                          >
-                            <Plus size={12} /> Add to Bill
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleFulfillManual}
-                            className="px-2 py-1 bg-purple-500/20 hover:bg-purple-500/35 border border-purple-500/30 text-purple-300 font-bold text-[10px] rounded-lg transition-all cursor-pointer"
-                            title="Mark delivered and send instant WhatsApp message"
-                          >
-                            Mark Delivered
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* A. Search & Scan Medicine Area (Header) */}
@@ -2426,10 +2360,19 @@ const POS = () => {
                   disabled={!inventoryIndexReady}
                   className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait"
                   value={searchTerm}
-                  onFocus={() => setShowSearchDropdown(true)}
+                  onFocus={() => {
+                    if (searchTerm.trim().length >= 2) {
+                      setShowSearchDropdown(true);
+                    }
+                  }}
                   onChange={e => {
-                    setSearchTerm(e.target.value);
-                    setShowSearchDropdown(true);
+                    const val = e.target.value;
+                    setSearchTerm(val);
+                    if (val.trim().length >= 2) {
+                      setShowSearchDropdown(true);
+                    } else {
+                      setShowSearchDropdown(false);
+                    }
                   }}
                   onKeyDown={e => {
                     if (searchResults.length === 0) return;
@@ -2543,7 +2486,7 @@ const POS = () => {
                 )}
                 
                 {/* Search results dropdown */}
-                {showSearchDropdown && searchResults.length > 0 && (
+                {showSearchDropdown && searchTerm.trim().length >= 2 && searchResults.length > 0 && (
                   <div ref={searchResultsRef} className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
@@ -2959,11 +2902,7 @@ const POS = () => {
                     if (!item.isEmptyRow) {
                       if (isUnmappedNew) {
                         rowStatusClass = "border-b border-purple-500/30 bg-purple-500/[0.06] hover:bg-purple-500/[0.12]";
-                        statusBadge = (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0 ml-1">
-                            🆕 Unmapped / New
-                          </span>
-                        );
+                        statusBadge = null;
                       } else if (isMasterDbOnly) {
                         rowStatusClass = "border-b border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/[0.12]";
                         statusBadge = (
@@ -3018,7 +2957,7 @@ const POS = () => {
                                 onFocus={() => {
                                   const idx = cart.indexOf(item);
                                   setActiveRowSearchIndex(idx);
-                                  setRowSearchTerm(item.name);
+                                  setRowSearchTerm('');
                                 }}
                                 onBlur={() => {
                                   setTimeout(() => {
@@ -3052,7 +2991,7 @@ const POS = () => {
                                 placeholder={item.isEmptyRow ? "Search medicine..." : "Change medicine..."}
                               />
                               
-                              {activeRowSearchIndex === cart.indexOf(item) && rowSearchResults.length > 0 && (
+                              {activeRowSearchIndex === cart.indexOf(item) && rowSearchTerm.trim().length >= 2 && rowSearchResults.length > 0 && (
                                 <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-2xl">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
@@ -4013,6 +3952,9 @@ const POS = () => {
           />
         </Suspense>
       )}
+
+      {/* Floating Staged Order Queue Widget */}
+      <StagedQueueFloatingWidget onLoadIntoPOS={handleLoadStagedItemIntoPOS} />
 
     </div>
   );

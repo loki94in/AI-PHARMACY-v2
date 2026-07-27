@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography, shadows } from '../lib/theme';
-import { testConnection, setServerUrl, adminLogin, autoDiscoverServer } from '../lib/api';
+import { testConnection, setServerUrl, getServerUrl, adminLogin, autoDiscoverServer } from '../lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
@@ -70,6 +70,16 @@ export default function ServerSetup({ onConnected }: ServerSetupProps) {
       setDiscoveryStatus('found');
     } else {
       setDiscoveryStatus('not_found');
+    }
+  };
+
+  const handleSkipAuth = async () => {
+    try {
+      const url = (await getServerUrl()) || 'http://localhost:5000';
+      await setServerUrl(url);
+      onConnected();
+    } catch {
+      onConnected();
     }
   };
 
@@ -311,6 +321,25 @@ export default function ServerSetup({ onConnected }: ServerSetupProps) {
                   <Text style={styles.optionDesc}>Sign in with Admin Credentials</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Option 3: Direct Skip Auth for Testing */}
+            <TouchableOpacity
+              onPress={handleSkipAuth}
+              activeOpacity={0.8}
+              style={styles.optionButton}
+            >
+              <LinearGradient
+                colors={[colors.accent + '25', colors.primary + '25']}
+                style={[styles.optionGradientBorder, { borderColor: colors.accent }]}
+              >
+                <Ionicons name="flash" size={24} color={colors.accent} />
+                <View style={styles.optionTextContainer}>
+                  <Text style={[styles.optionTitle, { color: colors.accent }]}>⚡ Direct Test Mode</Text>
+                  <Text style={styles.optionDesc}>Skip Auth & Jump Straight to Billing/App</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.accent} />
               </LinearGradient>
             </TouchableOpacity>
           </View>

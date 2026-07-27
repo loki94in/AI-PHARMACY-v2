@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, User, Calendar, Plus, Pill } from 'lucide-react';
 import { api } from '../services/api';
+import { stagedQueueService } from '../services/stagedQueueService';
 
 interface Props {
   onClose: () => void;
@@ -73,6 +74,26 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       setPatientName(tx.patient_name || '');
       setPatientPhone(tx.patient_phone || '');
       setDiscount(tx.discount || 0);
+    }
+  };
+
+  const handleReviewInPOS = (index: number) => {
+    const formattedQueue = sales.map(s => ({
+      id: s.id,
+      type: 'sales' as const,
+      patient_name: s.patient_name,
+      patient_phone: s.patient_phone,
+      doctor_name: s.doctor_name,
+      discount: s.discount,
+      payment_medium: s.payment_medium,
+      total_amount: s.total_amount,
+      items_json: s.items_json,
+    }));
+
+    stagedQueueService.startQueue(formattedQueue, index);
+    onClose();
+    if (window.location.pathname !== '/pos') {
+      window.location.href = '/pos';
     }
   };
 
@@ -232,7 +253,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
               </div>
             ) : (
               <div className="space-y-3">
-                {activeList.map((tx) => {
+                {activeList.map((tx, index) => {
                   let items: any[] = [];
                   try {
                     items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
@@ -286,13 +307,23 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                             <Trash2 size={14} />
                           </button>
                           <button
-                            className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
-                              selectedTx?.id === tx.id && selectedTx?.type === activeTab
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeTab === 'sales') {
+                                handleReviewInPOS(index);
+                              } else {
+                                handleSelectTx(tx, activeTab);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
+                              activeTab === 'sales'
+                                ? 'bg-primary text-white hover:bg-primary/90 shadow-sm'
+                                : selectedTx?.id === tx.id && selectedTx?.type === activeTab
                                 ? 'bg-primary text-white'
                                 : 'bg-bg3 hover:bg-border text-text'
                             }`}
                           >
-                            Review
+                            <span>Review</span>
                           </button>
                         </div>
                       </div>

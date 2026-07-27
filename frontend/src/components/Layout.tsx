@@ -62,6 +62,7 @@ import { LiveCartAddModal } from './LiveCartAddModal';
 import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
+import { ConnectedDevicesFooterBar } from './ConnectedDevicesFooterBar';
 import { api, apiClient } from '../services/api';
 import { useOnClickOutside } from '../hooks/useOnClickOutside';
 import { useApiQuery } from '../hooks/useApiQuery';
@@ -1999,6 +2000,11 @@ export const Layout = ({
             }}
           />
         </div>
+        
+        {/* Real-Time Connected Mobile Devices Status Footer Bar */}
+        <ConnectedDevicesFooterBar
+          onOpenConnectModal={() => setShowConnectModal(true)}
+        />
         
         {/* Global Modals */}
         {showQuickOrder && (

@@ -147,7 +147,7 @@ const Sells = () => {
   const clientFilterFn = useCallback((inv: SaleInvoice) => {
     const total = Number(inv.total_amount) || 0;
 
-    if (colFilterNo && !inv.invoice_no.toLowerCase().includes(colFilterNo.toLowerCase())) {
+    if (colFilterNo && !(inv.invoice_no || '').toLowerCase().includes(colFilterNo.toLowerCase())) {
       return false;
     }
     if (colFilterName) {
@@ -202,9 +202,9 @@ const Sells = () => {
         date_to: filters.date_to,
         include_items: 'true',
       });
-      const data = res.invoices || [];
-      const totalItems = res.meta?.total || data.length;
-      const totalPages = Math.ceil(totalItems / 100);
+      const data = Array.isArray(res) ? res : (res?.invoices || res?.data || []);
+      const totalItems = res?.meta?.total || data.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / 100));
       return {
         data,
         totalItems,
@@ -218,6 +218,23 @@ const Sells = () => {
   const fetchInvoices = useCallback((silent = false) => {
     refetch();
   }, [refetch]);
+
+  // Auto refetch when module cache cleared or date range changes
+  useEffect(() => {
+    const handleClear = () => {
+      refetch();
+    };
+    window.addEventListener('clear-module-cache', handleClear);
+    window.addEventListener('app-show-toast', handleClear);
+    return () => {
+      window.removeEventListener('clear-module-cache', handleClear);
+      window.removeEventListener('app-show-toast', handleClear);
+    };
+  }, [refetch]);
+
+  useEffect(() => {
+    refetch();
+  }, [dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to, refetch]);
 
   const openView = async (invoice: SaleInvoice) => {
     try {
