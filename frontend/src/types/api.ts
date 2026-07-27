@@ -90,6 +90,8 @@ export interface Refill {
   hold_for_stock?: number;
   is_active: number;
   is_ready?: number;
+  quantity_needed?: number;
+  in_stock_qty?: number;
 }
 
 export interface AutomationNotification {

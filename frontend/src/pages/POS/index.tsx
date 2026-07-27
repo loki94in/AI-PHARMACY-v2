@@ -1344,18 +1344,26 @@ const POS = () => {
         return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id, existingItem.id, { qty: newQty, looseQty: newLoose });
       }
       
+      const hasRealBatch = !!(med.batch_no || med.batch) && med.batch !== 'AUTO' && med.batch !== 'SPECIAL' && med.batch !== 'B-GEN' && !!(med.inventory_id || (typeof med.id === 'number' && med.id < 1000000000));
+      const initialMrp = hasRealBatch ? (med.mrp || 0) : 0;
+      const initialUnitPrice = hasRealBatch ? (med.unitPrice || med.unit_price || med.mrp || 0) : 0;
+      const initialGst = med.gst_percent !== undefined ? med.gst_percent : (med.gst !== undefined ? med.gst : (med.tax_percent !== undefined ? med.tax_percent : 12));
+
       const newItem = { 
         id: med.id, 
         medicine_id: med.medicine_id || med.id,
+        inventory_id: med.inventory_id || (hasRealBatch ? med.id : undefined),
         name: med.name, 
-        batch: med.batch || 'B-GEN', 
-        expiry: med.expiry || '12/28', 
+        batch: med.batch || (hasRealBatch ? med.batch_no : ''), 
+        expiry: med.expiry || med.expiry_date || '', 
         qty: incQty, 
         looseQty: incLooseQty,
         discount: med.discount !== undefined ? med.discount : 0,
+        gst_percent: initialGst,
         packSize: med.packSize || 10,
-        mrp: med.mrp, 
-        costPrice: med.costPrice || (med.mrp * 0.7),
+        mrp: initialMrp, 
+        unitPrice: initialUnitPrice,
+        costPrice: med.costPrice || (initialMrp * 0.7),
         salts: med.salts || '',
         availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0)),
         availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0),
@@ -2937,11 +2945,47 @@ const POS = () => {
                       }
                     }
 
+                    // 3-Color Classification System:
+                    // Color 1 (Theme Normal): Registered in Local Inventory with active stock & batch
+                    // Color 2 (Amber Tint): Exists in Master Catalog, but NOT in active local inventory (0 stock)
+                    // Color 3 (Purple Tint): Completely new / manual / unmapped item
+                    const hasLocalStock = !!item.inventory_id && ((item.availableStock || 0) > 0 || (item.availableLooseStock || 0) > 0 || (item.batch && item.batch !== 'AUTO' && item.batch !== 'SPECIAL'));
+                    const isMasterDbOnly = !hasLocalStock && (!!item.medicine_id || (typeof item.id === 'number' && item.id < 1000000000));
+                    const isUnmappedNew = !hasLocalStock && !isMasterDbOnly && !item.isEmptyRow;
+
+                    let rowStatusClass = "border-b border-border/30 hover:bg-bg2/40";
+                    let statusBadge = null;
+
+                    if (!item.isEmptyRow) {
+                      if (isUnmappedNew) {
+                        rowStatusClass = "border-b border-purple-500/30 bg-purple-500/[0.06] hover:bg-purple-500/[0.12]";
+                        statusBadge = (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0 ml-1">
+                            🆕 Unmapped / New
+                          </span>
+                        );
+                      } else if (isMasterDbOnly) {
+                        rowStatusClass = "border-b border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/[0.12]";
+                        statusBadge = (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0 ml-1">
+                            ⚡ Master DB Only
+                          </span>
+                        );
+                      } else {
+                        statusBadge = (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0 ml-1">
+                            In Stock
+                          </span>
+                        );
+                      }
+                    }
+
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-border/30 hover:bg-bg2/40 transition-all h-[38px]">
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className={`transition-all h-[38px] ${rowStatusClass}`}>
                         {/* Medicine Search/Change */}
                         <td className="py-1 px-2.5 min-w-[180px] relative">
                           <div className="flex items-center">
+                            {statusBadge}
                             {item.scanImage && (
                               <div className="relative group/thumb shrink-0 mr-2 select-none animate-in fade-in duration-200">
                                 <img

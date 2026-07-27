@@ -2027,6 +2027,15 @@ export default function PharmarackCart() {
                         displayRefills.map(refill => {
                           const inCart = getRefillItemInCart(refill);
                           const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
+                          const reqQty = Number(refill.quantity_needed || 10);
+                          const stockQty = Number(refill.in_stock_qty || 0);
+                          const shortageQty = Math.max(1, reqQty - stockQty);
+
+                          const today = new Date();
+                          const dueDate = new Date(refill.next_refill_date);
+                          const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                          const isLeadWindow = diffDays <= 6 && diffDays >= 0;
+
                           return (
                             <div
                               key={refill.id}
@@ -2035,10 +2044,10 @@ export default function PharmarackCart() {
                                 : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
                                 }`}
                             >
-                              <div className="flex justify-between items-start">
+                              <div className="flex justify-between items-start gap-2">
                                 <div 
-                                  className="flex flex-col min-w-0 cursor-pointer group"
-                                  onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                  className="flex flex-col min-w-0 cursor-pointer group flex-1"
+                                  onClick={() => liveCartAddEvent.triggerOpen(medName, shortageQty, undefined, refill.id)}
                                   title="Click to search in Pharmarack and add to cart"
                                 >
                                   <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
@@ -2047,9 +2056,19 @@ export default function PharmarackCart() {
                                   <span className="text-[9px] text-muted mt-0.5 truncate">
                                     Patient: {refill.patient_name}
                                   </span>
-                                  <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                                    Due Date: {formatDisplayDate(refill.next_refill_date)}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                    <span className="text-[8px] text-muted font-mono">
+                                      Due: {formatDisplayDate(refill.next_refill_date)}
+                                    </span>
+                                    {isLeadWindow && (
+                                      <span className="text-[8px] font-black text-amber-400 bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/40">
+                                        🔔 Lead Window ({diffDays}d)
+                                      </span>
+                                    )}
+                                    <span className="text-[8px] font-bold text-red-400 bg-red-500/15 px-1.5 py-0.2 rounded">
+                                      Need: {shortageQty} (Stock: {stockQty})
+                                    </span>
+                                  </div>
                                 </div>
                                 {inCart ? (
                                   <span className="shrink-0 text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/20 text-emerald-400 select-none">
@@ -2057,12 +2076,12 @@ export default function PharmarackCart() {
                                   </span>
                                 ) : (
                                   <button
-                                    onClick={() => liveCartAddEvent.triggerOpen(medName, 1, undefined, refill.id)}
+                                    onClick={() => liveCartAddEvent.triggerOpen(medName, shortageQty, undefined, refill.id)}
                                     className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-1 rounded-md transition-all active:scale-95 text-amber-400 font-sans flex items-center gap-1 cursor-pointer"
-                                    title="Open Medicine Search & Add to Pharmarack Live Cart"
+                                    title={`Add ${shortageQty} shortage units to Pharmarack Live Cart`}
                                   >
                                     <Search size={10} />
-                                    <span>Search & Add</span>
+                                    <span>Add ({shortageQty})</span>
                                   </button>
                                 )}
                               </div>

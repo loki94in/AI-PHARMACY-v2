@@ -270,9 +270,8 @@ router.get('/panel', async (req, res) => {
               (SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = pr.medicine_id) as in_stock_qty 
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
-       WHERE pr.is_active = 1 AND (date(pr.next_refill_date) <= date('now', '+' || ? || ' days') OR pr.is_ready = 1 OR pr.hold_for_stock = 1)
-       ORDER BY pr.next_refill_date ASC`,
-      [noticeDays]
+       WHERE pr.is_active = 1
+       ORDER BY pr.next_refill_date ASC`
     );
 
     const patientGroups: Record<string, any> = {};
@@ -295,6 +294,7 @@ router.get('/panel', async (req, res) => {
         medicine_id: row.medicine_id,
         medicine_name: row.medicine_name,
         quantity_needed: 10, // default refill quantity
+        refill_interval_days: row.refill_interval_days || 30,
         in_stock_qty: row.in_stock_qty || 0,
         stock_verified_override: row.stock_verified_override || 0,
         acknowledged: row.acknowledged || 0,
@@ -308,6 +308,39 @@ router.get('/panel', async (req, res) => {
     res.json(Object.values(patientGroups));
   } catch (err: any) {
     console.error('Failed to fetch refill panel:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Update refill frequency / interval days & recalculate next due date
+router.put('/:id/frequency', async (req, res) => {
+  const { id } = req.params;
+  const { refill_interval_days } = req.body;
+  const interval = parseInt(refill_interval_days, 10);
+  if (!interval || interval <= 0) {
+    return res.status(400).json({ error: 'Valid refill interval days required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [id]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill record not found' });
+    }
+
+    const nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + interval);
+    const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+
+    await db.run(
+      'UPDATE patient_refills SET refill_interval_days = ?, next_refill_date = ? WHERE id = ?',
+      [interval, nextDateStr, id]
+    );
+
+    res.json({ success: true, message: `Refill frequency updated to ${interval} days (due on ${nextDateStr.substring(0, 10)})`, next_refill_date: nextDateStr });
+  } catch (err: any) {
+    console.error('Failed to update refill frequency:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });

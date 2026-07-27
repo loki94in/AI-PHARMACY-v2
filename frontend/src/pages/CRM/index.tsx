@@ -23,6 +23,7 @@ interface RefillPatient {
     id: number;
     medicine_name: string;
     quantity_needed: number;
+    refill_interval_days?: number;
     in_stock_qty: number;
     is_ready: number;
     acknowledged: number;
@@ -148,6 +149,25 @@ const RefillsSection: React.FC = () => {
     finally { setLoading(false); }
   }, []);
 
+  const [editingRefill, setEditingRefill] = useState<{ id: number; currentInterval: number; name: string } | null>(null);
+  const [editIntervalVal, setEditIntervalVal] = useState<number>(30);
+  const [updatingFreq, setUpdatingFreq] = useState(false);
+
+  const handleUpdateFrequency = async () => {
+    if (!editingRefill) return;
+    setUpdatingFreq(true);
+    try {
+      await apiClient.put(`/refills/${editingRefill.id}/frequency`, { refill_interval_days: editIntervalVal });
+      toastEvent.trigger(`Updated refill frequency to ${editIntervalVal} days for "${editingRefill.name}"`, 'success', '/crm');
+      setEditingRefill(null);
+      await load();
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to update frequency', 'error', '/crm');
+    } finally {
+      setUpdatingFreq(false);
+    }
+  };
+
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
@@ -199,6 +219,25 @@ const RefillsSection: React.FC = () => {
       }
     });
     toastEvent.trigger(`Transferring ${patient.medicines.length} prescribed medicine(s) for ${patient.patient_name} to POS...`, 'info', '/pos');
+  };
+
+  const handleAddRefillShortageToCart = async (medicineName: string, orderQty: number) => {
+    try {
+      const res = await api.addPharmarackCart([{
+        productId: 0,
+        storeId: 0,
+        qty: orderQty,
+        productName: medicineName
+      }]);
+      if (res && res.success) {
+        toastEvent.trigger(`Added ${orderQty} unit(s) of "${medicineName}" to Pharmarack Live Cart!`, 'success', '/crm');
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to add item to live cart', 'error', '/crm');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to add to live cart', 'error', '/crm');
+    }
   };
 
   // ── Medicine row search & inventory dropdown ──────────────────────────────
@@ -402,13 +441,49 @@ const RefillsSection: React.FC = () => {
           </div>
         )}
         {[...overdue, ...upcoming].map((patient) => {
-          const isOverdue = new Date(patient.next_refill_date) < new Date();
+          const today = new Date();
+          const dueDate = new Date(patient.next_refill_date);
+          const isOverdue = dueDate < today;
+          const diffMs = dueDate.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+          // 5-6 Days Lead Window (Notification Buffer before due date)
+          const isLeadWindowActive = !isOverdue && diffDays <= 6 && diffDays >= 0;
+          const hasShortage = patient.medicines.some(m => Number(m.quantity_needed || 1) > Number(m.in_stock_qty || 0));
+          const is3DayStockAlert = !isOverdue && diffDays <= 3 && hasShortage;
+
           const allReady = patient.medicines.every(m => m.is_ready);
           return (
             <div
               key={`${patient.patient_phone}-${patient.next_refill_date}`}
-              className={`bg-bg2 border rounded-xl p-4 transition-all ${isOverdue ? 'border-red-500/30' : 'border-border'}`}
+              className={`bg-bg2 border rounded-xl p-4 transition-all ${
+                isOverdue ? 'border-red-500/30' : 
+                is3DayStockAlert ? 'border-amber-500/50 bg-amber-500/[0.02]' : 
+                isLeadWindowActive ? 'border-primary/40 bg-primary/[0.02]' : 'border-border'
+              }`}
             >
+              {/* Lead Window Notification Banner */}
+              {isLeadWindowActive && (
+                <div className="mb-3 px-3 py-2 bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base animate-bounce">🔔</span>
+                    <span>Refill On The Way! 5-6 Day Lead Notification Window Active (Due in {diffDays} day{diffDays !== 1 ? 's' : ''})</span>
+                  </div>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">Order Prep Window</span>
+                </div>
+              )}
+
+              {/* 3-Day Automated Inventory Stock Check Alert */}
+              {is3DayStockAlert && (
+                <div className="mb-3 px-3 py-2 bg-red-500/15 border border-red-500/30 rounded-xl text-xs font-extrabold text-red-400 flex items-center justify-between flex-wrap gap-2 animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={14} className="text-red-400 shrink-0" />
+                    <span>Automated 3-Day Inventory Stock Check: Shortage detected! Need items pushed to Live Cart.</span>
+                  </div>
+                  <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">3-Day Stock Alert</span>
+                </div>
+              )}
+
               {/* Patient header */}
               <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-3">
@@ -449,24 +524,66 @@ const RefillsSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Medicines */}
+              {/* Medicines with Shortage Calculation, Inline Freq Slider & Direct Live Cart Button */}
               <div className="space-y-1.5">
-                {patient.medicines.map(med => (
-                  <div key={med.id} className="flex items-center gap-2 px-3 py-2 bg-bg3/50 rounded-lg">
-                    <Package size={12} className="text-muted flex-shrink-0" />
-                    <span className="text-xs text-text flex-1 truncate">{med.medicine_name}</span>
-                    <span className="text-xs text-muted">Qty: {med.quantity_needed}</span>
-                    <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full ${
-                      med.is_ready ? 'bg-green-500/15 text-green-400' :
-                      med.hold_for_stock ? 'bg-yellow-500/15 text-yellow-400' :
-                      'bg-muted/15 text-muted'
-                    }`}>
-                      {med.is_ready ? <><Check size={9} /> Ready</> :
-                       med.hold_for_stock ? <><Clock size={9} /> Hold</> :
-                       <><AlertCircle size={9} /> Pending</>}
+                {patient.medicines.map(med => {
+                  const reqQty = Number(med.quantity_needed || 1);
+                  const stockQty = Number(med.in_stock_qty || 0);
+                  const shortageQty = Math.max(0, reqQty - stockQty);
+                  const cartOrderQty = shortageQty > 0 ? shortageQty : reqQty;
+
+                  return (
+                    <div key={med.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-bg3/50 rounded-xl border border-border/40 flex-wrap">
+                      <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                        <Package size={13} className="text-primary flex-shrink-0" />
+                        <span className="text-xs font-semibold text-text truncate">{med.medicine_name}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Edit Frequency Slider Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRefill({ id: med.id, currentInterval: med.refill_interval_days || 30, name: med.medicine_name });
+                            setEditIntervalVal(med.refill_interval_days || 30);
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-bg border border-border hover:border-primary/50 text-muted hover:text-text text-[10px] font-semibold transition-all cursor-pointer"
+                          title="Modify Refill Frequency / Due Date with Interactive Slider"
+                        >
+                          <Sliders size={10} className="text-accent" />
+                          <span>{med.refill_interval_days || 30}d Cycle (Edit)</span>
+                        </button>
+
+                        <span className="text-[11px] font-medium text-muted">
+                          Req: <strong className="text-text">{reqQty}</strong>
+                        </span>
+                        <span className="text-[11px] font-medium text-muted">
+                          Stock: <strong className={stockQty > 0 ? 'text-emerald-400' : 'text-red-400'}>{stockQty}</strong>
+                        </span>
+
+                        {shortageQty > 0 ? (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-extrabold">
+                            Need Order: {shortageQty}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
+                            In Stock
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleAddRefillShortageToCart(med.medicine_name, cartOrderQty)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                          title={`Add ${cartOrderQty} unit(s) of "${med.medicine_name}" directly to Pharmarack Live Cart`}
+                        >
+                          <ShoppingCart size={11} />
+                          <span>+ Live Cart ({cartOrderQty})</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {allReady && (
@@ -534,103 +651,94 @@ const RefillsSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Flexible Frequency Manager */}
+              {/* Flexible Frequency Manager with Interactive Slider & Presets */}
               <div className="bg-bg3/30 border border-border rounded-xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
                     <Sliders size={11} className="text-accent" />
-                    Flexible Frequency Manager
+                    Flexible Frequency Manager (Slider &amp; Presets)
                   </label>
-                  {/* Mode Toggle Tabs */}
-                  <div className="flex items-center bg-bg border border-border rounded-lg p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setFreqMode('preset')}
-                      className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${
-                        freqMode === 'preset' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-text'
-                      }`}
-                    >
-                      Presets
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFreqMode('custom')}
-                      className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all ${
-                        freqMode === 'custom' ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-text'
-                      }`}
-                    >
-                      Custom Interval
-                    </button>
-                  </div>
+                  <span className="text-xs font-black text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/30">
+                    {getEffectiveIntervalDays()} Days Interval
+                  </span>
                 </div>
 
-                {freqMode === 'preset' ? (
-                  <div>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                      {[
-                        { days: 7, label: '7 Days (Weekly)' },
-                        { days: 10, label: '10 Days' },
-                        { days: 15, label: '15 Days (Fortnightly)' },
-                        { days: 30, label: '30 Days (Monthly)' },
-                        { days: 45, label: '45 Days' },
-                        { days: 60, label: '60 Days (2 Months)' },
-                        { days: 90, label: '90 Days (3 Months)' }
-                      ].map(opt => (
-                        <button
-                          key={opt.days}
-                          type="button"
-                          onClick={() => setAddInterval(opt.days)}
-                          className={`px-2.5 py-2 rounded-xl text-xs text-center border font-medium transition-all ${
-                            addInterval === opt.days
-                              ? 'bg-primary/15 border-primary text-primary font-bold shadow-sm'
-                              : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted">Repeat every</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={365}
-                      value={customValue}
-                      onChange={e => setCustomValue(Math.max(1, Number(e.target.value)))}
-                      className="w-20 px-3 py-2 bg-bg border border-border rounded-xl text-xs text-text text-center font-semibold focus:outline-none focus:border-primary"
-                    />
-                    <select
-                      value={customUnit}
-                      onChange={e => setCustomUnit(e.target.value as any)}
-                      className="px-3 py-2 bg-bg border border-border rounded-xl text-xs text-text font-medium focus:outline-none focus:border-primary"
+                {/* Quick Presets: 15, 30, 90 Days */}
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { days: 15, label: '15 Days' },
+                    { days: 30, label: '30 Days' },
+                    { days: 90, label: '90 Days' },
+                    { days: 60, label: '60 Days' }
+                  ].map(opt => (
+                    <button
+                      key={opt.days}
+                      type="button"
+                      onClick={() => {
+                        setFreqMode('preset');
+                        setAddInterval(opt.days);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs text-center border font-bold transition-all cursor-pointer ${
+                        freqMode === 'preset' && addInterval === opt.days
+                          ? 'bg-primary border-primary text-white shadow-md'
+                          : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
+                      }`}
                     >
-                      <option value="days">Days</option>
-                      <option value="weeks">Weeks</option>
-                      <option value="months">Months</option>
-                    </select>
-                  </div>
-                )}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
 
-                {/* Dynamic Due Date Banner */}
+                {/* Interactive Slider Input */}
+                <div className="space-y-1 pt-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-muted">
+                    <span>1 Day</span>
+                    <span className="text-text font-bold">Slide to adjust: {getEffectiveIntervalDays()} Days</span>
+                    <span>180 Days</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={180}
+                    value={getEffectiveIntervalDays()}
+                    onChange={e => {
+                      setFreqMode('preset');
+                      setAddInterval(Number(e.target.value));
+                    }}
+                    className="w-full h-2 bg-bg border border-border rounded-lg appearance-none cursor-pointer accent-primary"
+                  />
+                </div>
+
+                {/* Dynamic Due Date & 5-Day Lead Notice Banner */}
                 {(() => {
                   const effDays = getEffectiveIntervalDays();
-                  const d = new Date();
-                  d.setDate(d.getDate() + effDays);
-                  const formattedDate = d.toLocaleDateString('en-IN', {
+                  const dueDate = new Date();
+                  dueDate.setDate(dueDate.getDate() + effDays);
+
+                  const leadDate = new Date(dueDate);
+                  leadDate.setDate(leadDate.getDate() - 5);
+
+                  const formattedDue = dueDate.toLocaleDateString('en-IN', {
                     weekday: 'short',
                     day: '2-digit',
                     month: 'short',
                     year: 'numeric'
                   });
+
+                  const formattedLead = leadDate.toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short'
+                  });
+
                   return (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-accent/10 border border-accent/20 rounded-xl text-xs text-accent">
-                      <Calendar size={13} className="flex-shrink-0" />
-                      <span>
-                        Calculated Next Due Date: <strong>{formattedDate}</strong> ({effDays} day interval cycle)
-                      </span>
+                    <div className="flex flex-col gap-1 px-3 py-2 bg-accent/10 border border-accent/20 rounded-xl text-xs text-accent">
+                      <div className="flex items-center gap-2">
+                        <Calendar size={13} className="flex-shrink-0 text-accent" />
+                        <span>Calculated Due Date: <strong>{formattedDue}</strong> ({effDays}-day cycle)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-amber-400 font-medium pl-5">
+                        <span>🔔 Auto Lead Window Active: <strong>{formattedLead}</strong> (5 days before due date for order prep)</span>
+                      </div>
                     </div>
                   );
                 })()}
@@ -827,6 +935,97 @@ const RefillsSection: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Inline Edit Refill Frequency Modal ────────────────────────────────────── */}
+      {editingRefill && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="text-sm font-bold text-text flex items-center gap-2">
+                <Sliders size={16} className="text-primary" />
+                Modify Refill Frequency
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingRefill(null)}
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-bg3"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-muted">
+              Adjust refill interval cycle for <strong className="text-text">{editingRefill.name}</strong>:
+            </p>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[15, 30, 90].map(days => (
+                <button
+                  key={days}
+                  type="button"
+                  onClick={() => setEditIntervalVal(days)}
+                  className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    editIntervalVal === days
+                      ? 'bg-primary border-primary text-white shadow-md'
+                      : 'bg-bg border-border text-muted hover:text-text'
+                  }`}
+                >
+                  {days} Days
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-1 pt-2">
+              <div className="flex justify-between text-xs font-bold text-text">
+                <span>Refill Interval:</span>
+                <span className="text-primary font-mono">{editIntervalVal} Days</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={180}
+                value={editIntervalVal}
+                onChange={e => setEditIntervalVal(Number(e.target.value))}
+                className="w-full h-2 bg-bg border border-border rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted font-mono">
+                <span>1 Day</span>
+                <span>90 Days</span>
+                <span>180 Days</span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary font-semibold flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Calendar size={14} />
+                <span>Calculated Next Due Date: <strong>{new Date(Date.now() + editIntervalVal * 86400000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
+              </div>
+              <div className="text-[11px] text-amber-400 pl-6">
+                <span>🔔 Auto 5-Day Lead Window Starts: <strong>{new Date(Date.now() + (editIntervalVal - 5) * 86400000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</strong></span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setEditingRefill(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-muted hover:bg-bg3"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateFrequency}
+                disabled={updatingFreq}
+                className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {updatingFreq ? 'Saving...' : 'Save Refill Frequency'}
+              </button>
+            </div>
           </div>
         </div>,
         document.body
