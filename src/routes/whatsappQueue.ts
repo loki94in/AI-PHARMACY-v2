@@ -150,13 +150,38 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
 
       // Log placed order to DB history
       try {
+        const today = new Date().toISOString().split('T')[0];
+        const placedAt = Date.now();
         await db.run(
-          `INSERT INTO pharmarack_placed_orders (store_id, store_name, line_total, items_count, placed_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          [order.storeId || 0, order.storeName, order.lineTotal || 0, order.items?.length || 0, Date.now()]
+          `INSERT INTO pharmarack_placed_orders (order_date, store_id, store_name, items_json, delivery_persons_json, placed_at, batch_sent, batch_sent_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+          [
+            today,
+            order.storeId || null,
+            order.storeName,
+            JSON.stringify(order.items || []),
+            null,
+            placedAt,
+            placedAt
+          ]
         );
+
+        // Auto-update matching pending special requests to status = 'Ordered'
+        if (Array.isArray(order.items) && order.items.length > 0) {
+          const pendingOrders = await db.all("SELECT id, product FROM special_orders WHERE status = 'Pending'");
+          for (const item of order.items) {
+            const prodName = (item.productName || item.product || item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (!prodName) continue;
+            for (const spOrder of pendingOrders) {
+              const reqName = (spOrder.product || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (reqName && (reqName === prodName || (reqName.length >= 4 && prodName.length >= 4 && (reqName.includes(prodName) || prodName.includes(reqName))))) {
+                await db.run("UPDATE special_orders SET status = 'Ordered', pharmarack_distributor = ? WHERE id = ?", [order.storeName, spOrder.id]);
+              }
+            }
+          }
+        }
       } catch (logErr) {
-        // Table might not exist or optional — ignore safely
+        console.warn('Could not log placed order in batch queue:', logErr);
       }
     }
 

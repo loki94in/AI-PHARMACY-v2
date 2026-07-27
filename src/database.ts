@@ -584,6 +584,7 @@ export async function ensureSchema(dbPath: string) {
     ['medicines', 'rack', 'ALTER TABLE medicines ADD COLUMN rack TEXT'],
     ['medicines', 'generic_name', 'ALTER TABLE medicines ADD COLUMN generic_name TEXT'],
     ['medicines', 'strength', 'ALTER TABLE medicines ADD COLUMN strength TEXT'],
+    ['medicines', 'rate', 'ALTER TABLE medicines ADD COLUMN rate REAL DEFAULT 0'],
     ['medicines', 'pack_unit', 'ALTER TABLE medicines ADD COLUMN pack_unit TEXT'],
     ['medicines', 'cgst_per', 'ALTER TABLE medicines ADD COLUMN cgst_per REAL DEFAULT 0'],
     ['medicines', 'sgst_per', 'ALTER TABLE medicines ADD COLUMN sgst_per REAL DEFAULT 0'],
@@ -703,11 +704,9 @@ export async function ensureSchema(dbPath: string) {
   // Pre-check PRAGMA table_info before ALTER TABLE DROP COLUMN to prevent SQLite error outputs
   const dropStatements: Array<[string, string, string]> = [
     ['medicines', 'manufactured_by', 'ALTER TABLE medicines DROP COLUMN manufactured_by'],
-    ['medicines', 'strength', 'ALTER TABLE medicines DROP COLUMN strength'],
     ['medicines', 'cgst', 'ALTER TABLE medicines DROP COLUMN cgst'],
     ['medicines', 'sgst', 'ALTER TABLE medicines DROP COLUMN sgst'],
     ['medicines', 'igst', 'ALTER TABLE medicines DROP COLUMN igst'],
-    ['medicines', 'rate', 'ALTER TABLE medicines DROP COLUMN rate'],
     ['inventory_master', 'storage_location_id', 'ALTER TABLE inventory_master DROP COLUMN storage_location_id'],
     ['held_bills', 'data', 'ALTER TABLE held_bills DROP COLUMN data']
   ];

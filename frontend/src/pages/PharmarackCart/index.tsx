@@ -135,18 +135,27 @@ export default function PharmarackCart() {
 
   const isItemAlreadySent = (item: CartLineItem, dist: Distributor): boolean => {
     const storeKey = dist.storeId ? String(dist.storeId) : (dist.storeName || '').toLowerCase().trim();
-    const sentInfo = latestSentMap[storeKey] || latestSentMap[(dist.storeName || '').toLowerCase().trim()];
-    if (!sentInfo || !sentInfo.placedAt) return false;
+    const normDistName = (dist.storeName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    // 1. If createdDate exists on cart item, compare timestamps
-    if (item.createdDate) {
-      const itemCreatedMs = new Date(item.createdDate).getTime();
-      if (!isNaN(itemCreatedMs) && itemCreatedMs > 0) {
-        return itemCreatedMs <= sentInfo.placedAt;
-      }
+    // 1. Find sentInfo by storeId or storeName or fuzzy normalized storeName
+    let sentInfo = latestSentMap[storeKey] || latestSentMap[(dist.storeName || '').toLowerCase().trim()] || latestSentMap[normDistName];
+    if (!sentInfo && normDistName) {
+      const matchKey = Object.keys(latestSentMap).find(k => {
+        const normK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return normK && (normK === normDistName || (normK.length >= 4 && normDistName.length >= 4 && (normK.includes(normDistName) || normDistName.includes(normK))));
+      });
+      if (matchKey) sentInfo = latestSentMap[matchKey];
     }
 
-    // 2. Check if productCode / productName was included in latest sent items
+    if (!sentInfo) {
+      // Fallback: If distributor was sent successfully in current session, treat items as sent
+      if (sentWaStatusMap[dist.storeId] === 'success' || sentWaStatusMap[dist.storeId] === 'queued') {
+        return true;
+      }
+      return false;
+    }
+
+    // 2. Check if productCode / productName was included in logged sent items
     if (Array.isArray(sentInfo.items) && sentInfo.items.length > 0) {
       const normItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
       const matched = sentInfo.items.some((sentItem: any) => {
@@ -154,9 +163,22 @@ export default function PharmarackCart() {
           return true;
         }
         const normSentName = (sentItem.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return normItemName === normSentName || (normItemName.length > 4 && normSentName.includes(normItemName));
+        return normItemName === normSentName || (normItemName.length >= 4 && normSentName.length >= 4 && (normItemName.includes(normSentName) || normSentName.includes(normItemName)));
       });
       if (matched) return true;
+    }
+
+    // 3. If createdDate exists on cart item, compare against last placedAt timestamp
+    if (sentInfo.placedAt && item.createdDate) {
+      const itemCreatedMs = new Date(item.createdDate).getTime();
+      if (!isNaN(itemCreatedMs) && itemCreatedMs > 0) {
+        return itemCreatedMs <= sentInfo.placedAt;
+      }
+    }
+
+    // 4. Session status fallback
+    if (sentWaStatusMap[dist.storeId] === 'success' || sentWaStatusMap[dist.storeId] === 'queued') {
+      return true;
     }
 
     return false;
@@ -167,8 +189,10 @@ export default function PharmarackCart() {
       const res = await api.getPharmarackSentDates();
       if (res && res.success && Array.isArray(res.dates)) {
         setSentDates(res.dates);
-        if (res.dates.length > 0 && !selectedSentDate) {
-          setSelectedSentDate(res.dates[0]);
+        if (res.dates.length > 0) {
+          const targetDate = (!selectedSentDate || !res.dates.includes(selectedSentDate)) ? res.dates[0] : selectedSentDate;
+          setSelectedSentDate(targetDate);
+          loadSentOrdersForDate(targetDate);
         }
       }
     } catch (err) {
@@ -192,16 +216,16 @@ export default function PharmarackCart() {
   };
 
   useEffect(() => {
-    if (sidebarTab === 'history') {
+    if (sidebarTab === 'history' || currentTab === 'sent-history') {
       loadSentDates();
     }
-  }, [sidebarTab]);
+  }, [sidebarTab, currentTab]);
 
   useEffect(() => {
-    if (sidebarTab === 'history' && selectedSentDate) {
+    if ((sidebarTab === 'history' || currentTab === 'sent-history') && selectedSentDate) {
       loadSentOrdersForDate(selectedSentDate);
     }
-  }, [sidebarTab, selectedSentDate]);
+  }, [sidebarTab, currentTab, selectedSentDate]);
 
   const handleCopySentItemsToCart = async (items: any[]) => {
     if (!items || items.length === 0) return;
@@ -461,8 +485,8 @@ export default function PharmarackCart() {
 
   const [batchCountdownSec, setBatchCountdownSec] = useState<number | null>(null);
 
-  // Distributor filter sub-tab state ('all' | 'success' | 'failed' | 'unmapped')
-  const [distributorFilterTab, setDistributorFilterTab] = useState<'all' | 'success' | 'failed' | 'unmapped'>('all');
+  // Distributor filter sub-tab state ('active' | 'all' | 'success' | 'failed' | 'unmapped')
+  const [distributorFilterTab, setDistributorFilterTab] = useState<'active' | 'all' | 'success' | 'failed' | 'unmapped'>('active');
 
   // Distributor search & contact edit modal state
   const [editingDistributor, setEditingDistributor] = useState<Distributor | null>(null);
@@ -600,12 +624,24 @@ export default function PharmarackCart() {
     return distributors.filter(d => !isDistributorMapped(d));
   }, [distributors, customDistributorPhones, savedDistributorsList]);
 
+  const activeCartDistributors = React.useMemo(() => {
+    return distributors.map(dist => {
+      const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+      return {
+        ...dist,
+        items: freshItems,
+        lineTotal: freshItems.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0)
+      };
+    }).filter(dist => dist.items.length > 0);
+  }, [distributors, latestSentMap]);
+
   const filteredDistributorList = React.useMemo(() => {
     if (distributorFilterTab === 'success') return successDistributors;
     if (distributorFilterTab === 'failed') return failedDistributors;
     if (distributorFilterTab === 'unmapped') return unmappedDistributors;
-    return distributors;
-  }, [distributorFilterTab, successDistributors, failedDistributors, unmappedDistributors, distributors]);
+    if (distributorFilterTab === 'all') return distributors;
+    return activeCartDistributors;
+  }, [distributorFilterTab, successDistributors, failedDistributors, unmappedDistributors, distributors, activeCartDistributors]);
 
   // ponytail: delivery boy data comes exclusively from /dispatch/delivery-boys (delivery_boys table)
   // Store info (name, phone, address) comes from /settings. No delivery boy keys read from app_settings.
@@ -856,75 +892,52 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
-    msg += `📋 *Pharmacy Details:*\n`;
-    msg += `• Store: *${storeInfo.name}*\n`;
-    msg += `• Phone: *${storeInfo.phone ? formatPhone(storeInfo.phone) : 'N/A'}*\n`;
-    if (storeInfo.adminPhone && storeInfo.adminPhone !== storeInfo.phone) {
-      msg += `• Admin Contact: *${formatPhone(storeInfo.adminPhone)}*\n`;
+    const storeName = storeInfo.name || 'TANMANY MEDICAL';
+    const storePhone = storeInfo.phone ? formatPhone(storeInfo.phone) : '+91 91305 58910';
+    const adminContact = storeInfo.adminPhone ? formatPhone(storeInfo.adminPhone) : '+91 80808 88041';
+    const address = storeInfo.address || 'Tanmaky, Khandala, Shindewadi (Shirval–Satara), Bhor Phata';
+    const email = storeInfo.email || 'him.94.walhekar@gmail.com';
+    const fileFormat = storeInfo.invoiceFileFormat ? storeInfo.invoiceFileFormat.replace(' File Format', '') : 'CSV';
+
+    let msg = `🏬 NEW STOCK ORDER – ${storeName}\n\n`;
+    msg += `📋 Pharmacy Details\n`;
+    msg += `• Store: ${storeName}\n`;
+    msg += `• Phone: ${storePhone}\n`;
+    if (adminContact) {
+      msg += `• Admin Contact: ${adminContact}\n`;
     }
-    msg += `• Address: *${storeInfo.address || 'N/A'}*\n`;
-    if (storeInfo.email) msg += `• Email: *${storeInfo.email}*\n`;
-    msg += `• Requested File Format: *${storeInfo.invoiceFileFormat || 'CSV File Format'}*\n`;
+    msg += `• Address: ${address}\n`;
+    if (email) {
+      msg += `• Email: ${email}\n`;
+    }
+    msg += `• Requested Format: ${fileFormat}\n`;
 
-    // Dynamic Delivery Boy & Pickup Staff Contacts section
-    msg += `\n🛵 *Delivery & Pickup Contacts:*\n`;
-
-    // Set to avoid duplicate entries
-    const addedContacts = new Set<string>();
-
+    // Dynamic Delivery Boy & Pickup Staff Contacts section if registered
     if (deliveryStaff?.name) {
       const staffPhone = formatPhone((deliveryStaff as any)?.phone || (deliveryStaff as any)?.code || '');
-      msg += `• Staff: *${deliveryStaff.name}*${staffPhone ? ` (${staffPhone})` : ''}\n`;
-      if (staffPhone) addedContacts.add(staffPhone);
+      msg += `• Staff: ${deliveryStaff.name}${staffPhone ? ` (${staffPhone})` : ''}\n`;
     }
 
-    // Dynamic rendering of ALL registered delivery boys with actual names and numbers from DB
-    if (deliveryBoysList.length > 0) {
-      deliveryBoysList.forEach(boy => {
-        if (boy.name && boy.whatsapp_number) {
-          const formatted = formatPhone(boy.whatsapp_number);
-          if (!addedContacts.has(formatted)) {
-            msg += `• ${boy.name}: *${formatted}*\n`;
-            addedContacts.add(formatted);
-          }
-        }
-      });
-    }
-
-    // ponytail: no app_settings fallback — delivery boys come exclusively from delivery_boys table
-
-    // Fallback to Admin contact if user skipped or no delivery boys exist
-    if (addedContacts.size === 0) {
-      const adminNum = formatPhone(storeInfo.adminPhone || storeInfo.phone);
-      if (adminNum) {
-        msg += `• Delivery Contact (Admin): *${adminNum}* (Call directly for delivery info)\n`;
-      } else {
-        msg += `• Contact Phone: *N/A*\n`;
-      }
-    }
-
-    msg += `\n----------------------------------\n`;
-    msg += `📦 *ORDERED MEDICINES:*\n`;
+    msg += `\n📦 Order Details\n`;
 
     // Filter to send ONLY fresh/new items so distributor is not confused by already-sent old items
     const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
     const itemsToSend = freshItems.length > 0 ? freshItems : dist.items;
 
-    itemsToSend.forEach((item, idx) => {
+    itemsToSend.forEach((item) => {
       const pack = item.packaging ? ` (${item.packaging})` : '';
       const rateText = item.ptr > 0 ? ` @ ₹${item.ptr.toFixed(2)}` : '';
-      msg += `${idx + 1}. *${item.productName}*${pack} — Qty: *${item.qty}*${rateText}\n`;
+      msg += `• ${item.productName}${pack} — Qty: ${item.qty}${rateText}\n`;
     });
-    msg += `----------------------------------\n`;
-    msg += `📊 *Total Items:* ${itemsToSend.length}\n`;
+
+    msg += `\n📊 Order Summary\n`;
+    msg += `• Total Items: ${itemsToSend.length}\n`;
     const targetSubtotal = itemsToSend.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0);
-    if (targetSubtotal > 0) {
-      msg += `💰 *Subtotal:* ₹${targetSubtotal.toFixed(2)}\n`;
-    }
-    msg += `🕒 *Time:* ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
-    msg += `*Please confirm order receipt & dispatch.*`;
-    return msg;
+    msg += `• Subtotal: ₹${targetSubtotal.toFixed(2)}\n`;
+    msg += `• Order Time: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
+    msg += `✅ Kindly confirm receipt of this order and share the expected dispatch/delivery status.\n\n`;
+    msg += `Thank you!`;
+
     return msg;
   };
 
@@ -987,9 +1000,7 @@ export default function PharmarackCart() {
     const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
     if (freshItems.length === 0) {
       toastEvent.trigger(`All ${dist.items.length} item(s) for ${dist.storeName} were already sent! No new items to order.`, 'info');
-      if (!window.confirm(`All ${dist.items.length} item(s) for ${dist.storeName} have already been sent in a previous WhatsApp order. Do you want to re-send the full order to ${dist.storeName} anyway?`)) {
-        return;
-      }
+      return;
     }
 
     let phoneNum = getDistributorPhoneNumber(dist);
@@ -1038,7 +1049,7 @@ export default function PharmarackCart() {
           storeId: dist.storeId,
           storeName: dist.storeName,
           deliveryPersons: dist.deliveryPersons,
-          items: dist.items
+          items: freshItems
         });
       } catch (distErr) {
         console.warn('Could not notify delivery boys via backend route:', distErr);
@@ -1046,8 +1057,7 @@ export default function PharmarackCart() {
 
       // Log placed order to DB history
       try {
-        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-        const itemsToLog = freshItems.length > 0 ? freshItems : dist.items;
+        const itemsToLog = freshItems;
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
           store_name: dist.storeName,
@@ -1096,6 +1106,7 @@ export default function PharmarackCart() {
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
         await fetchPendingOrders();
         await fetchLatestSentMap();
+        await loadSentDates();
       } catch (logErr) {
         console.warn('Could not log placed order:', logErr);
       }
@@ -1132,7 +1143,11 @@ export default function PharmarackCart() {
 
       for (const dist of mapped) {
         const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-        const itemsForBatch = freshItems.length > 0 ? freshItems : dist.items;
+        if (freshItems.length === 0) {
+          toastEvent.trigger(`Skipped ${dist.storeName}: All items were already sent in a previous order.`, 'info');
+          continue;
+        }
+        const itemsForBatch = freshItems;
 
         let phoneNum = getDistributorPhoneNumber(dist);
         let cleanPhone = phoneNum.replace(/\D/g, '');
@@ -1192,6 +1207,7 @@ export default function PharmarackCart() {
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
         await fetchPendingOrders();
         await fetchLatestSentMap();
+        await loadSentDates();
 
         toastEvent.trigger(
           `⚡ WhatsApp Queue started in background! Enqueued 1 Delivery Boy + ${ordersPayload.length} Distributor orders. Dispatching automatically!`,
@@ -2172,6 +2188,20 @@ export default function PharmarackCart() {
                   <div className="flex items-center justify-between pb-2 border-b border-glass-border/30 shrink-0">
                     <div className="flex items-center gap-1.5 bg-bg2/40 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none overflow-x-auto">
                       <button
+                        onClick={() => setDistributorFilterTab('active')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'active'
+                          ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                          }`}
+                      >
+                        <ShoppingCart size={13} />
+                        <span>Active Cart (Unsent)</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-bg/50 border border-glass-border/30 font-mono">
+                          {activeCartDistributors.length}
+                        </span>
+                      </button>
+
+                      <button
                         onClick={() => setDistributorFilterTab('all')}
                         className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'all'
                           ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
@@ -2231,7 +2261,20 @@ export default function PharmarackCart() {
 
                   {filteredDistributorList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
-                      {distributorFilterTab === 'success' ? (
+                      {distributorFilterTab === 'active' ? (
+                        <>
+                          <Check size={36} className="text-emerald-400/50" />
+                          <p className="text-sm font-bold text-emerald-400">All Cart Orders Sent! 🎉</p>
+                          <p className="text-xs text-muted max-w-sm">All items in your cart have been sent to distributors and saved in Sent Orders History.</p>
+                          <button
+                            onClick={() => setSearchParams({ tab: 'sent-history' })}
+                            className="mt-2 px-4 py-2 rounded-xl bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
+                          >
+                            <Send size={13} />
+                            <span>View Sent Orders History</span>
+                          </button>
+                        </>
+                      ) : distributorFilterTab === 'success' ? (
                         <>
                           <MessageSquare size={36} className="text-muted/30" />
                           <p className="text-xs font-bold text-text">No Messages Sent Yet</p>

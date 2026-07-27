@@ -1283,14 +1283,21 @@ const Purchases: React.FC = () => {
   };
 
   const savePurchase = async () => {
-    const distExists = selectedDistributor && distributors.some(d => d.id === selectedDistributor);
-    const searchMatchExists = distributors.some(d => {
-      const name = d.name || d.distributor_name || '';
-      return name.trim().toLowerCase() === distributorSearch.trim().toLowerCase();
-    });
+    let distIdToSave = selectedDistributor;
+    let distNameToSave = distributorSearch;
 
-    if (!selectedDistributor || !distExists || !searchMatchExists) {
-      alert('This distributor is new or unsaved. Please save the distributor details first by clicking the "+" button before saving the bill.');
+    if (!distIdToSave && distNameToSave && distNameToSave.trim()) {
+      const matched = distributors.find(d => {
+        const name = d.name || d.distributor_name || '';
+        return name.trim().toLowerCase() === distNameToSave.trim().toLowerCase();
+      });
+      if (matched) {
+        distIdToSave = matched.id;
+      }
+    }
+
+    if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
+      alert('Please select or enter a distributor name.');
       return;
     }
 
@@ -1300,20 +1307,22 @@ const Purchases: React.FC = () => {
     }
 
     const validItems = items.filter(item => {
-      const qty = parseFloat(item.qty as any) || 0;
-      return (item.medicine_id || (item.medicine_name && item.medicine_name.trim())) && qty > 0;
+      const name = item.medicine_name || item.name || item.medicine || '';
+      const qty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
+      return (item.medicine_id || name.trim().length > 0) && qty > 0;
     });
     if (validItems.length === 0) {
-      alert('Please add at least one medicine with quantity');
+      alert('Please add at least one medicine with a quantity greater than 0.');
       return;
     }
 
     setSaving(true);
     try {
       const payload = {
-        distributor_id: selectedDistributor,
+        distributor_id: distIdToSave,
+        distributor: distNameToSave,
         invoice_no: invoiceNo,
-        date: invoiceDate,
+        date: invoiceDate || getTodayString(),
         cd_per: parseFloat(globalCdPer as any) || 0,
         extra_credit: parseFloat(cnAmount as any) || 0,
         cn_amount: parseFloat(cnAmount as any) || 0,
@@ -1322,25 +1331,27 @@ const Purchases: React.FC = () => {
         source_filename: sourceFilename,
         source_file_headers: sourceFileHeaders,
         mapping_config: mappingConfig,
-        // If this bill was created from a Mail page email, pass the UID so the
-        // backend marks the email as saved (keeps it visible for the 3-day retention window)
         email_uid: emailSource?.email_uid || null,
-        items: validItems.map(item => ({
-          medicine_id: item.medicine_id,
-          medicine: item.medicine_name,
-          original_name: item.original_name,
-          batch_no: item.batch_no,
-          expiry_date: item.expiry_date,
-          qty: parseFloat(item.qty as any) || 0,
-          free_qty: parseFloat(item.free_qty as any) || 0,
-          rate: parseFloat(item.rate as any) || 0,
-          mrp: parseFloat(item.mrp as any) || 0,
-          cgst_per: parseFloat(item.cgst_per as any) || 0,
-          sgst_per: parseFloat(item.sgst_per as any) || 0,
-          cd_rs: parseFloat(item.cd_rs as any) || 0,
-          cd_per: parseFloat(item.cd_per as any) || 0,
-          additional_discount: parseFloat(item.additional_discount as any) || 0,
-        })),
+        items: validItems.map(item => {
+          const medName = item.medicine_name || item.name || item.medicine || '';
+          return {
+            medicine_id: item.medicine_id || null,
+            medicine: medName,
+            medicine_name: medName,
+            original_name: item.original_name || medName,
+            batch_no: item.batch_no || item.batch || '',
+            expiry_date: item.expiry_date || item.expiry || '',
+            qty: parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0,
+            free_qty: parseFloat(item.free_qty !== undefined ? item.free_qty : item.free_quantity) || 0,
+            rate: parseFloat(item.rate !== undefined ? item.rate : item.price) || 0,
+            mrp: parseFloat(item.mrp as any) || 0,
+            cgst_per: parseFloat(item.cgst_per !== undefined ? item.cgst_per : item.cgst) || 0,
+            sgst_per: parseFloat(item.sgst_per !== undefined ? item.sgst_per : item.sgst) || 0,
+            cd_rs: parseFloat(item.cd_rs as any) || 0,
+            cd_per: parseFloat(item.cd_per as any) || 0,
+            additional_discount: parseFloat(item.additional_discount as any) || 0,
+          };
+        }),
       };
 
       let response;

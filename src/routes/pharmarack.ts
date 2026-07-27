@@ -1667,24 +1667,44 @@ router.get('/sent-orders/latest-map', async (req, res) => {
       try { items = JSON.parse(r.items_json || '[]'); } catch (_) {}
 
       const storeKey = r.store_id ? String(r.store_id) : (r.store_name || '').toLowerCase().trim();
-      if (!sentMap[storeKey]) {
-        sentMap[storeKey] = {
-          storeId: r.store_id || null,
-          storeName: r.store_name || '',
-          placedAt: Number(r.placed_at || r.batch_sent_at || 0),
-          items: items.map((i: any) => ({
-            productCode: i.productCode || i.product_code || '',
-            productName: i.productName || i.product || i.name || '',
-            qty: i.qty || i.quantity || 1
-          }))
-        };
-      }
-      
-      // Also map by normalized store_name as fallback key
-      const nameKey = (r.store_name || '').toLowerCase().trim();
-      if (nameKey && !sentMap[nameKey]) {
-        sentMap[nameKey] = sentMap[storeKey];
-      }
+      const normNameKey = (r.store_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const placedAt = Number(r.placed_at || r.batch_sent_at || 0);
+
+      const parsedItems = items.map((i: any) => ({
+        productCode: i.productCode || i.product_code || '',
+        productName: i.productName || i.product || i.name || '',
+        qty: i.qty || i.quantity || 1
+      }));
+
+      const updateKey = (key: string) => {
+        if (!key) return;
+        if (!sentMap[key]) {
+          sentMap[key] = {
+            storeId: r.store_id || null,
+            storeName: r.store_name || '',
+            placedAt,
+            items: [...parsedItems]
+          };
+        } else {
+          if (placedAt > sentMap[key].placedAt) {
+            sentMap[key].placedAt = placedAt;
+          }
+          parsedItems.forEach((pi: any) => {
+            const piNormName = (pi.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const exists = sentMap[key].items.some((ex: any) => {
+              if (pi.productCode && ex.productCode && pi.productCode === ex.productCode) return true;
+              const exNormName = (ex.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              return piNormName && exNormName && (piNormName === exNormName || (piNormName.length >= 4 && exNormName.length >= 4 && (piNormName.includes(exNormName) || exNormName.includes(piNormName))));
+            });
+            if (!exists) {
+              sentMap[key].items.push(pi);
+            }
+          });
+        }
+      };
+
+      updateKey(storeKey);
+      if (normNameKey) updateKey(normNameKey);
     });
 
     res.json({ success: true, sentMap });

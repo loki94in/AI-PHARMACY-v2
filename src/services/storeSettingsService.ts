@@ -107,4 +107,29 @@ export async function getEmailRetentionLimit(dbInstance?: any): Promise<number> 
   return 15;
 }
 
+/**
+ * Formats standard customer notification message for ready/fulfilled special order.
+ */
+export async function buildOrderReadyNotificationMessage(
+  requesterName: string,
+  productName: string,
+  qty: number | string = 1,
+  dbInstance?: any
+): Promise<string> {
+  const storeName = await getStoreMedicalName(dbInstance);
+  const storePhone = await getStorePhone(dbInstance);
+  const name = (requesterName || 'Customer').trim();
+  const phone = storePhone ? storePhone.trim() : '';
+
+  let msg = `Hi ${name}, 👋\n\nGreat news! 🎉 Your requested medicine is now ready for pickup at ${storeName}.\n\nYour Order:\n• ${productName} × ${qty || 1}\n\n📍 Please visit our store at your convenience to collect your medicine.`;
+  
+  if (phone) {
+    msg += `\n\n📞 For any assistance, call us at ${phone}.`;
+  }
+  
+  msg += `\n\nThank you for choosing ${storeName}. We look forward to serving you!`;
+  return msg;
+}
+
+
 

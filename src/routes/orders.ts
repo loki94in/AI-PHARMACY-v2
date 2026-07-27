@@ -3,7 +3,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendMessage } from '../whatsappClient.js';
-import { getStoreMedicalName, getStoreMedicalNameAndPhone } from '../services/storeSettingsService.js';
+import { getStoreMedicalName, getStoreMedicalNameAndPhone, buildOrderReadyNotificationMessage } from '../services/storeSettingsService.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -370,8 +370,7 @@ router.post('/:id/notify-arrival', async (req, res) => {
     const cleanPhone = order.phone.replace(/\D/g, '');
     const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
     
-    const medicalName = await getStoreMedicalNameAndPhone(db);
-    const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) has arrived and is ready for collection at ${medicalName}. Please visit us to collect it.`;
+    const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db);
 
     await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
     
@@ -442,14 +441,12 @@ router.get('/uncollected-alerts', async (_req, res) => {
        AND datetime(date) <= datetime('now', '-2 days')`
     );
 
-    const alertedOrders = [];
-    const medicalName = await getStoreMedicalNameAndPhone(db);
-
+    const alertedOrders: any[] = [];
     for (const order of uncollected) {
       if (order.phone && order.notified === 0) {
         const cleanPhone = order.phone.replace(/\D/g, '');
         const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const msg = `Hi ${order.requester || 'Customer'}, your special order for ${order.product} (Qty: ${order.qty}) is ready for collection at ${medicalName}. Please visit us to collect it.`;
+        const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db);
         
         try {
           await sendMessage(formattedPhone, undefined, msg);

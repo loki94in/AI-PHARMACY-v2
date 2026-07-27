@@ -37,6 +37,7 @@ import {
   Edit,
   Menu,
   Truck,
+  Package,
 } from 'lucide-react';
 import { 
   ChevronLeft as ChevronLeftIcon, 
@@ -62,6 +63,7 @@ import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { api, apiClient } from '../services/api';
+import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
 import BackupCenterModal from './BackupCenterModal';
 import { useFetchMode } from '../hooks/useFetchMode';
@@ -1184,12 +1186,14 @@ const QuickAssistSidebar = ({
   setExpanded,
   refills,
   notifications,
+  specialOrders = [],
   onActionComplete,
 }: {
   expanded: boolean;
   setExpanded: (val: boolean) => void;
   refills: any[];
   notifications: any[];
+  specialOrders?: any[];
   onActionComplete: () => void;
 }) => {
   const navigate = useNavigate();
@@ -1230,6 +1234,32 @@ const QuickAssistSidebar = ({
     }
   };
 
+  const handleSendSpecialOrder = async (order: any) => {
+    try {
+      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
+      
+      if (order.phone) {
+        const cleanPhone = order.phone.replace(/\D/g, '');
+        const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+        const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`;
+        window.open(waUrl, '_blank');
+      }
+
+      await apiClient.post(`/orders/${order.id}/status`, { status: 'Ordered' });
+      toastEvent.trigger(`Marked special request "${order.product}" as Ordered!`, 'success');
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      onActionComplete();
+    } catch (e: any) {
+      console.error('Failed to send special order:', e);
+      toastEvent.trigger('Failed to update special request status', 'error');
+    }
+  };
+
+  const handleAddToCartSpecialOrder = (order: any) => {
+    liveCartAddEvent.triggerOpen(order.product, order.qty || 1, order.id);
+    toastEvent.trigger(`Added "${order.product}" to Live Cart search!`, 'info');
+  };
+
   if (!expanded) {
     return (
       <div
@@ -1245,9 +1275,9 @@ const QuickAssistSidebar = ({
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
           <span>Quick Assist</span>
         </div>
-        {(refills.length > 0 || notifications.length > 0) && (
+        {(refills.length > 0 || notifications.length > 0 || specialOrders.filter(s => s.status === 'Pending').length > 0) && (
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-500 text-[9px] font-black text-white px-1 border border-purple-600/30 animate-pulse">
-            {refills.length + notifications.length}
+            {refills.length + notifications.length + specialOrders.filter(s => s.status === 'Pending').length}
           </span>
         )}
       </div>
@@ -1256,6 +1286,7 @@ const QuickAssistSidebar = ({
 
   const activeRefills = refills.filter(r => r.is_active === 1);
   const inactiveRefills = refills.filter(r => r.is_active === 0);
+  const pendingSpecialOrders = specialOrders.filter(s => s.status === 'Pending');
 
   return (
     <div className="w-80 bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full shrink-0 z-20 transition-all duration-300">
@@ -1384,6 +1415,60 @@ const QuickAssistSidebar = ({
           );
         })()}
 
+        {/* Quick Special Requests */}
+        <div>
+          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-400">
+            <div className="flex items-center gap-1.5">
+              <Package size={14} className="text-amber-400" />
+              <span>Quick Special Requests ({pendingSpecialOrders.length})</span>
+            </div>
+            <button
+              onClick={() => navigate('/orders')}
+              className="text-[9px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-widest"
+            >
+              View All
+            </button>
+          </div>
+          {pendingSpecialOrders.length === 0 ? (
+            <p className="text-xs text-muted/50 italic pl-2 py-1">No pending special requests</p>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {pendingSpecialOrders.map(order => (
+                <div key={order.id} className="p-3 rounded-xl bg-amber-500/[0.04] border border-amber-500/20 flex flex-col gap-2">
+                  <div className="flex items-start justify-between gap-1">
+                    <span className="font-bold text-xs text-text truncate">{order.product}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
+                      Qty: {order.qty || 1}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-muted flex items-center justify-between">
+                    <span className="truncate">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
+                    <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider">{order.priority || 'Normal'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <button
+                      onClick={() => handleSendSpecialOrder(order)}
+                      className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Send WhatsApp Order for this Special Request"
+                    >
+                      <SendIcon size={12} />
+                      Send Order
+                    </button>
+                    <button
+                      onClick={() => handleAddToCartSpecialOrder(order)}
+                      className="py-1.5 px-2.5 rounded bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
+                      title="Add item to Pharmarack Cart"
+                    >
+                      <ShoppingCart size={11} />
+                      Cart
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Staged Messages */}
         <div>
           <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
@@ -1507,6 +1592,18 @@ export const Layout = ({
 
   const [refills, setRefills] = useState<any[]>([]);
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
+
+  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<any[]>({
+    queryKey: ['special-orders-quick-assist'],
+    queryFn: () => api.getOrders().catch(() => []),
+    refetchInterval: 15000,
+  });
+
+  useEffect(() => {
+    const handleRefresh = () => refetchSpecialOrders();
+    window.addEventListener('refresh-special-orders', handleRefresh);
+    return () => window.removeEventListener('refresh-special-orders', handleRefresh);
+  }, [refetchSpecialOrders]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     try {
       const stored = localStorage.getItem('quick_assist_sidebar_expanded') ?? localStorage.getItem('refill_sidebar_expanded');
@@ -1768,7 +1865,11 @@ export const Layout = ({
             setExpanded={setIsSidebarExpanded}
             refills={refills}
             notifications={stagedNotifications}
-            onActionComplete={fetchRefillData}
+            specialOrders={specialOrdersList}
+            onActionComplete={() => {
+              fetchRefillData();
+              refetchSpecialOrders();
+            }}
           />
         </div>
         
