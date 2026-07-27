@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, ClipboardList, ClipboardPlus, Sparkles, Loader2, ShoppingCart, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
-import { toastEvent, quickOrderEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, specialOrdersEvent } from '../services/events';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
 
@@ -604,6 +604,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
       });
 
       toastEvent.trigger(`Successfully logged request for ${items.length} medicine(s)!`, 'success');
+      // Notify the PharmarackCart sidebar (and any other specialOrdersEvent subscriber) immediately
+      specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
 
       // 2. Add all items to the actual Pharmarack cart in a single batch call

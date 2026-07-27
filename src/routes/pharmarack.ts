@@ -1650,6 +1650,51 @@ router.get('/sent-orders', async (req, res) => {
 });
 
 /**
+ * GET /api/pharmarack/sent-orders/latest-map
+ * Returns a map of the latest placed order info (placed_at timestamp + sent item codes/names) for each store.
+ */
+router.get('/sent-orders/latest-map', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      `SELECT * FROM pharmarack_placed_orders ORDER BY placed_at DESC`
+    );
+
+    const sentMap: Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }> = {};
+
+    rows.forEach(r => {
+      let items = [];
+      try { items = JSON.parse(r.items_json || '[]'); } catch (_) {}
+
+      const storeKey = r.store_id ? String(r.store_id) : (r.store_name || '').toLowerCase().trim();
+      if (!sentMap[storeKey]) {
+        sentMap[storeKey] = {
+          storeId: r.store_id || null,
+          storeName: r.store_name || '',
+          placedAt: Number(r.placed_at || r.batch_sent_at || 0),
+          items: items.map((i: any) => ({
+            productCode: i.productCode || i.product_code || '',
+            productName: i.productName || i.product || i.name || '',
+            qty: i.qty || i.quantity || 1
+          }))
+        };
+      }
+      
+      // Also map by normalized store_name as fallback key
+      const nameKey = (r.store_name || '').toLowerCase().trim();
+      if (nameKey && !sentMap[nameKey]) {
+        sentMap[nameKey] = sentMap[storeKey];
+      }
+    });
+
+    res.json({ success: true, sentMap });
+  } catch (err: any) {
+    console.error('Error fetching Pharmarack latest sent map:', err);
+    res.status(500).json({ error: 'Failed to fetch latest sent map: ' + err.message });
+  }
+});
+
+/**
  * POST /api/pharmarack/log-placed-order
  * Saves a placed/sent order into pharmarack_placed_orders table.
  */
@@ -1676,6 +1721,25 @@ router.post('/log-placed-order', async (req, res) => {
         placedAt
       ]
     );
+
+    // Auto-update matching pending special requests to status = 'Ordered'
+    if (Array.isArray(items) && items.length > 0) {
+      try {
+        const pendingOrders = await db.all("SELECT id, product FROM special_orders WHERE status = 'Pending'");
+        for (const item of items) {
+          const prodName = (item.productName || item.product || item.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!prodName) continue;
+          for (const order of pendingOrders) {
+            const reqName = (order.product || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (reqName && (reqName === prodName || (reqName.length >= 4 && prodName.length >= 4 && (reqName.includes(prodName) || prodName.includes(reqName))))) {
+              await db.run("UPDATE special_orders SET status = 'Ordered', pharmarack_distributor = ? WHERE id = ?", [store_name, order.id]);
+            }
+          }
+        }
+      } catch (orderErr) {
+        console.warn('Error auto-updating special orders status on placed order:', orderErr);
+      }
+    }
 
     res.json({ success: true });
   } catch (err: any) {

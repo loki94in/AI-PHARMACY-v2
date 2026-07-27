@@ -721,7 +721,8 @@ export const api = {
   // Pharmarack Sent Orders History
   getPharmarackSentDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/pharmarack/sent-orders/dates').then(res => res.data),
   getPharmarackSentOrders: (date?: string) => apiClient.get<{ success: boolean; date: string; orders: any[] }>('/pharmarack/sent-orders', { params: { date } }).then(res => res.data),
-  logPharmarackPlacedOrder: (data: { store_id?: number; store_name: string; items: any[]; delivery_persons?: any[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
+  getPharmarackLatestSentMap: () => apiClient.get<{ success: boolean; sentMap: Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }> }>('/pharmarack/sent-orders/latest-map').then(res => res.data),
+  logPharmarackPlacedOrder: (data: { store_id?: number | null; store_name: string; items: any[]; delivery_persons?: any[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
 
   // System Services Live Health Status
   getServicesStatus: () => apiClient.get<{

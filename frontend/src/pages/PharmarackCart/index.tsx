@@ -119,6 +119,49 @@ export default function PharmarackCart() {
   const [sentOrdersLoading, setSentOrdersLoading] = useState<boolean>(false);
   const [readdingSentItems, setReaddingSentItems] = useState<boolean>(false);
 
+  // Latest sent order history map by store ID / store name
+  const [latestSentMap, setLatestSentMap] = useState<Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }>>({});
+
+  const fetchLatestSentMap = async () => {
+    try {
+      const res = await api.getPharmarackLatestSentMap();
+      if (res && res.success && res.sentMap) {
+        setLatestSentMap(res.sentMap);
+      }
+    } catch (err) {
+      console.warn('Failed to load latest sent map:', err);
+    }
+  };
+
+  const isItemAlreadySent = (item: CartLineItem, dist: Distributor): boolean => {
+    const storeKey = dist.storeId ? String(dist.storeId) : (dist.storeName || '').toLowerCase().trim();
+    const sentInfo = latestSentMap[storeKey] || latestSentMap[(dist.storeName || '').toLowerCase().trim()];
+    if (!sentInfo || !sentInfo.placedAt) return false;
+
+    // 1. If createdDate exists on cart item, compare timestamps
+    if (item.createdDate) {
+      const itemCreatedMs = new Date(item.createdDate).getTime();
+      if (!isNaN(itemCreatedMs) && itemCreatedMs > 0) {
+        return itemCreatedMs <= sentInfo.placedAt;
+      }
+    }
+
+    // 2. Check if productCode / productName was included in latest sent items
+    if (Array.isArray(sentInfo.items) && sentInfo.items.length > 0) {
+      const normItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const matched = sentInfo.items.some((sentItem: any) => {
+        if (item.productCode && sentItem.productCode && item.productCode === sentItem.productCode) {
+          return true;
+        }
+        const normSentName = (sentItem.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return normItemName === normSentName || (normItemName.length > 4 && normSentName.includes(normItemName));
+      });
+      if (matched) return true;
+    }
+
+    return false;
+  };
+
   const loadSentDates = async () => {
     try {
       const res = await api.getPharmarackSentDates();
@@ -813,7 +856,7 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    let msg = `🏬 *NEW STOCK ORDER — ${storeInfo.name.toUpperCase()}*\n\n`;
+    let msg = `🏬 *NEW STOCK ORDER — AI PHARMACY*\n\n`;
     msg += `📋 *Pharmacy Details:*\n`;
     msg += `• Store: *${storeInfo.name}*\n`;
     msg += `• Phone: *${storeInfo.phone ? formatPhone(storeInfo.phone) : 'N/A'}*\n`;
@@ -863,18 +906,25 @@ export default function PharmarackCart() {
 
     msg += `\n----------------------------------\n`;
     msg += `📦 *ORDERED MEDICINES:*\n`;
-    dist.items.forEach((item, idx) => {
+
+    // Filter to send ONLY fresh/new items so distributor is not confused by already-sent old items
+    const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+    const itemsToSend = freshItems.length > 0 ? freshItems : dist.items;
+
+    itemsToSend.forEach((item, idx) => {
       const pack = item.packaging ? ` (${item.packaging})` : '';
       const rateText = item.ptr > 0 ? ` @ ₹${item.ptr.toFixed(2)}` : '';
       msg += `${idx + 1}. *${item.productName}*${pack} — Qty: *${item.qty}*${rateText}\n`;
     });
     msg += `----------------------------------\n`;
-    msg += `📊 *Total Items:* ${dist.items.length}\n`;
-    if (dist.lineTotal > 0) {
-      msg += `💰 *Subtotal:* ₹${dist.lineTotal.toFixed(2)}\n`;
+    msg += `📊 *Total Items:* ${itemsToSend.length}\n`;
+    const targetSubtotal = itemsToSend.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0);
+    if (targetSubtotal > 0) {
+      msg += `💰 *Subtotal:* ₹${targetSubtotal.toFixed(2)}\n`;
     }
     msg += `🕒 *Time:* ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
     msg += `*Please confirm order receipt & dispatch.*`;
+    return msg;
     return msg;
   };
 
@@ -934,6 +984,14 @@ export default function PharmarackCart() {
       return;
     }
 
+    const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+    if (freshItems.length === 0) {
+      toastEvent.trigger(`All ${dist.items.length} item(s) for ${dist.storeName} were already sent! No new items to order.`, 'info');
+      if (!window.confirm(`All ${dist.items.length} item(s) for ${dist.storeName} have already been sent in a previous WhatsApp order. Do you want to re-send the full order to ${dist.storeName} anyway?`)) {
+        return;
+      }
+    }
+
     let phoneNum = getDistributorPhoneNumber(dist);
 
     let cleanPhone = phoneNum.replace(/\D/g, '');
@@ -988,12 +1046,15 @@ export default function PharmarackCart() {
 
       // Log placed order to DB history
       try {
+        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+        const itemsToLog = freshItems.length > 0 ? freshItems : dist.items;
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
           store_name: dist.storeName,
-          items: dist.items,
+          items: itemsToLog,
           delivery_persons: dist.deliveryPersons
         });
+        await fetchLatestSentMap();
       } catch (logErr) {
         console.warn('Could not log placed order:', logErr);
       }
@@ -1022,12 +1083,19 @@ export default function PharmarackCart() {
 
       // Log placed order to DB history on tab fallback
       try {
+        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+        const itemsToLog = freshItems.length > 0 ? freshItems : dist.items;
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
           store_name: dist.storeName,
-          items: dist.items,
+          items: itemsToLog,
           delivery_persons: dist.deliveryPersons
         });
+        setHasUnreadSentHistory(true);
+        specialOrdersEvent.triggerUpdated();
+        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        await fetchPendingOrders();
+        await fetchLatestSentMap();
       } catch (logErr) {
         console.warn('Could not log placed order:', logErr);
       }
@@ -1063,6 +1131,9 @@ export default function PharmarackCart() {
       const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
 
       for (const dist of mapped) {
+        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+        const itemsForBatch = freshItems.length > 0 ? freshItems : dist.items;
+
         let phoneNum = getDistributorPhoneNumber(dist);
         let cleanPhone = phoneNum.replace(/\D/g, '');
         if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
@@ -1081,8 +1152,8 @@ export default function PharmarackCart() {
           storeId: dist.storeId,
           phone: cleanPhone,
           message: msg,
-          lineTotal: dist.lineTotal,
-          items: dist.items
+          lineTotal: itemsForBatch.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0),
+          items: itemsForBatch
         });
       }
 
@@ -1115,6 +1186,12 @@ export default function PharmarackCart() {
         });
 
         setSentWaStatusMap(prev => ({ ...prev, ...statusUpdates }));
+
+        setHasUnreadSentHistory(true);
+        specialOrdersEvent.triggerUpdated();
+        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        await fetchPendingOrders();
+        await fetchLatestSentMap();
 
         toastEvent.trigger(
           `⚡ WhatsApp Queue started in background! Enqueued 1 Delivery Boy + ${ordersPayload.length} Distributor orders. Dispatching automatically!`,
@@ -1336,6 +1413,7 @@ export default function PharmarackCart() {
         setLastFetched(now);
         cachedLastFetched = now;
         fetchPriceHistories(list);
+        fetchLatestSentMap();
       } else {
         setError('Failed to retrieve cart details.');
       }
@@ -1432,6 +1510,7 @@ export default function PharmarackCart() {
     fetchCart();
     fetchPendingOrders();
     fetchPendingRefills();
+    fetchLatestSentMap();
   }, []);
 
   // Re-fetch pending special orders whenever any page creates/updates an order.
@@ -1444,6 +1523,35 @@ export default function PharmarackCart() {
     return unsub;
   }, []);
 
+  // Listen to cross-page refresh events fired by QuickOrderModal, LiveCartAddModal, Orders page, etc.
+  // 'refresh-pharmarack-cart'  → re-fetch cart so newly-added items appear immediately
+  // 'refresh-special-orders'   → re-fetch pending orders so the left sidebar count is up-to-date
+  useEffect(() => {
+    const handleCartRefresh = () => {
+      cachedDistributors = [];
+      fetchCart();
+      fetchLatestSentMap();
+    };
+    const handleOrdersRefresh = () => {
+      cachedPendingOrders = [];
+      fetchPendingOrders();
+    };
+    window.addEventListener('refresh-pharmarack-cart', handleCartRefresh);
+    window.addEventListener('refresh-special-orders', handleOrdersRefresh);
+    return () => {
+      window.removeEventListener('refresh-pharmarack-cart', handleCartRefresh);
+      window.removeEventListener('refresh-special-orders', handleOrdersRefresh);
+    };
+  }, []);
+
+
+  const [hasUnreadSentHistory, setHasUnreadSentHistory] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (currentTab === 'sent-history') {
+      setHasUnreadSentHistory(false);
+    }
+  }, [currentTab]);
 
   const totalProducts = distributors.reduce((s, d) => s + d.items.length, 0);
   const totalQty = distributors.reduce((s, d) => s + d.items.reduce((q, i) => q + i.qty, 0), 0);
@@ -1465,14 +1573,23 @@ export default function PharmarackCart() {
         </button>
 
         <button
-          onClick={() => setSearchParams({ tab: 'sent-history' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'sent-history'
+          onClick={() => {
+            setSearchParams({ tab: 'sent-history' });
+            setHasUnreadSentHistory(false);
+          }}
+          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all relative ${currentTab === 'sent-history'
             ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
             : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
             }`}
         >
           <Send size={14} />
-          Sent Orders History
+          <span>Sent Orders History</span>
+          {hasUnreadSentHistory && currentTab !== 'sent-history' && (
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+          )}
         </button>
 
         <button
@@ -2191,9 +2308,20 @@ export default function PharmarackCart() {
                                 {dist.deliveryPersons[0].name}
                               </span>
                             )}
-                            <span className="text-[10px] text-muted font-bold px-2 py-0.5 bg-bg/50 rounded-full border border-glass-border/30">
-                              {dist.items.length} item{dist.items.length !== 1 ? 's' : ''}
-                            </span>
+                            {(() => {
+                              const sentCount = dist.items.filter(i => isItemAlreadySent(i, dist)).length;
+                              const newCount = dist.items.length - sentCount;
+                              return (
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-bg/50 rounded-full border border-glass-border/30 flex items-center gap-1.5 shrink-0">
+                                  {newCount > 0 && <span className="text-emerald-400 font-extrabold">✨ {newCount} New</span>}
+                                  {newCount > 0 && sentCount > 0 && <span className="text-muted/40">•</span>}
+                                  {sentCount > 0 && <span className="text-muted font-semibold">✓ {sentCount} Sent</span>}
+                                  {newCount === 0 && sentCount === 0 && (
+                                    <span className="text-muted font-normal">{dist.items.length} items</span>
+                                  )}
+                                </span>
+                              );
+                            })()}
 
                             {/* Button 1: Send to Delivery Boy via WhatsApp */}
                             <button
@@ -2293,11 +2421,34 @@ export default function PharmarackCart() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-glass-border/15">
-                              {dist.items.map((item, idx) => (
-                                <tr key={`${item.productCode}-${idx}`} className="hover:bg-bg3/10 transition-colors">
-                                  <td className="px-4 py-2.5">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-bold text-text text-[11px]">{item.productName}</span>
+                              {dist.items.map((item, idx) => {
+                                const isSent = isItemAlreadySent(item, dist);
+                                return (
+                                  <tr
+                                    key={`${item.productCode}-${idx}`}
+                                    className={`transition-colors ${
+                                      isSent
+                                        ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
+                                        : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
+                                    }`}
+                                  >
+                                    <td className="px-4 py-2.5">
+                                      <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className={`font-bold text-[11px] ${isSent ? 'text-muted line-through opacity-80' : 'text-text'}`}>
+                                            {item.productName}
+                                          </span>
+                                          {isSent ? (
+                                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 shrink-0 select-none flex items-center gap-0.5">
+                                              <Check size={8} />
+                                              <span>SENT</span>
+                                            </span>
+                                          ) : (
+                                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
+                                              <span>✨ NEW</span>
+                                            </span>
+                                          )}
+                                        </div>
 
                                       {/* Duplicate Distributor Warning */}
                                       {(() => {
@@ -2399,12 +2550,11 @@ export default function PharmarackCart() {
                                     {item.amount > 0 ? `₹${item.amount.toFixed(2)}` : '—'}
                                   </td>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Distributor subtotal */}
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                         {dist.lineTotal > 0 && (
                           <div className="border-t border-glass-border/30 px-4 py-2 bg-bg3/30 flex justify-end">
                             <span className="text-[10px] text-muted font-bold uppercase tracking-wider mr-3">Subtotal</span>
