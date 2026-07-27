@@ -262,22 +262,35 @@ const POS = () => {
     }
   }, []);
 
-  // Hydrate POS cart from router state parameter for refills panel handoff
+  // Hydrate POS cart from router state parameter for refills / special orders panel handoff
   useEffect(() => {
     if (location.state && (location.state as any).prefill) {
       const prefill = (location.state as any).prefill;
-      const { patientName: name, patientPhone: phone } = prefill;
+      const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays } = prefill;
       if (name) setPatientName(name);
-      if (phone) setPatientPhone(phone);
+      if (phone) {
+        setPatientPhone(phone);
+        setSendWhatsApp(true); // Auto-enable WhatsApp toggle when prefilled for customer
+      }
+      if (refillPatient || refillId) {
+        setRefillEnabled(true);
+        if (refillId) setActiveRefillId(Number(refillId));
+        if (rDays) setRefillDays(Number(rDays));
+      }
+      if (advancePayment && Number(advancePayment) > 0) {
+        setDiscount((prev: number) => prev + Number(advancePayment));
+      }
 
       const fetchAndAdd = async () => {
         try {
-          // Multi-medicine array from CRM "Bill Now → POS"
+          // Multi-medicine array from CRM "Bill Now / Sell → POS"
           if (Array.isArray(prefill.medicines) && prefill.medicines.length > 0) {
             const cartItems: any[] = [];
             for (const med of prefill.medicines) {
+              const targetName = med.medicineName || med.medicine_name || '';
+              const targetQty = Number(med.quantity_needed || med.qty) || 1;
               try {
-                const matched = await api.searchMedicine(med.medicineName || med.medicine_name || '');
+                const matched = await api.searchMedicine(targetName);
                 if (matched && matched.length > 0) {
                   const m = matched[0];
                   cartItems.push({
@@ -286,15 +299,43 @@ const POS = () => {
                     batch: m.batch_no || m.batch_number || 'AUTO',
                     expiry: m.expiry_date || '12/28',
                     mrp: m.mrp || 100,
-                    qty: Number(med.quantity_needed) || 10,
-                    quantity: Number(med.quantity_needed) || 10,
+                    qty: targetQty,
+                    quantity: targetQty,
                     unitPrice: m.unit_price || m.mrp || 100,
                     looseQty: 0,
                     discount: 0,
                     packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 10
                   });
+                } else {
+                  cartItems.push({
+                    id: 'special_' + Date.now() + '_' + Math.random(),
+                    name: targetName || 'Special Request Medicine',
+                    batch: 'SPECIAL',
+                    expiry: '12/28',
+                    mrp: 100,
+                    qty: targetQty,
+                    quantity: targetQty,
+                    unitPrice: 100,
+                    looseQty: 0,
+                    discount: 0,
+                    packSize: 1
+                  });
                 }
-              } catch { /* skip individual medicine resolution errors */ }
+              } catch {
+                cartItems.push({
+                  id: 'special_' + Date.now() + '_' + Math.random(),
+                  name: targetName || 'Special Request Medicine',
+                  batch: 'SPECIAL',
+                  expiry: '12/28',
+                  mrp: 100,
+                  qty: targetQty,
+                  quantity: targetQty,
+                  unitPrice: 100,
+                  looseQty: 0,
+                  discount: 0,
+                  packSize: 1
+                });
+              }
             }
             if (cartItems.length > 0) setCart(cartItems);
           } else if (prefill.medicineId) {
@@ -307,8 +348,8 @@ const POS = () => {
                 batch: matched.batch_no || matched.batch_number || 'AUTO',
                 expiry: matched.expiry_date || '12/28',
                 mrp: matched.mrp || 100,
-                qty: Number(prefill.quantity) || 10,
-                quantity: Number(prefill.quantity) || 10,
+                qty: Number(prefill.quantity) || 1,
+                quantity: Number(prefill.quantity) || 1,
                 unitPrice: matched.unit_price || matched.mrp || 100,
                 looseQty: 0,
                 discount: 0,

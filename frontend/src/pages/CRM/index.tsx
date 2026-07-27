@@ -2,13 +2,16 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { apiClient, api } from '../../services/api';
+import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle
 } from 'lucide-react';
-import { toastEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
+import { useOnClickOutside } from '../../hooks/useOnClickOutside';
+import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -179,21 +182,23 @@ const RefillsSection: React.FC = () => {
     } finally { setSending(null); }
   };
 
-  // ── Bill Now → POS ────────────────────────────────────────────────────────
-  const handleBillNow = (patient: RefillPatient) => {
+  // ── Sell Refill Patient → POS ─────────────────────────────────────────────
+  const handleSellRefillPatient = (patient: RefillPatient) => {
     navigate('/pos', {
       state: {
         prefill: {
           patientName: patient.patient_name,
           patientPhone: patient.patient_phone,
+          refillPatient: true,
           medicines: patient.medicines.map(m => ({
             medicine_name: m.medicine_name,
             medicineName: m.medicine_name,
-            quantity_needed: m.quantity_needed || 10
+            quantity_needed: m.quantity_needed || 1
           }))
         }
       }
     });
+    toastEvent.trigger(`Transferring ${patient.medicines.length} prescribed medicine(s) for ${patient.patient_name} to POS...`, 'info', '/pos');
   };
 
   // ── Medicine row search & inventory dropdown ──────────────────────────────
@@ -432,14 +437,14 @@ const RefillsSection: React.FC = () => {
                     <Send size={11} className={sending === patient.patient_phone ? 'animate-pulse' : ''} />
                     {sending === patient.patient_phone ? 'Sending…' : 'Remind Now'}
                   </button>
-                  {/* Bill Now → POS */}
+                  {/* Sell Now → POS */}
                   <button
-                    onClick={() => handleBillNow(patient)}
-                    title="Open POS with this patient's medicines pre-loaded"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary rounded-lg text-xs font-medium hover:bg-primary/20 transition-colors"
+                    onClick={() => handleSellRefillPatient(patient)}
+                    title="Sell now: Pre-loads all prescribed medicines & quantities into POS"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <Package size={11} />
-                    Bill Now → POS
+                    <ShoppingCart size={13} />
+                    <span>⚡ Sell Now</span>
                   </button>
                 </div>
               </div>
@@ -2130,27 +2135,113 @@ interface SpecialOrderItem {
   pharmarack_rate?: number | null;
   pharmarack_mrp?: number | null;
   pharmarack_scheme?: string | null;
+  pharmarack_mapped?: number | null;
   advance_payment?: number | null;
 }
 
 const SpecialOrdersSection: React.FC = () => {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<SpecialOrderItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+
+  // Date Filters
+  const [dateFrom, setDateFrom] = useState(getNDaysAgoString(15));
+  const [dateTo, setDateTo] = useState(getTodayString());
+  const [manualToDate, setManualToDate] = useState(false);
+
   const [notifyingId, setNotifyingId] = useState<number | null>(null);
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [addingCartId, setAddingCartId] = useState<number | null>(null);
+  const [convertingId, setConvertingId] = useState<number | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
   // New Request Form State
-  const [newProduct, setNewProduct] = useState('');
-  const [newRequester, setNewRequester] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newQty, setNewQty] = useState(1);
-  const [newAdvance, setNewAdvance] = useState<number | ''>('');
-  const [newPriority, setNewPriority] = useState('Normal');
+  const [product, setProduct] = useState('');
+  const [requester, setRequester] = useState('');
+  const [phone, setPhone] = useState('');
+  const [qty, setQty] = useState<number | ''>(1);
+  const [advancePayment, setAdvancePayment] = useState<number | ''>('');
+  const [priority, setPriority] = useState('Normal');
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Pharmarack Search States
+  const [prSearchResults, setPrSearchResults] = useState<any[]>([]);
+  const [showPrDropdown, setShowPrDropdown] = useState(false);
+  const [loadingPr, setLoadingPr] = useState(false);
+
+  const productContainerRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(productContainerRef, () => {
+    setShowPrDropdown(false);
+  });
+
+  // Selected Pharmarack Metadata Form State
+  const [selectedDistributor, setSelectedDistributor] = useState('');
+  const [selectedRate, setSelectedRate] = useState<number | ''>('');
+  const [selectedMrp, setSelectedMrp] = useState<number | ''>('');
+  const [selectedMapped, setSelectedMapped] = useState(true);
+  const [selectedScheme, setSelectedScheme] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState<string | number>('');
+  const [selectedStoreId, setSelectedStoreId] = useState<string | number>('');
+  const [selectedProductCode, setSelectedProductCode] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState('');
+  const [selectedPackaging, setSelectedPackaging] = useState('');
+
+  const isSelectingPrRef = useRef(false);
+
+  useEffect(() => {
+    if (!manualToDate) {
+      setDateTo(getTodayString());
+    }
+  }, [manualToDate]);
+
+  // Debounced search for Pharmarack products
+  useEffect(() => {
+    if (isSelectingPrRef.current) return;
+    if (!product.trim()) {
+      setPrSearchResults([]);
+      setShowPrDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      if (isSelectingPrRef.current) return;
+      setLoadingPr(true);
+      try {
+        const results = await api.searchPharmarack(product);
+        if (isSelectingPrRef.current) return;
+        setPrSearchResults(results || []);
+        setShowPrDropdown(results && results.length > 0);
+      } catch (err) {
+        console.error('Pharmarack query failed:', err);
+      } finally {
+        setLoadingPr(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [product]);
+
+  const handleSelectPharmarackItem = (item: any) => {
+    isSelectingPrRef.current = true;
+    setProduct(item.name);
+    setSelectedDistributor(item.distributor || '');
+    setSelectedRate(item.rate !== null && item.rate !== undefined ? item.rate : '');
+    setSelectedMrp(item.mrp !== null && item.mrp !== undefined ? item.mrp : '');
+    setSelectedMapped(!!item.mapped);
+    setSelectedScheme(item.scheme || '');
+    setSelectedProductId(item.productId || '');
+    setSelectedStoreId(item.storeId || '');
+    setSelectedProductCode(item.productCode || '');
+    setSelectedCompany(item.company || '');
+    setSelectedPackaging(item.packaging || '');
+    setPrSearchResults([]);
+    setShowPrDropdown(false);
+  };
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
@@ -2166,6 +2257,13 @@ const SpecialOrdersSection: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
+    const handleRefresh = () => {
+      loadOrders();
+    };
+    window.addEventListener('refresh-special-orders', handleRefresh);
+    return () => {
+      window.removeEventListener('refresh-special-orders', handleRefresh);
+    };
   }, [loadOrders]);
 
   const handleNotifyArrival = async (order: SpecialOrderItem) => {
@@ -2207,8 +2305,17 @@ const SpecialOrdersSection: React.FC = () => {
     }
   };
 
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [addingCartId, setAddingCartId] = useState<number | null>(null);
+  const handleSellSpecialOrder = (order: SpecialOrderItem) => {
+    const prefill = {
+      patientName: order.requester,
+      patientPhone: order.phone,
+      specialOrderId: order.id,
+      advancePayment: order.advance_payment ? Number(order.advance_payment) : 0,
+      medicines: [{ medicineName: order.product, quantity_needed: order.qty }]
+    };
+    toastEvent.trigger(`Transferring "${order.product}" (Qty: ${order.qty}) to POS for ${order.requester}...`, 'info', '/pos');
+    navigate('/pos', { state: { prefill } });
+  };
 
   const handleAddToCart = async (order: SpecialOrderItem) => {
     setAddingCartId(order.id);
@@ -2221,12 +2328,14 @@ const SpecialOrdersSection: React.FC = () => {
         storeName: order.pharmarack_distributor || undefined,
         rate: order.pharmarack_rate || undefined,
         mrp: order.pharmarack_mrp || undefined,
-        scheme: order.pharmarack_scheme || undefined
+        scheme: order.pharmarack_scheme || undefined,
+        mapped: order.pharmarack_mapped === 1
       }]);
       if (res && res.success) {
         toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success', '/crm');
         await api.updateOrder(order.id, { status: 'Ordered' });
         await loadOrders();
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
       } else {
         toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error', '/crm');
       }
@@ -2244,6 +2353,7 @@ const SpecialOrdersSection: React.FC = () => {
       await api.deleteOrder(id);
       toastEvent.trigger(`Special order for "${product}" cancelled & deleted`, 'success', '/crm');
       await loadOrders();
+      specialOrdersEvent.triggerUpdated();
     } catch {
       toastEvent.trigger('Failed to delete order request', 'error', '/crm');
     } finally {
@@ -2251,41 +2361,133 @@ const SpecialOrdersSection: React.FC = () => {
     }
   };
 
-  const handleCreateRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProduct.trim() || !newRequester.trim() || !newPhone.trim()) {
-      toastEvent.trigger('Product, Customer Name, and Phone are required.', 'error', '/crm');
+  const handleConvertToRefill = async (order: SpecialOrderItem) => {
+    const daysStr = prompt(`Enter refill frequency in days for "${order.product}" (e.g. 30):`, '30');
+    if (daysStr === null) return;
+    
+    const intervalDays = parseInt(daysStr, 10);
+    if (isNaN(intervalDays) || intervalDays <= 0) {
+      toastEvent.trigger('Please enter a valid number of days.', 'error', '/crm');
       return;
     }
+
+    setConvertingId(order.id);
+    try {
+      const response = await api.convertToRefill(order.id, intervalDays);
+      if (response.success) {
+        toastEvent.trigger(response.message || 'Successfully converted to recurring refill!', 'success', '/crm');
+        await loadOrders();
+      } else {
+        toastEvent.trigger(response.error || 'Failed to convert to recurring refill.', 'error', '/crm');
+      }
+    } catch (err: any) {
+      console.error('Error converting order to refill:', err);
+      toastEvent.trigger('Failed to convert order to recurring refill.', 'error', '/crm');
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
+  const handleScanUncollected = async () => {
+    setRefreshing(true);
+    try {
+      const alertedList = await api.getUncollectedAlerts();
+      const notifiedCount = alertedList.filter(o => o.notified).length;
+      
+      if (notifiedCount > 0) {
+        toastEvent.trigger(`Reminders scan complete. Sent WhatsApp alerts to ${notifiedCount} customer(s).`, 'success', '/crm');
+      } else {
+        toastEvent.trigger('No uncollected orders required notifications at this time.', 'info', '/crm');
+      }
+      await loadOrders();
+    } catch (err) {
+      console.error('Error scanning uncollected alerts:', err);
+      toastEvent.trigger('Failed to execute uncollected alerts reminders.', 'error', '/crm');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleCreateRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const customerName = requester.trim();
+    const customerPhone = phone.replace(/\D/g, '');
+
+    if (!product.trim()) {
+      toastEvent.trigger('Product name is required.', 'error', '/crm');
+      return;
+    }
+    if (!customerName) {
+      toastEvent.trigger('Customer Name is required.', 'error', '/crm');
+      return;
+    }
+    if (!customerPhone || customerPhone.length < 10) {
+      toastEvent.trigger('Please enter a valid 10-digit mobile number.', 'error', '/crm');
+      return;
+    }
+    if (!qty || Number(qty) < 1) {
+      toastEvent.trigger('Quantity must be at least 1.', 'error', '/crm');
+      return;
+    }
+
     setFormSubmitting(true);
     try {
       await api.createOrder({
-        product: newProduct.trim(),
-        requester: newRequester.trim(),
-        phone: newPhone.trim(),
-        qty: Number(newQty) || 1,
-        priority: newPriority,
-        advance_payment: newAdvance !== '' ? Number(newAdvance) : 0
+        product: product.trim(),
+        requester: customerName,
+        phone: customerPhone,
+        qty: Number(qty) || 1,
+        priority,
+        status: 'Pending',
+        pharmarack_distributor: selectedDistributor || undefined,
+        pharmarack_rate: selectedRate !== '' ? Number(selectedRate) : undefined,
+        pharmarack_mrp: selectedMrp !== '' ? Number(selectedMrp) : undefined,
+        pharmarack_mapped: selectedMapped ? 1 : 0,
+        pharmarack_scheme: selectedScheme || undefined,
+        advance_payment: advancePayment !== '' ? Number(advancePayment) : 0
       });
 
       // Auto sync to Pharmarack Cart
       try {
-        await api.addPharmarackCart([{
-          productId: 0,
-          storeId: 0,
-          qty: Number(newQty) || 1,
-          productName: newProduct.trim()
+        const cartRes = await api.addPharmarackCart([{
+          productId: selectedProductId || 0,
+          storeId: selectedStoreId || 0,
+          qty: Number(qty) || 1,
+          rate: selectedRate !== '' ? Number(selectedRate) : undefined,
+          scheme: selectedScheme || undefined,
+          productCode: selectedProductCode || undefined,
+          company: selectedCompany || undefined,
+          productName: product.trim(),
+          storeName: selectedDistributor || undefined,
+          packaging: selectedPackaging || undefined,
+          mapped: selectedMapped
         }]);
+        if (cartRes && cartRes.success) {
+          window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+        }
       } catch (_) {}
 
-      toastEvent.trigger(`Special order for "${newProduct}" logged & added to cart!`, 'success', '/crm');
+      toastEvent.trigger(`Special order for "${product}" logged & synced!`, 'success', '/crm');
       setShowAddModal(false);
-      setNewProduct('');
-      setNewRequester('');
-      setNewPhone('');
-      setNewQty(1);
-      setNewAdvance('');
+      setProduct('');
+      setRequester('');
+      setPhone('');
+      setQty(1);
+      setAdvancePayment('');
+      setPriority('Normal');
+      setSelectedDistributor('');
+      setSelectedRate('');
+      setSelectedMrp('');
+      setSelectedMapped(true);
+      setSelectedScheme('');
+      setSelectedProductId('');
+      setSelectedStoreId('');
+      setSelectedProductCode('');
+      setSelectedCompany('');
+      setSelectedPackaging('');
+      isSelectingPrRef.current = false;
       await loadOrders();
+      specialOrdersEvent.triggerUpdated();
     } catch (err: any) {
       toastEvent.trigger(err?.response?.data?.error || 'Failed to log special request', 'error', '/crm');
     } finally {
@@ -2302,31 +2504,48 @@ const SpecialOrdersSection: React.FC = () => {
       (o.pharmarack_distributor && o.pharmarack_distributor.toLowerCase().includes(q));
     
     if (!matchesSearch) return false;
-    if (statusFilter === 'All') return true;
-    if (statusFilter === 'Pending') return o.status === 'Pending';
-    if (statusFilter === 'Waiting') return o.status === 'Waiting';
-    if (statusFilter === 'Arrived') return o.status === 'Ready' || o.status === 'Arrived';
-    if (statusFilter === 'Not Arrived') return o.status !== 'Ready' && o.status !== 'Arrived' && o.status !== 'Fulfilled';
-    return true;
+
+    let matchesStatus = true;
+    if (statusFilter === 'Pending') matchesStatus = o.status === 'Pending';
+    else if (statusFilter === 'Ordered') matchesStatus = o.status === 'Ordered';
+    else if (statusFilter === 'Waiting') matchesStatus = o.status === 'Waiting';
+    else if (statusFilter === 'Arrived') matchesStatus = o.status === 'Ready' || o.status === 'Arrived';
+    else if (statusFilter === 'Not Arrived') matchesStatus = o.status !== 'Ready' && o.status !== 'Arrived' && o.status !== 'Fulfilled';
+
+    if (!matchesStatus) return false;
+
+    let matchesDate = true;
+    if (dateFrom || dateTo) {
+      if (!o.date) {
+        matchesDate = false;
+      } else {
+        const itemDate = o.date.substring(0, 10);
+        const start = dateFrom || '0000-00-00';
+        const end = dateTo || '9999-99-99';
+        matchesDate = itemDate >= start && itemDate <= end;
+      }
+    }
+    return matchesDate;
   });
 
   return (
     <div className="flex flex-col h-full gap-3 overflow-hidden">
-      {/* Top Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-bg2 border border-border rounded-xl shrink-0">
-        <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+      {/* Top Controls & Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg2 border border-border rounded-xl shrink-0">
+        {/* Left: Search & Status Filters */}
+        <div className="flex items-center gap-2 flex-1 min-w-[280px]">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
-              placeholder="Search by medicine, customer name, phone, distributor..."
+              placeholder="Search medicine, customer, phone, distributor..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
             />
           </div>
           <div className="flex items-center gap-1 bg-bg3/60 p-1 rounded-xl border border-border">
-            {['All', 'Pending', 'Waiting', 'Arrived', 'Not Arrived'].map(st => (
+            {['All', 'Pending', 'Ordered', 'Waiting', 'Arrived', 'Not Arrived'].map(st => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
@@ -2340,7 +2559,62 @@ const SpecialOrdersSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Right: Date Range, Remind Uncollected, Refresh, New Request */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Date Picker Controls */}
+          <div className="flex items-center gap-1.5 bg-bg border border-border px-2.5 py-1 rounded-xl text-xs">
+            <Calendar size={13} className="text-muted" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="bg-transparent text-text font-medium focus:outline-none text-[11px]"
+            />
+            <span className="text-muted text-[10px]">to</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => {
+                setManualToDate(true);
+                setDateTo(e.target.value);
+              }}
+              className="bg-transparent text-text font-medium focus:outline-none text-[11px]"
+            />
+          </div>
+
+          {/* Quick Date Presets */}
+          <div className="flex items-center bg-bg3/60 p-0.5 rounded-lg border border-border">
+            <button
+              onClick={() => { setDateFrom(getNDaysAgoString(15)); setDateTo(getTodayString()); setManualToDate(false); }}
+              className="px-2 py-0.5 text-[10px] font-semibold text-muted hover:text-text rounded"
+            >
+              15d
+            </button>
+            <button
+              onClick={() => { setDateFrom(getNDaysAgoString(30)); setDateTo(getTodayString()); setManualToDate(false); }}
+              className="px-2 py-0.5 text-[10px] font-semibold text-muted hover:text-text rounded"
+            >
+              30d
+            </button>
+            <button
+              onClick={() => { setDateFrom(''); setDateTo(''); }}
+              className="px-2 py-0.5 text-[10px] font-semibold text-muted hover:text-text rounded"
+            >
+              All
+            </button>
+          </div>
+
+          {/* Auto Remind Uncollected Button */}
+          <button
+            onClick={handleScanUncollected}
+            disabled={refreshing || loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-bold transition-all disabled:opacity-50"
+            title="Scan orders ready for 2+ days and send auto WhatsApp reminder notifications"
+          >
+            <AlertTriangle size={13} className={refreshing ? 'animate-spin' : ''} />
+            <span>Auto Remind</span>
+          </button>
+
           <button
             onClick={loadOrders}
             className="p-2 rounded-xl bg-bg3 hover:bg-bg border border-border text-muted hover:text-text transition-all"
@@ -2348,6 +2622,7 @@ const SpecialOrdersSection: React.FC = () => {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-md shadow-primary/20 transition-all"
@@ -2367,6 +2642,7 @@ const SpecialOrdersSection: React.FC = () => {
         ) : (
           filteredOrders.map(order => {
             const isArrived = order.status === 'Ready' || order.status === 'Arrived';
+            const isOrdered = order.status === 'Ordered';
             const hasAdvance = order.advance_payment && Number(order.advance_payment) > 0;
             return (
               <div
@@ -2376,6 +2652,8 @@ const SpecialOrdersSection: React.FC = () => {
                     ? 'bg-emerald-500/5 border-emerald-500/30'
                     : order.status === 'Waiting'
                     ? 'bg-amber-500/5 border-amber-500/30'
+                    : isOrdered
+                    ? 'bg-indigo-500/5 border-indigo-500/30'
                     : 'bg-bg2 border-border hover:border-primary/40'
                 }`}
               >
@@ -2392,15 +2670,31 @@ const SpecialOrdersSection: React.FC = () => {
                           ✨ Advance Paid: ₹{Number(order.advance_payment).toFixed(2)}
                         </span>
                       )}
+                      {order.priority && (
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          order.priority === 'High' ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-bg3 text-muted border border-border'
+                        }`}>
+                          {order.priority}
+                        </span>
+                      )}
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                         isArrived
                           ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                           : order.status === 'Waiting'
                           ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                          : isOrdered
+                          ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
                           : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                       }`}>
                         {order.status}
                       </span>
+
+                      {/* Notified Badge */}
+                      {order.notified === 1 && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold flex items-center gap-1">
+                          <CheckCircle2 size={11} /> WA Sent
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
@@ -2423,27 +2717,28 @@ const SpecialOrdersSection: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Right Column: Action Buttons */}
-                  <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  {/* Right Column: Complete Status Action Bar */}
+                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                    {/* Sell Now Button - Quick Handoff to POS */}
                     <button
-                      onClick={() => handleAddToCart(order)}
-                      disabled={addingCartId === order.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
-                      title="Push special request item directly to Pharmarack Cart"
+                      onClick={() => handleSellSpecialOrder(order)}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                      title="Sell now: Transfers patient, medicine, quantity & advance credit directly to POS"
                     >
-                      <ShoppingCart size={13} className={addingCartId === order.id ? 'animate-spin' : ''} />
-                      <span>{addingCartId === order.id ? 'Adding...' : 'Add to Cart'}</span>
+                      <ShoppingCart size={14} />
+                      <span>⚡ Sell Now</span>
                     </button>
 
+                    {/* Arrived & WA Button */}
                     {!isArrived ? (
                       <button
                         onClick={() => handleNotifyArrival(order)}
                         disabled={notifyingId === order.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
-                        title="Mark order as arrived and auto send WhatsApp arrival message to customer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-xs font-bold transition-all disabled:opacity-50"
+                        title="Mark order as arrived and auto send WhatsApp arrival notification to customer"
                       >
                         <CheckCircle2 size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                        <span>{notifyingId === order.id ? 'Sending...' : 'Mark Arrived & WA'}</span>
+                        <span>{notifyingId === order.id ? 'Sending...' : 'Arrived & WA'}</span>
                       </button>
                     ) : (
                       <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
@@ -2452,35 +2747,74 @@ const SpecialOrdersSection: React.FC = () => {
                       </span>
                     )}
 
-                    {order.status !== 'Waiting' && !isArrived && (
+                    {/* Pending Status Button */}
+                    {order.status !== 'Pending' && (
+                      <button
+                        onClick={() => handleUpdateStatus(order.id, 'Pending')}
+                        disabled={updatingId === order.id}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-semibold transition-all"
+                        title="Set status to Pending"
+                      >
+                        <Clock size={12} />
+                        <span>Pending</span>
+                      </button>
+                    )}
+
+                    {/* Waiting Status Button */}
+                    {order.status !== 'Waiting' && (
                       <button
                         onClick={() => handleUpdateStatus(order.id, 'Waiting')}
                         disabled={updatingId === order.id}
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-all"
+                        title="Set status to Waiting"
                       >
                         <Clock size={12} />
-                        <span>Mark Waiting</span>
+                        <span>Waiting</span>
                       </button>
                     )}
 
+                    {/* Add to Pharmarack Cart */}
+                    <button
+                      onClick={() => handleAddToCart(order)}
+                      disabled={addingCartId === order.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-xs font-bold transition-all disabled:opacity-50"
+                      title="Push special request item directly to Pharmarack Cart"
+                    >
+                      <ShoppingCart size={13} className={addingCartId === order.id ? 'animate-spin' : ''} />
+                      <span>{addingCartId === order.id ? 'Adding...' : 'Cart'}</span>
+                    </button>
+
+                    {/* Convert Refill */}
+                    <button
+                      onClick={() => handleConvertToRefill(order)}
+                      disabled={convertingId === order.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-xs font-semibold transition-all disabled:opacity-50"
+                      title="Convert special order into recurring patient refill schedule"
+                    >
+                      <Repeat2 size={12} className={convertingId === order.id ? 'animate-spin' : ''} />
+                      <span>{convertingId === order.id ? '...' : 'Refill'}</span>
+                    </button>
+
+                    {/* Resend WA */}
                     <button
                       onClick={() => handleResendBooking(order)}
                       disabled={resendingId === order.id}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-bg3 border border-border text-muted hover:text-primary text-xs font-semibold transition-all"
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-bg3 border border-border text-muted hover:text-primary text-xs font-semibold transition-all"
                       title="Resend booking confirmation WhatsApp"
                     >
                       <MessageCircle size={12} />
-                      <span>{resendingId === order.id ? 'Sending...' : 'Resend WA'}</span>
+                      <span>{resendingId === order.id ? 'Sending...' : 'WA'}</span>
                     </button>
 
+                    {/* Cancel Button */}
                     <button
                       onClick={() => handleDeleteOrder(order.id, order.product)}
                       disabled={deletingId === order.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold transition-all disabled:opacity-50"
-                      title="Cancel & Delete Special Order Request"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold transition-all disabled:opacity-50"
+                      title="Cancel Special Order Request"
                     >
-                      <Trash2 size={13} className={deletingId === order.id ? 'animate-spin' : ''} />
-                      <span>{deletingId === order.id ? 'Deleting...' : 'Delete / Cancel'}</span>
+                      <Trash2 size={12} />
+                      <span>{deletingId === order.id ? 'Deleting...' : 'Cancel'}</span>
                     </button>
                   </div>
                 </div>
@@ -2493,11 +2827,11 @@ const SpecialOrdersSection: React.FC = () => {
       {/* Add Special Request Modal inside CRM */}
       {showAddModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="glass-panel w-full max-w-lg bg-bg2 rounded-2xl border border-primary/20 p-5 shadow-2xl space-y-4">
+          <div className="glass-panel w-full max-w-lg bg-bg2 rounded-2xl border border-primary/20 p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-border pb-3">
               <h3 className="font-bold text-sm text-text flex items-center gap-2">
                 <ClipboardList size={16} className="text-primary" />
-                Log Quick Special Request
+                Register Out-of-Stock Special Request
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}
@@ -2507,19 +2841,123 @@ const SpecialOrdersSection: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateRequest} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-text mb-1">Product / Medicine Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Dolo 650mg, Pan D..."
-                  value={newProduct}
-                  onChange={e => setNewProduct(e.target.value)}
-                  className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
-                />
+            <form onSubmit={handleCreateRequest} className="space-y-3.5 text-xs">
+              {/* Product Search with Live Pharmarack Autocomplete */}
+              <div ref={productContainerRef} className="space-y-1.5 relative">
+                <label className="block font-semibold text-text">Requested Medicine Name *</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Search medicine e.g. Lipitor 10mg..."
+                    value={product}
+                    onChange={e => {
+                      isSelectingPrRef.current = false;
+                      setProduct(e.target.value);
+                    }}
+                    onFocus={() => { if (prSearchResults.length > 0) setShowPrDropdown(true); }}
+                    className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary text-xs"
+                  />
+                  {loadingPr && (
+                    <div className="absolute right-3 top-2.5">
+                      <RefreshCw size={14} className="animate-spin text-primary" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Dropdown Live Results from Pharmarack */}
+                {showPrDropdown && prSearchResults.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-1 bg-bg2 border border-border rounded-xl shadow-2xl z-50 max-h-56 overflow-y-auto">
+                    <div className="p-2 border-b border-border/40 bg-bg3/50 text-[9px] font-bold text-muted uppercase tracking-wider flex justify-between items-center">
+                      <span>Pharmarack Live Matches</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowPrDropdown(false)}
+                        className="text-muted hover:text-text font-bold"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    {prSearchResults.map((item, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => handleSelectPharmarackItem(item)}
+                        className="p-3 border-b border-border/30 hover:bg-bg3/80 transition-colors cursor-pointer flex flex-col gap-1 text-xs"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-1.5 flex-wrap truncate max-w-[200px]">
+                            <span className="font-bold text-text truncate" title={item.name}>
+                              {item.name} <span className="text-[10px] text-muted">({item.packaging})</span>
+                            </span>
+                            {item.scheme && (
+                              <span className="text-[8px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1 py-0.2 rounded font-semibold uppercase">
+                                {item.scheme}
+                              </span>
+                            )}
+                          </div>
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                            item.mapped
+                              ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {item.mapped ? 'Mapped' : 'Non-Mapped'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-muted truncate">
+                          Distributor: <span className="text-text font-medium">{item.distributor}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] font-mono mt-0.5">
+                          <span className="text-green-400 font-bold">
+                            PTR: {item.rate ? `₹${item.rate.toFixed(2)}` : 'N/A'}
+                          </span>
+                          <span className="text-text">
+                            MRP: {item.mrp ? `₹${item.mrp.toFixed(2)}` : 'N/A'}
+                          </span>
+                          <span className="text-sky-400">
+                            Stock: {item.stock}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
+              {/* Selected Pharmarack Metadata Panel */}
+              {selectedDistributor && (
+                <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl flex flex-col gap-1 text-[11px] animate-fade-in">
+                  <div className="font-bold text-primary flex items-center justify-between">
+                    <span>Selected Pharmarack Option</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDistributor('');
+                        setSelectedRate('');
+                        setSelectedMrp('');
+                        setSelectedMapped(true);
+                        setSelectedScheme('');
+                        setSelectedProductId('');
+                        setSelectedStoreId('');
+                        setSelectedProductCode('');
+                        setSelectedCompany('');
+                        setSelectedPackaging('');
+                      }}
+                      className="text-muted hover:text-red-400 text-[10px] font-bold underline"
+                    >
+                      Clear option
+                    </button>
+                  </div>
+                  <div className="text-text flex justify-between">
+                    <span>Distributor: <strong>{selectedDistributor}</strong></span>
+                    <span>Rate: <strong className="text-green-400">{selectedRate !== '' ? `₹${selectedRate}` : 'N/A'}</strong></span>
+                  </div>
+                  {selectedScheme && (
+                    <div className="text-amber-400 font-semibold">Scheme: {selectedScheme}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Customer Name & Phone */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-text mb-1">Customer Name *</label>
@@ -2527,24 +2965,25 @@ const SpecialOrdersSection: React.FC = () => {
                     type="text"
                     required
                     placeholder="Customer Name"
-                    value={newRequester}
-                    onChange={e => setNewRequester(e.target.value)}
+                    value={requester}
+                    onChange={e => setRequester(e.target.value)}
                     className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-text mb-1">Phone Number (WhatsApp) *</label>
+                  <label className="block font-semibold text-text mb-1">Phone (WhatsApp) *</label>
                   <input
                     type="tel"
                     required
                     placeholder="10-digit mobile"
-                    value={newPhone}
-                    onChange={e => setNewPhone(e.target.value)}
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
                     className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
               </div>
 
+              {/* Quantity, Advance Payment & Priority */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block font-semibold text-text mb-1">Quantity *</label>
@@ -2552,8 +2991,8 @@ const SpecialOrdersSection: React.FC = () => {
                     type="number"
                     min="1"
                     required
-                    value={newQty}
-                    onChange={e => setNewQty(Number(e.target.value))}
+                    value={qty}
+                    onChange={e => setQty(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
@@ -2564,16 +3003,16 @@ const SpecialOrdersSection: React.FC = () => {
                     min="0"
                     step="0.01"
                     placeholder="0.00"
-                    value={newAdvance}
-                    onChange={e => setNewAdvance(e.target.value === '' ? '' : Number(e.target.value))}
+                    value={advancePayment}
+                    onChange={e => setAdvancePayment(e.target.value === '' ? '' : Number(e.target.value))}
                     className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-semibold text-emerald-400 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
                   <label className="block font-semibold text-text mb-1">Priority</label>
                   <select
-                    value={newPriority}
-                    onChange={e => setNewPriority(e.target.value)}
+                    value={priority}
+                    onChange={e => setPriority(e.target.value)}
                     className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   >
                     <option value="Low">Low</option>
@@ -2600,7 +3039,7 @@ const SpecialOrdersSection: React.FC = () => {
                   disabled={formSubmitting}
                   className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-md shadow-primary/20 transition-all disabled:opacity-50"
                 >
-                  {formSubmitting ? 'Logging Request...' : 'Log & Send Booking WA'}
+                  {formSubmitting ? 'Logging Request...' : 'Log & Sync Cart'}
                 </button>
               </div>
             </form>

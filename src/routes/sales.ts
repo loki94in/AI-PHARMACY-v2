@@ -326,10 +326,16 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Resolve refill cycle if this sale completes a pending refill
-    if (refillId) {
-      const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
-      if (refill) {
+    // Resolve refill cycle if this sale completes a pending refill or matches customer phone number
+    const cleanPhone = (patient_phone || '').replace(/\D/g, '');
+    const phoneQuery = cleanPhone.length >= 10 ? `%${cleanPhone.slice(-10)}%` : 'NON_EXISTENT';
+    const matchingRefills = await db.all(
+      `SELECT * FROM patient_refills WHERE (id = ?) OR (patient_phone IS NOT NULL AND length(patient_phone) >= 10 AND replace(patient_phone, ' ', '') LIKE ?)`,
+      [refillId || -1, phoneQuery]
+    );
+
+    if (Array.isArray(matchingRefills) && matchingRefills.length > 0) {
+      for (const refill of matchingRefills) {
         const nextDate = new Date();
         nextDate.setDate(nextDate.getDate() + Number(refill.refill_interval_days || 30));
         const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
@@ -345,7 +351,7 @@ router.post('/', async (req, res) => {
                quick_bill_id = NULL,
                stock_verified_override = 0
            WHERE id = ?`,
-          [nextDateStr, refillId]
+          [nextDateStr, refill.id]
         );
 
         if (refill.quick_bill_id) {
@@ -358,7 +364,7 @@ router.post('/', async (req, res) => {
           `UPDATE automation_notifications 
            SET lifecycle_status = 'sent' 
            WHERE type = 'refill_collection' AND reference_id = ? AND lifecycle_status = 'staged'`,
-          [String(refillId)]
+          [String(refill.id)]
         );
       }
     }

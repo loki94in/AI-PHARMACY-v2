@@ -91,7 +91,7 @@ const Dashboard = () => {
             <Search size={18} />
             <span>Inventory</span>
           </Link>
-          <Link to="/orders" className="flex items-center gap-2.5 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-all font-semibold text-sm">
+          <Link to="/crm?tab=special_orders" className="flex items-center gap-2.5 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-all font-semibold text-sm">
             <ClipboardList size={18} />
             <span>Special Orders</span>
           </Link>

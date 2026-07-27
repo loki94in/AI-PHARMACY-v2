@@ -138,7 +138,6 @@ const Sidebar = ({
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
     { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },
     { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
-    { path: '/orders', label: 'Orders & Requests', icon: <ClipboardList size={18} /> },
     { path: '/database', label: 'Master Database', icon: <Database size={18} /> },
     { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
@@ -1092,7 +1091,7 @@ const Topbar = ({
 
           {/* Special Orders & Alerts indicator */}
           <Link
-            to="/orders"
+            to="/crm?tab=special_orders"
             className={`
               p-2 rounded-xl transition-colors flex items-center justify-center relative hover:bg-white/5
               ${orderAlertCount > 0 ? 'text-amber-400' : 'text-muted hover:text-white'}
@@ -1425,7 +1424,7 @@ const QuickAssistSidebar = ({
               <span>Quick Special Requests ({activeSpecialOrders.length})</span>
             </div>
             <button
-              onClick={() => navigate('/orders')}
+              onClick={() => navigate('/crm?tab=special_orders')}
               className="text-[9px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-widest"
             >
               View All
