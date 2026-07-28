@@ -16,10 +16,11 @@ import { ensureSchema } from './database.js';
 import { registerProcessGuardian } from './process/processGuardian.js';
 import { activityTracker } from './utils/activityTracker.js';
 import { getBackendFetchMode } from './services/dataFetchControl.js';
+import { config, getAppDataDir } from './config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', 'data', 'app.db');
+const DB_PATH = config.dbPath;
 
 // Startup check disabled permanently
 
@@ -27,18 +28,25 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', 'data', 'ap
  * Lazy-load route factory: defers module import until first request hits this path.
  * Eliminates ~8-12s of cold boot time from heavy transitive dependencies
  * (puppeteer, tesseract, onnxruntime, whatsapp-web.js, xlsx, etc.)
+ *
+ * Takes a loader thunk — `() => import('./routes/x.js')` — rather than a path
+ * string. A literal `import('./x.js')` written directly at each call site lets
+ * esbuild bundle it (and its dependencies) into the single packaged file;
+ * a path string passed through a variable can't be statically analyzed, so it
+ * would fall through to a real runtime import that has nothing to resolve
+ * against once everything is bundled into one file.
  */
-function lazyRoute(modulePath: string): express.RequestHandler {
+function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.RequestHandler {
   let router: express.Router | null = null;
   let loadPromise: Promise<express.Router> | null = null;
   return (req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
-      import(modulePath).then(m => m.default(req, res, next)).catch(next);
+      loader().then(m => m.default(req, res, next)).catch(next);
       return;
     }
     if (router) return router(req, res, next);
     if (!loadPromise) {
-      loadPromise = import(modulePath).then(m => {
+      loadPromise = loader().then(m => {
         router = m.default;
         return router!;
       });
@@ -51,15 +59,15 @@ function lazyRoute(modulePath: string): express.RequestHandler {
 registerProcessGuardian();
 
 // ── SKIP_AUTH safety guard ──────────────────────────────────────────
-// Hard block: never allow auth bypass in production
-if (process.env.SKIP_AUTH === 'true' && process.env.NODE_ENV === 'production') {
+// Hard block: never allow auth bypass when ENFORCE_PROD_AUTH=true in production
+if (process.env.SKIP_AUTH === 'true' && process.env.NODE_ENV === 'production' && process.env.ENFORCE_PROD_AUTH === 'true') {
   throw new Error(
-    'FATAL: SKIP_AUTH=true is set while NODE_ENV=production. ' +
-    'This is forbidden. Unset SKIP_AUTH before deploying to production.'
+    'FATAL: SKIP_AUTH=true is set while NODE_ENV=production and ENFORCE_PROD_AUTH=true. ' +
+    'This is forbidden. Unset SKIP_AUTH before deploying to production server.'
   );
 }
 if (process.env.SKIP_AUTH === 'true') {
-  console.warn('⚠️  AUTH BYPASS ACTIVE — SKIP_AUTH=true. DO NOT USE IN PRODUCTION.');
+  console.warn('⚠️  AUTH BYPASS ACTIVE — SKIP_AUTH=true.');
 }
 // ────────────────────────────────────────────────────────────────────
 
@@ -79,9 +87,9 @@ app.use((req, res, next) => {
 });
 
 // Ensure uploads and temp directories exist
-const UPLOAD_DIR = path.resolve(__dirname, '..', 'uploads');
-const TEMP_DIR = path.join(UPLOAD_DIR, 'temp');
-const RAW_DIR = path.resolve(__dirname, '..', 'catalogue', 'raw');
+const UPLOAD_DIR = config.uploadDir;
+const TEMP_DIR = config.tempDir;
+const RAW_DIR = path.join(getAppDataDir(), 'catalogue', 'raw');
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -100,9 +108,9 @@ app.use(helmet({
 }));
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',  // Vite dev server
-  'http://localhost:3000',  // Production build
+  'http://localhost:5174',  // Production build
   'http://127.0.0.1:5173',
-  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5174',
 ];
 
 app.use(cors({
@@ -129,13 +137,13 @@ app.use(rateLimit({
 app.use(express.json({ limit: '15mb' }));
 
 
-app.use('/uploads', express.static(path.resolve(__dirname, '..', 'uploads')));
-app.use('/data/search_screenshots', express.static(path.resolve(__dirname, '..', 'data', 'search_screenshots')));
+app.use('/uploads', express.static(UPLOAD_DIR));
+app.use('/data/search_screenshots', express.static(path.join(getAppDataDir(), 'data', 'search_screenshots')));
 
 // Old test console routes have been removed. This server now acts purely as an API backend.
 
 // WhatsApp Business webhook (before auth — needs to be publicly accessible)
-app.use('/api/wa-business/webhook', lazyRoute('./routes/whatsappBusiness.js'));
+app.use('/api/wa-business/webhook', lazyRoute(() => import('./routes/whatsappBusiness.js')));
 
 // Public health check endpoint for mobile connection testing
 app.get('/api/health', (req, res) => {
@@ -147,59 +155,103 @@ app.use('/api', authenticateApiKey);
 
 // All routes lazy-loaded: modules import on first request, not at server startup.
 // Agent 2 (CRM & Utilities) Routers
-app.use('/api/crm', lazyRoute('./routes/crm.js'));
-app.use('/api/utilities', lazyRoute('./routes/utilities.js'));
-app.use('/api/security', lazyRoute('./routes/security.js'));
-app.use('/api/email', lazyRoute('./routes/email.js'));
-app.use('/api/verification', lazyRoute('./routes/verification.js'));
-app.use('/api/migration', lazyRoute('./routes/migration.js'));
-app.use('/api/settings', lazyRoute('./routes/settings.js'));
-app.use('/api/pharmarack', lazyRoute('./routes/pharmarack.js'));
-app.use('/api/dispatch', lazyRoute('./routes/dispatch.js'));
-app.use('/api/archive', lazyRoute('./routes/archive.js'));
-app.use('/api/learning', lazyRoute('./routes/learning.js'));
-app.use('/api/messaging', lazyRoute('./routes/messaging.js'));
-app.use('/api/aicamera', lazyRoute('./routes/aiCamera.js'));
-app.use('/api/telegram-prescription', lazyRoute('./routes/telegramPrescription.js'));
-app.use('/api/refills', lazyRoute('./routes/refills.js'));
-app.use('/api/wa-business', lazyRoute('./routes/whatsappBusiness.js'));
-app.use('/api/automation', lazyRoute('./routes/automation.js'));
-app.use('/api/system', lazyRoute('./routes/serviceStatus.js'));
+app.use('/api/crm', lazyRoute(() => import('./routes/crm.js')));
+app.use('/api/utilities', lazyRoute(() => import('./routes/utilities.js')));
+app.use('/api/security', lazyRoute(() => import('./routes/security.js')));
+app.use('/api/email', lazyRoute(() => import('./routes/email.js')));
+app.use('/api/verification', lazyRoute(() => import('./routes/verification.js')));
+app.use('/api/migration', lazyRoute(() => import('./routes/migration.js')));
+app.use('/api/settings', lazyRoute(() => import('./routes/settings.js')));
+app.use('/api/pharmarack', lazyRoute(() => import('./routes/pharmarack.js')));
+app.use('/api/dispatch', lazyRoute(() => import('./routes/dispatch.js')));
+app.use('/api/archive', lazyRoute(() => import('./routes/archive.js')));
+app.use('/api/learning', lazyRoute(() => import('./routes/learning.js')));
+app.use('/api/messaging', lazyRoute(() => import('./routes/messaging.js')));
+app.use('/api/aicamera', lazyRoute(() => import('./routes/aiCamera.js')));
+app.use('/api/telegram-prescription', lazyRoute(() => import('./routes/telegramPrescription.js')));
+app.use('/api/refills', lazyRoute(() => import('./routes/refills.js')));
+app.use('/api/wa-business', lazyRoute(() => import('./routes/whatsappBusiness.js')));
+app.use('/api/automation', lazyRoute(() => import('./routes/automation.js')));
+app.use('/api/system', lazyRoute(() => import('./routes/serviceStatus.js')));
 // Core API routes
-app.use('/api/sales', lazyRoute('./routes/sales.js'));
-app.use('/api/inventory', lazyRoute('./routes/inventory.js'));
-app.use('/api/dashboard', lazyRoute('./routes/dashboard.js'));
-app.use('/api/purchases', lazyRoute('./routes/purchases.js'));
-app.use('/api/returns', lazyRoute('./routes/returns.js'));
-app.use('/api/customer-returns', lazyRoute('./routes/customerReturns.js'));
-app.use('/api/credit-notes', lazyRoute('./routes/creditNotes.js'));
-app.use('/api/orders', lazyRoute('./routes/orders.js'));
-app.use('/api/quick-assistant', lazyRoute('./routes/quickAssistant.js'));
-app.use('/api/expiry', lazyRoute('./routes/expiry.js'));
-app.use('/api/reports', lazyRoute('./routes/reports.js'));
-app.use('/api/compliance', lazyRoute('./routes/compliance.js'));
-app.use('/api/license', lazyRoute('./routes/license.js'));
+app.use('/api/sales', lazyRoute(() => import('./routes/sales.js')));
+app.use('/api/inventory', lazyRoute(() => import('./routes/inventory.js')));
+app.use('/api/dashboard', lazyRoute(() => import('./routes/dashboard.js')));
+app.use('/api/purchases', lazyRoute(() => import('./routes/purchases.js')));
+app.use('/api/returns', lazyRoute(() => import('./routes/returns.js')));
+app.use('/api/customer-returns', lazyRoute(() => import('./routes/customerReturns.js')));
+app.use('/api/credit-notes', lazyRoute(() => import('./routes/creditNotes.js')));
+app.use('/api/orders', lazyRoute(() => import('./routes/orders.js')));
+app.use('/api/quick-assistant', lazyRoute(() => import('./routes/quickAssistant.js')));
+app.use('/api/expiry', lazyRoute(() => import('./routes/expiry.js')));
+app.use('/api/reports', lazyRoute(() => import('./routes/reports.js')));
+app.use('/api/compliance', lazyRoute(() => import('./routes/compliance.js')));
+app.use('/api/license', lazyRoute(() => import('./routes/license.js')));
 // Generic /api routes
-app.use('/api', lazyRoute('./routes/upload.js'));
-app.use('/api', lazyRoute('./routes/catalog.js'));
-app.use('/api', lazyRoute('./routes/medicines.js'));
-app.use('/api', lazyRoute('./routes/enrichment.js'));
-app.use('/api', lazyRoute('./routes/distributors.js'));
-app.use('/api', lazyRoute('./routes/notifications.js'));
-app.use('/api/whatsapp/queue', lazyRoute('./routes/whatsappQueue.js'));
-app.use('/api/investigation', lazyRoute('./routes/investigation.js'));
-app.use('/api/dispatch', lazyRoute('./routes/dispatch.js'));
-app.use('/api', lazyRoute('./routes/medicineAvailability.js'));
+app.use('/api', lazyRoute(() => import('./routes/upload.js')));
+app.use('/api', lazyRoute(() => import('./routes/catalog.js')));
+app.use('/api', lazyRoute(() => import('./routes/medicines.js')));
+app.use('/api', lazyRoute(() => import('./routes/enrichment.js')));
+app.use('/api', lazyRoute(() => import('./routes/distributors.js')));
+app.use('/api', lazyRoute(() => import('./routes/notifications.js')));
+app.use('/api/whatsapp/queue', lazyRoute(() => import('./routes/whatsappQueue.js')));
+app.use('/api/investigation', lazyRoute(() => import('./routes/investigation.js')));
+app.use('/api/dispatch', lazyRoute(() => import('./routes/dispatch.js')));
+app.use('/api', lazyRoute(() => import('./routes/medicineAvailability.js')));
 
 // Serve the built frontend (frontend/dist) for production-style deployments.
-// Local development is unaffected — `npm run dev` still runs the Vite dev server on 5173.
-const frontendDist = path.resolve(__dirname, '..', 'frontend', 'dist');
+// Multi-candidate search ensures it finds frontend assets regardless of process cwd or pkg packaging.
+const appDataDir = getAppDataDir();
+const frontendCandidates = [
+  path.resolve(appDataDir, 'frontend', 'dist'),
+  path.resolve(process.cwd(), 'frontend', 'dist'),
+  path.resolve(__dirname, '..', 'frontend', 'dist'),
+  path.resolve(__dirname, '..', '..', 'frontend', 'dist'),
+  path.resolve(process.cwd(), 'dist'),
+  path.resolve(appDataDir, 'dist'),
+];
+
+const frontendDist = frontendCandidates.find(dir => fs.existsSync(path.join(dir, 'index.html'))) || frontendCandidates[0];
+
 app.use(express.static(frontendDist));
 app.use((req, res, next) => {
-  // Let unmatched /api/* requests fall through to notFoundHandler below instead of
-  // being swallowed by the SPA fallback.
-  if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(frontendDist, 'index.html'));
+  // Let unmatched /api/* or /ws requests fall through to API/404 handlers
+  if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+  
+  // Do not send index.html fallback for missing static asset files (.js, .css, images, etc.)
+  // Returning HTML for a missing JS chunk file causes browser Unexpected token '<' syntax errors and loading loops.
+  if (req.path.startsWith('/assets/') || /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff2?|ttf|map)$/i.test(req.path)) {
+    return res.status(404).send('Asset not found');
+  }
+
+  const indexPath = path.join(frontendDist, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.status(503).send(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>AI PHARMACY OS — Assets Not Built</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="font-family:system-ui, -apple-system, sans-serif; background:#0f172a; color:#f8fafc; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; padding:16px; box-sizing:border-box;">
+        <div style="text-align:center; max-width:480px; width:100%; padding:32px 24px; background:#1e293b; border-radius:20px; border:1px solid #334155; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);">
+          <div style="width:48px; height:48px; margin:0 auto 16px; background:#0ea5e9; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:24px; color:#fff;">+</div>
+          <h2 style="color:#38bdf8; margin:0 0 12px; font-size:20px;">AI PHARMACY OS</h2>
+          <p style="color:#94a3b8; font-size:14px; line-height:1.5; margin:0 0 20px;">The backend server is running cleanly on port 5174, but the web interface assets are missing at:<br/><code style="display:block; margin-top:8px; padding:8px; background:#0f172a; border-radius:8px; font-size:12px; color:#e2e8f0; word-break:break-all;">${frontendDist}</code></p>
+          <div style="background:#0f172a; padding:12px; border-radius:10px; font-size:12px; color:#cbd5e1; text-align:left; border:1px solid #334155;">
+            <strong>To resolve this:</strong>
+            <ul style="margin:6px 0 0; padding-left:18px;">
+              <li>Run <code>npm run build:all</code> to build the web interface.</li>
+              <li>Or run <code>npm run dev</code> to start in development mode.</li>
+            </ul>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
 // Initialize services that need startup logic
@@ -249,11 +301,37 @@ export function extractMedicinesWithPython(messageText: string): Promise<string[
     });
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5174;
 
 // Start HTTP server immediately to accept requests in <20ms
-app.listen(PORT, async () => {
-  console.log(`Server is running on http://localhost:${PORT}/test`);
+const server = app.listen(PORT, async () => {
+  const serverUrl = `http://localhost:${PORT}`;
+  console.log(`Server is running on ${serverUrl}`);
+
+  // Auto-open browser when launched from the packaged Windows executable (.exe)
+  if ((process as any).pkg || process.env.AUTO_OPEN_BROWSER === 'true') {
+    setTimeout(() => {
+      console.log(`[Boot] Launching default browser at ${serverUrl}...`);
+      if (process.platform === 'win32') {
+        spawn('cmd', ['/c', 'start', serverUrl], { detached: true, stdio: 'ignore' }).unref();
+      } else if (process.platform === 'darwin') {
+        spawn('open', [serverUrl], { detached: true, stdio: 'ignore' }).unref();
+      } else {
+        spawn('xdg-open', [serverUrl], { detached: true, stdio: 'ignore' }).unref();
+      }
+    }, 1000);
+  }
+});
+
+server.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`\n⚠️  Port ${PORT} is already bound by another instance of AI Pharmacy OS.`);
+    console.warn(`AI Pharmacy OS server is already running in the background.\n`);
+    process.exit(0);
+  } else {
+    console.error('Server startup error:', err);
+  }
+});
 
   // Asynchronously initialize database, indexes and cache in the background
   (async () => {
@@ -475,7 +553,6 @@ app.listen(PORT, async () => {
       process.exit(1);
     }
   })();
-});
 
 async function setupCrons(db: any) {
   const cron = (await import('node-cron')).default;

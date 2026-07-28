@@ -38,7 +38,9 @@ import {
   Menu,
   Truck,
   Package,
+  Download,
 } from 'lucide-react';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 import { 
   ChevronLeft as ChevronLeftIcon, 
   ChevronRight as ChevronRightIcon, 
@@ -648,6 +650,7 @@ const Topbar = ({
   onMenuClick?: () => void;
 }) => {
   const location = useLocation();
+  const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
   const [showPanel, setShowPanel] = useState(false);
   const [flashToast, setFlashToast] = useState<(ToastEventDetail & { id: number }) | null>(null);
   const [catalogJob, setCatalogJob] = useState<{
@@ -781,6 +784,7 @@ const Topbar = ({
 
   const [waQueueDetail, setWaQueueDetail] = useState<{
     isProcessing: boolean;
+    isPaused?: boolean;
     activeTargetName?: string | null;
     counts: { pending: number; sending: number; sent: number };
   } | null>(null);
@@ -799,6 +803,7 @@ const Topbar = ({
       if (qData) {
         setWaQueueDetail({
           isProcessing: qData.isProcessing,
+          isPaused: qData.isPaused,
           activeTargetName: qData.activeTargetName,
           counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
         });
@@ -918,95 +923,97 @@ const Topbar = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Mobile Connection / Devices Status */}
-          <div className="relative" ref={popoverRef}>
-            <button
-              onClick={() => setShowDevicesPopover(prev => !prev)}
-              className={`
-                flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
-                ${onlineDevicesCount > 0 
-                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' 
-                  : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-white/5'}
-              `}
-              title="Connected Mobile Devices"
-            >
-              <Smartphone size={14} className={onlineDevicesCount > 0 ? "animate-pulse" : ""} />
-              <span>{onlineDevicesCount > 0 ? `${onlineDevicesCount} Online` : 'Offline'}</span>
-            </button>
+          {/* Mobile Connection / Devices Status (Auto-hides when no devices connected) */}
+          {(connectedDevices.length > 0 || onlineDevicesCount > 0) && (
+            <div className="relative" ref={popoverRef}>
+              <button
+                onClick={() => setShowDevicesPopover(prev => !prev)}
+                className={`
+                  flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
+                  ${onlineDevicesCount > 0 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' 
+                    : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-white/5'}
+                `}
+                title="Connected Mobile Devices"
+              >
+                <Smartphone size={14} className={onlineDevicesCount > 0 ? "animate-pulse" : ""} />
+                <span>{onlineDevicesCount > 0 ? `${onlineDevicesCount} Online` : 'Offline'}</span>
+              </button>
 
-            {showDevicesPopover && (
-              <div className="absolute right-0 top-full mt-2 w-80 bg-glass-bg border border-glass-border backdrop-blur-2xl rounded-2xl shadow-2xl p-4 z-dropdown">
-                <div className="flex items-center justify-between pb-3 border-b border-glass-border mb-3">
-                  <span className="text-xs font-bold uppercase text-text/80 tracking-wide">Sync Devices</span>
-                  <button 
-                    onClick={() => { setShowDevicesPopover(false); onOpenConnectModal(); }}
-                    className="flex items-center gap-1 text-[10px] font-black uppercase text-sky-400 hover:text-sky-300 transition-colors"
-                  >
-                    <Plus size={12} />
-                    Add Device
-                  </button>
+              {showDevicesPopover && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-glass-bg border border-glass-border backdrop-blur-2xl rounded-2xl shadow-2xl p-4 z-dropdown">
+                  <div className="flex items-center justify-between pb-3 border-b border-glass-border mb-3">
+                    <span className="text-xs font-bold uppercase text-text/80 tracking-wide">Sync Devices</span>
+                    <button 
+                      onClick={() => { setShowDevicesPopover(false); onOpenConnectModal(); }}
+                      className="flex items-center gap-1 text-[10px] font-black uppercase text-sky-400 hover:text-sky-300 transition-colors"
+                    >
+                      <Plus size={12} />
+                      Add Device
+                    </button>
+                  </div>
+                  
+                  {connectedDevices.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-muted/60">
+                      No devices registered. Click "Add Device" to pair a mobile phone.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto pr-1">
+                      {connectedDevices.map(device => (
+                        <div key={device.token} className="flex items-start justify-between p-2 rounded-xl bg-white/[0.02] border border-glass-border hover:bg-white/[0.04] transition-all">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
+                            <div className={`mt-0.5 p-1 rounded-lg ${device.is_online ? 'bg-emerald-500/10 text-emerald-400' : 'bg-black/20 text-muted'}`}>
+                              <DeviceIcon os={device.os} size={14} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              {renamingToken === device.token ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={renameValue}
+                                    onChange={e => setRenameValue(e.target.value)}
+                                    className="w-full bg-black/40 border border-primary/40 rounded px-1.5 py-0.5 text-xs text-text focus:outline-none"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleRenameDevice(device.token, renameValue);
+                                      if (e.key === 'Escape') setRenamingToken(null);
+                                    }}
+                                  />
+                                  <button onClick={() => handleRenameDevice(device.token, renameValue)} className="text-emerald-400 hover:text-emerald-300">
+                                    <Check size={12} />
+                                  </button>
+                                  <button onClick={() => setRenamingToken(null)} className="text-red-400 hover:text-red-300">
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 group/name">
+                                  <span className="text-xs font-semibold text-text truncate max-w-[120px]">{device.device_name}</span>
+                                  <button 
+                                    onClick={() => { setRenamingToken(device.token); setRenameValue(device.device_name); }} 
+                                    className="opacity-0 group-hover/name:opacity-100 text-[10px] text-muted hover:text-text transition-opacity"
+                                  >
+                                    <Edit size={10} />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="text-[9px] text-muted uppercase font-bold tracking-wider mt-0.5">{device.os}</div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1.5">
+                            <span className={`h-2 w-2 rounded-full ${device.is_online ? 'bg-emerald-400 animate-pulse' : 'bg-muted/30'}`} />
+                            <span className="text-[8px] text-muted font-mono whitespace-nowrap">
+                              {device.is_online ? 'ONLINE' : (device.offline_seconds && device.offline_seconds > 86400) ? 'OFFLINE' : 'RECENT'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                
-                {connectedDevices.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-muted/60">
-                    No devices registered. Click "Add Device" to pair a mobile phone.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto pr-1">
-                    {connectedDevices.map(device => (
-                      <div key={device.token} className="flex items-start justify-between p-2 rounded-xl bg-white/[0.02] border border-glass-border hover:bg-white/[0.04] transition-all">
-                        <div className="flex items-start gap-2 flex-1 min-w-0">
-                          <div className={`mt-0.5 p-1 rounded-lg ${device.is_online ? 'bg-emerald-500/10 text-emerald-400' : 'bg-black/20 text-muted'}`}>
-                            <DeviceIcon os={device.os} size={14} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            {renamingToken === device.token ? (
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value={renameValue}
-                                  onChange={e => setRenameValue(e.target.value)}
-                                  className="w-full bg-black/40 border border-primary/40 rounded px-1.5 py-0.5 text-xs text-text focus:outline-none"
-                                  autoFocus
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') handleRenameDevice(device.token, renameValue);
-                                    if (e.key === 'Escape') setRenamingToken(null);
-                                  }}
-                                />
-                                <button onClick={() => handleRenameDevice(device.token, renameValue)} className="text-emerald-400 hover:text-emerald-300">
-                                  <Check size={12} />
-                                </button>
-                                <button onClick={() => setRenamingToken(null)} className="text-red-400 hover:text-red-300">
-                                  <X size={12} />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1 group/name">
-                                <span className="text-xs font-semibold text-text truncate max-w-[120px]">{device.device_name}</span>
-                                <button 
-                                  onClick={() => { setRenamingToken(device.token); setRenameValue(device.device_name); }} 
-                                  className="opacity-0 group-hover/name:opacity-100 text-[10px] text-muted hover:text-text transition-opacity"
-                                >
-                                  <Edit size={10} />
-                                </button>
-                              </div>
-                            )}
-                            <div className="text-[9px] text-muted uppercase font-bold tracking-wider mt-0.5">{device.os}</div>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <span className={`h-2 w-2 rounded-full ${device.is_online ? 'bg-emerald-400 animate-pulse' : 'bg-muted/30'}`} />
-                          <span className="text-[8px] text-muted font-mono whitespace-nowrap">
-                            {device.is_online ? 'ONLINE' : (device.offline_seconds && device.offline_seconds > 86400) ? 'OFFLINE' : 'RECENT'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Pharmarack Live Cart Connection Status */}
           <Link
@@ -1031,45 +1038,53 @@ const Topbar = ({
             </span>
           </Link>
 
-          {/* WhatsApp Connection & Background Queue Status (Live Header Pill) */}
-          <button
-            type="button"
-            onClick={onOpenWaQueue}
-            className={`
-              hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
-              ${(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0)
-                ? 'bg-sky-500/15 border-sky-500/30 text-sky-400 hover:bg-sky-500/25 shadow-lg shadow-sky-500/10'
-                : servicesStatus?.whatsapp?.connected
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
-                : 'bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/20'}
-            `}
-            title={servicesStatus?.whatsapp?.connected ? `WhatsApp Live Queue Controller (${(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} queued)` : "WhatsApp Connecting/Offline"}
-          >
-            {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0) ? (
-              <RefreshCw size={13} className="animate-spin text-sky-400 shrink-0" />
-            ) : (
-              <MessageSquareIcon size={13} className={!servicesStatus?.whatsapp?.connected ? "animate-pulse shrink-0" : "shrink-0"} />
-            )}
-            <span className="flex items-center gap-1.5">
-              {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0) ? (
-                <>
-                  <span className="font-mono text-white font-bold">{waQueueDetail?.counts?.sent || 0} Sent</span>
-                  <span className="opacity-40">•</span>
-                  <span className="font-mono text-sky-300 font-bold">{(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} Pending</span>
-                  {waQueueDetail?.activeTargetName && (
-                    <>
-                      <span className="opacity-40">•</span>
-                      <span className="text-emerald-300 font-bold truncate max-w-[130px]">▶ {waQueueDetail.activeTargetName}</span>
-                    </>
-                  )}
-                </>
-              ) : servicesStatus?.whatsapp?.connected ? (
-                'WA Online'
-              ) : (
-                'WA Sync'
-              )}
-            </span>
-          </button>
+          {/* WhatsApp Connection & Background Queue Status (Live Header Pill with Auto-Hide & Inline Play/Pause) */}
+          {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0) && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold uppercase tracking-wider shadow-lg shadow-emerald-500/10 shrink-0">
+              <button
+                type="button"
+                onClick={onOpenWaQueue}
+                className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                title={`WhatsApp Live Queue Controller (${(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} queued)`}
+              >
+                {waQueueDetail?.isPaused ? (
+                  <PauseIcon size={12} className="text-amber-400 shrink-0" />
+                ) : (
+                  <RefreshCw size={12} className="animate-spin text-emerald-400 shrink-0" />
+                )}
+                <span className="font-bold text-white font-mono">
+                  {waQueueDetail?.counts?.sent || 0}/{(waQueueDetail?.counts?.sent || 0) + (waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)}
+                </span>
+                {waQueueDetail?.activeTargetName && (
+                  <span className="text-emerald-300 font-bold truncate max-w-[120px]">
+                    ▶ {waQueueDetail.activeTargetName}
+                  </span>
+                )}
+              </button>
+
+              {/* Inline Play / Pause Toggle Button */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    await apiClient.post('/whatsapp/queue/toggle-pause');
+                    window.dispatchEvent(new CustomEvent('cache-invalidate'));
+                  } catch (err) {
+                    console.error('Failed to toggle queue pause:', err);
+                  }
+                }}
+                className={`p-1 rounded-lg transition-all cursor-pointer ${
+                  waQueueDetail?.isPaused
+                    ? 'bg-amber-500/30 text-amber-300 hover:bg-amber-500/50'
+                    : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40'
+                }`}
+                title={waQueueDetail?.isPaused ? "Resume WhatsApp Queue" : "Pause WhatsApp Queue"}
+              >
+                {waQueueDetail?.isPaused ? <PlayIcon size={12} className="fill-current" /> : <PauseIcon size={12} className="fill-current" />}
+              </button>
+            </div>
+          )}
 
           {/* Quick Order Shortcut Button */}
           <button
@@ -1090,24 +1105,6 @@ const Topbar = ({
           >
             <ShoppingCart size={18} />
           </button>
-
-          {/* Special Orders & Alerts indicator */}
-          <Link
-            to="/crm?tab=special_orders"
-            className={`
-              p-2 rounded-xl transition-colors flex items-center justify-center relative hover:bg-white/5
-              ${orderAlertCount > 0 ? 'text-amber-400' : 'text-muted hover:text-white'}
-            `}
-            title="Special Orders & Pending Requests"
-          >
-            <ClipboardList size={18} />
-            {orderAlertCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-              </span>
-            )}
-          </Link>
 
           {/* Refresh Page Cache Button */}
           <button

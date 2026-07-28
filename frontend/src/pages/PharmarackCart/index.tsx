@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check } from 'lucide-react';
+import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
@@ -108,10 +108,27 @@ export default function PharmarackCart() {
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills' | 'history'>('requests');
+  const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills' | 'sales_suggestions' | 'missing_phone' | 'history'>('requests');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
   const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
+
+  const [reorderSuggestions, setReorderSuggestions] = useState<any[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState<boolean>(false);
+
+  const fetchReorderSuggestions = async () => {
+    setSuggestionsLoading(true);
+    try {
+      const res = await api.getSalesReorderSuggestions();
+      if (res && res.success && Array.isArray(res.items)) {
+        setReorderSuggestions(res.items);
+      }
+    } catch (err) {
+      console.warn('Failed to load sales reorder suggestions:', err);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
 
   const [sentDates, setSentDates] = useState<string[]>([]);
   const [selectedSentDate, setSelectedSentDate] = useState<string>('');
@@ -230,28 +247,39 @@ export default function PharmarackCart() {
   const handleCopySentItemsToCart = async (items: any[]) => {
     if (!items || items.length === 0) return;
     setReaddingSentItems(true);
-    let addedCount = 0;
     try {
-      for (const item of items) {
-        const prodName = item.productName || item.product || item.name;
-        const qty = item.qty || item.quantity || 1;
-        if (!prodName) continue;
-        await apiClient.post('/pharmarack/cart/add', {
-          productName: prodName,
-          qty,
-          productCode: item.productCode || '',
-          company: item.company || '',
-          packaging: item.packaging || '',
-          ptr: item.ptr || 0,
-          mrp: item.mrp || 0
-        });
-        addedCount++;
+      const payload = items.map(item => ({
+        productId: item.productId || 0,
+        storeId: item.storeId || item.store_id || 0,
+        qty: item.qty || item.quantity || 1,
+        productCode: item.productCode || '',
+        productName: item.productName || item.product || item.name || '',
+        company: item.company || '',
+        packaging: item.packaging || item.Packing || '',
+        rate: item.ptr || item.rate || 0,
+        mrp: item.mrp || 0,
+        storeName: item.storeName || item.store_name || '',
+        mapped: true
+      })).filter(i => i.productName);
+
+      if (payload.length === 0) {
+        toastEvent.trigger('No valid items to re-add.', 'error');
+        return;
       }
-      toastEvent.trigger(`Successfully re-added ${addedCount} item(s) to active cart!`, 'success');
-      fetchCart();
+
+      const res = await api.addPharmarackCart(payload);
+      if (res && res.success) {
+        cachedDistributors = [];
+        await fetchCart();
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+        toastEvent.trigger(`✅ Re-added ${payload.length} item(s) to Pharmarack cart!`, 'success');
+        setSearchParams({ tab: 'cart' });
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to re-add items to cart', 'error');
+      }
     } catch (err: any) {
       console.error('Error re-adding sent items to cart:', err);
-      toastEvent.trigger('Failed to re-add items: ' + (err.message || 'Server error'), 'error');
+      toastEvent.trigger('Failed to re-add items: ' + (err?.response?.data?.error || err.message || 'Server error'), 'error');
     } finally {
       setReaddingSentItems(false);
     }
@@ -486,7 +514,7 @@ export default function PharmarackCart() {
   const [batchCountdownSec, setBatchCountdownSec] = useState<number | null>(null);
 
   // Distributor filter sub-tab state ('active' | 'all' | 'success' | 'failed' | 'unmapped')
-  const [distributorFilterTab, setDistributorFilterTab] = useState<'active' | 'all' | 'success' | 'failed' | 'unmapped'>('active');
+  const [distributorFilterTab, setDistributorFilterTab] = useState<'active' | 'unsent' | 'sent' | 'all' | 'success' | 'failed' | 'unmapped'>('active');
 
   // Distributor search & contact edit modal state
   const [editingDistributor, setEditingDistributor] = useState<Distributor | null>(null);
@@ -624,24 +652,55 @@ export default function PharmarackCart() {
     return distributors.filter(d => !isDistributorMapped(d));
   }, [distributors, customDistributorPhones, savedDistributorsList]);
 
-  const activeCartDistributors = React.useMemo(() => {
+  const getCartItemAmount = (item: any): number => {
+    if (typeof item.amount === 'number' && item.amount > 0) return item.amount;
+    const rate = item.ptr || item.rate || 0;
+    const qty = item.qty || item.quantity || 1;
+    return rate * qty;
+  };
+
+  const unsentCartDistributors = React.useMemo(() => {
     return distributors.map(dist => {
       const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
+      const computedTotal = freshItems.reduce((sum, item) => sum + getCartItemAmount(item), 0);
       return {
         ...dist,
         items: freshItems,
-        lineTotal: freshItems.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0)
+        lineTotal: computedTotal
       };
     }).filter(dist => dist.items.length > 0);
-  }, [distributors, latestSentMap]);
+  }, [distributors, latestSentMap, sentWaStatusMap]);
+
+  const sentCartDistributors = React.useMemo(() => {
+    return distributors.map(dist => {
+      const sentItems = dist.items.filter(item => isItemAlreadySent(item, dist));
+      const computedTotal = sentItems.reduce((sum, item) => sum + getCartItemAmount(item), 0);
+      return {
+        ...dist,
+        items: sentItems.length > 0 ? sentItems : dist.items,
+        lineTotal: computedTotal
+      };
+    }).filter(dist => (dist.items.length > 0 && dist.items.some(i => isItemAlreadySent(i, dist))) || sentWaStatusMap[dist.storeId] === 'success');
+  }, [distributors, latestSentMap, sentWaStatusMap]);
+
+  const activeCartDistributors = React.useMemo(() => {
+    return distributors.map(dist => {
+      const computedTotal = dist.items.reduce((sum, item) => sum + getCartItemAmount(item), 0);
+      return {
+        ...dist,
+        lineTotal: computedTotal
+      };
+    }).filter(dist => dist.items.length > 0);
+  }, [distributors]);
 
   const filteredDistributorList = React.useMemo(() => {
-    if (distributorFilterTab === 'success') return successDistributors;
+    if (distributorFilterTab === 'unsent' || distributorFilterTab === 'active') return unsentCartDistributors;
+    if (distributorFilterTab === 'sent' || distributorFilterTab === 'success') return sentCartDistributors;
     if (distributorFilterTab === 'failed') return failedDistributors;
     if (distributorFilterTab === 'unmapped') return unmappedDistributors;
-    if (distributorFilterTab === 'all') return distributors;
-    return activeCartDistributors;
-  }, [distributorFilterTab, successDistributors, failedDistributors, unmappedDistributors, distributors, activeCartDistributors]);
+    if (distributorFilterTab === 'all') return activeCartDistributors;
+    return unsentCartDistributors;
+  }, [distributorFilterTab, unsentCartDistributors, sentCartDistributors, failedDistributors, unmappedDistributors, activeCartDistributors]);
 
   // ponytail: delivery boy data comes exclusively from /dispatch/delivery-boys (delivery_boys table)
   // Store info (name, phone, address) comes from /settings. No delivery boy keys read from app_settings.
@@ -1568,11 +1627,68 @@ export default function PharmarackCart() {
     }
   };
 
+  const handleReaddSingleSentItem = async (item: any, storeId?: number, storeName?: string) => {
+    const medName = item.productName || item.product || item.name || '';
+    const qty = item.qty || item.quantity || 1;
+
+    if (!medName) {
+      toastEvent.trigger('Invalid medicine details.', 'error');
+      return;
+    }
+
+    setReaddingSentItems(true);
+    try {
+      const payload = [{
+        productId: item.productId || 0,
+        storeId: storeId || item.storeId || 0,
+        qty: qty,
+        productCode: item.productCode || '',
+        productName: medName,
+        company: item.company || '',
+        packaging: item.packaging || item.Packing || '',
+        rate: item.ptr || item.rate || 0,
+        mrp: item.mrp || 0,
+        storeName: storeName || item.storeName || '',
+        mapped: true
+      }];
+
+      const res = await api.addPharmarackCart(payload);
+      if (res && res.success) {
+        const targetStoreId = storeId || item.storeId || 0;
+        if (targetStoreId) {
+          setSentWaStatusMap(prev => {
+            const next = { ...prev };
+            delete next[targetStoreId];
+            return next;
+          });
+        }
+        cachedDistributors = [];
+        await fetchCart();
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+
+        toastEvent.trigger(`✅ Added "${medName}" (x${qty}) to Pharmarack cart!`, 'success');
+        
+        // Auto-switch to Pharmarack Cart tab so user sees the item in cart immediately
+        setSearchParams({ tab: 'cart' });
+        return;
+      } else {
+        throw new Error(res?.error || 'Failed to add to cart');
+      }
+    } catch (err: any) {
+      console.warn('Direct cart add failed, opening Live Cart search modal:', err);
+      toastEvent.trigger(`Opening Live Cart search for "${medName}"...`, 'info');
+      liveCartAddEvent.triggerOpen(medName, qty);
+    } finally {
+      setReaddingSentItems(false);
+    }
+  };
+
   useEffect(() => {
     fetchCart();
     fetchPendingOrders();
     fetchPendingRefills();
     fetchLatestSentMap();
+    fetchReorderSuggestions();
   }, []);
 
   // Re-fetch pending special orders whenever any page creates/updates an order.
@@ -1616,8 +1732,8 @@ export default function PharmarackCart() {
   }, [currentTab]);
 
   const totalProducts = distributors.reduce((s, d) => s + d.items.length, 0);
-  const totalQty = distributors.reduce((s, d) => s + d.items.reduce((q, i) => q + i.qty, 0), 0);
-  const totalAmount = distributors.reduce((s, d) => s + d.items.reduce((a, i) => a + i.amount, 0), 0);
+  const totalQty = distributors.reduce((s, d) => s + d.items.reduce((q, i) => q + (i.qty || 1), 0), 0);
+  const totalAmount = distributors.reduce((s, d) => s + d.items.reduce((a, i) => a + getCartItemAmount(i), 0), 0);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-3 p-6 pb-4">
@@ -1671,93 +1787,160 @@ export default function PharmarackCart() {
           <NonMappedDistributors />
         </div>
       ) : currentTab === 'sent-history' ? (
-        /* ── Full-Width Sent Orders History View ── */
-        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl p-6 space-y-5 min-h-0">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-glass-border/40 pb-4">
-            <div>
-              <h3 className="text-base font-bold text-text uppercase tracking-wide flex items-center gap-2">
-                <Send size={18} className="text-primary" />
-                Sent Orders History
-              </h3>
-              <p className="text-xs text-muted mt-1">
-                View all historical order dispatches grouped by date and distributor store
-              </p>
+        /* ── Split-Pane Sent Orders History Master-Detail View ── */
+        <div className="flex-1 flex overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
+          
+          {/* Left Master Sidebar: Historical Order Dates */}
+          <div className="w-72 md:w-80 shrink-0 border-r border-glass-border/40 flex flex-col bg-bg2/30 overflow-hidden">
+            <div className="p-4 border-b border-glass-border/40 flex items-center justify-between shrink-0 bg-bg2/50">
+              <div className="flex items-center gap-2">
+                <Calendar size={16} className="text-primary" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-text">History Dates</h4>
+              </div>
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-mono">
+                {sentDates.length} Days
+              </span>
             </div>
 
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-extrabold text-muted uppercase tracking-wider flex items-center gap-1.5">
-                <Clock size={14} className="text-primary" /> Order Date:
-              </label>
-              <select
-                value={selectedSentDate}
-                onChange={(e) => setSelectedSentDate(e.target.value)}
-                className="text-xs font-bold px-4 py-2 rounded-xl bg-bg border border-glass-border text-text focus:outline-none focus:border-primary shadow-sm min-w-[180px]"
-              >
-                {sentDates.length === 0 ? (
-                  <option value="">No past sent orders found</option>
-                ) : (
-                  sentDates.map(d => (
-                    <option key={d} value={d}>
-                      {d} {d === new Date().toISOString().split('T')[0] ? '(Today)' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
+            {/* Dates List */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+              {sentDates.length === 0 ? (
+                <div className="text-center py-10 text-xs text-muted italic">
+                  No historical dates found
+                </div>
+              ) : (
+                sentDates.map(d => {
+                  const isToday = d === new Date().toISOString().split('T')[0];
+                  const isSelected = d === selectedSentDate;
+                  const dateObj = new Date(d);
+                  const formattedDisplay = isNaN(dateObj.getTime())
+                    ? d
+                    : dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'short' });
+
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => setSelectedSentDate(d)}
+                      className={`w-full text-left p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-2 border ${
+                        isSelected
+                          ? 'bg-primary/15 border-primary/40 text-text shadow-md shadow-primary/5'
+                          : 'bg-white/[0.02] border-glass-border/30 text-muted hover:text-text hover:bg-white/[0.05]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Clock size={14} className={isSelected ? "text-primary shrink-0" : "text-muted/60 shrink-0"} />
+                        <div className="min-w-0">
+                          <div className={`text-xs font-bold truncate ${isSelected ? 'text-text' : 'text-text/80'}`}>
+                            {formattedDisplay}
+                          </div>
+                          <div className="text-[9px] text-muted font-mono">{d}</div>
+                        </div>
+                      </div>
+                      {isToday && (
+                        <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                          Today
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-            {sentOrdersLoading ? (
-              <div className="text-center py-12 text-xs text-muted font-bold tracking-wider uppercase animate-pulse">
-                Loading sent order history for {selectedSentDate}…
+          {/* Right Detail Panel: Sent Orders for Selected Date */}
+          <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-5 min-h-0 bg-glass-bg/20">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-glass-border/40 pb-4 shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-text uppercase tracking-wide flex items-center gap-2">
+                  <Send size={18} className="text-primary" />
+                  Sent Orders: {selectedSentDate ? (isNaN(new Date(selectedSentDate).getTime()) ? selectedSentDate : new Date(selectedSentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })) : 'Select Date'}
+                </h3>
+                <p className="text-xs text-muted mt-1">
+                  Distributor orders dispatched on {selectedSentDate}
+                </p>
               </div>
-            ) : sentOrders.length === 0 ? (
-              <div className="text-center py-16 text-xs text-muted italic select-none">
-                No order dispatches found for date {selectedSentDate || 'selected'}.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {sentOrders.map((order: any) => (
-                  <div key={order.id} className="p-4 rounded-2xl border border-glass-border/60 bg-bg/40 flex flex-col justify-between gap-3 shadow-md">
-                    <div>
-                      <div className="flex items-center justify-between pb-2 border-b border-glass-border/30">
-                        <span className="text-sm font-extrabold text-text truncate" title={order.store_name}>
-                          {order.store_name}
-                        </span>
-                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${order.batch_sent ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>
-                          {order.batch_sent ? '● Sent' : '○ Pending'}
-                        </span>
+
+              {selectedSentDate && (
+                <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/5 border border-glass-border text-text font-mono shrink-0">
+                  {sentOrders.length} Order{sentOrders.length !== 1 ? 's' : ''} Sent
+                </span>
+              )}
+            </div>
+
+            {/* Orders Grid / Cards */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+              {sentOrdersLoading ? (
+                <div className="text-center py-16 text-xs text-muted font-bold tracking-wider uppercase animate-pulse">
+                  Loading sent order history for {selectedSentDate}…
+                </div>
+              ) : sentOrders.length === 0 ? (
+                <div className="text-center py-20 text-xs text-muted italic select-none">
+                  No order dispatches found for date {selectedSentDate || 'selected'}.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {sentOrders.map((order: any) => (
+                    <div key={order.id} className="p-4 rounded-2xl border border-glass-border/60 bg-bg/40 flex flex-col justify-between gap-3 shadow-md hover:border-glass-border transition-all">
+                      <div>
+                        <div className="flex items-center justify-between pb-2 border-b border-glass-border/30">
+                          <span className="text-sm font-extrabold text-text truncate" title={order.store_name}>
+                            {order.store_name}
+                          </span>
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${order.batch_sent ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>
+                            {order.batch_sent ? '● Sent' : '○ Pending'}
+                          </span>
+                        </div>
+
+                        {/* Items List */}
+                        <div className="space-y-2 mt-3">
+                          {Array.isArray(order.items) && order.items.map((item: any, idx: number) => {
+                            const medName = item.productName || item.product || item.name;
+                            const itemQty = item.qty || item.quantity || 1;
+
+                            return (
+                              <div key={idx} className="flex justify-between items-center text-xs text-text bg-bg2/40 p-2.5 rounded-xl border border-glass-border/30 hover:border-glass-border transition-all">
+                                <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                                  <span className="truncate font-semibold text-text" title={medName}>{medName}</span>
+                                  <span className="font-mono font-extrabold text-primary shrink-0">x{itemQty}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => handleReaddSingleSentItem(item, order.store_id, order.store_name)}
+                                    disabled={readdingSentItems}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                                    title="Add this medicine to active cart (falls back to Live Cart search if out of stock)"
+                                  >
+                                    <Plus size={11} /> Re-add
+                                  </button>
+                                  <button
+                                    onClick={() => liveCartAddEvent.triggerOpen(medName, itemQty)}
+                                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-glass-border text-muted hover:text-text text-[10px] font-bold transition-all active:scale-95 cursor-pointer"
+                                    title="Search across all available distributors in Live Cart Add modal"
+                                  >
+                                    <Search size={11} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      {/* Items List */}
-                      <div className="space-y-1.5 mt-3">
-                        {Array.isArray(order.items) && order.items.map((item: any, idx: number) => (
-                          <div key={idx} className="flex justify-between items-center text-xs text-text bg-bg2/30 p-2 rounded-lg border border-glass-border/20">
-                            <span className="truncate pr-2 font-semibold">{item.productName || item.product || item.name}</span>
-                            <span className="font-mono font-bold shrink-0 text-primary">x{item.qty || item.quantity}</span>
-                          </div>
-                        ))}
+                      {/* Footer Info */}
+                      <div className="flex items-center justify-between mt-2 text-[10px] text-muted pt-2 border-t border-glass-border/20">
+                        <span className="font-mono">
+                          Sent at: {order.placed_at ? new Date(order.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-muted/70 uppercase">
+                          {Array.isArray(order.items) ? order.items.length : 0} Item{Array.isArray(order.items) && order.items.length !== 1 ? 's' : ''}
+                        </span>
                       </div>
                     </div>
-
-                    {/* Footer Info & Action */}
-                    <div className="flex items-center justify-between mt-2 text-[10px] text-muted pt-2 border-t border-glass-border/20">
-                      <span className="font-mono">
-                        Sent at: {order.placed_at ? new Date(order.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
-                      </span>
-                      <button
-                        onClick={() => handleCopySentItemsToCart(order.items)}
-                        disabled={readdingSentItems}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-                        title="Copy these items back into current active cart"
-                      >
-                        <Plus size={12} /> Re-add to Active Cart
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -1839,20 +2022,20 @@ export default function PharmarackCart() {
             {!loading && !error && (
               <div className="w-80 border-r border-glass-border/40 bg-bg2/25 flex flex-col shrink-0 overflow-hidden">
                 {/* Sidebar Tabs */}
-                <div className="flex border-b border-glass-border/40 bg-bg3/10 shrink-0 select-none">
+                <div className="flex border-b border-glass-border/40 bg-bg3/10 shrink-0 select-none overflow-x-auto">
                   <button
                     onClick={() => setSidebarTab('requests')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'requests'
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'requests'
                       ? 'border-primary text-primary bg-primary/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
                     <Clock size={11} />
-                    Requests ({pendingOrders.length})
+                    Req ({pendingOrders.length})
                   </button>
                   <button
                     onClick={() => setSidebarTab('refills')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === 'refills'
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'refills'
                       ? 'border-primary text-primary bg-primary/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
@@ -1861,14 +2044,25 @@ export default function PharmarackCart() {
                     Refills ({pendingRefills.length})
                   </button>
                   <button
+                    onClick={() => setSidebarTab('sales_suggestions')}
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'sales_suggestions'
+                      ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
+                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      }`}
+                    title="2-Day Sales & 6-Month Average Reorder Suggestions"
+                  >
+                    <TrendingUp size={11} className="text-emerald-400" />
+                    Sales ({reorderSuggestions.length})
+                  </button>
+                  <button
                     onClick={() => setSidebarTab('missing_phone' as any)}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 ${sidebarTab === ('missing_phone' as any)
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[70px] ${sidebarTab === ('missing_phone' as any)
                       ? 'border-amber-500 text-amber-400 bg-amber-500/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
                   >
                     <Phone size={11} />
-                    Missing Phone
+                    Missing
                   </button>
                 </div>
 
@@ -2135,6 +2329,59 @@ export default function PharmarackCart() {
                         })
                       );
                     })()
+                  ) : sidebarTab === 'sales_suggestions' ? (
+                    /* ── 2-Day & 6-Month Sales Reorder Suggestions ── */
+                    suggestionsLoading ? (
+                      <div className="flex flex-col items-center justify-center py-10 gap-2">
+                        <div className="w-6 h-6 border-2 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
+                        <span className="text-[10px] text-muted animate-pulse font-bold uppercase tracking-wider">Calculating 6M & 2-Day Sales…</span>
+                      </div>
+                    ) : reorderSuggestions.length === 0 ? (
+                      <div className="text-center py-8 text-[11px] text-muted italic select-none">
+                        No 2-day sales suggestions found.
+                      </div>
+                    ) : (
+                      reorderSuggestions.map((sug) => (
+                        <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-bg/40 flex flex-col gap-2 shadow-sm hover:border-emerald-500/30 transition-all">
+                          <div className="flex justify-between items-start">
+                            <div className="flex flex-col min-w-0 pr-1">
+                              <span className="text-xs font-black text-text truncate" title={sug.medicineName}>
+                                {sug.medicineName}
+                              </span>
+                              <span className="text-[10px] text-muted truncate">
+                                {sug.company} {sug.packaging ? `• ${sug.packaging}` : ''}
+                              </span>
+                            </div>
+                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                              🔥 {sug.twoDaySales} Sold (2d)
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border/30">
+                            <span title="6-Month Daily Average Sales">
+                              📊 6M Avg: <strong className="text-emerald-400">{sug.sixMonthAvgDailySales}</strong>/day
+                            </span>
+                            <span title="Current Inventory Stock">
+                              📦 Stock: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-glass-border/30">
+                            <span className="text-[10px] font-bold text-muted">
+                              Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
+                            </span>
+                            <button
+                              onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
+                              className="shrink-0 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+                              title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
+                            >
+                              <Plus size={11} />
+                              <span>Add ({sug.suggestedQty})</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )
                   ) : (
                     /* ── Missing Phone Distributors in Cart ── */
                     (() => {
@@ -2200,7 +2447,7 @@ export default function PharmarackCart() {
             )}
 
             {/* Right Panel: Main live cart contents */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg/20">
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
                   <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
@@ -2257,60 +2504,61 @@ export default function PharmarackCart() {
                 </div>
               ) : (
                 <>
-                  {/* ── Sub-Filter Toggle Bar (All / Sent Successfully / Failed / Missing Phone) ── */}
-                  <div className="flex items-center justify-between pb-2 border-b border-glass-border/30 shrink-0">
-                    <div className="flex items-center gap-1.5 bg-bg2/40 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none overflow-x-auto">
+                  {/* ── Sticky Sub-Filter Toggle Bar (Unsent Cart Orders / Sent Orders / All / Failed / Missing Phone) ── */}
+                  <div className="sticky top-0 z-10 bg-bg2/80 backdrop-blur-md px-6 py-3 border-b border-glass-border/40 shrink-0 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-1.5 bg-bg2/60 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none overflow-x-auto">
                       <button
                         onClick={() => setDistributorFilterTab('active')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'active'
-                          ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
-                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                          }`}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                          distributorFilterTab === 'active' || distributorFilterTab === 'unsent'
+                            ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm font-extrabold'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                        }`}
                       >
                         <ShoppingCart size={13} />
-                        <span>Active Cart (Unsent)</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-bg/50 border border-glass-border/30 font-mono">
-                          {activeCartDistributors.length}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() => setDistributorFilterTab('all')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'all'
-                          ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
-                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                          }`}
-                      >
-                        <Building2 size={13} />
-                        <span>All</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-bg/50 border border-glass-border/30 font-mono">
-                          {distributors.length}
+                        <span>Unsent Cart Orders</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-primary/10 text-primary border border-primary/20 font-mono font-bold">
+                          {unsentCartDistributors.length}
                         </span>
                       </button>
 
                       <button
                         onClick={() => setDistributorFilterTab('success')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'success'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
-                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                          }`}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                          distributorFilterTab === 'success' || distributorFilterTab === 'sent'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm font-extrabold'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                        }`}
                       >
                         <Check size={13} className="text-emerald-400" />
-                        <span>Sent Successfully</span>
+                        <span>Sent Orders</span>
                         <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono font-bold">
-                          {successDistributors.length}
+                          {sentCartDistributors.length}
                         </span>
                       </button>
 
                       <button
+                        onClick={() => setDistributorFilterTab('all')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                          distributorFilterTab === 'all'
+                            ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm font-extrabold'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                        }`}
+                      >
+                        <Building2 size={13} />
+                        <span>All Items ({distributors.length})</span>
+                      </button>
+
+                      <button
                         onClick={() => setDistributorFilterTab('failed')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'failed'
-                          ? 'bg-red/20 text-red border border-red/30 shadow-sm'
-                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                          }`}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                          distributorFilterTab === 'failed'
+                            ? 'bg-red/20 text-red border border-red/30 shadow-sm font-extrabold'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                        }`}
                       >
                         <AlertCircle size={13} className="text-red" />
-                        <span>Failed / Unsent</span>
+                        <span>Failed</span>
                         <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-red/10 text-red border border-red/20 font-mono font-bold">
                           {failedDistributors.length}
                         </span>
@@ -2318,19 +2566,23 @@ export default function PharmarackCart() {
 
                       <button
                         onClick={() => setDistributorFilterTab('unmapped')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${distributorFilterTab === 'unmapped'
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm'
-                          : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                          }`}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                          distributorFilterTab === 'unmapped'
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm font-extrabold'
+                            : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
+                        }`}
                       >
                         <Phone size={13} className="text-amber-400" />
                         <span>Missing Phone</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono font-bold">
                           {unmappedDistributors.length}
                         </span>
                       </button>
                     </div>
                   </div>
+
+                  {/* ── Scrollable Distributor Cards Panel ── */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0 custom-scrollbar">
 
                   {filteredDistributorList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
@@ -2663,7 +2915,7 @@ export default function PharmarackCart() {
                                     ) : '—'}
                                   </td>
                                   <td className="px-4 py-2.5 text-right font-mono font-black text-emerald-400 text-[11px]">
-                                    {item.amount > 0 ? `₹${item.amount.toFixed(2)}` : '—'}
+                                    ₹{getCartItemAmount(item).toFixed(2)}
                                   </td>
                                 </tr>
                               );
@@ -2680,6 +2932,7 @@ export default function PharmarackCart() {
                       </div>
                     ))
                   )}
+                  </div>
                 </>
               )}
             </div>

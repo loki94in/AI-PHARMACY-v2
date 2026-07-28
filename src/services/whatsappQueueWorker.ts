@@ -17,6 +17,7 @@ export interface QueueItem {
 
 export interface QueueWorkerState {
   isProcessing: boolean;
+  isPaused: boolean;
   isOnline: boolean;
   nextDispatchCountdownMs: number;
   nextDispatchTimestamp: number | null;
@@ -36,6 +37,7 @@ export interface QueueWorkerState {
 
 class WhatsAppQueueWorker {
   private isProcessing = false;
+  private isPaused = false;
   private isLoopRunning = false;
   private lastWasOffline = false;
   private lastOfflineLogTime = 0;
@@ -43,6 +45,19 @@ class WhatsAppQueueWorker {
   private currentSendingItemId: number | null = null;
   private pacingMinMs = 8000;
   private pacingMaxMs = 12000;
+
+  public isWorkerPaused(): boolean {
+    return this.isPaused;
+  }
+
+  public setPaused(paused: boolean): void {
+    this.isPaused = paused;
+  }
+
+  public togglePaused(): boolean {
+    this.isPaused = !this.isPaused;
+    return this.isPaused;
+  }
 
   constructor() {
     // Start background processing loop
@@ -206,7 +221,7 @@ class WhatsAppQueueWorker {
 
   /** Internal queue processor that returns true if items were actively processed */
   private async processQueueInternal(): Promise<boolean> {
-    if (this.isProcessing) return false;
+    if (this.isProcessing || this.isPaused) return false;
     this.isProcessing = true;
 
     try {
@@ -427,6 +442,7 @@ class WhatsAppQueueWorker {
 
     return {
       isProcessing: this.isProcessing,
+      isPaused: this.isPaused,
       isOnline: waStatus.isReady,
       nextDispatchCountdownMs: countdown,
       nextDispatchTimestamp: this.nextDispatchTimestamp,

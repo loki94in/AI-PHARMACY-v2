@@ -47,6 +47,29 @@ router.get('/notifications/connection-info', async (req, res) => {
   }
 });
 
+// Download Android APK file for mobile installation and pairing
+router.get('/notifications/download-apk', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const candidatePaths = [
+    path.join(process.cwd(), 'data', 'pharmacy-mobile.apk'),
+    path.join(process.cwd(), 'public', 'pharmacy-mobile.apk'),
+    path.join(process.cwd(), 'pharmacy-mobile', 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk'),
+    path.join(process.cwd(), 'pharmacy-mobile', 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+  ];
+
+  const foundPath = candidatePaths.find(p => fs.existsSync(p));
+  if (foundPath) {
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    return res.download(foundPath, 'AI-Pharmacy-Mobile.apk');
+  }
+
+  res.status(404).json({
+    error: 'APK file not found on server.',
+    message: 'Place pharmacy-mobile.apk inside the data/ folder to enable direct mobile APK downloads.'
+  });
+});
+
 // Real-time notifications SSE Stream
 router.get('/notifications/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');

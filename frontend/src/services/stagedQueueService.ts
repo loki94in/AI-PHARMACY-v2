@@ -34,6 +34,26 @@ const emitUpdate = () => {
   );
 };
 
+const clearQueueImpl = () => {
+  activeQueue = [];
+  currentIndex = 0;
+  isQueueActive = false;
+  emitUpdate();
+};
+
+const getCurrentItemImpl = (): StagedItem | null => {
+  if (!isQueueActive || activeQueue.length === 0) return null;
+  return activeQueue[currentIndex] || null;
+};
+
+const getQueueStateImpl = () => ({
+  queue: activeQueue,
+  currentIndex,
+  isActive: isQueueActive,
+  total: activeQueue.length,
+  currentItem: isQueueActive ? activeQueue[currentIndex] : null,
+});
+
 export const stagedQueueService = {
   startQueue: (items: StagedItem[], startIndex = 0) => {
     activeQueue = items;
@@ -42,18 +62,9 @@ export const stagedQueueService = {
     emitUpdate();
   },
 
-  getCurrentItem: (): StagedItem | null => {
-    if (!isQueueActive || activeQueue.length === 0) return null;
-    return activeQueue[currentIndex] || null;
-  },
+  getCurrentItem: getCurrentItemImpl,
 
-  getQueueState: () => ({
-    queue: activeQueue,
-    currentIndex,
-    isActive: isQueueActive,
-    total: activeQueue.length,
-    currentItem: isQueueActive ? activeQueue[currentIndex] : null,
-  }),
+  getQueueState: getQueueStateImpl,
 
   nextItem: () => {
     if (currentIndex < activeQueue.length - 1) {
@@ -62,7 +73,7 @@ export const stagedQueueService = {
       return activeQueue[currentIndex];
     } else {
       // Reached end of queue
-      stagedQueueService.clearQueue();
+      clearQueueImpl();
       return null;
     }
   },
@@ -76,15 +87,10 @@ export const stagedQueueService = {
     return activeQueue[currentIndex] || null;
   },
 
-  clearQueue: () => {
-    activeQueue = [];
-    currentIndex = 0;
-    isQueueActive = false;
-    emitUpdate();
-  },
+  clearQueue: clearQueueImpl,
 
   approveCurrentAndNext: async () => {
-    const current = stagedQueueService.getCurrentItem();
+    const current = getCurrentItemImpl();
     if (!current) return null;
 
     try {
@@ -107,7 +113,7 @@ export const stagedQueueService = {
     // Remove approved item from queue and advance
     activeQueue = activeQueue.filter((_, idx) => idx !== currentIndex);
     if (activeQueue.length === 0) {
-      stagedQueueService.clearQueue();
+      clearQueueImpl();
       return null;
     }
 
@@ -119,8 +125,8 @@ export const stagedQueueService = {
     return activeQueue[currentIndex] || null;
   },
 
-  subscribe: (callback: (state: ReturnType<typeof stagedQueueService.getQueueState>) => void) => {
-    const handler = () => callback(stagedQueueService.getQueueState());
+  subscribe: (callback: (state: ReturnType<typeof getQueueStateImpl>) => void) => {
+    const handler = () => callback(getQueueStateImpl());
     window.addEventListener('staged-queue-updated', handler);
     return () => window.removeEventListener('staged-queue-updated', handler);
   },

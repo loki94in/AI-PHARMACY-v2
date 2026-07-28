@@ -1298,6 +1298,33 @@ const Settings = () => {
         </div>
       </div>
 
+      {/* ─── Mobile App & APK Download ─── */}
+      <div className="glass-panel p-6 border border-emerald-500/20 bg-emerald-500/[0.02]">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <Download size={22} />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-text flex items-center gap-2">
+                Android Mobile App (.APK) & Remote Pairing
+              </h3>
+              <p className="text-xs text-muted mt-0.5">
+                Download the official APK file to install on Android phones & connect directly with this PC server over Wi-Fi / LAN.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowConnectModal(true)}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+          >
+            <Download size={15} />
+            <span>Download APK & Pair App</span>
+          </button>
+        </div>
+      </div>
+
       {/* ─── Distributors & AI Learning Contacts Directory Notice ─── */}
       <div className="glass-panel p-6 space-y-3 bg-bg2/40 border border-glass-border rounded-2xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

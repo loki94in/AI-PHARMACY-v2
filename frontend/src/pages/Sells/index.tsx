@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, Fragment, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
@@ -69,11 +70,15 @@ const exportColumns = [
 ];
 
 const Sells = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const todayStr = getTodayString();
+  const thirtyDaysAgoStr = getNDaysAgoString(30);
+
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'sells-date-range',
-    defaultFrom: '',
-    defaultTo: '',
+    defaultFrom: thirtyDaysAgoStr,
+    defaultTo: todayStr,
   });
 
   const [colFilterNo, setColFilterNo] = useState('');
@@ -105,10 +110,6 @@ const Sells = () => {
   // Universal Edit state
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
-  // Date Filter Popover state
-  const [showDatePopover, setShowDatePopover] = useState(false);
-
-  const todayStr = getTodayString();
   const isDateFilterExcludingToday = !!(
     (dateRangeHelper.dateRange.from && dateRangeHelper.dateRange.from > todayStr) ||
     (dateRangeHelper.dateRange.to && dateRangeHelper.dateRange.to < todayStr)
@@ -118,9 +119,24 @@ const Sells = () => {
     if (!dateStr) return '';
     const parts = dateStr.split('-');
     if (parts.length === 3) {
-      return `${parts[2]}/${parts[1]}`; // e.g. "03/07"
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const monthStr = monthNames[monthIdx] || parts[1];
+      return `${parseInt(parts[2], 10)} ${monthStr}`;
     }
     return dateStr;
+  };
+
+  const getDateRangeLabel = () => {
+    const from = dateRangeHelper.dateRange.from;
+    const to = dateRangeHelper.dateRange.to;
+    if (!from && !to) return 'All Dates';
+    if (from === todayStr && to === todayStr) return 'Today';
+    if (from && to && from === to) return formatShortDate(from);
+    if (from && to) return `${formatShortDate(from)} - ${formatShortDate(to)}`;
+    if (from) return `From ${formatShortDate(from)}`;
+    if (to) return `Until ${formatShortDate(to)}`;
+    return 'All Dates';
   };
 
   const handleOpenEnrichment = async (item: SaleItem) => {
@@ -192,6 +208,7 @@ const Sells = () => {
     serverFilters: {
       date_from: dateRangeHelper.dateRange.from,
       date_to: dateRangeHelper.dateRange.to,
+      search: (colFilterNo || colFilterName || colFilterDrName || '').trim(),
     },
     clientFilterFn,
     fetchPage: async (pageParam, filters) => {
@@ -200,6 +217,7 @@ const Sells = () => {
         limit: 100,
         date_from: filters.date_from,
         date_to: filters.date_to,
+        search: filters.search,
         include_items: 'true',
       });
       const data = Array.isArray(res) ? res : (res?.invoices || res?.data || []);
@@ -249,14 +267,10 @@ const Sells = () => {
     try {
       const full = await api.getSale(invoice.id);
       setViewInvoice(null);
-      setEditInvoice(full);
-      setEditItems(full.items || []);
-      setEditCustomerName(full.customer_name || '');
-      setEditCustomerPhone(full.customer_phone || '');
-      setEditPaymentMedium(full.payment_medium || 'CASH');
-      setEditDiscount(full.discount ?? 0);
+      setEditInvoice(null);
+      navigate('/pos', { state: { editSale: full } });
     } catch (err) {
-      toastEvent.trigger('Failed to load invoice details', 'error');
+      toastEvent.trigger('Failed to load invoice for editing in POS', 'error');
     }
   };
 
@@ -377,28 +391,107 @@ const Sells = () => {
         </div>
       </div>
 
-      {/* Date filter exclusion warning banner */}
-      {isDateFilterExcludingToday && (
-        <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs shrink-0 animate-in slide-in-from-top-2 duration-300">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
-            <span>
-              Today's sales are hidden because your date filter is currently set to{' '}
-              <strong className="text-amber-100">
-                {dateRangeHelper.dateRange.from ? formatShortDate(dateRangeHelper.dateRange.from) : 'start'}
-                {' to '}
-                {dateRangeHelper.dateRange.to ? formatShortDate(dateRangeHelper.dateRange.to) : 'end'}
-              </strong>.
-            </span>
+      {/* Dedicated Top Date Filter Bar */}
+      <div className="bg-bg2/80 border border-glass-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-md">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary/10 border border-primary/20 rounded-lg text-xs font-bold text-primary shrink-0">
+            <Calendar size={14} />
+            <span>Sales Period:</span>
           </div>
-          <button
-            onClick={() => dateRangeHelper.clearFilters()}
-            className="px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-bold transition-all cursor-pointer"
-          >
-            Show All Dates / Today
-          </button>
+
+          {/* Quick Presets */}
+          <div className="flex items-center gap-1 bg-bg3/80 p-1 rounded-lg border border-glass-border/40 shrink-0">
+            {[
+              {
+                label: '30 Days (Default)',
+                key: '30d',
+                action: () => dateRangeHelper.setPreset(30),
+                active: dateRangeHelper.dateRange.from === thirtyDaysAgoStr && dateRangeHelper.dateRange.to === todayStr,
+              },
+              {
+                label: 'Today',
+                key: 'today',
+                action: () => dateRangeHelper.setDateRange({ from: todayStr, to: todayStr }),
+                active: dateRangeHelper.dateRange.from === todayStr && dateRangeHelper.dateRange.to === todayStr,
+              },
+              {
+                label: 'Yesterday',
+                key: 'yesterday',
+                action: () => {
+                  const y = getNDaysAgoString(1);
+                  dateRangeHelper.setDateRange({ from: y, to: y });
+                },
+                active: dateRangeHelper.dateRange.from === getNDaysAgoString(1) && dateRangeHelper.dateRange.to === getNDaysAgoString(1),
+              },
+              {
+                label: 'This Month',
+                key: 'month',
+                action: () => {
+                  const now = new Date();
+                  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+                  dateRangeHelper.setDateRange({ from: firstDay, to: todayStr });
+                },
+                active: dateRangeHelper.dateRange.from === new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10) && dateRangeHelper.dateRange.to === todayStr,
+              },
+              {
+                label: 'All Time',
+                key: 'all',
+                action: () => dateRangeHelper.clearFilters(),
+                active: !dateRangeHelper.dateRange.from && !dateRangeHelper.dateRange.to,
+              },
+            ].map(p => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={p.action}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  p.active
+                    ? 'bg-primary text-white shadow-sm shadow-primary/30 font-bold'
+                    : 'text-muted hover:text-text hover:bg-white/5'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom Date Inputs */}
+          <div className="flex items-center gap-2 bg-bg3/80 px-3 py-1 rounded-lg border border-glass-border/40 shrink-0 text-xs">
+            <span className="text-[10px] font-bold text-muted uppercase">FROM:</span>
+            <input
+              type="date"
+              value={dateRangeHelper.dateRange.from}
+              onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
+              className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
+            />
+            <span className="text-[10px] font-bold text-muted uppercase">TO:</span>
+            <input
+              type="date"
+              value={dateRangeHelper.dateRange.to}
+              onChange={e => dateRangeHelper.handleToChange(e.target.value)}
+              className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
+            />
+            {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
+              <button
+                type="button"
+                onClick={() => dateRangeHelper.clearFilters()}
+                className="ml-1 p-1 text-muted hover:text-red transition-colors rounded cursor-pointer"
+                title="Reset date filter (All Time)"
+              >
+                <RotateCcw size={12} />
+              </button>
+            )}
+          </div>
         </div>
-      )}
+
+        {/* Live Filter Summary Count */}
+        <div className="flex items-center gap-2 text-xs shrink-0 ml-auto">
+          <span className="bg-bg3/90 px-3 py-1.5 rounded-lg border border-glass-border/50 font-mono text-[11px]">
+            Showing <strong className="text-white font-bold">{items.length}</strong> of{' '}
+            <strong className="text-white font-bold">{totalItems}</strong> invoices ({getDateRangeLabel()})
+          </span>
+        </div>
+      </div>
 
       {/* Invoices Table */}
       <div className="bg-white/10 backdrop-blur-lg rounded-xl p-0 border border-white/20 flex-1 flex flex-col overflow-hidden min-h-0">
@@ -438,99 +531,10 @@ const Sells = () => {
                     className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                   />
                 </td>
-                <td className="p-2 w-44 shrink-0 relative">
-                  <button
-                    onClick={() => setShowDatePopover(!showDatePopover)}
-                    className="w-full flex items-center justify-between gap-1 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs text-text hover:bg-white/5 transition-all text-left"
-                  >
-                    <div className="flex items-center gap-1 truncate text-muted">
-                      <Calendar size={11} className="text-primary shrink-0" />
-                      <span className="truncate text-[11px]">
-                        {dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to
-                          ? `${formatShortDate(dateRangeHelper.dateRange.from)} - ${formatShortDate(dateRangeHelper.dateRange.to)}`
-                          : 'All Dates'}
-                      </span>
-                    </div>
-                    {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dateRangeHelper.clearFilters();
-                        }}
-                        className="hover:text-red p-0.5 rounded"
-                      >
-                        <X size={10} />
-                      </button>
-                    )}
-                  </button>
-
-                  {showDatePopover && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowDatePopover(false)} />
-                      <div className="absolute top-full left-0 mt-1.5 z-50 w-72 glass-panel p-3 border border-glass-border shadow-2xl flex flex-col gap-3 text-xs bg-bg2 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex justify-between items-center pb-2 border-b border-glass-border/30">
-                          <span className="font-bold text-text text-[11px]">Filter by Date</span>
-                          <button
-                            onClick={() => {
-                              dateRangeHelper.clearFilters();
-                              setShowDatePopover(false);
-                            }}
-                            className="text-[10px] text-muted hover:text-red transition-all flex items-center gap-1 font-bold"
-                          >
-                            <RotateCcw size={10} /> Reset
-                          </button>
-                        </div>
-
-                        {/* Presets */}
-                        <div className="flex flex-wrap items-center gap-1">
-                          {[
-                            { label: '7 Days', days: 7 },
-                            { label: '30 Days', days: 30 },
-                            { label: '90 Days', days: 90 },
-                          ].map(p => (
-                            <button
-                              key={p.days}
-                              type="button"
-                              onClick={() => {
-                                dateRangeHelper.setPreset(p.days);
-                              }}
-                              className="px-2 py-0.5 rounded bg-white/5 border border-glass-border/50 text-[10px] text-muted hover:text-text hover:bg-white/10"
-                            >
-                              {p.label}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] text-muted font-bold">FROM</span>
-                            <input
-                              type="date"
-                              value={dateRangeHelper.dateRange.from}
-                              onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-                              className="px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50 w-full"
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] text-muted font-bold">TO</span>
-                            <input
-                              type="date"
-                              value={dateRangeHelper.dateRange.to}
-                              onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-                              className="px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50 w-full"
-                            />
-                          </div>
-                        </div>
-                        
-                        <button
-                          onClick={() => setShowDatePopover(false)}
-                          className="w-full py-1 rounded bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all"
-                        >
-                          Apply Filter
-                        </button>
-                      </div>
-                    </>
-                  )}
+                <td className="p-2 w-44 shrink-0 flex items-center px-3">
+                  <span className="text-[11px] font-semibold text-muted truncate">
+                    {getDateRangeLabel()}
+                  </span>
                 </td>
                 <td className="p-2 w-32 shrink-0">
                   <input
@@ -672,9 +676,16 @@ const Sells = () => {
                             <button
                               onClick={() => openView(inv)}
                               className="p-2 rounded-lg bg-white/5 hover:bg-sky-500 hover:text-white border border-glass-border hover:border-sky-500 shadow-sm hover:shadow-[0_0_15px_rgba(14,165,233,0.4)] text-muted transition-all transform hover:scale-105 active:scale-95"
-                              title="View invoice"
+                              title="View invoice details"
                             >
                               <FileText size={14} />
+                            </button>
+                            <button
+                              onClick={() => openEdit(inv)}
+                              className="p-2 rounded-lg bg-white/5 hover:bg-primary hover:text-white border border-glass-border hover:border-primary shadow-sm hover:shadow-primary/30 text-muted transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+                              title="Edit bill in POS"
+                            >
+                              <Edit3 size={14} />
                             </button>
                             <button
                               onClick={() => setDeleteConfirm(inv.id)}

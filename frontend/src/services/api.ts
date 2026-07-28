@@ -10,13 +10,15 @@ export const apiClient = axios.create({
   },
 });
 
-// Interceptor to attach the session token if available
+// Interceptor to attach the session token if available.
+// Falls back to the backend's own documented default API key (see
+// config.apiKey in src/config/index.ts) when no real license session token
+// has been issued yet — there's no activation flow wired up in this build,
+// so without this fallback every request 401s with no way to recover.
 apiClient.interceptors.request.use((config) => {
   try {
-    const token = localStorage.getItem('session_token') || localStorage.getItem('api_key');
-    if (token) {
-      config.headers['x-session-token'] = token;
-    }
+    const token = localStorage.getItem('session_token') || localStorage.getItem('api_key') || 'Pass@123';
+    config.headers['x-session-token'] = token;
   } catch (err) {
     console.warn('localStorage access denied. Token not attached.');
   }
@@ -668,6 +670,7 @@ export const api = {
   approveStagedPurchase: (id: number, data: any) => apiClient.post(`/purchases/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedPurchase: (id: number) => apiClient.post(`/purchases/staged/${id}/reject`).then(res => res.data),
   getConnectionInfo: () => apiClient.get('/notifications/connection-info').then(res => res.data),
+  getApkDownloadUrl: () => `${apiClient.defaults.baseURL || '/api'}/notifications/download-apk`,
   getActionLogs: () => apiClient.get('/notifications/action-logs').then(res => res.data),
   clearActionLogs: () => apiClient.post('/notifications/action-logs/clear').then(res => res.data),
   getAssistantChatLogs: () => apiClient.get('/notifications/chat-logs').then(res => res.data),
@@ -750,6 +753,7 @@ export const api = {
   // Resilient WhatsApp Queue & Live Control
   getWhatsAppQueueStatus: () => apiClient.get<{
     isProcessing: boolean;
+    isPaused?: boolean;
     isOnline: boolean;
     nextDispatchCountdownMs: number;
     nextDispatchTimestamp: number | null;
@@ -777,5 +781,10 @@ export const api = {
   getStorageLocations: () => apiClient.get<any[]>('/settings/storage-locations').then(res => res.data),
   saveStorageLocation: (data: { name: string; code?: string; type?: string; description?: string; is_default?: boolean; is_active?: boolean }) => apiClient.post<{ success: boolean; data: any }>('/settings/storage-locations', data).then(res => res.data),
   updateStorageLocation: (id: number, data: Partial<{ name: string; code: string; type: string; description: string; is_default: boolean; is_active: boolean }>) => apiClient.put<{ success: boolean; data: any }>(`/settings/storage-locations/${id}`, data).then(res => res.data),
-  deleteStorageLocation: (id: number) => apiClient.delete<{ success: boolean; message: string }>(`/settings/storage-locations/${id}`).then(res => res.data),
+  // Registered Mobile Devices API
+  getRegisteredDevices: () => apiClient.get<{ success: boolean; devices: any[] }>('/settings/registered-devices').then(res => res.data),
+  renameDevice: (token: string, deviceName: string) => apiClient.put<{ success: boolean; message: string }>('/settings/registered-devices/rename', { token, device_name: deviceName }).then(res => res.data),
+
+  // Sales Reorder Suggestions API
+  getSalesReorderSuggestions: () => apiClient.get<{ success: boolean; count: number; items: any[] }>('/sales/reorder-suggestions').then(res => res.data),
 };

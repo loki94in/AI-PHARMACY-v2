@@ -1,11 +1,8 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { config } from '../config/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+const DB_PATH = config.dbPath;
 
 /**
  * Writes a crash entry to the crash_log table.

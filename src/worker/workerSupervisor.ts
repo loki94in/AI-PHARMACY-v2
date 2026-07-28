@@ -1,17 +1,9 @@
 import { fork, ChildProcess } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Detect if we are running in TypeScript or JavaScript source
-const isTs = __filename.endsWith('.ts');
-const ext = isTs ? '.ts' : '.js';
+import { isPackagedApp } from '../config/index.js';
 
 interface WorkerConfig {
   name: string;
-  scriptPath: string;
+  role: 'catalog' | 'email';
   instance?: ChildProcess;
   restartCount: number;
   lastPongTime?: number;
@@ -23,12 +15,12 @@ export class WorkerSupervisor {
   private workers: Record<string, WorkerConfig> = {
     catalog: {
       name: 'Catalog Worker',
-      scriptPath: path.resolve(__dirname, `runCatalogWorker${ext}`),
+      role: 'catalog',
       restartCount: 0,
     },
     email: {
       name: 'Email Poller',
-      scriptPath: path.resolve(__dirname, `runEmailPoller${ext}`),
+      role: 'email',
       restartCount: 0,
     },
   };
@@ -78,15 +70,20 @@ export class WorkerSupervisor {
     const config = this.workers[key];
     if (config.instance) return;
 
-    console.log(`[WorkerSupervisor] Spawning ${config.name} (Script: ${config.scriptPath})...`);
+    // Packaged as a single executable, there's no separate worker script file to fork —
+    // fork this same app (or, in dev, the same entry script) and let it dispatch on
+    // WORKER_ROLE instead of starting the HTTP server. See src/bootstrap.ts.
+    const forkTarget = isPackagedApp() ? process.execPath : process.argv[1];
+
+    console.log(`[WorkerSupervisor] Spawning ${config.name} (role: ${config.role})...`);
     config.spawnTime = Date.now();
     config.lastPongTime = Date.now();
 
     try {
       // Fork the child process inheriting environment and execution loaders (tsx etc.)
-      const child = fork(config.scriptPath, [], {
+      const child = fork(forkTarget, [], {
         execArgv: [...process.execArgv],
-        env: { ...process.env, IS_WORKER: 'true' },
+        env: { ...process.env, IS_WORKER: 'true', WORKER_ROLE: config.role },
       });
 
       config.instance = child;

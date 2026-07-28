@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer-core';
+import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
@@ -198,6 +198,7 @@ class GoogleSearchService {
 
     const launchBrowser = async (headless: boolean) => {
       isHeadful = !headless;
+      const puppeteer = await getPuppeteer();
       return await puppeteer.launch({
         executablePath: chromePath,
         headless: headless ? 'shell' : false,

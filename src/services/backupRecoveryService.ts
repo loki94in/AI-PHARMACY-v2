@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import AdmZip from 'adm-zip';
 import axios from 'axios';
@@ -10,13 +9,10 @@ import { eventService } from './eventService.js';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
-import { config } from '../config/index.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { config, getAppDataDir } from '../config/index.js';
 
 const getDbPath = () => config.dbPath;
-const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
+const BACKUP_DIR = path.join(getAppDataDir(), 'backup');
 const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
 const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
 

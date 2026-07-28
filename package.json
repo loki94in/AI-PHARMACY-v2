@@ -2,18 +2,21 @@
   "name": "ai-pharmacy",
   "version": "0.1.0",
   "type": "module",
-  "bin": "dist/src/server.js",
+  "bin": "dist-pkg/server.cjs",
   "scripts": {
-    "start": "tsx src/server.ts",
+    "start": "tsx src/bootstrap.ts",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "tsx watch src/server.ts",
+    "dev:server": "tsx watch src/bootstrap.ts",
     "dev:client": "npm run dev --prefix frontend",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --passWithNoTests --forceExit",
     "enqueue-catalog": "tsx ./src/cli/enqueueCatalog.ts",
     "worker": "tsx ./src/worker/catalogWorker.ts",
     "watch-catalog": "tsx ./src/cli/watchCatalog.ts",
     "build": "tsc -p tsconfig.json",
-    "build:exe": "npm run build && pkg . --targets node18-win-x64 --output dist/PharmacyOS.exe"
+    "build:client": "npm run build --prefix frontend",
+    "build:all": "npm run build:client && npm run build",
+    "build:bundle": "node scripts/buildBundle.cjs",
+    "build:exe": "npm run build:all && npm run build:bundle && node scripts/buildSea.cjs"
   },
   "dependencies": {
     "@types/compression": "^1.8.1",
@@ -75,16 +78,13 @@
     "@types/unzipper": "^0.10.11",
     "concurrently": "^10.0.3",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.28.0",
     "jest": "^29.6.0",
     "node-gyp": "^12.3.0",
-    "pkg": "^5.8.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.1.0",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3"
-  },
-  "pkg": {
-    "assets": []
   },
   "overrides": {
     "qs": "^6.15.2",

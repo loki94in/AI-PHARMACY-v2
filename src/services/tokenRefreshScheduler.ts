@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import puppeteer from 'puppeteer-core';
+import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 
 const execAsync = promisify(exec);
@@ -303,6 +303,7 @@ export class TokenRefreshScheduler {
     let browser;
     const holder = { token: null as string | null };
     let tempProfilePathToDelete = '';
+    const puppeteer = await getPuppeteer();
 
     try {
       console.log('[TokenRefreshScheduler] Killing orphan Chrome processes and cleaning profile locks...');

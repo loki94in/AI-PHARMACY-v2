@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, QrCode, RefreshCw, AlertCircle, Copy, Check, Smartphone, Edit2, Save, Wifi, WifiOff } from 'lucide-react';
+import { X, QrCode, RefreshCw, AlertCircle, Copy, Check, Smartphone, Edit2, Save, Wifi, WifiOff, Download } from 'lucide-react';
 import { api } from '../services/api';
 
 interface DeviceItem {
@@ -33,8 +33,8 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
     setError(null);
     try {
       const [connData, devData] = await Promise.all([
-        api.getConnectionInfo().catch(() => null),
-        api.getRegisteredDevices().catch(() => null),
+        api.getConnectionInfo ? api.getConnectionInfo().catch(() => null) : Promise.resolve(null),
+        typeof api.getRegisteredDevices === 'function' ? api.getRegisteredDevices().catch(() => null) : Promise.resolve(null),
       ]);
 
       if (connData && connData.success) {
@@ -58,9 +58,11 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
     fetchConnectionInfo();
     const interval = setInterval(async () => {
       try {
-        const devData = await api.getRegisteredDevices();
-        if (devData && Array.isArray(devData.devices)) {
-          setDevices(devData.devices);
+        if (typeof api.getRegisteredDevices === 'function') {
+          const devData = await api.getRegisteredDevices();
+          if (devData && Array.isArray(devData.devices)) {
+            setDevices(devData.devices);
+          }
         }
       } catch {}
     }, 10000);
@@ -269,6 +271,42 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
                   </div>
                 </div>
               )}
+
+              {/* Direct APK Download Banner */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500/10 via-primary/10 to-sky-500/10 border border-emerald-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🤖</span>
+                    <div>
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">Android Mobile App (.APK)</h4>
+                      <p className="text-[11px] text-muted">Install manually on phone & pair with PC</p>
+                    </div>
+                  </div>
+                  <a
+                    href={api.getApkDownloadUrl ? api.getApkDownloadUrl() : '/api/notifications/download-apk'}
+                    download="AI-Pharmacy-Mobile.apk"
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500 text-black hover:bg-emerald-400 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+                  >
+                    <Download size={14} />
+                    <span>Download APK</span>
+                  </a>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/10 text-[10px] text-muted text-center font-medium">
+                  <div className="bg-black/30 p-2 rounded-lg border border-white/5">
+                    <span className="font-bold text-white block mb-0.5">1. Download</span>
+                    Save APK to Phone / PC
+                  </div>
+                  <div className="bg-black/30 p-2 rounded-lg border border-white/5">
+                    <span className="font-bold text-white block mb-0.5">2. Install</span>
+                    Allow Manual / Unknown Install
+                  </div>
+                  <div className="bg-black/30 p-2 rounded-lg border border-white/5">
+                    <span className="font-bold text-white block mb-0.5">3. Pair QR</span>
+                    Scan QR below in App
+                  </div>
+                </div>
+              </div>
 
               {/* QR Code Container */}
               <div className="w-full flex flex-col items-center pt-2">

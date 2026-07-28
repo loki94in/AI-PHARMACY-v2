@@ -264,8 +264,40 @@ const POS = () => {
     }
   }, []);
 
-  // Hydrate POS cart from router state parameter for refills / special orders panel handoff
+  // Hydrate POS cart from router state parameter when editing an existing bill or prefilling
   useEffect(() => {
+    const locState = location.state as any;
+    if (locState && locState.editSale) {
+      const editSale = locState.editSale;
+      if (editSale.customer_name) setPatientName(editSale.customer_name);
+      if (editSale.customer_phone) setPatientPhone(editSale.customer_phone);
+      if (editSale.doctor_name) setDoctor(editSale.doctor_name);
+      if (editSale.discount !== undefined) setDiscount(Number(editSale.discount));
+      if (editSale.payment_medium) setPaymentMedium(editSale.payment_medium);
+
+      if (Array.isArray(editSale.items) && editSale.items.length > 0) {
+        const cartItems = editSale.items.map((it: any) => ({
+          id: it.inventory_id || it.id,
+          inventory_id: it.inventory_id,
+          medicine_id: it.medicine_id,
+          name: it.medicine_name || it.name || 'Medicine',
+          batch: it.batch_number || it.batch_no || 'AUTO',
+          expiry: it.expiry_date || '12/28',
+          mrp: it.item_mrp || it.mrp || 100,
+          qty: Number(it.quantity || 1),
+          quantity: Number(it.quantity || 1),
+          unitPrice: Number(it.unit_price || it.rate || it.mrp || 100),
+          looseQty: Number(it.loose_qty || 0),
+          discount: Number(it.discount_per || 0),
+          packSize: Number(it.pack_size || 10),
+        }));
+        setCart(cartItems);
+      }
+      toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS`, 'info');
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
+
     if (location.state && (location.state as any).prefill) {
       const prefill = (location.state as any).prefill;
       const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays } = prefill;

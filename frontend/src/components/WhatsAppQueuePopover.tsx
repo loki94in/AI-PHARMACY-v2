@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
-  WifiOff, Edit3, Play, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
+  WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
@@ -113,6 +113,15 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       await fetchStatus();
     } catch (err) {
       toastEvent.trigger('Failed to flush queue', 'error');
+    }
+  };
+
+  const handleTogglePause = async () => {
+    try {
+      await apiClient.post('/whatsapp/queue/toggle-pause');
+      await fetchStatus();
+    } catch (err) {
+      toastEvent.trigger('Failed to toggle queue pause', 'error');
     }
   };
 
@@ -271,6 +280,19 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
             {/* Quick Actions */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleTogglePause}
+                className={`px-3 py-1.5 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                  queueState?.isPaused
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                    : 'bg-white/10 hover:bg-white/20 text-text border border-glass-border'
+                }`}
+                title={queueState?.isPaused ? 'Resume WhatsApp Queue' : 'Pause WhatsApp Queue'}
+              >
+                {queueState?.isPaused ? <Play size={12} className="fill-current" /> : <Pause size={12} className="fill-current" />}
+                <span>{queueState?.isPaused ? 'Resume Queue' : 'Pause Queue'}</span>
+              </button>
+
               <button
                 onClick={handleFlushNow}
                 disabled={pendingTotal === 0}

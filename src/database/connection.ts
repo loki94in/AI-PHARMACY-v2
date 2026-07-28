@@ -3,15 +3,12 @@ import { Database } from 'sqlite';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
-import { config } from '../config/index.js';
+import { config, getAppDataDir } from '../config/index.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const DB_PATH = config.dbPath;
 
 class DatabaseManager {
@@ -45,60 +42,79 @@ class DatabaseManager {
         try {
           await this.connection.close();
         } catch (e) {}
+        this.connection = null;
       }
-      let db = new Database({ filename: dbPath, driver: sqlite3.Database });
-      let needsHeal = false;
-      let initialErrorMsg = '';
 
       const isTest = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
       const busyTimeout = isTest ? 5000 : 30000;
+      const maxAttempts = 10;
+      let lastError: any = null;
 
-      let openSuccess = false;
-      try {
-        await db.open();
-        await db.run(`PRAGMA busy_timeout = ${busyTimeout};`);
-        await db.run('PRAGMA journal_mode = WAL;');
-        openSuccess = true;
-      } catch (err: any) {
-        const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked') || err?.code === 'SQLITE_BUSY';
-        if (!isBusy) {
-          needsHeal = true;
-          initialErrorMsg = err.message || 'Failed to open database file';
-        } else {
-          console.warn('[DB] Database busy on connection open, skipping self-healing rename.');
-        }
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        let db = new Database({ filename: dbPath, driver: sqlite3.Database });
+        let needsHeal = false;
+        let initialErrorMsg = '';
+        let openSuccess = false;
+
         try {
-          await db.close();
-        } catch (_) {}
+          await db.open();
+          await db.run(`PRAGMA busy_timeout = ${busyTimeout};`);
+          await db.run('PRAGMA journal_mode = WAL;');
+          openSuccess = true;
+        } catch (err: any) {
+          lastError = err;
+          const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked') || err?.code === 'SQLITE_BUSY';
+          if (!isBusy) {
+            needsHeal = true;
+            initialErrorMsg = err.message || 'Failed to open database file';
+          } else {
+            console.warn(`[DB] Database busy on connection open (attempt ${attempt}/${maxAttempts}), retrying...`);
+          }
+          try {
+            await db.close();
+          } catch (_) {}
+        }
+
+        if (needsHeal) {
+          try {
+            db = await this.runSelfHealing(dbPath, busyTimeout, initialErrorMsg);
+            openSuccess = true;
+          } catch (healErr) {
+            lastError = healErr;
+            openSuccess = false;
+          }
+        }
+
+        if (openSuccess) {
+          this.setupWriteInterceptor(db);
+          this.connection = db;
+          this.currentDbPath = dbPath;
+          break;
+        }
+
+        if (attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 300 * attempt));
+        }
       }
 
-      if (needsHeal) {
-        db = await this.runSelfHealing(dbPath, busyTimeout, initialErrorMsg);
-        openSuccess = true;
-      }
-
-      if (openSuccess) {
-        this.setupWriteInterceptor(db);
-        this.connection = db;
-        this.currentDbPath = dbPath;
-      } else {
-        this.connection = null;
-        throw new Error('Database connection is currently busy or unavailable. Please retry.');
+      if (!this.connection) {
+        throw new Error(`Database connection is currently busy or unavailable. Please retry. (${lastError?.message || 'SQLITE_BUSY'})`);
       }
 
       // Run background integrity check if production/pkg and not test
       const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';
-      if (isProductionOrPkg && !isTest && !needsHeal) {
+      if (isProductionOrPkg && !isTest) {
+        const activeConn = this.connection;
         setImmediate(async () => {
           try {
-            const integrityResult = await db.get('PRAGMA quick_check');
+            const integrityResult = await activeConn.get('PRAGMA quick_check');
             if (integrityResult?.quick_check !== 'ok') {
               console.error('[DB] Quick check failed, attempting WAL checkpoint recovery...');
-              await db.run('PRAGMA wal_checkpoint(TRUNCATE)');
-              const recheck = await db.get('PRAGMA quick_check');
+              await activeConn.run('PRAGMA wal_checkpoint(TRUNCATE)');
+              const recheck = await activeConn.get('PRAGMA quick_check');
               if (recheck?.quick_check !== 'ok') {
                 console.error('[DB] Background quick check failed after WAL checkpoint. Starting silent background restoration...');
-                const healedDb = await this.runSelfHealing(dbPath, busyTimeout, 'Quick check failed after WAL checkpoint', db);
+                const healedDb = await this.runSelfHealing(dbPath, busyTimeout, 'Quick check failed after WAL checkpoint', activeConn);
                 this.setupWriteInterceptor(healedDb);
                 this.connection = healedDb;
               } else {
@@ -112,16 +128,12 @@ class DatabaseManager {
               return;
             }
 
-            // PRAGMA quick_check opens every virtual table, so an unusable FTS index
-            // makes it throw even though the database file is perfectly intact.
-            // Restoring an old backup over a healthy live database because of a broken
-            // search index would lose real data, so rebuild the index and re-check first.
             if (err?.message?.includes('vtable constructor failed')) {
               console.warn('[DB] Quick check blocked by an unusable virtual table — rebuilding the search index.');
               try {
                 const { ensureMedicinesFts } = await import('../database.js');
-                await ensureMedicinesFts(db);
-                const recheck = await db.get('PRAGMA quick_check');
+                await ensureMedicinesFts(activeConn);
+                const recheck = await activeConn.get('PRAGMA quick_check');
                 if (recheck?.quick_check === 'ok') {
                   console.log('[DB] Search index rebuilt; database is healthy, no restore needed.');
                   return;
@@ -133,7 +145,7 @@ class DatabaseManager {
 
             console.error('[DB] Background quick check error:', err);
             try {
-              const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || 'Background check error', db);
+              const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || 'Background check error', activeConn);
               this.setupWriteInterceptor(healedDb);
               this.connection = healedDb;
             } catch (healErr) {
@@ -238,7 +250,7 @@ class DatabaseManager {
     }
 
     // 2. Check backup/snapshots for snapshot_*.db.gz
-    const snapshotsDir = path.resolve(__dirname, '..', '..', 'backup', 'snapshots');
+    const snapshotsDir = path.join(getAppDataDir(), 'backup', 'snapshots');
     if (fs.existsSync(snapshotsDir)) {
       fs.readdirSync(snapshotsDir).forEach(file => {
         if (file.startsWith('snapshot_') && file.endsWith('.db.gz')) {

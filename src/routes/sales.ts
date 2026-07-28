@@ -877,20 +877,23 @@ router.get('/list', async (req, res) => {
     const whereClauses: string[] = [];
     const params: any[] = [];
 
+    const isStrictDate = req.query.strict_date === 'true';
+
     if (search) {
-      whereClauses.push('(si.invoice_no LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id WHERE sale_it.invoice_id = si.id AND inv_m.batch_no LIKE ?))');
+      whereClauses.push('(si.invoice_no LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR d.name LIKE ? OR EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id JOIN medicines m_search ON inv_m.medicine_id = m_search.id WHERE sale_it.invoice_id = si.id AND (inv_m.batch_no LIKE ? OR m_search.name LIKE ?)))');
       const s = `%${search}%`;
-      params.push(s, s, s, s);
+      params.push(s, s, s, s, s, s);
     }
-    if (date_from) {
+    // Constrain by date: if search is active, bypass date_from/date_to unless strict_date=true is explicitly requested
+    if (date_from && (!search || isStrictDate)) {
       whereClauses.push("DATE(si.date, 'localtime') >= DATE(?)");
       params.push(date_from);
     }
-    if (date_to) {
+    if (date_to && (!search || isStrictDate)) {
       whereClauses.push("DATE(si.date, 'localtime') <= DATE(?)");
       params.push(date_to);
     }
-    if (batch) {
+    if (batch && !search) {
       whereClauses.push('EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id WHERE sale_it.invoice_id = si.id AND inv_m.batch_no LIKE ?)');
       params.push(`%${batch}%`);
     }
@@ -2121,6 +2124,119 @@ router.post('/staged/:id/reject', async (req, res) => {
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to reject staged sale' });
+  }
+});
+
+// Get 6-Month & 2-Day Sales reorder suggestions for Pharmarack Cart
+router.get('/reorder-suggestions', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    
+    // Query 2-Day sales per medicine
+    const twoDaySales = await db.all(`
+      SELECT 
+        m.id as medicine_id,
+        m.name as medicine_name,
+        m.company,
+        m.packaging,
+        m.ptr,
+        m.mrp,
+        SUM(si.quantity) as two_day_qty
+      FROM sale_items si
+      JOIN sales_invoices inv ON si.invoice_id = inv.id
+      JOIN inventory_master im ON si.inventory_id = im.id
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE inv.date >= DATETIME('now', '-2 days')
+      GROUP BY m.id
+      ORDER BY two_day_qty DESC
+      LIMIT 100
+    `);
+
+    // Query 6-Month (180 days) sales per medicine
+    const sixMonthSalesMap: Record<number, number> = {};
+    try {
+      const sixMonthRows = await db.all(`
+        SELECT 
+          im.medicine_id,
+          SUM(si.quantity) as total_qty
+        FROM sale_items si
+        JOIN sales_invoices inv ON si.invoice_id = inv.id
+        JOIN inventory_master im ON si.inventory_id = im.id
+        WHERE inv.date >= DATETIME('now', '-180 days')
+        GROUP BY im.medicine_id
+      `);
+      for (const row of sixMonthRows) {
+        sixMonthSalesMap[row.medicine_id] = row.total_qty;
+      }
+    } catch (_) {}
+
+    // Query 6-Month purchases per medicine
+    const sixMonthPurchasesMap: Record<number, number> = {};
+    try {
+      const purchaseRows = await db.all(`
+        SELECT 
+          im.medicine_id,
+          SUM(pi.quantity) as total_qty
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        JOIN inventory_master im ON pi.inventory_id = im.id
+        WHERE p.date >= DATETIME('now', '-180 days')
+        GROUP BY im.medicine_id
+      `);
+      for (const row of purchaseRows) {
+        sixMonthPurchasesMap[row.medicine_id] = row.total_qty;
+      }
+    } catch (_) {}
+
+    // Query Current Stock per medicine
+    const currentStockMap: Record<number, number> = {};
+    try {
+      const stockRows = await db.all(`
+        SELECT medicine_id, SUM(quantity) as current_stock
+        FROM inventory_master
+        GROUP BY medicine_id
+      `);
+      for (const row of stockRows) {
+        currentStockMap[row.medicine_id] = Math.max(0, row.current_stock || 0);
+      }
+    } catch (_) {}
+
+    // Assemble suggestion items
+    const items = twoDaySales.map((row: any) => {
+      const medId = row.medicine_id;
+      const sold2Days = Number(row.two_day_qty || 0);
+      const sold6Months = Number(sixMonthSalesMap[medId] || sold2Days);
+      const purchased6Months = Number(sixMonthPurchasesMap[medId] || 0);
+      const stock = Number(currentStockMap[medId] || 0);
+
+      const dailyAvgSales = Math.round((sold6Months / 180) * 100) / 100;
+      const dailyAvgPurchases = Math.round((purchased6Months / 180) * 100) / 100;
+      
+      // Suggested Reorder Qty = (2-Day Sales + 6-Month Daily Avg * 2) - Current Stock
+      const netRequirement = (sold2Days + (dailyAvgSales * 2)) - stock;
+      const suggestedQty = Math.max(1, Math.ceil(netRequirement > 0 ? netRequirement : sold2Days));
+
+      return {
+        medicineId: medId,
+        medicineName: row.medicine_name,
+        company: row.company || '',
+        packaging: row.packaging || '',
+        ptr: Number(row.ptr || 0),
+        mrp: Number(row.mrp || 0),
+        twoDaySales: sold2Days,
+        sixMonthTotalSales: sold6Months,
+        sixMonthAvgDailySales: dailyAvgSales,
+        sixMonthTotalPurchases: purchased6Months,
+        sixMonthAvgDailyPurchases: dailyAvgPurchases,
+        currentStock: stock,
+        suggestedQty: suggestedQty
+      };
+    });
+
+    res.json({ success: true, count: items.length, items });
+  } catch (err: any) {
+    console.error('Reorder suggestions error:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch reorder suggestions' });
   }
 });
 

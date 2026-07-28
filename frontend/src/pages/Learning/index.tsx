@@ -1935,8 +1935,7 @@ const Learning: React.FC = () => {
                                     type="button"
                                     onClick={async () => {
                                       await apiClient.post('/settings/save', settingsData);
-                                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                                      window.open(`${backendUrl}/api/email/auth/google`, '_blank');
+                                      window.open('/api/email/auth/google', 'GoogleLoginPopup', 'width=600,height=700,status=yes,toolbar=no,menubar=no,location=no');
                                     }}
                                     className="text-[9px] font-bold bg-sky-500/20 hover:bg-sky-500/35 text-sky px-4 py-2 rounded-lg border border-sky-500/30 transition-all uppercase tracking-wider"
                                   >

@@ -7,7 +7,7 @@ import { eventService } from '../services/eventService.js';
 
 import fs from 'fs';
 import path from 'path';
-import puppeteer from 'puppeteer-core';
+import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 
 import { fileURLToPath } from 'url';
 
@@ -99,6 +99,7 @@ router.post('/login-window', async (req, res) => {
         }
       }
 
+      const puppeteer = await getPuppeteer();
       browser = await puppeteer.launch({
         executablePath: chromePath,
         headless: false,

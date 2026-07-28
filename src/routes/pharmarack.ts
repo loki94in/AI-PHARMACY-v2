@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import puppeteer from 'puppeteer-core';
+import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 import { notificationService } from '../services/notificationService.js';
 import { searchCache } from '../services/searchCache.js';
@@ -496,6 +496,7 @@ router.post('/login-window', async (req, res) => {
     let browser;
     let tempProfilePathToDelete = '';
     const mainProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+    const puppeteer = await getPuppeteer();
 
     try {
       console.log('Killing any orphan Chrome processes holding locks on pharmarack_profile...');
@@ -956,6 +957,7 @@ router.post('/cart/add', async (req, res) => {
         const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
         let browser;
         let tempProfilePathToDelete = '';
+        const puppeteer = await getPuppeteer();
 
         try {
           try {

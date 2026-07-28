@@ -24,6 +24,7 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
 
   const fetchDevices = useCallback(async () => {
     try {
+      if (typeof api.getRegisteredDevices !== 'function') return;
       const res = await api.getRegisteredDevices();
       if (res && Array.isArray(res.devices)) {
         setDevices(res.devices);

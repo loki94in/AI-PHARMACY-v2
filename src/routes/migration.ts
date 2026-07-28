@@ -528,11 +528,14 @@ router.post('/staging/finalize', async (req, res) => {
       console.warn('Failed to stop workers or close staging connections:', err);
     }
 
-    // 5. Checkpoint active DB and close dbManager connection pool
+    // 5. Close live dbManager connection pool FIRST to release file handles
+    await dbManager.close(true);
+
+    // 6. Checkpoint active DB using better-sqlite3 with timeout
     if (fs.existsSync(DB_PATH)) {
       try {
         const Database = (await import('better-sqlite3')).default;
-        const tempAppDb = new Database(DB_PATH);
+        const tempAppDb = new Database(DB_PATH, { timeout: 10000 });
         tempAppDb.pragma('wal_checkpoint(TRUNCATE)');
         tempAppDb.pragma('journal_mode = DELETE');
         tempAppDb.close();
@@ -540,8 +543,6 @@ router.post('/staging/finalize', async (req, res) => {
         console.warn('[Migration Finalize] Active DB checkpoint warning:', checkpointErr);
       }
     }
-
-    await dbManager.close(true);
 
     // 6. Create backup of active app.db
     const timestamp = Date.now();

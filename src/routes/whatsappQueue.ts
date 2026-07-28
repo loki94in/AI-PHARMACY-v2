@@ -211,6 +211,40 @@ router.post('/flush', async (_req, res) => {
   }
 });
 
+// POST toggle pause queue
+router.post('/toggle-pause', async (_req, res) => {
+  try {
+    const isPaused = whatsappQueueWorker.togglePaused();
+    const state = await whatsappQueueWorker.getWorkerState();
+    res.json({ success: true, isPaused, message: isPaused ? 'Queue paused' : 'Queue resumed', state });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to toggle queue pause' });
+  }
+});
+
+// POST pause queue
+router.post('/pause', async (_req, res) => {
+  try {
+    whatsappQueueWorker.setPaused(true);
+    const state = await whatsappQueueWorker.getWorkerState();
+    res.json({ success: true, isPaused: true, message: 'Queue paused', state });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to pause queue' });
+  }
+});
+
+// POST resume queue
+router.post('/resume', async (_req, res) => {
+  try {
+    whatsappQueueWorker.setPaused(false);
+    whatsappQueueWorker.triggerProcessing();
+    const state = await whatsappQueueWorker.getWorkerState();
+    res.json({ success: true, isPaused: false, message: 'Queue resumed', state });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to resume queue' });
+  }
+});
+
 // POST retry all failed messages
 router.post('/retry-failed', async (_req, res) => {
   try {

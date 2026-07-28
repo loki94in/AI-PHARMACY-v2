@@ -11,7 +11,7 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
   const [queueState, setQueueState] = useState(stagedQueueService.getQueueState());
 
   useEffect(() => {
-    return stagedQueueService.subscribe(state => {
+    return stagedQueueService.subscribe((state: any) => {
       setQueueState(state);
     });
   }, []);
