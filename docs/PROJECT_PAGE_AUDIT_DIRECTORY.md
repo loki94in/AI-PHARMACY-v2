@@ -172,9 +172,9 @@
 
 ### 16. AI Learning & OCR Rule Management (`/learning`)
 * **Component Path**: [pages/Learning/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/Learning/index.tsx)
-* **Authoritative Responsibilities**: OCR invoice correction learning rules, medicine name alias mapping (`medicine_aliases`), AI prompt tuning parameters.
-* **Authoritative Data Sources**: `GET /api/learning/ocr-corrections`, `GET /api/learning/aliases`.
-* **Database Tables**: `ocr_corrections`, `medicine_aliases`, `ocr_audit_queue`.
+* **Authoritative Responsibilities**: OCR invoice correction learning rules, medicine name alias mapping (`medicine_aliases`), AI prompt tuning parameters, Telegram Bot configuration (`telegram_enabled`, `telegram_token`, `telegram_chat_id`), WhatsApp Web & Business API configuration, automation toggles, backup channel settings.
+* **Authoritative Data Sources**: `GET /api/learning/ocr-corrections`, `GET /api/learning/aliases`, `GET /api/settings`, `POST /api/settings/save`.
+* **Database Tables**: `ocr_corrections`, `medicine_aliases`, `ocr_audit_queue`, `app_settings` (for messaging integrations).
 * **Identified Legacy Contamination**:
   - **Legacy Field Contamination**: `Learning/index.tsx` still contains legacy input fields editing `settingsData.delivery_boy_name` / `settingsData.delivery_boy_whatsapp` in `app_settings`! These fields belong exclusively to `Dispatch/index.tsx` (`delivery_boys` DB table).
 
@@ -182,11 +182,12 @@
 
 ### 17. System Settings (`/settings`)
 * **Component Path**: [pages/Settings/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/Settings/index.tsx)
-* **Authoritative Responsibilities**: Pharmacy core metadata (Shop Name, Address, Phone, GSTIN, Drug License), Default Tax Rates, Invoice Prefixes, Backup Frequency, DataFetchControl Registry, Admin Remote Key, Pharmarack Session Credentials.
+* **Authoritative Responsibilities**: Pharmacy core metadata (Shop Name, Address, Phone, GSTIN, Drug License), Default Tax Rates, Invoice Prefixes, Backup Frequency, DataFetchControl Registry, Admin Remote Key, Pharmarack Session Credentials, Monthly Report configuration, Notification toggles.
 * **Authoritative Data Sources**: `GET /api/settings`, `POST /api/settings/save`.
 * **Database Tables**: `app_settings` key-value store.
 * **Identified Legacy Field Rot**:
   - `Settings/index.tsx` contains unused state fields (`dineshWhatsappNumber`, `deliveryBoy` interfaces) from before Delivery Boys were moved to `/dispatch`.
+* **Scope Note**: Telegram Bot, WhatsApp, and WhatsApp Business API configurations are managed exclusively in Learning (`/learning`), not here.
 
 ---
 

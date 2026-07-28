@@ -119,12 +119,13 @@ export async function processSalesLine(sqlLine: string, db: Database): Promise<b
             }
 
             // Insert into sales_invoices
+            // subtotal (Bill Amount) mirrors total_amount here since this legacy format carries no discount column
             const insertInvoiceQuery = `
-                INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, subtotal)
+                VALUES (?, ?, ?, ?, ?, ?)
             `;
 
-            await db.run(insertInvoiceQuery, [invoice_no, customerId, dateStr, totalAmount, taxAmount]);
+            await db.run(insertInvoiceQuery, [invoice_no, customerId, dateStr, totalAmount, taxAmount, totalAmount]);
             return true;
         } catch (error) {
             console.error(`Error processing legacy_sales line: ${error}`);

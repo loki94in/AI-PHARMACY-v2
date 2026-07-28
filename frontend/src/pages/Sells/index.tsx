@@ -159,10 +159,10 @@ const Sells = () => {
     }
   };
 
-  // Client-side instant filter function for invoices
+  // Client-side instant filter function for invoices.
+  // Amount range and Pay Via are enforced server-side (serverFilters below) so they apply to the
+  // full dataset rather than only whatever page(s) have loaded into memory so far.
   const clientFilterFn = useCallback((inv: SaleInvoice) => {
-    const total = Number(inv.total_amount) || 0;
-
     if (colFilterNo && !(inv.invoice_no || '').toLowerCase().includes(colFilterNo.toLowerCase())) {
       return false;
     }
@@ -170,7 +170,7 @@ const Sells = () => {
       const searchLower = colFilterName.toLowerCase();
       const nameMatch = (inv.customer_name || 'Walk-in').toLowerCase().includes(searchLower);
       const phoneMatch = (inv.customer_phone || '').includes(colFilterName);
-      const medicineMatch = inv.items?.some(it => 
+      const medicineMatch = inv.items?.some(it =>
         (it.medicine_name || '').toLowerCase().includes(searchLower) ||
         (it.batch_number || '').toLowerCase().includes(searchLower)
       );
@@ -179,17 +179,9 @@ const Sells = () => {
     if (colFilterDrName && !((inv.doctor_name || '').toLowerCase().includes(colFilterDrName.toLowerCase()))) {
       return false;
     }
-    
-    const colMin = colFilterMinAmount ? Number(colFilterMinAmount) : 0;
-    const colMax = colFilterMaxAmount ? Number(colFilterMaxAmount) : 100000000;
-    if (total < colMin || total > colMax) return false;
-
-    if (colFilterPayVia && inv.payment_medium !== colFilterPayVia) {
-      return false;
-    }
 
     return true;
-  }, [colFilterNo, colFilterName, colFilterDrName, colFilterMinAmount, colFilterMaxAmount, colFilterPayVia]);
+  }, [colFilterNo, colFilterName, colFilterDrName]);
 
   // Infinite Scroll hook setup
   const {
@@ -209,6 +201,9 @@ const Sells = () => {
       date_from: dateRangeHelper.dateRange.from,
       date_to: dateRangeHelper.dateRange.to,
       search: (colFilterNo || colFilterName || colFilterDrName || '').trim(),
+      min_amount: colFilterMinAmount,
+      max_amount: colFilterMaxAmount,
+      payment_medium: colFilterPayVia,
     },
     clientFilterFn,
     fetchPage: async (pageParam, filters) => {
@@ -218,7 +213,9 @@ const Sells = () => {
         date_from: filters.date_from,
         date_to: filters.date_to,
         search: filters.search,
-        include_items: 'true',
+        min_amount: filters.min_amount ? Number(filters.min_amount) : undefined,
+        max_amount: filters.max_amount ? Number(filters.max_amount) : undefined,
+        payment_medium: filters.payment_medium || undefined,
       });
       const data = Array.isArray(res) ? res : (res?.invoices || res?.data || []);
       const totalItems = res?.meta?.total || data.length;
@@ -367,43 +364,21 @@ const Sells = () => {
   });
 
   return (
-    <div className="h-full flex flex-col px-6 py-6 animate-in fade-in duration-500 gap-4">
+    <div className="h-full flex flex-col px-4 py-4 animate-in fade-in duration-500 gap-3 relative">
       
-      {/* Header with Export Buttons */}
-      <div className="flex justify-between items-center shrink-0">
-        <h1 className="text-xl font-bold text-text uppercase tracking-wider flex items-center gap-2">
-          <FileText className="w-5 h-5 text-primary" />
-          Sales History Ledger
-        </h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => exportToCSV(items, exportColumns, 'sales_history.csv')}
-            className="px-3 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold hover:text-text transition-all text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <Download size={13} /> Export CSV
-          </button>
-          <button
-            onClick={() => exportToPDF(items, exportColumns, 'sales_history.pdf', 'Sales History Report')}
-            className="px-3 py-1.5 rounded-lg border border-glass-border bg-white/5 hover:bg-white/10 text-muted font-bold hover:text-text transition-all text-xs flex items-center gap-1.5 cursor-pointer"
-          >
-            <Download size={13} /> Export PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Dedicated Top Date Filter Bar */}
-      <div className="bg-bg2/80 border border-glass-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-md">
+      {/* Streamlined Compact Date Filter Bar */}
+      <div className="bg-bg2/80 border border-glass-border rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-sm text-xs">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary/10 border border-primary/20 rounded-lg text-xs font-bold text-primary shrink-0">
+          <div className="flex items-center gap-1.5 text-primary font-bold text-xs shrink-0">
             <Calendar size={14} />
-            <span>Sales Period:</span>
+            <span>Period:</span>
           </div>
 
           {/* Quick Presets */}
-          <div className="flex items-center gap-1 bg-bg3/80 p-1 rounded-lg border border-glass-border/40 shrink-0">
+          <div className="flex items-center gap-1 bg-bg3 p-0.5 rounded-lg border border-glass-border/40 shrink-0">
             {[
               {
-                label: '30 Days (Default)',
+                label: '30 Days',
                 key: '30d',
                 action: () => dateRangeHelper.setPreset(30),
                 active: dateRangeHelper.dateRange.from === thirtyDaysAgoStr && dateRangeHelper.dateRange.to === todayStr,
@@ -444,10 +419,10 @@ const Sells = () => {
                 key={p.key}
                 type="button"
                 onClick={p.action}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
                   p.active
-                    ? 'bg-primary text-white shadow-sm shadow-primary/30 font-bold'
-                    : 'text-muted hover:text-text hover:bg-white/5'
+                    ? 'bg-primary text-white font-bold shadow-sm'
+                    : 'text-muted hover:text-text hover:bg-bg2'
                 }`}
               >
                 {p.label}
@@ -456,7 +431,7 @@ const Sells = () => {
           </div>
 
           {/* Custom Date Inputs */}
-          <div className="flex items-center gap-2 bg-bg3/80 px-3 py-1 rounded-lg border border-glass-border/40 shrink-0 text-xs">
+          <div className="flex items-center gap-1.5 bg-bg3 px-2 py-1 rounded-lg border border-glass-border/40 shrink-0 text-xs">
             <span className="text-[10px] font-bold text-muted uppercase">FROM:</span>
             <input
               type="date"
@@ -475,7 +450,7 @@ const Sells = () => {
               <button
                 type="button"
                 onClick={() => dateRangeHelper.clearFilters()}
-                className="ml-1 p-1 text-muted hover:text-red transition-colors rounded cursor-pointer"
+                className="p-0.5 text-muted hover:text-red transition-colors rounded cursor-pointer"
                 title="Reset date filter (All Time)"
               >
                 <RotateCcw size={12} />
@@ -486,115 +461,130 @@ const Sells = () => {
 
         {/* Live Filter Summary Count */}
         <div className="flex items-center gap-2 text-xs shrink-0 ml-auto">
-          <span className="bg-bg3/90 px-3 py-1.5 rounded-lg border border-glass-border/50 font-mono text-[11px]">
-            Showing <strong className="text-white font-bold">{items.length}</strong> of{' '}
-            <strong className="text-white font-bold">{totalItems}</strong> invoices ({getDateRangeLabel()})
+          <span className="bg-bg3 px-2.5 py-1 rounded-lg border border-glass-border/50 font-mono text-[11px] text-muted">
+            {items.length !== totalItems ? (
+              <>Filtered: <strong className="text-text font-bold">{items.length}</strong> / <strong className="text-text font-bold">{totalItems}</strong> total</>
+            ) : (
+              <>Invoices: <strong className="text-text font-bold">{totalItems}</strong></>
+            )} ({getDateRangeLabel()})
           </span>
         </div>
       </div>
 
       {/* Invoices Table */}
-      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-0 border border-white/20 flex-1 flex flex-col overflow-hidden min-h-0">
+      <div className="bg-bg2/60 backdrop-blur-lg rounded-xl p-0 border border-glass-border flex-1 flex flex-col overflow-hidden min-h-0">
         
         <InfiniteTable
           totalSize={rowVirtualizer.getTotalSize()}
           containerRef={parentRef}
           header={
-            <>
-              <tr className="flex items-center w-full bg-[#18181b]/95 select-none">
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-28 shrink-0">No.</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider flex-1 min-w-0">Name of the patient</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-44 shrink-0">Date</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-32 shrink-0">Dr Name</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0">Bill Amount</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-24 shrink-0">Final Amount</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-20 shrink-0">Discount</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-20 shrink-0">Pay Via</th>
-                <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider w-32 shrink-0">Actions</th>
-              </tr>
-              <tr className="bg-bg2 border-b border-glass-border/30 flex items-center w-full select-none">
-                <td className="p-2 w-28 shrink-0">
-                  <input
-                    type="text"
-                    placeholder="Search No..."
-                    value={colFilterNo}
-                    onChange={e => setColFilterNo(e.target.value)}
-                    className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                  />
-                </td>
-                <td className="p-2 flex-1 min-w-0">
-                  <input
-                    type="text"
-                    placeholder="Search patient/phone/medicine..."
-                    value={colFilterName}
-                    onChange={e => setColFilterName(e.target.value)}
-                    className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                  />
-                </td>
-                <td className="p-2 w-44 shrink-0 flex items-center px-3">
-                  <span className="text-[11px] font-semibold text-muted truncate">
-                    {getDateRangeLabel()}
-                  </span>
-                </td>
-                <td className="p-2 w-32 shrink-0">
-                  <input
-                    type="text"
-                    placeholder="Search doctor..."
-                    value={colFilterDrName}
-                    onChange={e => setColFilterDrName(e.target.value)}
-                    className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                  />
-                </td>
-                <td className="p-2 w-24 shrink-0 flex gap-1">
+            <tr className="flex items-center w-full bg-bg3/95 border-b border-glass-border/40 select-none py-2 text-xs">
+              {/* No. */}
+              <th className="px-2 py-1 w-32 shrink-0 flex items-center justify-start">
+                <input
+                  type="text"
+                  placeholder="Search No..."
+                  value={colFilterNo}
+                  onChange={e => setColFilterNo(e.target.value)}
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                />
+              </th>
+
+              {/* Name of the patient */}
+              <th className="px-2 py-1 flex-1 min-w-[240px] flex items-center justify-start">
+                <input
+                  type="text"
+                  placeholder="Search patient/phone/medicine..."
+                  value={colFilterName}
+                  onChange={e => setColFilterName(e.target.value)}
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                />
+              </th>
+
+              {/* Date */}
+              <th className="px-2 py-1 w-36 shrink-0 flex items-center justify-center text-center">
+                <div className="w-full py-1 bg-bg2/50 border border-glass-border/40 rounded-md text-[10px] font-semibold text-muted truncate text-center" title="Filtered Date Period">
+                  {getDateRangeLabel()}
+                </div>
+              </th>
+
+              {/* Dr Name */}
+              <th className="px-2 py-1 w-36 shrink-0 flex items-center justify-start">
+                <input
+                  type="text"
+                  placeholder="Search doctor..."
+                  value={colFilterDrName}
+                  onChange={e => setColFilterDrName(e.target.value)}
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                />
+              </th>
+
+              {/* Bill Amount */}
+              <th className="px-1.5 py-1 w-28 shrink-0 flex items-center justify-end text-right">
+                <div className="flex gap-1 w-full">
                   <input
                     type="number"
-                    placeholder="Min"
+                    placeholder="Min ₹"
                     value={colFilterMinAmount}
                     onChange={e => setColFilterMinAmount(e.target.value)}
-                    className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-[11px] text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
                   />
                   <input
                     type="number"
-                    placeholder="Max"
+                    placeholder="Max ₹"
                     value={colFilterMaxAmount}
                     onChange={e => setColFilterMaxAmount(e.target.value)}
-                    className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-[11px] text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
                   />
-                </td>
-                <td className="p-2 w-24 shrink-0"></td>
-                <td className="p-2 w-20 shrink-0"></td>
-                <td className="p-2 w-20 shrink-0">
-                  <select
-                    value={colFilterPayVia}
-                    onChange={e => setColFilterPayVia(e.target.value)}
-                    className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50"
+                </div>
+              </th>
+
+              {/* Final Amount */}
+              <th className="px-2 py-1 w-28 shrink-0 flex items-center justify-end text-right">
+                <span className="text-xs font-semibold text-muted/60 px-1">Final Amt</span>
+              </th>
+
+              {/* Discount */}
+              <th className="px-2 py-1 w-24 shrink-0 flex items-center justify-end text-right">
+                <span className="text-xs font-semibold text-muted/60 px-1">Discount</span>
+              </th>
+
+              {/* Pay Via */}
+              <th className="px-1.5 py-1 w-24 shrink-0 flex items-center justify-center text-center">
+                <select
+                  value={colFilterPayVia}
+                  onChange={e => setColFilterPayVia(e.target.value)}
+                  className="w-full px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal focus:outline-none focus:border-primary/50"
+                >
+                  <option value="">Pay: All</option>
+                  <option value="CASH">CASH</option>
+                  <option value="UPI">UPI</option>
+                  <option value="CARD">CARD</option>
+                  <option value="CREDIT">CREDIT</option>
+                </select>
+              </th>
+
+              {/* Actions */}
+              <th className="px-2 py-1 w-32 shrink-0 flex items-center justify-center text-center">
+                {(colFilterNo || colFilterName || colFilterDrName || colFilterMinAmount || colFilterMaxAmount || colFilterPayVia) ? (
+                  <button
+                    onClick={() => {
+                      setColFilterNo('');
+                      setColFilterName('');
+                      setColFilterDrName('');
+                      setColFilterMinAmount('');
+                      setColFilterMaxAmount('');
+                      setColFilterPayVia('');
+                    }}
+                    className="text-[11px] text-red hover:underline font-bold py-0.5 cursor-pointer"
                   >
-                    <option value="">All</option>
-                    <option value="CASH">CASH</option>
-                    <option value="UPI">UPI</option>
-                    <option value="CARD">CARD</option>
-                    <option value="CREDIT">CREDIT</option>
-                  </select>
-                </td>
-                <td className="p-2 w-32 shrink-0 text-center">
-                  {(colFilterNo || colFilterName || colFilterDrName || colFilterMinAmount || colFilterMaxAmount || colFilterPayVia) && (
-                    <button
-                      onClick={() => {
-                        setColFilterNo('');
-                        setColFilterName('');
-                        setColFilterDrName('');
-                        setColFilterMinAmount('');
-                        setColFilterMaxAmount('');
-                        setColFilterPayVia('');
-                      }}
-                      className="text-xs text-red hover:underline font-bold"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </td>
-              </tr>
-            </>
+                    Clear Filters
+                  </button>
+                ) : (
+                  <span className="text-xs font-semibold text-muted/60">Actions</span>
+                )}
+              </th>
+            </tr>
           }
           body={
             items.length === 0 ? (
@@ -614,47 +604,42 @@ const Sells = () => {
                     size={virtualRow.size}
                     onClick={() => openView(inv)}
                   >
-                    <td className="p-4 w-28 shrink-0 relative">
+                    <td className="px-4 py-3.5 w-32 shrink-0 flex items-center justify-start relative">
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-primary to-purple-500 scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-center"></div>
-                      <span className="font-mono text-sm font-bold text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20 shadow-sm">{inv.invoice_no}</span>
+                      <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20 shadow-sm">{inv.invoice_no}</span>
                     </td>
-                    <td className="p-4 flex-1 min-w-0">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-white/5 p-2 rounded-full border border-glass-border shadow-sm group-hover:bg-white/10 group-hover:shadow-md transition-all shrink-0">
+                    <td className="px-4 py-3.5 flex-1 min-w-[240px] flex items-center">
+                      <div className="flex items-center gap-3 w-full">
+                        <div className="bg-bg3 p-2 rounded-full border border-glass-border shadow-sm group-hover:bg-primary/10 group-hover:shadow-md transition-all shrink-0">
                           <User size={14} className="text-muted group-hover:text-primary transition-colors" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-sm font-bold text-text group-hover:text-primary transition-colors truncate">{inv.customer_name || 'Walk-in'}</div>
+                          <div className="text-xs font-bold text-text group-hover:text-primary transition-colors truncate">{inv.customer_name || 'Walk-in'}</div>
                           {inv.customer_phone && <div className="text-[10px] text-muted font-medium mt-0.5 font-mono">{inv.customer_phone}</div>}
-                          {inv.items && inv.items.length > 0 && (
-                            <div className="text-[11px] text-muted mt-1 truncate max-w-[300px] font-sans" title={inv.items.map(it => `${it.medicine_name} (${it.quantity} Str${it.loose_qty ? `, ${it.loose_qty} Tab` : ''})`).join(', ')}>
-                              <span className="font-semibold text-primary/80">Items:</span> {inv.items.map(it => `${it.medicine_name} (${it.quantity} Str${it.loose_qty ? `, ${it.loose_qty} Tab` : ''})`).join(', ')}
-                            </div>
-                          )}
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 w-44 shrink-0 text-sm text-muted">
+                    <td className="px-4 py-3.5 w-36 shrink-0 text-xs text-muted flex items-center justify-center">
                       {formatDate(inv.date)}
                     </td>
-                    <td className="p-4 w-32 shrink-0 text-sm text-muted truncate">
+                    <td className="px-4 py-3.5 w-36 shrink-0 text-xs text-muted truncate flex items-center justify-start">
                       {inv.doctor_name || '-'}
                     </td>
-                    <td className="p-4 w-24 shrink-0">
-                      <span className="text-sm font-bold text-text">₹{Math.round(Number(inv.subtotal || 0))}</span>
+                    <td className="px-3 py-3.5 w-28 shrink-0 flex items-center justify-end text-right">
+                      <span className="text-xs font-bold text-text">₹{Math.round(Number(inv.subtotal || 0))}</span>
                     </td>
-                    <td className="p-4 w-24 shrink-0">
-                      <span className="text-sm font-bold text-green">₹{Math.round(Number(inv.total_amount || 0))}</span>
+                    <td className="px-3 py-3.5 w-28 shrink-0 flex items-center justify-end text-right">
+                      <span className="text-xs font-bold text-green">₹{Math.round(Number(inv.total_amount || 0))}</span>
                     </td>
-                    <td className="p-4 w-20 shrink-0 text-sm text-muted">
+                    <td className="px-3 py-3.5 w-24 shrink-0 text-xs text-muted flex items-center justify-end text-right">
                       ₹{Math.round(Number(inv.discount || 0))}
                     </td>
-                    <td className="p-4 w-20 shrink-0">
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-white/10 text-muted">
+                    <td className="px-3 py-3.5 w-24 shrink-0 flex items-center justify-center">
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border">
                         {inv.payment_medium || 'CASH'}
                       </span>
                     </td>
-                    <td className="p-4 w-32 shrink-0" onClick={e => e.stopPropagation()}>
+                    <td className="px-3 py-3.5 w-32 shrink-0 flex items-center justify-center" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-2 min-w-[120px]">
                         {deleteConfirm === inv.id ? (
                           <div className="flex items-center gap-1.5 p-1 rounded-lg bg-red/10 border border-red/20 w-full justify-center">
@@ -1231,6 +1216,24 @@ const Sells = () => {
           }} 
         />
       )}
+
+      {/* Floating Action Bar for Exporting Data */}
+      <div className="fixed bottom-6 right-8 z-30 flex items-center gap-2 bg-bg2/95 backdrop-blur-md border border-glass-border p-1.5 rounded-full shadow-2xl transition-all">
+        <button
+          onClick={() => exportToCSV(items, exportColumns, 'sales_history.csv')}
+          className="px-3.5 py-1.5 rounded-full bg-bg3 hover:bg-primary/20 text-text font-semibold hover:text-primary transition-all text-xs flex items-center gap-1.5 border border-glass-border cursor-pointer"
+          title="Export to CSV"
+        >
+          <Download size={13} /> Export CSV
+        </button>
+        <button
+          onClick={() => exportToPDF(items, exportColumns, 'sales_history.pdf', 'Sales History Report')}
+          className="px-3.5 py-1.5 rounded-full bg-bg3 hover:bg-primary/20 text-text font-semibold hover:text-primary transition-all text-xs flex items-center gap-1.5 border border-glass-border cursor-pointer"
+          title="Export to PDF"
+        >
+          <Download size={13} /> Export PDF
+        </button>
+      </div>
 
     </div>
   );

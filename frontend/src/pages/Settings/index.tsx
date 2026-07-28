@@ -76,9 +76,7 @@ interface SettingsData {
   lowStockThreshold: number;
   expiryAlertDays: number;
   dineshWhatsappNumber: string;
-  telegramEnabled: boolean;
-  telegramToken: string;
-  telegramChatId: string;
+
   whatsappEnabled: boolean;
   waBusinessEnabled: boolean;
   waBusinessPhoneNumberId: string;
@@ -138,9 +136,7 @@ const Settings = () => {
     lowStockThreshold: 10,
     expiryAlertDays: 90,
     dineshWhatsappNumber: '',
-    telegramEnabled: false,
-    telegramToken: '',
-    telegramChatId: '',
+
     whatsappEnabled: false,
     waBusinessEnabled: false,
     waBusinessPhoneNumberId: '',
@@ -438,9 +434,7 @@ const Settings = () => {
   const setLowStockThreshold = (val: number | ((p: number) => number)) => updateSetting('lowStockThreshold', val);
   const setExpiryAlertDays = (val: number | ((p: number) => number)) => updateSetting('expiryAlertDays', val);
   const setDineshWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('dineshWhatsappNumber', val);
-  const setTelegramEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('telegramEnabled', val);
-  const setTelegramToken = (val: string | ((p: string) => string)) => updateSetting('telegramToken', val);
-  const setTelegramChatId = (val: string | ((p: string) => string)) => updateSetting('telegramChatId', val);
+
   const setWhatsappEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('whatsappEnabled', val);
   const setWaBusinessEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('waBusinessEnabled', val);
   const setWaBusinessPhoneNumberId = (val: string | ((p: string) => string)) => updateSetting('waBusinessPhoneNumberId', val);
@@ -592,9 +586,7 @@ const Settings = () => {
     lowStockThreshold,
     expiryAlertDays,
     dineshWhatsappNumber,
-    telegramEnabled,
-    telegramToken,
-    telegramChatId,
+
     whatsappEnabled,
     waBusinessEnabled,
     waBusinessPhoneNumberId,
@@ -678,9 +670,7 @@ const Settings = () => {
         lowStockThreshold: Number(serverSettings.low_stock_threshold) || 10,
         expiryAlertDays: Number(serverSettings.expiry_alert_days) || 90,
         dineshWhatsappNumber: serverSettings.dinesh_whatsapp_number || '',
-        telegramEnabled: serverSettings.telegram_enabled === 'true',
-        telegramToken: serverSettings.telegram_token || '',
-        telegramChatId: serverSettings.telegram_chat_id || '',
+
         whatsappEnabled: serverSettings.whatsapp_enabled === 'true',
         waBusinessEnabled: serverSettings.wa_business_enabled === 'true',
         waBusinessPhoneNumberId: serverSettings.wa_business_phone_number_id || '',
@@ -790,10 +780,6 @@ const Settings = () => {
       owner_whatsapp_number: ownerWhatsappNumber,
       monthly_report_template_theme: monthlyReportTemplateTheme,
 
-      telegram_enabled: telegramEnabled.toString(),
-      telegram_token: telegramToken,
-      telegram_chat_id: telegramChatId,
-      
       whatsapp_enabled: whatsappEnabled.toString(),
 
        // WhatsApp Business API
@@ -939,10 +925,6 @@ const Settings = () => {
       low_stock_threshold: lowStockThreshold.toString(),
       expiry_alert_days: expiryAlertDays.toString(),
 
-      telegram_enabled: telegramEnabled.toString(),
-      telegram_token: telegramToken,
-      telegram_chat_id: telegramChatId,
-      
       whatsapp_enabled: whatsappEnabled.toString(),
 
       wa_business_enabled: waBusinessEnabled.toString(),

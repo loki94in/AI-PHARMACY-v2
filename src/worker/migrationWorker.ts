@@ -1580,8 +1580,9 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                     saleVals.push(val);
                   }
                 }
-                const baseCols = ['invoice_no', 'customer_id', 'doctor_id', 'date', 'total_amount', 'discount', 'cgst_value', 'sgst_value'];
-                const baseVals = [invoiceNo, customer.id, doctor.id, dateStr, totalAmount, discount, cgstVal, sgstVal];
+                const subtotal = totalAmount + discount;
+                const baseCols = ['invoice_no', 'customer_id', 'doctor_id', 'date', 'total_amount', 'discount', 'subtotal', 'cgst_value', 'sgst_value'];
+                const baseVals = [invoiceNo, customer.id, doctor.id, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal];
                 const colsStr = [...baseCols, ...saleCols].join(', ');
                 const placeholdersStr = [...baseCols, ...saleCols].map(() => '?').join(', ');
                 const result = await db.run(
@@ -2007,10 +2008,11 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                   // Sale Invoice
                   let invoice = await db.get('SELECT id FROM sales_invoices WHERE invoice_no = ?', [invoiceNo]);
                   if (!invoice) {
+                    const subtotal = totalAmount + discount;
                     const result = await db.run(
-                      `INSERT INTO sales_invoices (invoice_no, customer_id, doctor_id, date, total_amount, discount, cgst_value, sgst_value)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                      [invoiceNo, customerId || 1, doctorId || 1, dateStr, totalAmount, discount, cgstVal, sgstVal]
+                      `INSERT INTO sales_invoices (invoice_no, customer_id, doctor_id, date, total_amount, discount, subtotal, cgst_value, sgst_value)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      [invoiceNo, customerId || 1, doctorId || 1, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal]
                     );
                     invoice = { id: result.lastID };
                   }

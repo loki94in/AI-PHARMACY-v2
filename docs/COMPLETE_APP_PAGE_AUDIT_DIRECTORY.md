@@ -127,8 +127,8 @@
 
 #### 14. AI Learning & Rule Hub (`/learning`)
 * **File Path**: [frontend/src/pages/Learning/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/Learning/index.tsx)
-* **Authoritative Role**: OCR invoice correction rules, medicine alias dictionary (`medicine_aliases`), Doctors tab (`?tab=doctors`), Dispatch tab (`?tab=dispatch`).
-* **Authoritative APIs & DB Tables**: `GET /api/learning/ocr-corrections`, `GET /api/learning/aliases`, `GET /api/dispatch/delivery-boys`; Tables: `ocr_corrections`, `medicine_aliases`, `delivery_boys`.
+* **Authoritative Role**: OCR invoice correction rules, medicine alias dictionary (`medicine_aliases`), Doctors tab (`?tab=doctors`), Dispatch tab (`?tab=dispatch`), Telegram Bot configuration, WhatsApp Web & Business API configuration, automation toggles, backup channel settings.
+* **Authoritative APIs & DB Tables**: `GET /api/learning/ocr-corrections`, `GET /api/learning/aliases`, `GET /api/dispatch/delivery-boys`, `GET /api/settings`, `POST /api/settings/save`; Tables: `ocr_corrections`, `medicine_aliases`, `delivery_boys`, `app_settings` (messaging integrations).
 * **Identified Gaps & Unused Code**:
   - **Duplicated Form**: Renders delivery boy inputs in **two separate tabs** on the same page (Dispatch tab vs Operations tab).
 

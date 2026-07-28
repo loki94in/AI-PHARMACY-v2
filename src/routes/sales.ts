@@ -862,6 +862,9 @@ router.get('/list', async (req, res) => {
     const date_from = (req.query.date_from as string) || '';
     const date_to = (req.query.date_to as string) || '';
     const batch = (req.query.batch as string) || '';
+    const min_amount = parseFloat((req.query.min_amount as string) || '');
+    const max_amount = parseFloat((req.query.max_amount as string) || '');
+    const payment_medium = (req.query.payment_medium as string) || '';
 
     // Pagination params
     const clientLimitRaw = req.query.limit ? parseInt(req.query.limit as string, 10) : NaN;
@@ -896,6 +899,18 @@ router.get('/list', async (req, res) => {
     if (batch && !search) {
       whereClauses.push('EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id WHERE sale_it.invoice_id = si.id AND inv_m.batch_no LIKE ?)');
       params.push(`%${batch}%`);
+    }
+    if (!isNaN(min_amount)) {
+      whereClauses.push('si.subtotal >= ?');
+      params.push(min_amount);
+    }
+    if (!isNaN(max_amount)) {
+      whereClauses.push('si.subtotal <= ?');
+      params.push(max_amount);
+    }
+    if (payment_medium) {
+      whereClauses.push('si.payment_medium = ?');
+      params.push(payment_medium);
     }
 
     const where = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : 'WHERE 1=1';

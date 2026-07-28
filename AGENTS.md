@@ -296,5 +296,6 @@ To prevent regressions, legacy fallback loops, and developer/AI confusion when f
    - **Delivery Boy Management**: MUST ONLY be read/written via `/dispatch` (`Dispatch/index.tsx`) using the `delivery_boys` database table (`GET/POST /api/dispatch/delivery-boys`). **NEVER** read/write delivery boy details from `Settings`, `Learning`, or `app_settings`.
    - **Special Shortage Orders**: MUST ONLY be managed via `/orders` (`Orders/index.tsx`) using the `special_orders` database table (`GET/POST /api/orders`). **NEVER** introduce parallel logic pointing to `pending_shortage_requests`.
    - **OCR Correction & Alias Learning**: MUST ONLY be managed via `/learning` (`Learning/index.tsx`) using `ocr_corrections` and `medicine_aliases` tables.
+   - **Telegram Bot Configuration**: MUST ONLY be managed via `/learning` (`Learning/index.tsx`) using `app_settings` keys (`telegram_enabled`, `telegram_token`, `telegram_chat_id`). **NEVER** add Telegram config UI to `Settings` or any other page.
    - **Core Pharmacy Configuration**: `Settings` (`/settings`) is strictly reserved for store metadata (Name, Address, GSTIN, License, Tax Rate, Invoice Prefix, DataFetchControl). Feature-specific configurations belong on their respective domain pages.
 

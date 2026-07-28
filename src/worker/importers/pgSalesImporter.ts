@@ -67,11 +67,14 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
   const rawInvoice = row['invoice'] || legacyId;
   const uniqueInvoice = await ensureInvoiceNoUnique(rawInvoice, legacyId, db);
 
+  const total_amount = parseFloat(row['amount'] || '0') || 0;
+  const discount = parseFloat(row['discount'] || '0') || 0;
+
   salesBatch.push({
     invoice_no: uniqueInvoice,
     customer_id: customerId || null,
     date: row['created_time'] || null,
-    total_amount: parseFloat(row['amount'] || '0') || 0,
+    total_amount,
     tax_amount: parseFloat(row['net_gst_value'] || '0') || 0,
     doctor_id: doctorId || null,
     payment_medium: row['payment_medium'] || null,
@@ -81,7 +84,8 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
     igst_value: parseFloat(row['igst_value'] || '0') || 0,
     legacy_id: legacyId,
     business_date: row['business_date'] || row['created_time'] || null,
-    discount: parseFloat(row['discount'] || '0') || 0,
+    discount,
+    subtotal: total_amount + discount,
   });
 
   if (salesBatch.length >= 2000) {
@@ -96,9 +100,9 @@ export async function flushSalesInvoices(db: Database) {
     for (const s of salesBatch) {
       try {
         const result = await db.run(
-          `INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, doctor_id, payment_medium, roff, cgst_value, sgst_value, igst_value, legacy_id, business_date, discount)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [s.invoice_no, s.customer_id, s.date, s.total_amount, s.tax_amount, s.doctor_id, s.payment_medium, s.roff, s.cgst_value, s.sgst_value, s.igst_value, s.legacy_id, s.business_date, s.discount || 0]
+          `INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, doctor_id, payment_medium, roff, cgst_value, sgst_value, igst_value, legacy_id, business_date, discount, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.invoice_no, s.customer_id, s.date, s.total_amount, s.tax_amount, s.doctor_id, s.payment_medium, s.roff, s.cgst_value, s.sgst_value, s.igst_value, s.legacy_id, s.business_date, s.discount || 0, s.subtotal || s.total_amount]
         );
         salesInvoiceMap.set(s.legacy_id, result.lastID!);
       } catch (err: any) {
