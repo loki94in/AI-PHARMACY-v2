@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { sanitizePhoneInput } from '../../utils/phone';
 import { apiClient, api } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -99,6 +100,9 @@ interface SettingsData {
 }
 
 const Settings = () => {
+  const [searchParams] = useSearchParams();
+  const isMissingDetails = searchParams.get('missing') === 'pharmacy_details';
+
   // Consolidated settings data state
   const [settings, setSettings] = useState<SettingsData>({
     pharmacyName: '',
@@ -1161,6 +1165,19 @@ const Settings = () => {
   return (
     <div className="h-full flex flex-col fade-in space-y-6 overflow-y-auto pb-8">
 
+      {/* Missing Pharmacy Details Warning Banner */}
+      {isMissingDetails && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center justify-between gap-3 shrink-0 shadow-lg">
+          <div className="flex items-center gap-3">
+            <AlertTriangle size={22} className="shrink-0 text-amber-400" />
+            <div>
+              <h4 className="font-extrabold text-sm text-text">Pharmacy Details Required</h4>
+              <p className="text-xs text-muted">Please fill in your Pharmacy Name and Phone Number below to enable sending distributor orders via WhatsApp.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Pharmacy Details ─── */}
       <div className="glass-panel p-6">
         <h3 className="font-bold flex items-center gap-2 mb-6">
@@ -1204,10 +1221,11 @@ const Settings = () => {
             <input
               id="phone"
               type="text"
-              className="premium-input w-full"
+              className="premium-input w-full font-mono font-semibold"
               placeholder="10-digit number"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
+              maxLength={10}
             />
           </div>
 
@@ -1218,10 +1236,11 @@ const Settings = () => {
             <input
               id="ownerWhatsappNumber"
               type="text"
-              className="premium-input w-full bg-bg border border-border"
+              className="premium-input w-full bg-bg border border-border font-mono font-semibold"
               placeholder="e.g. 9876543210"
               value={ownerWhatsappNumber}
-              onChange={(e) => setOwnerWhatsappNumber(e.target.value)}
+              onChange={(e) => setOwnerWhatsappNumber(sanitizePhoneInput(e.target.value))}
+              maxLength={10}
             />
             <p className="text-[10px] text-muted">All automated billing, expiry warnings, OCR status, & monthly reports send here.</p>
           </div>

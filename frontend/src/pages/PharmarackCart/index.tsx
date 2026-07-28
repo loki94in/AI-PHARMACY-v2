@@ -5,7 +5,8 @@ import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
 
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import NonMappedDistributors from '../NonMappedDistributors';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { findBestCartMatchForOrder, evaluateOrderCartMatch } from '../../utils/orderFuzzyMatcher';
@@ -98,6 +99,7 @@ function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
 
 export default function PharmarackCart() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const currentTab = searchParams.get('tab') || 'cart';
   const [distributors, setDistributors] = useState<Distributor[]>(() => cachedDistributors);
   const [loading, setLoading] = useState(() => cachedDistributors.length === 0);
@@ -459,7 +461,7 @@ export default function PharmarackCart() {
       if (res.data) {
         const s = res.data;
         setStoreInfo({
-          name: s.pharmacy_name || s.shop_name || s.store_name || s.name || 'AI Pharmacy',
+          name: s.pharmacy_name || s.shop_name || s.store_name || s.name || '',
           phone: s.phone || s.shop_phone || s.store_phone || s.whatsapp_number || s.owner_whatsapp_number || '',
           address: s.address || s.shop_address || s.store_address || '',
           email: s.email || '',
@@ -474,6 +476,13 @@ export default function PharmarackCart() {
     } catch (err) {
       console.warn('Failed to load store settings for WhatsApp template:', err);
     }
+  };
+
+  const hasPharmacySettings = () => {
+    return Boolean(
+      storeInfo.name && storeInfo.name.trim().length > 0 &&
+      storeInfo.phone && storeInfo.phone.trim().length > 0
+    );
   };
 
   useEffect(() => {
@@ -996,22 +1005,22 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    const storeName = storeInfo.name || 'TANMANY MEDICAL';
-    const storePhone = storeInfo.phone ? formatPhone(storeInfo.phone) : '+91 91305 58910';
-    const adminContact = storeInfo.adminPhone ? formatPhone(storeInfo.adminPhone) : '+91 80808 88041';
-    const address = storeInfo.address || 'Tanmaky, Khandala, Shindewadi (Shirval–Satara), Bhor Phata';
-    const email = storeInfo.email || 'him.94.walhekar@gmail.com';
+    const storeName = storeInfo.name || '';
+    const storePhone = storeInfo.phone ? formatPhone(storeInfo.phone) : '';
+    const adminContact = storeInfo.adminPhone ? formatPhone(storeInfo.adminPhone) : '';
+    const address = storeInfo.address || '';
+    const email = storeInfo.email || '';
     const fileFormat = storeInfo.invoiceFileFormat ? storeInfo.invoiceFileFormat.replace(' File Format', '') : 'CSV';
 
     // ponytail: header is fixed app name, not the pharmacy store name
     let msg = `AI Pharmacy Genius OS\n\n`;
     msg += `📋 Pharmacy Details\n`;
-    msg += `• Store: ${storeName}\n`;
-    msg += `• Phone: ${storePhone}\n`;
+    if (storeName) msg += `• Store: ${storeName}\n`;
+    if (storePhone) msg += `• Phone: ${storePhone}\n`;
     if (adminContact) {
       msg += `• Admin Contact: ${adminContact}\n`;
     }
-    msg += `• Address: ${address}\n`;
+    if (address) msg += `• Address: ${address}\n`;
     if (email) {
       msg += `• Email: ${email}\n`;
     }
@@ -1051,7 +1060,8 @@ export default function PharmarackCart() {
       toastEvent.trigger('Delivery boy name is required.', 'error');
       return;
     }
-    if (!quickBoyPhone.trim() || !isValidPhoneNumber(quickBoyPhone)) {
+    const cleanPhone = sanitizePhoneInput(quickBoyPhone);
+    if (!isValid10DigitPhone(cleanPhone)) {
       toastEvent.trigger('Please enter a valid 10-digit WhatsApp phone number.', 'error');
       return;
     }
@@ -1063,7 +1073,13 @@ export default function PharmarackCart() {
         whatsapp_number: quickBoyPhone.trim(),
         is_active: 1
       });
-      // ponytail: no dual-write to app_settings — delivery_boys table is single source of truth
+      try {
+        await api.saveContact({
+          name: quickBoyName.trim(),
+          type: 'distributor_delivery',
+          phone: quickBoyPhone.trim()
+        });
+      } catch (_) {}
       toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
       await Promise.all([fetchDeliveryBoys(), fetchStoreInfo()]);
       setShowMissingBoyModal(false);
@@ -1096,6 +1112,12 @@ export default function PharmarackCart() {
   };
 
   const handleSendWhatsAppOrder = async (dist: Distributor, bypassMissingBoyCheck = false) => {
+    if (!hasPharmacySettings()) {
+      toastEvent.trigger('Pharmacy Name and Contact Phone are required in Settings before sending orders.', 'error');
+      navigate('/settings?missing=pharmacy_details');
+      return;
+    }
+
     if (!bypassMissingBoyCheck && !hasDeliveryBoyContacts()) {
       setPendingTargetDistributor(dist);
       setShowMissingBoyModal(true);
@@ -1221,6 +1243,12 @@ export default function PharmarackCart() {
   };
 
   const handleSendAllWhatsAppOrders = async (bypassMissingBoyCheck = false) => {
+    if (!hasPharmacySettings()) {
+      toastEvent.trigger('Pharmacy Name and Contact Phone are required in Settings before sending orders.', 'error');
+      navigate('/settings?missing=pharmacy_details');
+      return;
+    }
+
     if (!bypassMissingBoyCheck && !hasDeliveryBoyContacts()) {
       setPendingTargetDistributor('ALL');
       setShowMissingBoyModal(true);
@@ -1414,12 +1442,15 @@ export default function PharmarackCart() {
         // Updating an existing selected distributor from directory
         const foundSaved = savedDistributorsList.find((d: any) => d.id === selectedSavedDistId);
         try {
-          await apiClient.put(`/distributors/${selectedSavedDistId}`, {
+          const updateRes = await apiClient.put(`/distributors/${selectedSavedDistId}`, {
             name: foundSaved?.name || distName,
             phone: cleanPhone
           });
+          if (updateRes.data && updateRes.data.id) {
+            targetDistId = updateRes.data.id;
+          }
         } catch (e) {
-          console.warn('PUT distributor by ID failed, falling back to name upsert:', e);
+          console.warn('PUT distributor by ID failed, falling back to post upsert:', e);
           const fallbackRes = await apiClient.post('/distributors', {
             name: foundSaved?.name || distName,
             phone: cleanPhone
@@ -1457,11 +1488,9 @@ export default function PharmarackCart() {
         });
       } catch (_) {}
 
-      // 3. Broadcast real-time update events & refresh saved distributors list and mappings
+      // 3. Broadcast real-time update events
       window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       window.dispatchEvent(new CustomEvent('contacts-updated'));
-      await fetchSavedDistributors();
-      await fetchDistributorMappings();
     } catch (err: any) {
       console.warn('Background save distributor contact error:', err);
     } finally {
@@ -3080,9 +3109,10 @@ export default function PharmarackCart() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 9822012345 or +919822012345"
+                  placeholder="e.g. 9822012345"
                   value={modalPhoneInput}
-                  onChange={(e) => setModalPhoneInput(e.target.value)}
+                  onChange={(e) => setModalPhoneInput(sanitizePhoneInput(e.target.value))}
+                  maxLength={10}
                   className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text font-mono focus:outline-none focus:border-emerald-500 font-bold"
                 />
                 <p className="text-[10px] text-muted mt-1 font-medium">
@@ -3164,7 +3194,8 @@ export default function PharmarackCart() {
                     type="text"
                     placeholder="e.g. 9876543210"
                     value={quickBoyPhone}
-                    onChange={(e) => setQuickBoyPhone(e.target.value)}
+                    onChange={(e) => setQuickBoyPhone(sanitizePhoneInput(e.target.value))}
+                    maxLength={10}
                     className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text font-mono focus:outline-none focus:border-amber-500 font-bold"
                   />
                 </div>

@@ -14,6 +14,7 @@ import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { StagedQueueFloatingWidget } from '../../components/StagedQueueFloatingWidget';
 import { stagedQueueService, type StagedItem } from '../../services/stagedQueueService';
+import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -1807,24 +1808,18 @@ const POS = () => {
       alert('⚠️ CANNOT SAVE BILL:\n\nPlease add at least one valid medicine to the cart before saving the bill.');
       return;
     }
-    const phoneToUse = overridePhone !== undefined ? overridePhone : patientPhone;
+    const phoneToUse = sanitizePhoneInput(overridePhone !== undefined ? overridePhone : patientPhone);
 
     if (isLoss) {
       alert(`❌ CANNOT SAVE BILL:\n\nTransaction results in a Net Loss (Grand Total ₹${grandTotal} is less than Cost Price ₹${Math.round(totalCost)}).\nPlease adjust overall discount or items MRP to proceed.`);
       return;
     }
 
-    if (paymentMedium === 'CREDIT') {
-      if (!patientName.trim()) {
-        alert('Patient/Customer Name is required for Credit transactions to track outstanding balance!');
-        return;
-      }
-      if (!phoneToUse.trim()) {
-        setPromptPhoneValue('');
-        pendingDirectSaveRef.current = isDirectSave;
-        setShowPhonePromptModal(true);
-        return;
-      }
+    if (!isValid10DigitPhone(phoneToUse)) {
+      setPromptPhoneValue(phoneToUse);
+      pendingDirectSaveRef.current = isDirectSave;
+      setShowPhonePromptModal(true);
+      return;
     }
 
     // Expiry check
@@ -2254,7 +2249,8 @@ const POS = () => {
                     className="premium-input text-sm font-mono font-semibold h-10 px-3.5 w-full text-text bg-bg2/50 border-border/80 rounded-xl" 
                     placeholder="9876543210"
                     value={patientPhone}
-                    onChange={e => setPatientPhone(e.target.value)}
+                    onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
+                    maxLength={10}
                     aria-label="Phone Number"
                   />
                   <button 
@@ -3519,13 +3515,14 @@ const POS = () => {
                 type="tel"
                 placeholder="Enter 10-digit phone number (e.g. 9876543210)"
                 value={promptPhoneValue}
-                onChange={e => setPromptPhoneValue(e.target.value)}
+                onChange={e => setPromptPhoneValue(sanitizePhoneInput(e.target.value))}
+                maxLength={10}
                 autoFocus
                 className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-sm text-text font-mono focus:outline-none focus:border-primary shadow-inner"
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
-                    const val = promptPhoneValue.trim();
-                    if (!val) { alert('Please enter a WhatsApp contact number'); return; }
+                    const val = sanitizePhoneInput(promptPhoneValue);
+                    if (!isValid10DigitPhone(val)) { alert('Please enter a valid 10-digit phone number (e.g. 9876543210)'); return; }
                     setPatientPhone(val);
                     setShowPhonePromptModal(false);
                     handleCompleteSale(val, pendingDirectSaveRef.current);
@@ -3542,8 +3539,8 @@ const POS = () => {
               </button>
               <button
                 onClick={() => {
-                  const val = promptPhoneValue.trim();
-                  if (!val) { alert('Please enter a WhatsApp contact number'); return; }
+                  const val = sanitizePhoneInput(promptPhoneValue);
+                  if (!isValid10DigitPhone(val)) { alert('Please enter a valid 10-digit phone number (e.g. 9876543210)'); return; }
                   setPatientPhone(val);
                   setShowPhonePromptModal(false);
                   handleCompleteSale(val, pendingDirectSaveRef.current);
@@ -3613,7 +3610,8 @@ const POS = () => {
                   className="premium-input w-full text-sm font-mono py-2 px-3 bg-bg2/50 border-border/80 rounded-xl" 
                   placeholder="e.g. 9130558910" 
                   value={patientPhone}
-                  onChange={e => setPatientPhone(e.target.value)}
+                  onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
+                  maxLength={10}
                 />
               </div>
 
@@ -3752,10 +3750,11 @@ const POS = () => {
                 <label className="text-xs font-bold text-muted uppercase tracking-wider">Phone</label>
                 <input
                   type="text"
-                  className="premium-input w-full rounded-xl bg-bg2/40 border-border"
-                  placeholder="Contact Number"
+                  className="premium-input w-full rounded-xl bg-bg2/40 border-border font-mono"
+                  placeholder="10-digit Phone Number"
                   value={newDoctorPhone}
-                  onChange={(e) => setNewDoctorPhone(e.target.value)}
+                  onChange={(e) => setNewDoctorPhone(sanitizePhoneInput(e.target.value))}
+                  maxLength={10}
                 />
               </div>
 

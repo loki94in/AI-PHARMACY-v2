@@ -5,7 +5,7 @@ import { extractCleanEmail } from '../utils/emailSanitizer.js';
 
 const router = express.Router();
 
-router.get('/distributors', async (req, res) => {
+const getDistributorsHandler = async (req: express.Request, res: express.Response) => {
   try {
     const db = await dbManager.getConnection();
     const distributors = await db.all('SELECT * FROM distributors ORDER BY name');
@@ -13,10 +13,13 @@ router.get('/distributors', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+router.get('/distributors', getDistributorsHandler);
+router.get('/', getDistributorsHandler);
 
 // Create or update distributor details
-router.post('/distributors', async (req, res) => {
+const postDistributorsHandler = async (req: express.Request, res: express.Response) => {
   const { name, phone, email, address, gstin } = req.body;
   if (!name) {
     return res.status(400).json({ error: 'Distributor name is required' });
@@ -59,10 +62,13 @@ router.post('/distributors', async (req, res) => {
     console.error('Failed to create/update distributor:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+router.post('/distributors', postDistributorsHandler);
+router.post('/', postDistributorsHandler);
 
 // Update distributor details including preferred email invoice format
-router.put('/:id', async (req, res) => {
+const putDistributorHandler = async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   const { name, phone, email, preferred_file_format, gstin, address } = req.body;
   const cleanEmail = extractCleanEmail(email);
@@ -89,15 +95,18 @@ router.put('/:id', async (req, res) => {
       );
     } catch (_) {}
 
-    res.json({ success: true, message: 'Distributor details updated successfully' });
+    res.json({ success: true, message: 'Distributor details updated successfully', id: Number(id) });
   } catch (error) {
     console.error('Failed to update distributor:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+router.put('/distributors/:id', putDistributorHandler);
+router.put('/:id', putDistributorHandler);
 
 // Delete a distributor
-router.delete('/:id', async (req, res) => {
+const deleteDistributorHandler = async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   try {
     const db = await dbManager.getConnection();
@@ -110,7 +119,10 @@ router.delete('/:id', async (req, res) => {
     console.error('Failed to delete distributor:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+};
+
+router.delete('/distributors/:id', deleteDistributorHandler);
+router.delete('/:id', deleteDistributorHandler);
 
 router.post('/purchases', async (req, res) => {
   const { distributor, invoice_no, total_amount } = req.body;
