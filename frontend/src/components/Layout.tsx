@@ -791,6 +791,8 @@ const Topbar = ({
 
   const notifiedFailedQueueIdsRef = useRef<Set<number>>(new Set());
 
+  const waQueueActiveRef = useRef(false);
+
   const fetchServicesStatus = useCallback(async () => {
     try {
       const { api } = await import('../services/api.js');
@@ -807,6 +809,8 @@ const Topbar = ({
           activeTargetName: qData.activeTargetName,
           counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
         });
+        // Update ref for polling interval adjustment (avoids effect re-trigger)
+        waQueueActiveRef.current = (qData.counts?.pending || 0) > 0 || qData.isProcessing;
 
         if (Array.isArray(qData.recentItems)) {
           qData.recentItems.forEach((item: any) => {
@@ -822,21 +826,26 @@ const Topbar = ({
       console.warn('[Layout] Failed to fetch services status:', err);
     }
   }, []);
-
   useEffect(() => {
     // Poll faster (every 3s) when queue has pending/sending items, otherwise 8s
-    const activeQueue = (waQueueDetail?.counts?.pending || 0) > 0 || waQueueDetail?.isProcessing;
-    const intervalMs = activeQueue ? 3000 : 8000;
     let interval: ReturnType<typeof setInterval> | undefined;
+    const poll = () => {
+      fetchServicesStatus().then(() => {
+        const activeQueue = waQueueActiveRef.current;
+        const newMs = activeQueue ? 3000 : 8000;
+        if (!interval) {
+          interval = setInterval(poll, newMs);
+        }
+      }).catch(() => {});
+    };
     const cancelDefer = deferUntilIdle(() => {
-      fetchServicesStatus();
-      interval = setInterval(fetchServicesStatus, intervalMs);
+      poll();
     });
     return () => {
       cancelDefer();
       clearInterval(interval);
     };
-  }, [fetchServicesStatus, waQueueDetail?.counts?.pending, waQueueDetail?.isProcessing]);
+  }, [fetchServicesStatus]);
 
   useEffect(() => {
     fetchDevices();
