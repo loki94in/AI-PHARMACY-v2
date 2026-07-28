@@ -1334,15 +1334,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 <span className="text-xs font-bold uppercase tracking-widest text-muted">
                   Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length + autoRefillItems.length})
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setShowNewRequestForm(prev => !prev)}
-                  className="px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-[9px] font-bold uppercase transition-all flex items-center gap-0.5"
-                  title="Log a new special medicine request"
-                >
-                  <Plus size={10} />
-                  + Req
-                </button>
               </div>
               <div className="flex gap-1 text-[8px] font-bold uppercase flex-wrap">
                 <span className="px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{autoRefillItems.length} Auto</span>
@@ -1652,7 +1643,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       </span>
                     )}
                   </h3>
-                  <p className="text-xs text-muted">Direct live stock addition for inventory replenishment</p>
+
                 </div>
               </div>
 

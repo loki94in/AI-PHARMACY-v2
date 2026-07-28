@@ -3,15 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
-import { 
-  Brain, 
-  Database, 
-  FileText, 
-  Trash2, 
-  RefreshCw, 
-  AlertTriangle, 
-  CheckCircle2, 
-  X, 
+import {
+  Brain,
+  Database,
+  FileText,
+  Trash2,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  X,
   Settings,
   HelpCircle,
   ArrowRight,
@@ -31,7 +31,8 @@ import {
   Stethoscope,
   Search,
   Truck,
-  Check
+  Check,
+  Edit
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -556,49 +557,6 @@ const Learning: React.FC = () => {
     return () => clearInterval(interval);
   }, [healthPollActive]);
 
-  const handleAddDoctor = async () => {
-    if (!newDocName.trim()) {
-      toastEvent.trigger('Doctor name is required', 'error');
-      return;
-    }
-    try {
-      const res = await apiClient.post('/crm/doctors', {
-        name: newDocName.trim(),
-        speciality: newDocSpecialty.trim(),
-        phone: newDocPhone.trim(),
-        hospital: newDocHospital.trim(),
-        reg_no: newDocRegNo.trim(),
-        send_daily_summary: newDocSendSummary
-      });
-      if (res.data && res.data.success) {
-        // Also save to unified contacts master table & notify all components
-        try {
-          await api.saveContact({
-            name: newDocName.trim(),
-            type: 'doctor',
-            phone: newDocPhone.trim(),
-            address: newDocHospital.trim() || undefined
-          });
-        } catch (_) {}
-
-        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
-        window.dispatchEvent(new CustomEvent('contacts-updated'));
-        toastEvent.trigger('Doctor added successfully', 'success');
-        setShowAddDocModal(false);
-        setNewDocName('');
-        setNewDocPhone('');
-        setNewDocSpecialty('');
-        setNewDocHospital('');
-        setNewDocRegNo('');
-        setNewDocSendSummary(false);
-        queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
-      }
-    } catch (err) {
-      console.error('Failed to add doctor:', err);
-      toastEvent.trigger('Failed to add doctor', 'error');
-    }
-  };
-
   const handleToggleDoctorSummary = async (doc: any) => {
     const updatedStatus = doc.send_daily_summary === 1 ? 0 : 1;
     try {
@@ -635,6 +593,87 @@ const Learning: React.FC = () => {
       toastEvent.trigger('Failed to send billing reports', 'error');
     } finally {
       setTriggeringDoctorReport(null);
+    }
+  };
+
+  const handleDeleteDoctor = async (docId: number, docName: string) => {
+    if (!window.confirm(`Remove Dr. ${docName} from affiliates?`)) return;
+    try {
+      await apiClient.delete(`/crm/doctors/${docId}`);
+      toastEvent.trigger(`Dr. ${docName} removed from affiliates.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
+    } catch (err) {
+      console.error('Failed to delete doctor:', err);
+      toastEvent.trigger('Failed to remove doctor.', 'error');
+    }
+  };
+
+  const [editingDoctorId, setEditingDoctorId] = useState<number | null>(null);
+
+  const handleEditDoctor = async (docId: number) => {
+    const doc = doctorsList.find(d => d.id === docId);
+    if (!doc) return;
+    setNewDocName(doc.name);
+    setNewDocPhone(doc.phone || '');
+    setNewDocSpecialty(doc.speciality || '');
+    setNewDocHospital(doc.hospital || '');
+    setNewDocRegNo(doc.reg_no || '');
+    setNewDocSendSummary(doc.send_daily_summary === 1);
+    setEditingDoctorId(docId);
+    setShowAddDocModal(true);
+  };
+
+  const handleSaveDoctor = async () => {
+    if (!newDocName.trim()) {
+      toastEvent.trigger('Doctor name is required', 'error');
+      return;
+    }
+    try {
+      if (editingDoctorId) {
+        await apiClient.put(`/crm/doctors/${editingDoctorId}`, {
+          name: newDocName.trim(),
+          speciality: newDocSpecialty.trim(),
+          phone: newDocPhone.trim(),
+          hospital: newDocHospital.trim(),
+          reg_no: newDocRegNo.trim(),
+          send_daily_summary: newDocSendSummary
+        });
+        toastEvent.trigger(`Dr. ${newDocName.trim()} updated successfully`, 'success');
+        setEditingDoctorId(null);
+      } else {
+        const res = await apiClient.post('/crm/doctors', {
+          name: newDocName.trim(),
+          speciality: newDocSpecialty.trim(),
+          phone: newDocPhone.trim(),
+          hospital: newDocHospital.trim(),
+          reg_no: newDocRegNo.trim(),
+          send_daily_summary: newDocSendSummary
+        });
+        if (res.data && res.data.success) {
+          try {
+            await api.saveContact({
+              name: newDocName.trim(),
+              type: 'doctor',
+              phone: newDocPhone.trim(),
+              address: newDocHospital.trim() || undefined
+            });
+          } catch (_) {}
+          window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+          window.dispatchEvent(new CustomEvent('contacts-updated'));
+          toastEvent.trigger('Doctor added successfully', 'success');
+        }
+      }
+      setShowAddDocModal(false);
+      setNewDocName('');
+      setNewDocPhone('');
+      setNewDocSpecialty('');
+      setNewDocHospital('');
+      setNewDocRegNo('');
+      setNewDocSendSummary(false);
+      queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
+    } catch (err) {
+      console.error(editingDoctorId ? 'Failed to update doctor:' : 'Failed to add doctor:', err);
+      toastEvent.trigger(editingDoctorId ? 'Failed to update doctor' : 'Failed to add doctor', 'error');
     }
   };
 
@@ -804,22 +843,14 @@ const Learning: React.FC = () => {
   return (
     <div className="h-full flex flex-col fade-in relative gap-4 overflow-hidden text-text">
       {/* Premium Dashboard Header */}
-      <div className="bg-glass-bg border border-glass-border rounded-3xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm shrink-0">
-        <div>
-          <h2 className="text-lg font-black tracking-tight text-text flex items-center gap-2">
-            <Brain className="text-sky animate-pulse" size={22} />
-            AI LEARNING & AUTOMATION command center
-          </h2>
-          <p className="text-xs text-muted">
-            Configure automated file ingestion, training rules, client messaging gateways, and clinical heuristics.
-          </p>
-        </div>
+      <div className="bg-glass-bg rounded-3xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm shrink-0 relative">
+        <div className="flex-1" />
         
-        <div className="flex gap-2">
+        <div className="flex gap-2 absolute right-5 top-1/2 -translate-y-1/2 sm:static sm:translate-y-0">
           <button
             onClick={handleRefreshClinicalModel}
             disabled={refreshingModel}
-            className="px-4 py-2 rounded-2xl bg-sky hover:bg-sky-400 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-sky/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-2xl bg-sky hover:bg-sky-400 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-sky/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
             <RefreshCw size={13} className={refreshingModel ? 'animate-spin' : ''} />
             {refreshingModel ? 'Retraining...' : 'Retrain Clinical Model'}
@@ -866,7 +897,7 @@ const Learning: React.FC = () => {
       </div>
 
       {/* Main Workspace Frame */}
-      <div className="flex-1 overflow-hidden min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6 flex flex-col">
+      <div className="flex-1 overflow-hidden min-h-0 bg-glass-bg rounded-3xl p-6 flex flex-col">
         
         {/* Tab 1: Clinical AI Engine */}
         {activeTab === 'clinical' && (
@@ -1033,7 +1064,7 @@ const Learning: React.FC = () => {
                 </p>
               </div>
               <button
-                onClick={() => setShowAddDocModal(true)}
+                onClick={() => { setEditingDoctorId(null); setShowAddDocModal(true); }}
                 className="px-4 py-2 bg-sky hover:bg-sky-400 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-sky/10 active:scale-95 transition-all"
               >
                 <Plus size={13} />
@@ -1104,18 +1135,33 @@ const Learning: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between mt-5 border-t border-glass-border/20 pt-3">
-                        <button
-                          onClick={() => handleTriggerDoctorReport(doc.id)}
-                          disabled={triggeringDoctorReport !== null}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 text-[10px] font-bold transition-all active:scale-95 disabled:opacity-40"
-                        >
-                          <Send size={11} className={triggeringDoctorReport === doc.id ? 'animate-spin' : ''} />
-                          <span>Test Report Send</span>
-                        </button>
-
-                        <span className="text-[9px] text-muted/40 font-mono">ID: {doc.id}</span>
-                      </div>
+<div className="flex items-center justify-between mt-5 border-t border-glass-border/20 pt-3">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleEditDoctor(doc.id)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-bg3 hover:bg-bg2 text-muted border border-glass-border text-[10px] font-bold transition-all active:scale-95"
+                            >
+                              <Edit size={11} />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDoctor(doc.id, doc.name)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red border border-red-500/20 text-[10px] font-bold transition-all active:scale-95"
+                            >
+                              <Trash2 size={11} />
+                              <span>Delete</span>
+                            </button>
+                            <button
+                              onClick={() => handleTriggerDoctorReport(doc.id)}
+                              disabled={triggeringDoctorReport !== null}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 text-[10px] font-bold transition-all active:scale-95 disabled:opacity-40"
+                            >
+                              <Send size={11} className={triggeringDoctorReport === doc.id ? 'animate-spin' : ''} />
+                              <span>Test Report</span>
+                            </button>
+                          </div>
+                          <span className="text-[9px] text-muted/40 font-mono">ID: {doc.id}</span>
+                        </div>
                     </div>
                   ))}
                 </div>
@@ -2462,10 +2508,10 @@ const Learning: React.FC = () => {
         <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
           <div className="bg-bg border border-glass-border w-full max-w-md rounded-3xl p-6 space-y-4 text-left shadow-2xl">
             <div className="flex justify-between items-center border-b border-glass-border pb-2.5">
-              <h3 className="font-bold text-sm text-text flex items-center gap-2">
-                <Stethoscope size={16} className="text-sky" />
-                Add New Affiliated Doctor
-              </h3>
+<h3 className="font-bold text-sm text-text flex items-center gap-2">
+                 <Stethoscope size={16} className="text-sky" />
+                 {editingDoctorId ? 'Edit Affiliated Doctor' : 'Add New Affiliated Doctor'}
+               </h3>
               <button
                 onClick={() => setShowAddDocModal(false)}
                 className="p-1 rounded hover:bg-white/10 text-muted hover:text-text transition-all"
@@ -2547,10 +2593,10 @@ const Learning: React.FC = () => {
                 Cancel
               </button>
               <button
-                onClick={handleAddDoctor}
+                onClick={handleSaveDoctor}
                 className="px-4 py-2 rounded-lg bg-sky hover:bg-sky-400 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-sky/10"
               >
-                Add Doctor
+                {editingDoctorId ? 'Update Doctor' : 'Add Doctor'}
               </button>
             </div>
           </div>
