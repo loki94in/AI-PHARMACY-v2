@@ -439,7 +439,7 @@ router.post('/login-window', async (req, res) => {
         }
       });
 
-      await page.goto('https://retailers.pharmarack.com/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto('https://retailers.pharmarack.com/loginotp', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
       let lastUsername = '';
       let lastPassword = '';
@@ -1159,7 +1159,7 @@ router.post('/cart/notify-manual', async (req, res) => {
   }
 
   try {
-    const success = await notificationService.notifyAboutCartOrder(storeName, Number(storeId), deliveryPersons || [], items);
+    const success = await notificationService.notifyDistributorCartOrder(storeName, Number(storeId), items, deliveryPersons || []);
     if (success) {
       res.json({ success: true, message: 'Notifications sent successfully via WhatsApp!' });
     } else {
@@ -1295,7 +1295,7 @@ router.get('/cart', async (req, res) => {
           const isOrderPlaced = await verifyOrderPlacedInPharmarack(storeId);
           if (isOrderPlaced) {
             console.log(`[AutoNotif] Order placement verified for store ${storeId}. Triggering auto notifications...`);
-            await notificationService.notifyAboutCartOrder(snap.storeName, storeId, snap.deliveryPersons, snap.items);
+            await notificationService.notifyDistributorCartOrder(snap.storeName, storeId, snap.items, snap.deliveryPersons);
           } else {
             console.log(`[AutoNotif] No order verified for store ${storeId}. Assuming manual cart clear/deletion. Skipping.`);
           }
