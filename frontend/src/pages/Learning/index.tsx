@@ -32,7 +32,8 @@ import {
   Search,
   Truck,
   Check,
-  Edit
+  Edit,
+  GitMerge
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -80,20 +81,24 @@ const cachedProfileDetailsMap: Record<number, any> = {};
 
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentTab = searchParams.get('tab') || 'clinical';
-  const [activeTab, setActiveTab] = useState<any>(currentTab);
+  const rawTab = searchParams.get('tab') || 'clinical';
+  const initialTab = (rawTab === 'distributor_layouts' || rawTab === 'distributors') ? 'distributors' : rawTab;
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
 
   const qrPollControl = useFetchMode('learning.qrPoll');
 
   useEffect(() => {
-    if (searchParams.get('tab')) {
-      setActiveTab(searchParams.get('tab'));
+    const tabParam = searchParams.get('tab');
+    if (tabParam) {
+      const normalized = (tabParam === 'distributor_layouts' || tabParam === 'distributors') ? 'distributors' : tabParam;
+      setActiveTab(normalized);
     }
   }, [searchParams]);
 
   const handleTabChange = (tabId: string) => {
+    const paramValue = tabId === 'distributors' ? 'distributor_layouts' : tabId;
     setActiveTab(tabId);
-    setSearchParams({ tab: tabId });
+    setSearchParams({ tab: paramValue });
   };
 
   const queryClient = useQueryClient();
@@ -209,6 +214,43 @@ const Learning: React.FC = () => {
   const [newDistName, setNewDistName] = useState('');
   const [newDistPhone, setNewDistPhone] = useState('');
   const [newDistEmail, setNewDistEmail] = useState('');
+
+  // Distributor merge states & search filter
+  const [showMergeDistModal, setShowMergeDistModal] = useState(false);
+  const [mergePrimaryId, setMergePrimaryId] = useState<number | null>(null);
+  const [mergeSecondaryIds, setMergeSecondaryIds] = useState<number[]>([]);
+  const [mergingDistributors, setMergingDistributors] = useState(false);
+  const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
+
+  const handleMergeDistributors = async () => {
+    if (!mergePrimaryId || mergeSecondaryIds.length === 0) {
+      toastEvent.trigger('Please select a primary distributor and at least one secondary distributor to merge', 'error');
+      return;
+    }
+    setMergingDistributors(true);
+    try {
+      const res = await apiClient.post('/learning/profiles/merge', {
+        primaryId: mergePrimaryId,
+        secondaryIds: mergeSecondaryIds
+      });
+      if (res.data && res.data.success) {
+        toastEvent.trigger(res.data.message || 'Distributors merged successfully', 'success');
+        setShowMergeDistModal(false);
+        setMergePrimaryId(null);
+        setMergeSecondaryIds([]);
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+        if (mergePrimaryId) {
+          setSelectedProfileId(mergePrimaryId);
+          queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', mergePrimaryId] });
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to merge distributors:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to merge distributors', 'error');
+    } finally {
+      setMergingDistributors(false);
+    }
+  };
 
   // Manual trainer editing state
   const [mappingRules, setMappingRules] = useState<Record<string, string>>({
@@ -1184,15 +1226,44 @@ const Learning: React.FC = () => {
                 <h3 className="text-xs font-bold text-muted uppercase tracking-wider">Distributors ({profiles.length})</h3>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setShowAddDistModal(true)}
-                    className="p-1 hover:text-sky text-muted font-bold uppercase tracking-wider text-[10px] flex items-center gap-0.5"
+                    onClick={() => { setShowMergeDistModal(true); setMergePrimaryId(null); setMergeSecondaryIds([]); }}
+                    className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber border border-amber-500/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                    title="Merge duplicate distributor profiles"
                   >
-                    <Plus size={12} /> Add
+                    <GitMerge size={11} /> Merge
+                  </button>
+                  <button
+                    onClick={() => setShowAddDistModal(true)}
+                    className="px-2 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                  >
+                    <Plus size={11} /> Add
                   </button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto py-2 space-y-2 custom-scrollbar">
+              {/* Real-time search filter */}
+              <div className="py-2 shrink-0">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    className="premium-input w-full pl-8 pr-2.5 py-1 text-xs"
+                    placeholder="Search distributors..."
+                    value={distributorSearchQuery}
+                    onChange={(e) => setDistributorSearchQuery(e.target.value)}
+                  />
+                  {distributorSearchQuery && (
+                    <button
+                      onClick={() => setDistributorSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-1 space-y-2 custom-scrollbar">
                 {loadingProfiles && profiles.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-muted gap-2">
                     <RefreshCw className="animate-spin text-sky" size={16} />
@@ -1201,7 +1272,9 @@ const Learning: React.FC = () => {
                 ) : profiles.length === 0 ? (
                   <div className="text-center py-20 text-xs text-muted">No distributors found.</div>
                 ) : (
-                  profiles.map(p => {
+                  profiles
+                    .filter(p => !distributorSearchQuery.trim() || p.distributor_name.toLowerCase().includes(distributorSearchQuery.toLowerCase().trim()) || (p.distributor_phone && p.distributor_phone.includes(distributorSearchQuery.trim())))
+                    .map(p => {
                     const isSelected = selectedProfileId === p.distributor_id;
                     return (
                       <button
@@ -2593,6 +2666,111 @@ const Learning: React.FC = () => {
                 className="px-4 py-2 rounded-lg bg-sky hover:bg-sky-400 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-sky/10"
               >
                 {editingDoctorId ? 'Update Doctor' : 'Add Doctor'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Merge Duplicate Distributors Modal */}
+      {showMergeDistModal && createPortal(
+        <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
+          <div className="bg-bg border border-glass-border w-full max-w-lg rounded-3xl p-6 space-y-4 text-left shadow-2xl">
+            <div className="flex justify-between items-center border-b border-glass-border pb-2.5">
+              <h3 className="font-bold text-sm text-text flex items-center gap-2">
+                <GitMerge size={16} className="text-amber" />
+                Merge Duplicate Distributor Profiles
+              </h3>
+              <button
+                onClick={() => setShowMergeDistModal(false)}
+                className="p-1 rounded hover:bg-white/10 text-muted hover:text-text transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4 py-1 text-left">
+              <p className="text-xs text-muted leading-relaxed">
+                Consolidate duplicate distributor records into a single master distributor. All historical bills, purchase orders, returns, payment receipts, and learned invoice OCR rules will be safely re-linked.
+              </p>
+
+              {/* Step 1: Pick Master */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-sky uppercase tracking-wider">1. Select Primary Master Distributor (To Keep)</label>
+                <select
+                  className="premium-input w-full text-xs"
+                  value={mergePrimaryId || ''}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    setMergePrimaryId(isNaN(val) ? null : val);
+                    setMergeSecondaryIds(prev => prev.filter(id => id !== val));
+                  }}
+                >
+                  <option value="">-- Choose Master Distributor --</option>
+                  {profiles.map(p => (
+                    <option key={p.distributor_id} value={p.distributor_id}>
+                      {p.distributor_name} {p.distributor_phone ? `(${p.distributor_phone})` : ''} — [ID: {p.distributor_id}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Step 2: Pick Duplicates */}
+              {mergePrimaryId !== null && (
+                <div className="space-y-2 pt-2 border-t border-glass-border/40">
+                  <label className="text-[10px] font-bold text-amber uppercase tracking-wider">2. Select Duplicate Distributors (To Merge & Remove)</label>
+                  <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 bg-bg3/40 border border-glass-border/40 rounded-xl custom-scrollbar">
+                    {profiles
+                      .filter(p => p.distributor_id !== mergePrimaryId)
+                      .map(p => {
+                        const isChecked = mergeSecondaryIds.includes(p.distributor_id);
+                        return (
+                          <label
+                            key={p.distributor_id}
+                            className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer ${
+                              isChecked ? 'bg-amber-500/15 border-amber-500/35 text-text' : 'bg-bg/40 border-glass-border/30 hover:bg-bg2/40 text-muted'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                className="accent-amber w-4 h-4 rounded cursor-pointer"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setMergeSecondaryIds(prev => [...prev, p.distributor_id]);
+                                  } else {
+                                    setMergeSecondaryIds(prev => prev.filter(id => id !== p.distributor_id));
+                                  }
+                                }}
+                              />
+                              <span className="text-xs font-semibold">{p.distributor_name}</span>
+                            </div>
+                            <span className="text-[9px] font-mono text-muted">{p.distributor_phone || 'no phone'}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-glass-border/30">
+              <button
+                onClick={() => setShowMergeDistModal(false)}
+                disabled={mergingDistributors}
+                className="px-3.5 py-2 rounded-lg bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMergeDistributors}
+                disabled={mergingDistributors || !mergePrimaryId || mergeSecondaryIds.length === 0}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-amber-600/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {mergingDistributors ? <RefreshCw size={13} className="animate-spin" /> : <GitMerge size={13} />}
+                {mergingDistributors ? 'Merging Profiles...' : `Merge (${mergeSecondaryIds.length}) into Master`}
               </button>
             </div>
           </div>

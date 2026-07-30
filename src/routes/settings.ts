@@ -391,6 +391,51 @@ router.delete('/distributors/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete distributor: ' + error.message });
   }
 });
+
+// Merge duplicate distributors into a single master distributor
+router.post('/distributors/merge', async (req, res) => {
+  const { primaryId, secondaryIds } = req.body;
+  if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
+    return res.status(400).json({ error: 'primaryId and secondaryIds array are required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    if (!primary) return res.status(404).json({ error: 'Primary distributor not found' });
+
+    const placeholders = secondaryIds.map(() => '?').join(',');
+    const params = [primaryId, ...secondaryIds];
+
+    // Re-link all related records to primaryId
+    await db.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    await db.run(`UPDATE purchase_orders SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    await db.run(`UPDATE returns SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    await db.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    await db.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    await db.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+
+    // Remove secondary learning profiles and ensure primary profile exists
+    await db.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
+    await db.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [primaryId]);
+
+    // Delete secondary duplicate distributor rows
+    await db.run(`DELETE FROM distributors WHERE id IN (${placeholders})`, secondaryIds);
+
+    // Sync phone number to pharmarack_distributors if present
+    if (primary.phone && primary.name) {
+      const cleanPhone = String(primary.phone).replace(/\D/g, '');
+      try {
+        await db.run("UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?", [cleanPhone, `%${primary.name.toLowerCase().trim()}%`]);
+      } catch (_) {}
+    }
+
+    res.json({ success: true, message: `Successfully merged ${secondaryIds.length} duplicate distributor(s) into '${primary.name}'`, primaryId });
+  } catch (error: any) {
+    console.error('Failed to merge distributors:', error);
+    res.status(500).json({ error: 'Failed to merge distributors: ' + error.message });
+  }
+});
+
 // Disconnect Google account settings
 router.post('/google/disconnect', async (_req, res) => {
   try {
