@@ -14,6 +14,7 @@ import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { StagedQueueFloatingWidget } from '../../components/StagedQueueFloatingWidget';
 import { stagedQueueService, type StagedItem } from '../../services/stagedQueueService';
+import { isExpiredDate } from '../../utils/date';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -43,48 +44,48 @@ const ModalSkeleton = () => (
     <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden slide-up">
       <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary animate-pulse" />
-          <div className="space-y-1">
-            <div className="h-5 w-48 bg-bg2/50 rounded animate-pulse" />
-            <div className="h-3 w-32 bg-bg2/50 rounded animate-pulse" />
-          </div>
+          <div className="h-6 w-32 bg-glass-border/40 rounded animate-pulse" />
         </div>
+        <div className="h-8 w-8 bg-glass-border/40 rounded-full animate-pulse" />
       </div>
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-primary" />
+      <div className="p-6 space-y-4 overflow-y-auto">
+        <div className="h-10 bg-glass-border/30 rounded-xl animate-pulse" />
+        <div className="h-40 bg-glass-border/20 rounded-xl animate-pulse" />
       </div>
     </div>
   </div>
 );
 
-// We will fetch common combinations dynamically instead of using hardcoded constants
-
 const getInitialPOSTabs = () => {
-  const saved = localStorage.getItem('pos_draft_tabs');
-  if (saved) {
+  const defaultTab = {
+    id: 'default',
+    title: 'Cart 1',
+    patientName: '',
+    patientPhone: '',
+    selectedCustomerId: null,
+    refillEnabled: false,
+    refillDays: 30,
+    items: [],
+    prescriptions: []
+  };
+
+  const savedTabsJson = localStorage.getItem('pos_active_tabs');
+  if (savedTabsJson) {
     try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const parsed = JSON.parse(savedTabsJson);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((t, idx) => ({
+          ...defaultTab,
+          ...t,
+          id: t.id || `tab_${idx}_${Date.now()}`
+        }));
+      }
     } catch (e) {
-      console.error('Failed to parse saved POS tabs:', e);
+      console.error('Failed to parse pos_active_tabs from localStorage:', e);
     }
   }
-  return [
-    {
-      id: 'default',
-      name: 'Cart 1',
-      items: [],
-      patientName: '',
-      patientPhone: '',
-      refillEnabled: false,
-      refillDays: 30,
-      doctor: '',
-      isManualDoctor: false,
-      discount: 0,
-      sendWhatsApp: false,
-      paymentMedium: 'CASH'
-    }
-  ];
+
+  return [defaultTab];
 };
 
 const getInitialPOSActiveTabId = (initialTabs: any[]) => {
@@ -107,6 +108,9 @@ const groupBatches = (items: any[]): any[] => {
     `${Number(stripQty) > 0 ? 0 : 1}|${exp || '9999-12'}`;
 
   for (const item of items) {
+    // Exclude expired batches strictly from POS sales
+    if (isExpiredDate(item.expiry_date || item.expiry)) continue;
+
     const medId = item.medicine_id || item.inventory_id || Math.random();
     const stripQty = item.quantity || 0;
     if (!map.has(medId)) {
@@ -159,9 +163,17 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
   if (!query || query.trim().length < 2) return [];
   const term = query.trim().toLowerCase();
   
+  // Filter strictly for items present in active inventory with positive stock AND NOT EXPIRED
+  const validInventory = inventory.filter(item => {
+    const hasInventory = !!item.inventory_id && ((item.stock_qty || item.quantity || 0) > 0 || (item.loose_quantity || 0) > 0);
+    const expired = isExpiredDate(item.expiry_date || item.expiry);
+    return hasInventory && !expired;
+  });
+
   // Prefix matches first
-  const prefixes = inventory.filter(item => 
+  const prefixes = validInventory.filter(item => 
     (item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) ||
+    (item.name && item.name.toLowerCase().startsWith(term)) ||
     (item.item_code && item.item_code.toLowerCase().startsWith(term)) ||
     (item.batch_no && item.batch_no.toLowerCase().startsWith(term))
   );
@@ -171,11 +183,13 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
   }
   
   // Infix matches second
-  const infixes = inventory.filter(item => 
+  const infixes = validInventory.filter(item => 
     ((item.medicine_name && item.medicine_name.toLowerCase().includes(term)) ||
+    (item.name && item.name.toLowerCase().includes(term)) ||
     (item.item_code && item.item_code.toLowerCase().includes(term)) ||
     (item.batch_no && item.batch_no.toLowerCase().includes(term))) &&
     !(item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) &&
+    !(item.name && item.name.toLowerCase().startsWith(term)) &&
     !(item.item_code && item.item_code.toLowerCase().startsWith(term)) &&
     !(item.batch_no && item.batch_no.toLowerCase().startsWith(term))
   );
@@ -2937,11 +2951,7 @@ const POS = () => {
                         statusBadge = null;
                       } else if (isMasterDbOnly) {
                         rowStatusClass = "border-b border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/[0.12]";
-                        statusBadge = (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0 ml-1">
-                            ⚡ Master DB Only
-                          </span>
-                        );
+                        statusBadge = null;
                       } else {
                         statusBadge = (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0 ml-1">

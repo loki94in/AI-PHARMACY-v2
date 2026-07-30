@@ -1067,11 +1067,13 @@ router.get('/search-medicine', async (req, res) => {
              OR m.name LIKE ? 
              OR im.mrp = ?
              OR im.batch_no LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
@@ -1108,11 +1110,13 @@ router.get('/search-medicine', async (req, res) => {
           WHERE (m.item_code = ? 
              OR m.name LIKE ?
              OR im.batch_no LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
@@ -1148,11 +1152,13 @@ router.get('/search-medicine', async (req, res) => {
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.name LIKE ?
-          AND im.quantity > 0
-          AND (im.expiry_date IS NULL OR 
+          AND (im.quantity > 0 OR im.loose_quantity > 0)
+          AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
             CASE 
-              WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-              WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+              WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
               WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
               ELSE im.expiry_date
             END >= strftime('%Y-%m', 'now')
@@ -1188,11 +1194,13 @@ router.get('/search-medicine', async (req, res) => {
           FROM inventory_master im
           JOIN medicines m ON im.medicine_id = m.id
           WHERE (m.name LIKE ? OR m.item_code LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
