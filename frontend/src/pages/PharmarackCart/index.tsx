@@ -585,33 +585,42 @@ export default function PharmarackCart() {
       return p.trim();
     };
 
-    // 1. First priority: Exact or noise-cleaned match WITH a valid phone number
-    const matchWithPhone = savedDistributorsList.find((d: any) => {
+    // 1. Highest Priority: EXACT match WITH a non-empty phone number
+    const exactWithPhone = savedDistributorsList.find((d: any) => {
       if (!d || !d.name || !getPhone(d)) return false;
-
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (rawCartNorm && rawCartNorm === rawSavedNorm) || (normCart && normSaved && normCart === normSaved);
+    });
+    if (exactWithPhone) return exactWithPhone;
 
+    // 2. Second Priority: EXACT match ANY record (even if phone not yet set)
+    const exactAny = savedDistributorsList.find((d: any) => {
+      if (!d || !d.name) return false;
+      const normSaved = normalizeDistName(d.name);
+      const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (rawCartNorm && rawCartNorm === rawSavedNorm) || (normCart && normSaved && normCart === normSaved);
+    });
+    if (exactAny) return exactAny;
+
+    // 3. Third Priority: Fuzzy substring match WITH a non-empty phone number
+    const fuzzyWithPhone = savedDistributorsList.find((d: any) => {
+      if (!d || !d.name || !getPhone(d)) return false;
+      const normSaved = normalizeDistName(d.name);
+      const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
       return (
-        (rawCartNorm && rawCartNorm === rawSavedNorm) ||
-        (normCart && normSaved && normCart === normSaved) ||
         (normCart && normSaved && (normCart.includes(normSaved) || normSaved.includes(normCart))) ||
         (rawCartNorm && rawSavedNorm && (rawCartNorm.includes(rawSavedNorm) || rawSavedNorm.includes(rawCartNorm)))
       );
     });
+    if (fuzzyWithPhone) return fuzzyWithPhone;
 
-    if (matchWithPhone) return matchWithPhone;
-
-    // 2. Second priority: Any matching distributor record (fallback)
+    // 4. Fourth Priority: Any fuzzy match fallback
     return savedDistributorsList.find((d: any) => {
       if (!d || !d.name) return false;
-
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-
       return (
-        (rawCartNorm && rawCartNorm === rawSavedNorm) ||
-        (normCart && normSaved && normCart === normSaved) ||
         (normCart && normSaved && (normCart.includes(normSaved) || normSaved.includes(normCart))) ||
         (rawCartNorm && rawSavedNorm && (rawCartNorm.includes(rawSavedNorm) || rawSavedNorm.includes(rawCartNorm)))
       );
@@ -625,8 +634,20 @@ export default function PharmarackCart() {
 
     // 2. Persistent store-to-distributor mapping from SQLite DB
     const normName = dist.storeName ? dist.storeName.toLowerCase().trim() : '';
-    if (normName && distributorMappings[normName]) {
-      const mapping = distributorMappings[normName];
+    const cleanStoreNorm = dist.storeName ? dist.storeName.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+
+    let mapping = normName ? distributorMappings[normName] : null;
+    if (!mapping && cleanStoreNorm) {
+      const matchKey = Object.keys(distributorMappings).find(k => {
+        const kNorm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return kNorm === cleanStoreNorm;
+      });
+      if (matchKey) {
+        mapping = distributorMappings[matchKey];
+      }
+    }
+
+    if (mapping) {
       if (mapping.distributorId) {
         const found = savedDistributorsList.find((d: any) => d.id === mapping.distributorId);
         const latestPhone = found?.phone || found?.mobile || found?.whatsapp || found?.contact || '';

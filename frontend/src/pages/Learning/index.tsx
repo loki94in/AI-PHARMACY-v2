@@ -109,7 +109,6 @@ const Learning: React.FC = () => {
     },
     {
       staleTime: 300000,
-      initialData: cachedDoctorsList.length > 0 ? cachedDoctorsList : undefined,
       refetchOnWindowFocus: false
     }
   );
@@ -125,27 +124,11 @@ const Learning: React.FC = () => {
     },
     { 
       staleTime: 300000, 
-      initialData: cachedProfiles.length > 0 ? cachedProfiles : undefined,
       refetchOnWindowFocus: false
     }
   );
 
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
-
-  useEffect(() => {
-    const handleUpdateEvents = () => {
-      queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
-      if (selectedProfileId) {
-        queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
-      }
-    };
-    window.addEventListener('phone-numbers-updated', handleUpdateEvents);
-    window.addEventListener('contacts-updated', handleUpdateEvents);
-    return () => {
-      window.removeEventListener('phone-numbers-updated', handleUpdateEvents);
-      window.removeEventListener('contacts-updated', handleUpdateEvents);
-    };
-  }, [queryClient, selectedProfileId]);
 
   // Settings Query with module caching
   const { data: serverSettings = cachedServerSettings, isLoading: loadingSettings } = useApiQuery<any>(
@@ -158,7 +141,6 @@ const Learning: React.FC = () => {
     },
     {
       staleTime: 300000,
-      initialData: cachedServerSettings || undefined,
       refetchOnWindowFocus: false
     }
   );
@@ -178,7 +160,7 @@ const Learning: React.FC = () => {
     {
       enabled: !!selectedProfileId,
       staleTime: 300000,
-      initialData: selectedProfileId && cachedProfileDetailsMap[selectedProfileId] ? cachedProfileDetailsMap[selectedProfileId] : undefined
+      refetchOnWindowFocus: false
     }
   );
 
@@ -400,7 +382,14 @@ const Learning: React.FC = () => {
       const fetchQR = async () => {
         try {
           const { data } = await apiClient.get('/messaging/qr');
-          setWaStatus(data);
+          if (data) {
+            setWaStatus(prev => {
+              if (prev.isReady === data.isReady && prev.qrUrl === data.qrUrl && prev.message === data.message) {
+                return prev;
+              }
+              return data;
+            });
+          }
         } catch (error) {
           console.error("Failed to fetch WhatsApp QR", error);
         }

@@ -1341,8 +1341,7 @@ router.get('/auto-verify', async (req, res) => {
     let message = 'Session expired';
 
     const endpoints = [
-      'https://retailers.pharmarack.com/api/v2/cart',
-      'https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/cart'
+      'https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails'
     ];
 
     for (const url of endpoints) {
@@ -1358,7 +1357,7 @@ router.get('/auto-verify', async (req, res) => {
             'Referer': 'https://retailers.pharmarack.com/',
             'Origin': 'https://retailers.pharmarack.com'
           },
-          signal: AbortSignal.timeout(4000)
+          signal: AbortSignal.timeout(6000)
         });
 
         if (response.ok) {
@@ -1408,8 +1407,7 @@ router.get('/session-status', async (req, res) => {
     let message = 'Session expired';
 
     const endpoints = [
-      'https://retailers.pharmarack.com/api/v2/cart',
-      'https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/cart'
+      'https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails'
     ];
 
     for (const url of endpoints) {
@@ -1425,7 +1423,7 @@ router.get('/session-status', async (req, res) => {
             'Referer': 'https://retailers.pharmarack.com/',
             'Origin': 'https://retailers.pharmarack.com'
           },
-          signal: AbortSignal.timeout(4000)
+          signal: AbortSignal.timeout(6000)
         });
 
         if (response.ok) {
