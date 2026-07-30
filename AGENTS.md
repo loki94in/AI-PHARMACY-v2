@@ -299,3 +299,20 @@ To prevent regressions, legacy fallback loops, and developer/AI confusion when f
    - **Telegram Bot Configuration**: MUST ONLY be managed via `/learning` (`Learning/index.tsx`) using `app_settings` keys (`telegram_enabled`, `telegram_token`, `telegram_chat_id`). **NEVER** add Telegram config UI to `Settings` or any other page.
    - **Core Pharmacy Configuration**: `Settings` (`/settings`) is strictly reserved for store metadata (Name, Address, GSTIN, License, Tax Rate, Invoice Prefix, DataFetchControl). Feature-specific configurations belong on their respective domain pages.
 
+---
+
+## WhatsApp Order Template & Delivery Boy Resolution Contract
+
+To prevent missing delivery boy contact numbers, broken templates, or unformatted text in WhatsApp notifications sent to distributors/customers:
+
+1. **Delivery Boy Resolution & Formatted Phone**:
+   - Every WhatsApp order template (including cart order notifications, purchase order notifications, and quick special order notifications) **MUST** resolve active registered delivery boys from the `delivery_boys` database table.
+   - When no specific delivery boy is assigned or if `Not assigned yet` is passed, the app **MUST** automatically query the first active delivery boy (`is_active = 1`) from `delivery_boys` and populate **BOTH** their Name (`name`) and Formatted Phone (`+91 XXXXX XXXXX`).
+   - If no active delivery boy exists in `delivery_boys`, the template **MUST** fall back to the Store Admin / Pharmacy Owner details from `app_settings` (`owner_whatsapp_number`, `shop_phone`) as `👤 Admin / Store Owner`.
+   - Never output raw unformatted phone numbers (like `919876543210` or `9876543210`) or leave `👤 Not assigned yet \n 📞 N/A` when active delivery boys exist in the system.
+
+2. **Special Orders & Quick Request Editing**:
+   - All Special Requests / Shortage Orders are stored in the `special_orders` SQLite database table and managed via `GET/POST/PUT/DELETE /api/orders` endpoints.
+   - Special Order Request management UI resides on `/crm?tab=special_orders` (`SpecialOrdersSection` in `frontend/src/pages/CRM/index.tsx`).
+   - Special Order Requests **MUST** support full editing via the Edit Modal (`showEditModal`), allowing users to edit product name, requester name, phone number, quantity, advance payment, priority, status, and distributor metadata via `api.updateOrder(id, data)` (PUT `/api/orders/:id`).
+

@@ -1022,16 +1022,46 @@ export default function PharmarackCart() {
   };
 
   const buildDistributorOrderMessage = (dist: Distributor) => {
-    // Use system-registered delivery boy (has whatsapp_number) as the pickup staff
-    const registeredBoy = deliveryBoysList.length > 0 ? deliveryBoysList[0] : null;
-
     const formatPhone = (raw: string) => {
       if (!raw) return '';
       let clean = raw.replace(/\D/g, '');
       if (clean.length === 10) return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
       if (clean.startsWith('91') && clean.length === 12) return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+      if (clean.length > 0) return `+${clean}`;
       return raw;
     };
+
+    // Resolve registered delivery boy from deliveryBoysList or dist.deliveryPersons, or fallback to Admin/Owner
+    let boyName = 'Not assigned yet';
+    let boyPhone = 'N/A';
+
+    // 1. Check dist.deliveryPersons first if it has a matched delivery boy in deliveryBoysList
+    if (dist.deliveryPersons && dist.deliveryPersons.length > 0 && dist.deliveryPersons[0].name && dist.deliveryPersons[0].name !== 'Not assigned yet') {
+      const match = deliveryBoysList.find(b => b.name && b.name.toLowerCase().includes(dist.deliveryPersons[0].name.toLowerCase()));
+      if (match) {
+        boyName = match.name;
+        boyPhone = formatPhone(match.whatsapp_number);
+      } else {
+        boyName = dist.deliveryPersons[0].name;
+      }
+    }
+
+    // 2. Fallback to first registered active delivery boy in deliveryBoysList
+    if ((boyName === 'Not assigned yet' || boyPhone === 'N/A') && deliveryBoysList.length > 0) {
+      const activeBoy = deliveryBoysList.find(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0) || deliveryBoysList[0];
+      if (activeBoy?.name) {
+        boyName = activeBoy.name;
+        boyPhone = formatPhone(activeBoy.whatsapp_number || '');
+      }
+    }
+
+    // 3. Fallback to Store Admin/Owner phone if no active delivery boy was found
+    if (boyName === 'Not assigned yet' || boyPhone === 'N/A') {
+      if (storeInfo.adminPhone || storeInfo.phone) {
+        boyName = 'Admin / Store Owner';
+        boyPhone = formatPhone(storeInfo.adminPhone || storeInfo.phone);
+      }
+    }
 
     const storeName = storeInfo.name || 'AI Pharmacy';
     const address = storeInfo.address || 'N/A';
@@ -1053,12 +1083,7 @@ export default function PharmarackCart() {
     });
 
     msg += `\n🚚 *Assigned Delivery Boy:*\n`;
-    if (registeredBoy?.name) {
-      const staffPhone = formatPhone(registeredBoy.whatsapp_number || '');
-      msg += `  👤 ${registeredBoy.name}\n  📞 ${staffPhone || 'N/A'}\n`;
-    } else {
-      msg += `  👤 Not assigned yet\n  📞 N/A\n`;
-    }
+    msg += `  👤 ${boyName}\n  📞 ${boyPhone || 'N/A'}\n`;
 
     msg += `\n*Delivery Location:* ${address}\n`;
     msg += `*Note:* ${email} (${fileFormat}) when sending bills.`;

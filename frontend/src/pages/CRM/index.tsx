@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -2516,6 +2516,22 @@ const SpecialOrdersSection: React.FC = () => {
   const [priority, setPriority] = useState('Normal');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
+  // Edit Request Form State
+  const [editingOrder, setEditingOrder] = useState<SpecialOrderItem | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editProduct, setEditProduct] = useState('');
+  const [editRequester, setEditRequester] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editQty, setEditQty] = useState<number | ''>(1);
+  const [editAdvancePayment, setEditAdvancePayment] = useState<number | ''>('');
+  const [editPriority, setEditPriority] = useState('Normal');
+  const [editStatus, setEditStatus] = useState('Pending');
+  const [editDistributor, setEditDistributor] = useState('');
+  const [editRate, setEditRate] = useState<number | ''>('');
+  const [editMrp, setEditMrp] = useState<number | ''>('');
+  const [editScheme, setEditScheme] = useState('');
+  const [editFormSubmitting, setEditFormSubmitting] = useState(false);
+
   // Pharmarack Search States
   const [prSearchResults, setPrSearchResults] = useState<any[]>([]);
   const [showPrDropdown, setShowPrDropdown] = useState(false);
@@ -2842,6 +2858,75 @@ const SpecialOrdersSection: React.FC = () => {
     }
   };
 
+  const handleOpenEditModal = (order: SpecialOrderItem) => {
+    setEditingOrder(order);
+    setEditProduct(order.product || '');
+    setEditRequester(order.requester || '');
+    setEditPhone(order.phone || '');
+    setEditQty(order.qty || 1);
+    setEditAdvancePayment(order.advance_payment !== undefined && order.advance_payment !== null ? Number(order.advance_payment) : '');
+    setEditPriority(order.priority || 'Normal');
+    setEditStatus(order.status || 'Pending');
+    setEditDistributor(order.pharmarack_distributor || '');
+    setEditRate(order.pharmarack_rate !== undefined && order.pharmarack_rate !== null ? Number(order.pharmarack_rate) : '');
+    setEditMrp(order.pharmarack_mrp !== undefined && order.pharmarack_mrp !== null ? Number(order.pharmarack_mrp) : '');
+    setEditScheme(order.pharmarack_scheme || '');
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+
+    const customerName = editRequester.trim();
+    const customerPhone = editPhone.replace(/\D/g, '');
+
+    if (!editProduct.trim()) {
+      toastEvent.trigger('Product name is required.', 'error', '/crm');
+      return;
+    }
+    if (!customerName) {
+      toastEvent.trigger('Customer Name is required.', 'error', '/crm');
+      return;
+    }
+    if (!customerPhone || customerPhone.length < 10) {
+      toastEvent.trigger('Please enter a valid 10-digit mobile number.', 'error', '/crm');
+      return;
+    }
+    if (!editQty || Number(editQty) < 1) {
+      toastEvent.trigger('Quantity must be at least 1.', 'error', '/crm');
+      return;
+    }
+
+    setEditFormSubmitting(true);
+    try {
+      await api.updateOrder(editingOrder.id, {
+        product: editProduct.trim(),
+        requester: customerName,
+        phone: customerPhone,
+        qty: Number(editQty) || 1,
+        priority: editPriority,
+        status: editStatus,
+        pharmarack_distributor: editDistributor || undefined,
+        pharmarack_rate: editRate !== '' ? Number(editRate) : undefined,
+        pharmarack_mrp: editMrp !== '' ? Number(editMrp) : undefined,
+        pharmarack_scheme: editScheme || undefined,
+        advance_payment: editAdvancePayment !== '' ? Number(editAdvancePayment) : 0
+      });
+
+      toastEvent.trigger(`Special request for "${editProduct.trim()}" updated successfully!`, 'success', '/crm');
+      setShowEditModal(false);
+      setEditingOrder(null);
+      await loadOrders();
+      specialOrdersEvent.triggerUpdated();
+    } catch (err: any) {
+      console.error('Failed to update special order request:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to update special order request', 'error', '/crm');
+    } finally {
+      setEditFormSubmitting(false);
+    }
+  };
+
   const filteredOrders = orders.filter(o => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q || 
@@ -3153,6 +3238,16 @@ const SpecialOrdersSection: React.FC = () => {
                       <span>{resendingId === order.id ? 'Sending...' : 'WA'}</span>
                     </button>
 
+                    {/* Edit Button */}
+                    <button
+                      onClick={() => handleOpenEditModal(order)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-xs font-bold transition-all cursor-pointer"
+                      title="Edit Special Order Request details"
+                    >
+                      <Pencil size={12} />
+                      <span>Edit</span>
+                    </button>
+
                     {/* Cancel Button */}
                     <button
                       onClick={() => handleDeleteOrder(order.id, order.product)}
@@ -3387,6 +3482,169 @@ const SpecialOrdersSection: React.FC = () => {
                   className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-md shadow-primary/20 transition-all disabled:opacity-50"
                 >
                   {formSubmitting ? 'Logging Request...' : 'Log & Sync Cart'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Edit Special Request Modal */}
+      {showEditModal && editingOrder && createPortal(
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="glass-panel w-full max-w-lg bg-bg2 rounded-2xl border border-primary/20 p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-border pb-3">
+              <h3 className="font-bold text-sm text-text flex items-center gap-2">
+                <Pencil size={16} className="text-primary" />
+                Edit Special Order Request #{editingOrder.id}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingOrder(null);
+                }}
+                className="p-1 rounded-lg hover:bg-bg3 text-muted hover:text-text"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-3.5 text-xs">
+              {/* Product Name */}
+              <div className="space-y-1.5">
+                <label className="block font-semibold text-text">Requested Medicine Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Medicine name..."
+                  value={editProduct}
+                  onChange={e => setEditProduct(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary text-xs"
+                />
+              </div>
+
+              {/* Customer Name & Phone */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-text mb-1">Customer Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Customer Name"
+                    value={editRequester}
+                    onChange={e => setEditRequester(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Phone (WhatsApp) *</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="10-digit mobile"
+                    value={editPhone}
+                    onChange={e => setEditPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Quantity, Advance Payment & Priority */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-text mb-1">Quantity *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editQty}
+                    onChange={e => setEditQty(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Advance Paid (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={editAdvancePayment}
+                    onChange={e => setEditAdvancePayment(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-semibold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Priority</label>
+                  <select
+                    value={editPriority}
+                    onChange={e => setEditPriority(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Normal">Normal</option>
+                    <option value="High">High Priority</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Status & Distributor */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-text mb-1">Order Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={e => setEditStatus(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Waiting">Waiting</option>
+                    <option value="Ordered">Ordered</option>
+                    <option value="Ready">Ready (Arrived)</option>
+                    <option value="Fulfilled">Fulfilled</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-text mb-1">Pharmarack Distributor</label>
+                  <input
+                    type="text"
+                    placeholder="Distributor Name (optional)"
+                    value={editDistributor}
+                    onChange={e => setEditDistributor(e.target.value)}
+                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingOrder(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-bg3 border border-border text-muted hover:text-text font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editFormSubmitting}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-md shadow-primary/20 transition-all disabled:opacity-50"
+                >
+                  {editFormSubmitting ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      <span>Save Changes</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

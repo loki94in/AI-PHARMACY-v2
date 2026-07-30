@@ -107,10 +107,11 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(sentMessage).toContain("Assigned Delivery Boy:");
   });
 
-  test('Edge Case: Delivery boy not assigned yet', async () => {
+  test('Edge Case: Delivery boy not assigned yet falls back to Admin/Owner or DB active delivery boy', async () => {
     const db = await dbManager.getConnection();
 
     await db.run("INSERT INTO distributors (id, name, phone) VALUES (?, ?, ?)", [1, "ABC Distributor", "9876543210"]);
+    await db.run("INSERT INTO app_settings (key, value) VALUES (?, ?)", ['owner_whatsapp_number', '9876543210']);
     await db.run("INSERT INTO purchases (id, distributor_id, invoice_no) VALUES (?, ?, ?)", [100, 1, "BILL-10025"]);
     await db.run("INSERT INTO medicines (id, name) VALUES (?, ?)", [50, "Paracetamol 500mg"]);
     await db.run("INSERT INTO purchase_items (purchase_id, medicine_id, quantity) VALUES (?, ?, ?)", [100, 50, 20]);
@@ -120,7 +121,8 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(res).toBe(true);
 
     const sentMessage = mockSendMessage.mock.calls[0][2];
-    expect(sentMessage).toContain("Not assigned yet");
+    expect(sentMessage).toContain("Admin / Store Owner");
+    expect(sentMessage).toContain("+91 98765 43210");
   });
 
   test('Edge Case: Distributor has no WhatsApp number', async () => {

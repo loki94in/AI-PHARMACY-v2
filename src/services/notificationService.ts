@@ -13,10 +13,19 @@ export interface NotificationData {
   caption?: string; // for WhatsApp media messages
 }
 
-export interface NotificationResult {
-  success: boolean;
-  messageId?: string;
-  error?: string;
+export function formatDisplayPhone(rawPhone?: string | null): string {
+  if (!rawPhone) return 'N/A';
+  const clean = String(rawPhone).replace(/\D/g, '');
+  if (clean.length === 10) {
+    return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+  }
+  if (clean.startsWith('91') && clean.length === 12) {
+    return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+  }
+  if (clean.length > 0) {
+    return `+${clean}`;
+  }
+  return String(rawPhone).trim() || 'N/A';
 }
 
 export class NotificationService {
@@ -283,8 +292,13 @@ export class NotificationService {
       let boyPhone = 'N/A';
       if (deliveryBoysList && deliveryBoysList.length > 0) {
         boyName = deliveryBoysList[0].name || 'Delivery Staff';
-        const rawNum = (deliveryBoysList[0].whatsapp_number || '').replace(/\D/g, '');
-        boyPhone = rawNum.length === 10 ? `+91 ${rawNum.slice(0, 5)} ${rawNum.slice(5)}` : (deliveryBoysList[0].whatsapp_number || 'N/A');
+        boyPhone = formatDisplayPhone(deliveryBoysList[0].whatsapp_number || '');
+      } else {
+        const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+        if (adminSetting?.value) {
+          boyName = 'Admin / Store Owner';
+          boyPhone = formatDisplayPhone(adminSetting.value);
+        }
       }
 
       const message = `🏥 *${store.storeName}*\n\n` +
@@ -319,7 +333,7 @@ export class NotificationService {
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['distributor_order', purchase.distributor_name, phone, message, 'sent', purchase.invoice_no]
+            ['distributor_invoice_order', purchase.distributor_name, phone, message, 'sent', `inv_${purchase.invoice_no}`]
           );
         } catch (wsError: any) {
           console.error(`[DistributorNotif] Failed to send WhatsApp to distributor number ${phone}:`, wsError);
@@ -328,7 +342,7 @@ export class NotificationService {
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            ['distributor_order', purchase.distributor_name, phone, message, 'failed', errMsg, purchase.invoice_no]
+            ['distributor_invoice_order', purchase.distributor_name, phone, message, 'failed', errMsg, `inv_${purchase.invoice_no}`]
           );
         }
       }
@@ -341,22 +355,19 @@ export class NotificationService {
   }
 
   /**
-   * Send WhatsApp notification to distributor and delivery boy about a cart order.
-   * This is triggered manually or automatically when cart is placed/cleared.
+   * Send WhatsApp order notification to distributor and delivery boy(s) when Pharmarack cart items are ordered.
    */
-  async notifyAboutCartOrder(
+  async notifyDistributorCartOrder(
     storeName: string,
     storeId: number,
-    deliveryPersons: { name: string; code: string }[],
-    items: any[]
+    items: any[],
+    deliveryPersons?: any[]
   ): Promise<boolean> {
-    if (!storeName || !items || items.length === 0) return false;
-
     let db = null;
     try {
       db = await dbManager.getConnection();
 
-      // 1. Retrieve distributor phone number
+      // 1. Find distributor phone from database
       const distributor = await db.get(
         "SELECT phone FROM distributors WHERE name LIKE ? OR name = ?",
         [`%${storeName}%`, storeName]
@@ -367,23 +378,33 @@ export class NotificationService {
         console.warn(`[CartOrderNotif] Distributor ${storeName} has no phone number in database.`);
       }
 
-      // 2. Resolve delivery boy(s) contact details from DB using their names
+      // 2. Resolve delivery boy(s) contact details
       let deliveryBoysText = '';
       const resolvedDeliveryBoys: { name: string; phone: string }[] = [];
 
       if (deliveryPersons && deliveryPersons.length > 0) {
         for (const boy of deliveryPersons) {
           if (!boy.name) continue;
+          let boyName = boy.name;
           const dbBoy = await db.get(
             "SELECT name, whatsapp_number FROM delivery_boys WHERE (name LIKE ? OR name = ?) AND is_active = 1",
             [`%${boy.name}%`, boy.name]
           );
 
+          if (dbBoy?.name) {
+            boyName = dbBoy.name;
+          }
+
           let boyPhoneRaw = dbBoy?.whatsapp_number || (boy as any).phone || (boy as any).whatsapp || '';
-          if (!boyPhoneRaw) {
+          if (!boyPhoneRaw || boy.name === 'Not assigned yet' || boy.name === 'N/A') {
             // Fallback to active delivery boys in database
-            const activeBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL LIMIT 1");
-            boyPhoneRaw = activeBoy?.whatsapp_number || '';
+            const activeBoy = await db.get("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
+            if (activeBoy?.whatsapp_number) {
+              boyPhoneRaw = activeBoy.whatsapp_number;
+              if (boyName === 'Not assigned yet' || boyName === 'N/A' || !dbBoy) {
+                boyName = activeBoy.name || 'Delivery Staff';
+              }
+            }
           }
 
           const boyPhones = boyPhoneRaw
@@ -393,11 +414,11 @@ export class NotificationService {
             .map((num: string) => num.length === 10 ? `91${num}` : num);
 
           const boyPhonesUnique: string[] = Array.from(new Set(boyPhones));
-          const phonesDisplay = boyPhonesUnique.join(', ') || 'No contact set';
-          deliveryBoysText += `${boy.name}\nMobile: ${phonesDisplay}\n\n`;
+          const phonesDisplay = boyPhonesUnique.map(p => formatDisplayPhone(p)).join(', ') || 'No contact set';
+          deliveryBoysText += `${boyName}\nMobile: ${phonesDisplay}\n\n`;
 
           if (boyPhonesUnique.length > 0) {
-            resolvedDeliveryBoys.push({ name: boy.name, phone: boyPhonesUnique[0] });
+            resolvedDeliveryBoys.push({ name: boyName, phone: boyPhonesUnique[0] });
           }
         }
         deliveryBoysText = deliveryBoysText.trim();
@@ -405,14 +426,14 @@ export class NotificationService {
 
       // If no delivery persons assigned in Pharmarack cart, fallback to registered active delivery boys from settings/db
       if (resolvedDeliveryBoys.length === 0) {
-        const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
+        const activeBoys = await db.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != ''");
         for (const boy of activeBoys) {
           if (!boy.whatsapp_number) continue;
           const clean = boy.whatsapp_number.replace(/\D/g, '');
           if (clean.length >= 10) {
             const formatted = clean.length === 10 ? `91${clean}` : clean;
-            resolvedDeliveryBoys.push({ name: boy.name, phone: formatted });
-            deliveryBoysText += `${boy.name}\nMobile: ${formatted}\n\n`;
+            resolvedDeliveryBoys.push({ name: boy.name || 'Delivery Staff', phone: formatted });
+            deliveryBoysText += `${boy.name}\nMobile: ${formatDisplayPhone(clean)}\n\n`;
           }
         }
 
@@ -423,8 +444,8 @@ export class NotificationService {
             const clean = String(adminSetting.value).replace(/\D/g, '');
             if (clean.length >= 10) {
               const formatted = clean.length === 10 ? `91${clean}` : clean;
-              resolvedDeliveryBoys.push({ name: 'Admin (Delivery Fallback)', phone: formatted });
-              deliveryBoysText += `Admin (Delivery Contact)\nMobile: ${formatted}\n\n`;
+              resolvedDeliveryBoys.push({ name: 'Admin / Store Owner', phone: formatted });
+              deliveryBoysText += `Admin (Store Owner)\nMobile: ${formatDisplayPhone(clean)}\n\n`;
             }
           }
         }
@@ -447,7 +468,13 @@ export class NotificationService {
       let boyPhone = 'N/A';
       if (resolvedDeliveryBoys && resolvedDeliveryBoys.length > 0) {
         boyName = resolvedDeliveryBoys[0].name;
-        boyPhone = resolvedDeliveryBoys[0].phone;
+        boyPhone = formatDisplayPhone(resolvedDeliveryBoys[0].phone);
+      } else {
+        const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+        if (adminSetting?.value) {
+          boyName = 'Admin / Store Owner';
+          boyPhone = formatDisplayPhone(adminSetting.value);
+        }
       }
 
       const message = `🏥 *${store.storeName}*\n\n` +

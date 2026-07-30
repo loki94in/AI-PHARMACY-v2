@@ -28,7 +28,9 @@ export function isPuppeteerDetachedError(msg?: string): boolean {
     str.includes('Target closed') ||
     str.includes('Protocol error') ||
     str.includes('Page crashed') ||
-    str.includes('browser has disconnected')
+    str.includes('browser has disconnected') ||
+    str.includes('CdpFrame') ||
+    str.includes('CdpPage')
   );
 }
 
