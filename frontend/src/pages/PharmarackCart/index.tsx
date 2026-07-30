@@ -619,23 +619,30 @@ export default function PharmarackCart() {
   };
 
   const getDistributorPhoneNumber = (dist: Distributor): string => {
-    // 1. Primary source: Stored persistent store-to-distributor mapping from SQLite DB
+    // 1. Primary priority: Transient memory session override (user explicitly edited/saved number in modal)
+    const custom = customDistributorPhones[dist.storeId];
+    if (custom && custom.trim().length > 0) return custom.trim();
+
+    // 2. Persistent store-to-distributor mapping from SQLite DB
     const normName = dist.storeName ? dist.storeName.toLowerCase().trim() : '';
     if (normName && distributorMappings[normName]) {
-      const mappedPhone = distributorMappings[normName].phone;
-      if (mappedPhone && mappedPhone.trim().length > 0) {
-        return mappedPhone.trim();
+      const mapping = distributorMappings[normName];
+      if (mapping.distributorId) {
+        const found = savedDistributorsList.find((d: any) => d.id === mapping.distributorId);
+        const latestPhone = found?.phone || found?.mobile || found?.whatsapp || found?.contact || '';
+        if (latestPhone && latestPhone.trim().length > 0) {
+          return latestPhone.trim();
+        }
+      }
+      if (mapping.phone && mapping.phone.trim().length > 0) {
+        return mapping.phone.trim();
       }
     }
 
-    // 2. Central Database (distributors table) match
+    // 3. Central Database (distributors table) match
     const matched = findSavedDistributorMatch(dist.storeName);
     const dbPhone = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
     if (dbPhone && dbPhone.trim().length > 0) return dbPhone.trim();
-
-    // 3. Fallback to transient memory session override
-    const custom = customDistributorPhones[dist.storeId];
-    if (custom && custom.trim().length > 0) return custom.trim();
 
     return '';
   };
@@ -647,7 +654,7 @@ export default function PharmarackCart() {
 
   const mappedDistributors = React.useMemo(() => {
     return distributors.filter(d => isDistributorMapped(d));
-  }, [distributors, customDistributorPhones, savedDistributorsList]);
+  }, [distributors, customDistributorPhones, savedDistributorsList, distributorMappings]);
 
   const successDistributors = React.useMemo(() => {
     return distributors.filter(d => sentWaStatusMap[d.storeId] === 'success');
@@ -659,7 +666,7 @@ export default function PharmarackCart() {
 
   const unmappedDistributors = React.useMemo(() => {
     return distributors.filter(d => !isDistributorMapped(d));
-  }, [distributors, customDistributorPhones, savedDistributorsList]);
+  }, [distributors, customDistributorPhones, savedDistributorsList, distributorMappings]);
 
   const getCartItemAmount = (item: any): number => {
     if (typeof item.amount === 'number' && item.amount > 0) return item.amount;
@@ -1005,34 +1012,15 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    const storeName = storeInfo.name || '';
-    const storePhone = storeInfo.phone ? formatPhone(storeInfo.phone) : '';
-    const adminContact = storeInfo.adminPhone ? formatPhone(storeInfo.adminPhone) : '';
-    const address = storeInfo.address || '';
-    const email = storeInfo.email || '';
+    const storeName = storeInfo.name || 'AI Pharmacy';
+    const address = storeInfo.address || 'N/A';
+    const email = storeInfo.email || 'N/A';
     const fileFormat = storeInfo.invoiceFileFormat ? storeInfo.invoiceFileFormat.replace(' File Format', '') : 'CSV';
+    const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    // ponytail: header is fixed app name, not the pharmacy store name
-    let msg = `AI Pharmacy Genius OS\n\n`;
-    msg += `📋 Pharmacy Details\n`;
-    if (storeName) msg += `• Store: ${storeName}\n`;
-    if (storePhone) msg += `• Phone: ${storePhone}\n`;
-    if (adminContact) {
-      msg += `• Admin Contact: ${adminContact}\n`;
-    }
-    if (address) msg += `• Address: ${address}\n`;
-    if (email) {
-      msg += `• Email: ${email}\n`;
-    }
-    msg += `• Requested Format: ${fileFormat}\n`;
-
-    // Delivery boy section: use system-registered boy (has name + whatsapp_number)
-    if (registeredBoy?.name) {
-      const staffPhone = formatPhone(registeredBoy.whatsapp_number || '');
-      msg += `• Delivery Boy: ${registeredBoy.name}${staffPhone ? ` (${staffPhone})` : ''}\n`;
-    }
-
-    msg += `\n📦 Order Details\n`;
+    let msg = `🏥 *${storeName}*\n\n`;
+    msg += `📅 *Date:* ${dateStr}\n\n`;
+    msg += `📋 *Items Requested:*\n`;
 
     // Filter to send ONLY fresh/new items so distributor is not confused by already-sent old items
     const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
@@ -1040,17 +1028,19 @@ export default function PharmarackCart() {
 
     itemsToSend.forEach((item) => {
       const pack = item.packaging ? ` (${item.packaging})` : '';
-      const rateText = item.ptr > 0 ? ` @ ₹${item.ptr.toFixed(2)}` : '';
-      msg += `• ${item.productName}${pack} — Qty: ${item.qty}${rateText}\n`;
+      msg += `  • ${item.productName}${pack} — \n    Qty: ${item.qty}\n`;
     });
 
-    msg += `\n📊 Order Summary\n`;
-    msg += `• Total Items: ${itemsToSend.length}\n`;
-    const targetSubtotal = itemsToSend.reduce((sum, item) => sum + (item.ptr > 0 ? item.ptr * item.qty : item.amount), 0);
-    msg += `• Subtotal: ₹${targetSubtotal.toFixed(2)}\n`;
-    msg += `• Order Time: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n\n`;
-    msg += `✅ Kindly confirm receipt of this order and share the expected dispatch/delivery status.\n\n`;
-    msg += `Thank you!`;
+    msg += `\n🚚 *Assigned Delivery Boy:*\n`;
+    if (registeredBoy?.name) {
+      const staffPhone = formatPhone(registeredBoy.whatsapp_number || '');
+      msg += `  👤 ${registeredBoy.name}\n  📞 ${staffPhone || 'N/A'}\n`;
+    } else {
+      msg += `  👤 Not assigned yet\n  📞 N/A\n`;
+    }
+
+    msg += `\n*Delivery Location:* ${address}\n`;
+    msg += `*Note:* ${email} (${fileFormat}) when sending bills.`;
 
     return msg;
   };
@@ -1383,6 +1373,7 @@ export default function PharmarackCart() {
 
   const handleOpenEditModal = (dist: Distributor) => {
     setEditingDistributor(dist);
+    setIsSavingContact(false);
     setModalSearchTerm(dist.storeName || '');
     setIsAddingNewDistributor(false);
     setNewDistNameInput(dist.storeName || '');
@@ -1411,7 +1402,7 @@ export default function PharmarackCart() {
   };
 
   const handleSaveDistributorContact = async () => {
-    if (!editingDistributor) return;
+    if (!editingDistributor || isSavingContact) return;
     setIsSavingContact(true);
     const cleanPhone = modalPhoneInput.trim();
     const storeId = editingDistributor.storeId;
@@ -1422,8 +1413,19 @@ export default function PharmarackCart() {
       ...prev,
       [storeId]: cleanPhone
     }));
+    if (distName) {
+      const normName = distName.toLowerCase().trim();
+      setDistributorMappings(prev => ({
+        ...prev,
+        [normName]: {
+          distributorId: selectedSavedDistId,
+          phone: cleanPhone
+        }
+      }));
+    }
     toastEvent.trigger(`Saved WhatsApp contact for ${distName}`, 'success');
     setEditingDistributor(null);
+    setIsSavingContact(false);
 
     // 2. Persist to database in background
     try {
@@ -3021,7 +3023,10 @@ export default function PharmarackCart() {
               </div>
               <button
                 type="button"
-                onClick={() => setEditingDistributor(null)}
+                onClick={() => {
+                  setEditingDistributor(null);
+                  setIsSavingContact(false);
+                }}
                 className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
               >
                 <X size={18} />
@@ -3125,7 +3130,10 @@ export default function PharmarackCart() {
             <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setEditingDistributor(null)}
+                onClick={() => {
+                  setEditingDistributor(null);
+                  setIsSavingContact(false);
+                }}
                 className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all"
               >
                 Cancel

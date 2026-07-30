@@ -60,6 +60,11 @@ export async function recalculateStockLimits(): Promise<void> {
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 export function startStockCalculatorWorker(intervalMs: number = 86400000): void {
+  if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') {
+    console.log('[StockCalculatorWorker] StockCalculatorWorker is STOPPED and DISABLED.');
+    stopStockCalculatorWorker();
+    return;
+  }
   if (intervalId) return;
 
   console.log(`[StockCalculatorWorker] Starting with interval ${intervalMs}ms`);

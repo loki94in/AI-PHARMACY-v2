@@ -204,6 +204,11 @@ export class TokenRefreshScheduler {
   }
 
   public start() {
+    if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') {
+      console.log('[TokenRefreshScheduler] Background token refresh scheduler is STOPPED and DISABLED.');
+      this.stop();
+      return;
+    }
     if (this.timeoutId) return;
     console.log('[TokenRefreshScheduler] Starting randomized background token refresh scheduler (40-60 min window)...');
     // Run initial check on boot

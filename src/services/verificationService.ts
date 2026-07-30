@@ -118,8 +118,8 @@ export class VerificationService {
       };
     } catch (err: any) {
       console.error('[VerificationService] Database health check crashed:', err);
-      // Attempt safe reconnection/healing if closed or locked
-      if (err.message && (err.message.includes('closed') || err.message.includes('MISUSE') || err.message.includes('BUSY'))) {
+      // Self-healing reconnection disabled when background self-healing workers are turned off
+      if (process.env.DISABLE_SELF_HEALING_WORKERS === 'false' && err.message && (err.message.includes('closed') || err.message.includes('MISUSE') || err.message.includes('BUSY'))) {
         try {
           console.warn('[VerificationService] closed database detected, running self-healing reconnect...');
           await dbManager.close(true);

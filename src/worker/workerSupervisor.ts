@@ -37,8 +37,9 @@ export class WorkerSupervisor {
 
   /** Starts all configured background workers */
   public start(): void {
-    if (process.env.DISABLE_BACKGROUND_WORKERS === 'true') {
-      console.log('[WorkerSupervisor] Background workers disabled via DISABLE_BACKGROUND_WORKERS=true.');
+    if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') {
+      console.log('[WorkerSupervisor] ALL background workers are STOPPED and DISABLED.');
+      this.stop();
       return;
     }
 

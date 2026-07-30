@@ -281,8 +281,17 @@ const Learning: React.FC = () => {
     }
   }, [profiles, selectedProfileId]);
 
+  // Synchronously hydrate or reset selectedProfile whenever selectedProfileId changes
   useEffect(() => {
-    if (serverProfileDetail) {
+    if (selectedProfileId && cachedProfileDetailsMap[selectedProfileId]) {
+      setSelectedProfile(cachedProfileDetailsMap[selectedProfileId]);
+    } else {
+      setSelectedProfile(null);
+    }
+  }, [selectedProfileId]);
+
+  useEffect(() => {
+    if (serverProfileDetail && serverProfileDetail.distributor && serverProfileDetail.distributor.id === selectedProfileId) {
       setSelectedProfile(serverProfileDetail);
       
       // Populate manual rules form safely
@@ -316,10 +325,8 @@ const Learning: React.FC = () => {
         grn_no: rules.grn_no || '',
         custom_columns: rules.custom_columns || {}
       });
-    } else {
-      setSelectedProfile(null);
     }
-  }, [serverProfileDetail]);
+  }, [serverProfileDetail, selectedProfileId]);
 
   const checkPrHealth = async () => {
     setCheckingPrHealth(true);
@@ -1241,7 +1248,7 @@ const Learning: React.FC = () => {
             {/* Right Column: Profile details form */}
             <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
               {selectedProfileId !== null ? (
-                loadingDetail && !selectedProfile ? (
+                (loadingDetail || !selectedProfile || selectedProfile?.distributor?.id !== selectedProfileId) ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3">
                     <RefreshCw className="animate-spin text-sky" size={24} />
                     <span className="text-xs">Fetching profile details...</span>

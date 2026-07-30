@@ -182,6 +182,21 @@ export class NotificationService {
     }
   }
 
+  private async getStoreSettings(db: any) {
+    const settingsRows = await db.all(
+      "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'distributor_invoice_file_format')"
+    );
+    const settings: Record<string, string> = {};
+    for (const r of settingsRows) {
+      if (r.key && r.value) settings[r.key] = r.value;
+    }
+    const storeName = settings.shop_name || settings.pharmacy_name || 'AI Pharmacy';
+    const address = settings.shop_address || settings.address || 'N/A';
+    const email = settings.shop_email || settings.email || 'N/A';
+    const fileFormat = (settings.distributor_invoice_file_format || 'CSV').replace(' File Format', '');
+    return { storeName, address, email, fileFormat };
+  }
+
   /**
    * Automatically send order/bill information to distributor WhatsApp numbers
    * including medicines, quantities, and assigned delivery boy details.
@@ -251,40 +266,35 @@ export class NotificationService {
         [purchase.purchase_id]
       );
 
-      // 4. Format medicines list
-      let medicinesText = '';
+      // 4. Format message using single customized distributor template
+      const store = await this.getStoreSettings(db);
+      const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+      let itemsText = '';
       if (purchaseItems && purchaseItems.length > 0) {
-        medicinesText = purchaseItems
-          .map(item => `- ${item.medicine_name} × ${item.quantity}`)
+        itemsText = purchaseItems
+          .map((item: any) => `  • ${item.medicine_name} — \n    Qty: ${item.quantity}`)
           .join('\n');
       } else {
-        medicinesText = 'No items found.';
+        itemsText = '  • Standard Pharmacy Order Items';
       }
 
-      // 5. Format delivery boy(s) information
-      let deliveryBoysText = '';
+      let boyName = 'Not assigned yet';
+      let boyPhone = 'N/A';
       if (deliveryBoysList && deliveryBoysList.length > 0) {
-        deliveryBoysText = deliveryBoysList.map(boy => {
-          // Format boy contacts, support multiple numbers in boy's profile (comma/space-separated)
-          const boyPhoneRaw = boy.whatsapp_number || '';
-          const boyPhones = boyPhoneRaw
-            .split(/[\s,;]+/)
-            .map((num: string) => num.replace(/\D/g, ''))
-            .filter((num: string) => num.length >= 10)
-            .map((num: string) => num.length === 10 ? `91${num}` : num);
-
-          const boyPhonesUnique = [...new Set(boyPhones)];
-          const phonesDisplay = boyPhonesUnique.join(', ') || 'No contact set';
-          return `${boy.name}\nMobile: ${phonesDisplay}`;
-        }).join('\n\n');
-      } else {
-        deliveryBoysText = 'Not assigned yet';
+        boyName = deliveryBoysList[0].name || 'Delivery Staff';
+        const rawNum = (deliveryBoysList[0].whatsapp_number || '').replace(/\D/g, '');
+        boyPhone = rawNum.length === 10 ? `+91 ${rawNum.slice(0, 5)} ${rawNum.slice(5)}` : (deliveryBoysList[0].whatsapp_number || 'N/A');
       }
 
-      // 6. Format the WhatsApp message exactly as requested
-      const message = `Bill No: ${purchase.invoice_no}\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nExpected Delivery:\nToday`;
+      const message = `🏥 *${store.storeName}*\n\n` +
+        `📅 *Date:* ${dateStr}\n\n` +
+        `📋 *Items Requested:*\n${itemsText}\n\n` +
+        `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
+        `*Delivery Location:* ${store.address}\n` +
+        `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
 
-      // 7. Parse & format distributor numbers (support comma/space-separated in distributor phone)
+      // 5. Parse & format distributor numbers (support comma/space-separated in distributor phone)
       const distPhones = rawPhone
         .split(/[\s,;]+/)
         .map((num: string) => num.replace(/\D/g, ''))
@@ -324,8 +334,8 @@ export class NotificationService {
       }
 
       return sentCount > 0;
-    } catch (err) {
-      console.error('[DistributorNotif] Error sending distributor WhatsApp notification:', err);
+    } catch (error) {
+      console.error('[DistributorNotif] Exception while notifying distributor:', error);
       return false;
     }
   }
@@ -357,12 +367,7 @@ export class NotificationService {
         console.warn(`[CartOrderNotif] Distributor ${storeName} has no phone number in database.`);
       }
 
-      // 2. Format medicines list
-      const medicinesText = items
-        .map(item => `- ${item.productName || item.name || 'Unknown Product'} × ${item.qty || item.Quantity || 1}`)
-        .join('\n');
-
-      // 3. Resolve delivery boy(s) contact details from DB using their names
+      // 2. Resolve delivery boy(s) contact details from DB using their names
       let deliveryBoysText = '';
       const resolvedDeliveryBoys: { name: string; phone: string }[] = [];
 
@@ -425,12 +430,32 @@ export class NotificationService {
         }
       }
 
-      if (!deliveryBoysText) {
-        deliveryBoysText = 'Not assigned yet';
+      // 3. Format message using single customized distributor template
+      const store = await this.getStoreSettings(db);
+      const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+      let itemsText = '';
+      if (items && items.length > 0) {
+        itemsText = items
+          .map((item: any) => `  • ${item.productName || item.name || 'Medicine Item'} — \n    Qty: ${item.qty || item.Quantity || 1}`)
+          .join('\n');
+      } else {
+        itemsText = '  • Standard Pharmacy Order Items';
       }
 
-      // 4. Format message (include distributor name so each is unique and identifiable)
-      const message = `Order Finalized (Pharmarack Cart)\n\n📦 Distributor: ${storeName}\n\nMedicines:\n${medicinesText}\n\nDelivery Boy:\n${deliveryBoysText}\n\nRequested File Format:\nCSV File Format\n\nExpected Delivery:\nToday`;
+      let boyName = 'Not assigned yet';
+      let boyPhone = 'N/A';
+      if (resolvedDeliveryBoys && resolvedDeliveryBoys.length > 0) {
+        boyName = resolvedDeliveryBoys[0].name;
+        boyPhone = resolvedDeliveryBoys[0].phone;
+      }
+
+      const message = `🏥 *${store.storeName}*\n\n` +
+        `📅 *Date:* ${dateStr}\n\n` +
+        `📋 *Items Requested:*\n${itemsText}\n\n` +
+        `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
+        `*Delivery Location:* ${store.address}\n` +
+        `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
 
       // 5. Parse distributor numbers
       const distPhones = rawPhone

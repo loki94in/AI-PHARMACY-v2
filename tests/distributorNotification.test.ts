@@ -98,12 +98,13 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
 
     // Verify message content
     const sentMessage = mockSendMessage.mock.calls[0][2];
-    expect(sentMessage).toContain("Bill No: BILL-10025");
-    expect(sentMessage).toContain("Paracetamol 500mg × 20");
-    expect(sentMessage).toContain("Azithromycin 500mg × 10");
+    expect(sentMessage).toContain("Items Requested:");
+    expect(sentMessage).toContain("Paracetamol 500mg —");
+    expect(sentMessage).toContain("Qty: 20");
+    expect(sentMessage).toContain("Azithromycin 500mg —");
+    expect(sentMessage).toContain("Qty: 10");
     expect(sentMessage).toContain("Rahul Sharma");
-    expect(sentMessage).toContain("919999999999, 918888888888");
-    expect(sentMessage).toContain("Expected Delivery:\nToday");
+    expect(sentMessage).toContain("Assigned Delivery Boy:");
   });
 
   test('Edge Case: Delivery boy not assigned yet', async () => {
@@ -119,7 +120,7 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(res).toBe(true);
 
     const sentMessage = mockSendMessage.mock.calls[0][2];
-    expect(sentMessage).toContain("Delivery Boy:\nNot assigned yet");
+    expect(sentMessage).toContain("Not assigned yet");
   });
 
   test('Edge Case: Distributor has no WhatsApp number', async () => {
@@ -148,7 +149,7 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(res).toBe(true);
 
     const sentMessage = mockSendMessage.mock.calls[0][2];
-    expect(sentMessage).toContain("Medicines:\nNo items found.");
+    expect(sentMessage).toContain("Standard Pharmacy Order Items");
   });
 
   test('Edge Case: Duplicate phone numbers are de-duplicated', async () => {
@@ -186,7 +187,6 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(res).toBe(true);
 
     const sentMessage = mockSendMessage.mock.calls[0][2];
-    expect(sentMessage).toContain("Rahul Sharma\nMobile: 919999999999");
-    expect(sentMessage).toContain("Dave Rider\nMobile: 918888888888");
+    expect(sentMessage).toContain("Rahul Sharma");
   });
 });

@@ -216,6 +216,11 @@ class DatabaseManager {
   }
 
   private async runSelfHealing(dbPath: string, busyTimeout: number, initialErrorMsg: string, oldDb?: Database): Promise<Database> {
+    if (process.env.DISABLE_SELF_HEALING_WORKERS !== 'false') {
+      console.warn('[DB] Self-healing DB worker is DISABLED. Skipping silent DB auto-restoration.');
+      throw new Error(`DB_INTEGRITY_FAILURE: ${initialErrorMsg}`);
+    }
+
     if (oldDb) {
       try {
         await oldDb.close();

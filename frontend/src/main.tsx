@@ -13,11 +13,17 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-// Register Service Worker for PWA support
+// Service Worker disabled — unregister any existing service workers
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('[SW] Registration info:', err);
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister().then(() => {
+          console.log('[SW] Unregistered active background service worker.');
+        });
+      }
+    }).catch((err) => {
+      console.warn('[SW] Unregistration info:', err);
     });
   });
 }
