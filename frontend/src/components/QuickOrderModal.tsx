@@ -779,7 +779,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-dropdown left-0 right-0 mt-1 max-h-96 overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-xl rounded-xl shadow-2xl divide-y divide-glass-border/30 py-2">
+                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-96 overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-glass-border/30 py-2">
                       {suggestions.map((med, index) => {
                         const isPr = med.isPharmarack;
                         return (

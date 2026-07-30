@@ -225,20 +225,28 @@ router.get('/search', async (req, res) => {
       if (response.ok) {
         const data: any = await response.json();
         if (data && Array.isArray(data.data)) {
-          return data.data.map((p: any) => ({
-            name: p.ProductName || p.ProductFullName || '',
-            packaging: p.Packing || '',
-            distributor: p.StoreName || '',
-            rate: p.PTR !== undefined ? p.PTR : null,
-            mrp: p.MRP !== undefined ? p.MRP : null,
-            mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === '1' || String(p.Ismapped) === '1',
-            stock: p.Stock !== undefined ? String(p.Stock) : 'High',
-            scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
-            productId: p.ProductId || p.PrProductId || p.ProductCode,
-            productCode: p.ProductCode || '',
-            company: p.Company || '',
-            storeId: p.StoreId
-          }));
+          return data.data.map((p: any) => {
+            const rawFullName = p.ProductFullName || p.ProductName || '';
+            const masterBrand = p.MasterProductName || p.BrandName || p.ShortName || p.ProductShortName || p.ShortProductName || '';
+            const cleanShort = masterBrand || rawFullName.replace(/\b\d+(\.\d+)?(\/\d+(\.\d+)?)*\s*(mg|mcg|gm|ml|g|iu|%)\b/gi, '').replace(/\b\d+\s*ml\b/gi, '').trim().replace(/[-:]+$/, '').trim();
+
+            return {
+              name: masterBrand || p.ProductName || p.ProductFullName || '',
+              shortName: cleanShort || p.ProductName || '',
+              fullName: rawFullName,
+              packaging: p.Packing || '',
+              distributor: p.StoreName || '',
+              rate: p.PTR !== undefined ? p.PTR : null,
+              mrp: p.MRP !== undefined ? p.MRP : null,
+              mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === '1' || String(p.Ismapped) === '1',
+              stock: p.Stock !== undefined ? String(p.Stock) : 'High',
+              scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
+              productId: p.ProductId || p.PrProductId || p.ProductCode,
+              productCode: p.ProductCode || '',
+              company: p.Company || '',
+              storeId: p.StoreId
+            };
+          });
         }
       }
       return null;

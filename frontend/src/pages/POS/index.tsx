@@ -3034,7 +3034,7 @@ const POS = () => {
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchTerm.trim().length >= 2 && rowSearchResults.length > 0 && (
-                                <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-2xl">
+                                <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[9999] mt-1 bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-[0_20px_50px_rgba(0,0,0,0.8)]">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
                                       o => o.product.toLowerCase().trim() === med.medicine_name.toLowerCase().trim() ||

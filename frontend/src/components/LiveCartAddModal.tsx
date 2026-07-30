@@ -8,6 +8,8 @@ import { findBestCartMatchForOrder } from '../utils/orderFuzzyMatcher';
 
 interface SuggestionMedicine {
   medicine_name: string;
+  shortName?: string;
+  fullName?: string;
   isPharmarack?: boolean;
   distributor?: string;
   rate?: number;
@@ -1018,8 +1020,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
         if (prData && !(prData as any).isError && Array.isArray(prData) && prData.length > 0) {
           prData.forEach((item: any) => {
+            const displayName = item.shortName || item.name;
             mergedList.push({
-              medicine_name: item.name,
+              medicine_name: displayName,
+              shortName: item.shortName || item.name,
+              fullName: item.fullName || item.name,
               mrp: item.mrp,
               isPharmarack: true,
               distributor: item.distributor,
@@ -1626,7 +1631,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
 
           {/* Middle Column: Form */}
-          <div className="flex flex-col h-full justify-between md:pl-6 overflow-y-auto pr-2">
+          <div className="flex flex-col h-full justify-between md:pl-6 overflow-visible pr-2 relative z-30">
             <div className="space-y-4">
               {/* Title */}
               <div className="flex items-center gap-2.5">
@@ -1651,7 +1656,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               <form id="live-cart-add-form" onSubmit={handleSubmit} className="space-y-4">
                 
                 {/* Autocomplete Search Input */}
-                <div className="relative animate-in fade-in duration-200" ref={autocompleteRef}>
+                <div className="relative z-50 animate-in fade-in duration-200" ref={autocompleteRef}>
                   <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Medicine Search</label>
                   <div className="relative">
                     <span className="absolute left-3 top-[11.5px] text-muted">
@@ -1670,7 +1675,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-dropdown left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border border-glass-border backdrop-blur-2xl rounded-xl shadow-2xl divide-y divide-border/30 py-1 scrollbar-thin">
+                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
                       {suggestions.map((med, index) => (
                         <li
                           key={index}
@@ -1685,7 +1690,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         >
                           <div className="flex-1 min-w-0 pr-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-semibold text-text truncate text-sm">{med.medicine_name}</span>
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-semibold text-text truncate text-sm">{med.shortName || med.medicine_name}</span>
+                                {med.fullName && med.fullName !== (med.shortName || med.medicine_name) && (
+                                  <span className="text-[10px] text-muted/70 font-mono truncate">{med.fullName}</span>
+                                )}
+                              </div>
                               {med.rate !== undefined && med.rate !== null && !med.isErrorMessage && getEffectiveRate(med.rate, med.scheme, qty) === minEffectiveRate && (
                                 <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
                                   <Sparkles size={8} className="text-emerald-400 animate-pulse" /> Best Rate
