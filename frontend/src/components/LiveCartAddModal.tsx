@@ -1045,42 +1045,18 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               company: item.company
             });
           });
+        } else if (prData && (prData as any).isError) {
+          mergedList.push({
+            medicine_name: `⚠️ ${(prData as any).message}`,
+            isPharmarack: true,
+            isErrorMessage: true
+          });
         } else {
-          // If Pharmarack live search returned 0 results or error, try local medicines search as fallback
-          try {
-            const localData = await api.getMedicines(1, 10, cleanQuery);
-            if (localData && Array.isArray(localData.medicines) && localData.medicines.length > 0) {
-              localData.medicines.forEach((med: any) => {
-                mergedList.push({
-                  medicine_name: med.name,
-                  mrp: med.mrp || med.unit_mrp,
-                  isPharmarack: false,
-                  distributor: 'Local Stock',
-                  rate: med.purchase_price || med.ptr,
-                  mapped: true,
-                  packaging: med.packaging || '',
-                  stock: String(med.current_stock || med.stock || 'In Local Inventory'),
-                  company: med.manufacturer || med.company || ''
-                });
-              });
-            }
-          } catch (_) {}
-
-          if (mergedList.length === 0) {
-            if (prData && (prData as any).isError) {
-              mergedList.push({
-                medicine_name: `⚠️ ${(prData as any).message}`,
-                isPharmarack: true,
-                isErrorMessage: true
-              });
-            } else {
-              mergedList.push({
-                medicine_name: `No distributor or local matches found for "${cleanQuery}"`,
-                isPharmarack: true,
-                isErrorMessage: true
-              });
-            }
-          }
+          mergedList.push({
+            medicine_name: `No distributor matches found for "${cleanQuery}"`,
+            isPharmarack: true,
+            isErrorMessage: true
+          });
         }
 
         setSuggestions(mergedList);

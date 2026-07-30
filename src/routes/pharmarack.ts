@@ -214,7 +214,7 @@ router.get('/search', async (req, res) => {
       const data: any = await response.json();
       if (data && Array.isArray(data.data)) {
         const results = data.data.map((p: any) => {
-          const rawName = p.ProductName || p.ProductFullName || '';
+          const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || '';
 
           return {
             name: rawName,
