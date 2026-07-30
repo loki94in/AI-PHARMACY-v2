@@ -177,21 +177,10 @@ router.get('/search', async (req, res) => {
   if (!qRaw) {
     return res.json([]);
   }
-  // Use lowercase only for cache key; preserve original case for Pharmarack API
-  // (Pharmarack Elasticsearch is case-sensitive for brand names like "TELMISTAL A")
-  const qLower = qRaw.toLowerCase();
-  // ponytail: q kept for backward-compat cache key
-  const q = qLower;
 
   const storeId = req.query.storeId ? Number(req.query.storeId) : null;
   const isMapped = req.query.isMapped === 'true';
   const hasStoreFilter = storeId !== null && !isNaN(storeId);
-
-  // Check cache first using the prefix-matching cache service
-  const cachedData = searchCache.get(q, storeId, isMapped);
-  if (cachedData) {
-    return res.json(cachedData);
-  }
 
   try {
     const settings = await getPharmarackSettings();
@@ -201,32 +190,36 @@ router.get('/search', async (req, res) => {
       return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
     }
 
-    // Helper to perform an actual Elasticsearch query on Pharmarack
-    const performSearchQuery = async (searchTerm: string) => {
-      const payload: any = {
-        SearchKeyword: searchTerm,
-        StoreId: hasStoreFilter && isMapped ? [storeId] : [],
-        NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
-        Count: 50,
-        SkipCount: 0,
-        isMappedSearch: hasStoreFilter ? isMapped : null,
-        IsStock: 2,
-        IsScheme: 2,
-        IsSort: 1,
-        CartSource: 'MOVP'
-      };
+    // Direct pass-through query to Pharmarack OpenSearch Engine (exact payload used by official site)
+    const payload: any = {
+      SearchKeyword: qRaw,
+      StoreId: hasStoreFilter && isMapped ? [storeId] : [],
+      NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
+      Count: 50,
+      SkipCount: 0,
+      isMappedSearch: hasStoreFilter ? isMapped : null,
+      IsStock: 2,
+      IsScheme: 2,
+      IsSort: 1,
+      CartSource: 'MOVP'
+    };
 
-      const response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(2500)
-      });
+    const response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3500)
+    });
 
-      if (response.ok) {
-        const data: any = await response.json();
-        if (data && Array.isArray(data.data)) {
-          return data.data.map((p: any) => ({
-            name: p.ProductName || p.ProductFullName || '',
+    if (response.ok) {
+      const data: any = await response.json();
+      if (data && Array.isArray(data.data)) {
+        const results = data.data.map((p: any) => {
+          const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || '';
+
+          return {
+            name: rawName,
+            shortName: rawName,
+            fullName: rawName,
             packaging: p.Packing || '',
             distributor: p.StoreName || '',
             rate: p.PTR !== undefined ? p.PTR : null,
@@ -238,116 +231,17 @@ router.get('/search', async (req, res) => {
             productCode: p.ProductCode || '',
             company: p.Company || '',
             storeId: p.StoreId
-          }));
-        }
+          };
+        });
+
+        return res.json(results);
       }
-      return null;
-    };
-
-    try {
-      let mappedProducts: any[] = [];
-      let searchSuccessful = false;
-      const attempted = new Set<string>();
-
-      const trySearch = async (term: string): Promise<boolean> => {
-        if (!term || term.length < 2 || attempted.has(term)) return false;
-        attempted.add(term);
-        const r = await performSearchQuery(term);
-        if (r && r.length > 0) {
-          mappedProducts = r;
-          searchSuccessful = true;
-          return true;
-        }
-        return false;
-      };
-
-      // Upfront Cleaned Brand extraction (e.g. "HYPONAT O 15 MG TAB 10 (10 TABS)" -> "HYPONAT O 15")
-      const rawNoParens = qRaw.replace(/\([^)]*\)/g, '').trim();
-      const { cleaned: cleanedTerm } = cleanSearchQuery(rawNoParens);
-
-      // Stage 1: Cleaned brand query upfront if different from raw query
-      if (cleanedTerm && cleanedTerm.length >= 3 && cleanedTerm !== qRaw) {
-        if (await trySearch(cleanedTerm)) {
-          console.log(`[Pharmarack Search] Rapid hit on pre-cleaned term: "${cleanedTerm}"`);
-        }
-      }
-
-      // Stage 2: Original query exact match
-      if (!searchSuccessful && await trySearch(qRaw)) {
-        // found
-      }
-
-      // Stage 3: Lowercase fallback
-      if (!searchSuccessful && await trySearch(qLower)) {
-        console.log(`[Pharmarack Search] Found via lowercase: "${qLower}"`);
-      }
-
-      // Stage 4: First two words (Brand + strength, e.g., "HYPONAT O")
-      if (!searchSuccessful && qRaw.includes(' ')) {
-        const words = qRaw.trim().split(/\s+/);
-        if (words.length >= 2) {
-          const brandPrefix = `${words[0]} ${words[1]}`;
-          if (brandPrefix.length >= 3) {
-            console.log(`[Pharmarack Search] Trying brand prefix: "${brandPrefix}"`);
-            await trySearch(brandPrefix);
-          }
-        }
-      }
-
-      // Stage 5: First word only (brand name)
-      if (!searchSuccessful && qRaw.includes(' ')) {
-        const firstWord = qRaw.split(' ')[0].trim();
-        if (firstWord.length >= 3) {
-          console.log(`[Pharmarack Search] Trying first-word brand fallback: "${firstWord}"`);
-          await trySearch(firstWord);
-        }
-      }
-
-      // Stage 6: Local SQLite DB medicine / alias cross-reference fallback (only for search terms >= 3 chars to prevent random matches)
-      if (!searchSuccessful && qLower.length >= 3) {
-        try {
-          const db = await dbManager.getConnection();
-          const matchedMed: any = await db.get(
-            `SELECT m.name FROM medicines m 
-             LEFT JOIN medicine_aliases ma ON ma.medicine_id = m.id
-             WHERE LOWER(m.name) LIKE ? OR LOWER(ma.alias_name) LIKE ?
-             LIMIT 1`,
-            [`${qLower}%`, `${qLower}%`]
-          );
-          if (matchedMed && matchedMed.name) {
-            const aliasTerm = matchedMed.name.trim();
-            if (aliasTerm && aliasTerm.toLowerCase() !== qLower) {
-              console.log(`[Pharmarack Search] Trying local DB medicine match: "${aliasTerm}" for query "${qRaw}"`);
-              await trySearch(aliasTerm);
-            }
-          }
-        } catch (dbErr) {
-          console.warn('[Pharmarack Search] DB alias lookup error:', dbErr);
-        }
-      }
-
-      if (!searchSuccessful) {
-        console.log(`[Pharmarack Search] All stages exhausted for "${qRaw}". Product may not be in Pharmarack catalog.`);
-      }
-
-      if (searchSuccessful) {
-        // Cache under both original query 'q' and cleaned term to maximize instant cache hits
-        searchCache.set(q, storeId, isMapped, mappedProducts);
-        if (cleanedTerm && cleanedTerm.toLowerCase() !== q) {
-          searchCache.set(cleanedTerm.toLowerCase(), storeId, isMapped, mappedProducts);
-        }
-        return res.json(mappedProducts);
-      } else {
-        return res.json([]);
-      }
-    } catch (err: any) {
-      console.error('Pharmarack live API search failed:', err.message);
-      return res.status(503).json({ error: 'Connection error, please check internet or reconnect', code: 'CONNECTION_ERROR' });
     }
 
+    return res.json([]);
   } catch (err: any) {
-    console.error('Pharmarack search error:', err);
-    res.status(500).json({ error: 'Failed to search Pharmarack catalog' });
+    console.error('Pharmarack direct live API search failed:', err.message);
+    return res.status(503).json({ error: 'Connection error, please check internet or reconnect', code: 'CONNECTION_ERROR' });
   }
 });
 

@@ -120,3 +120,51 @@ export const formatExpiryToMMYY = (val: string): string => {
 
   return cleaned;
 };
+
+/**
+ * Checks whether an expiry date string is expired relative to current month/year.
+ * Returns true if the expiry date is in the past.
+ */
+export const isExpiredDate = (expiry_date?: string | null): boolean => {
+  if (!expiry_date) return false;
+  const trimmed = String(expiry_date).trim();
+  if (!trimmed) return false;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1; // 1-12
+
+  let expYear = 0;
+  let expMonth = 0;
+
+  if (/^\d{1,2}\/\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split('/');
+    expMonth = parseInt(parts[0], 10);
+    expYear = 2000 + parseInt(parts[1], 10);
+  } else if (/^\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const parts = trimmed.split('/');
+    expMonth = parseInt(parts[0], 10);
+    expYear = parseInt(parts[1], 10);
+  } else if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    expMonth = parseInt(parts[1], 10);
+    expYear = parseInt(parts[2], 10);
+  } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+    const parts = trimmed.split('/');
+    expMonth = parseInt(parts[1], 10);
+    expYear = parseInt(parts[2], 10);
+  } else if (/^\d{4}-\d{2}/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    expYear = parseInt(parts[0], 10);
+    expMonth = parseInt(parts[1], 10);
+  } else {
+    return false;
+  }
+
+  if (isNaN(expYear) || isNaN(expMonth)) return false;
+
+  if (expYear < currentYear) return true;
+  if (expYear === currentYear && expMonth < currentMonth) return true;
+  return false;
+};
+
