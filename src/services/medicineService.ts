@@ -233,12 +233,18 @@ export class MedicineService {
   ): Promise<{ medicine: MedicineResult; status: 'created' | 'updated' | 'staged' }> {
     const key = data.name.trim().toLowerCase();
     
-    // 1. Exact match check
+    // 1. Exact match & Alias check
     let existing = await db.get('SELECT * FROM medicines WHERE lower(name) = ?', [key]);
     if (!existing) {
       const alias = await db.get('SELECT medicine_id FROM medicine_aliases WHERE lower(alias_name) = ?', [key]);
       if (alias) {
         existing = await db.get('SELECT * FROM medicines WHERE id = ?', [alias.medicine_id]);
+      }
+    }
+    if (!existing) {
+      const legacy = await db.get('SELECT canonical_medicine_id FROM legacy_id_map WHERE lower(legacy_id) = ?', [key]);
+      if (legacy) {
+        existing = await db.get('SELECT * FROM medicines WHERE id = ?', [legacy.canonical_medicine_id]);
       }
     }
 
@@ -410,6 +416,102 @@ export class MedicineService {
     );
     await dbManager.close();
     return row ? parseInt(row.count.toString(), 10) : 0;
+  }
+
+  /**
+   * Register or update a distributor-specific medicine alias
+   */
+  async registerDistributorAlias(
+    db: any,
+    distributorId: number | null | undefined,
+    aliasName: string,
+    medicineId: number
+  ): Promise<void> {
+    if (!aliasName || !medicineId) return;
+    const cleanAlias = aliasName.trim();
+    if (!cleanAlias) return;
+
+    try {
+      if (distributorId) {
+        await db.run(
+          `INSERT OR REPLACE INTO distributor_medicine_aliases (distributor_id, alias_name, medicine_id) VALUES (?, ?, ?)`,
+          [distributorId, cleanAlias, medicineId]
+        );
+      }
+      // Also register global alias
+      await db.run(
+        `INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)`,
+        [cleanAlias, medicineId]
+      );
+    } catch (err) {
+      console.warn(`[MedicineService] Alias registration warning for "${cleanAlias}":`, err);
+    }
+  }
+
+  /**
+   * Multi-Tier resolution engine:
+   * Tier 1: Exact name match on medicines
+   * Tier 2: Distributor-specific alias
+   * Tier 3: Global medicine alias
+   * Tier 4: Legacy ID mapping
+   * Tier 5: Prefix / FTS fuzzy fallback match
+   */
+  async resolveMedicineNameMultiTier(
+    db: any,
+    rawName: string,
+    distributorId?: number | null
+  ): Promise<{ medicineId: number | null; confidence: number; matchType: string }> {
+    if (!rawName) return { medicineId: null, confidence: 0, matchType: 'none' };
+    const cleanName = rawName.trim();
+    const key = cleanName.toLowerCase();
+
+    // Tier 1: Exact Name Match
+    const exact = await db.get('SELECT id FROM medicines WHERE LOWER(name) = ?', [key]);
+    if (exact?.id) {
+      return { medicineId: exact.id, confidence: 1.0, matchType: 'exact_name' };
+    }
+
+    // Tier 2: Distributor Alias
+    if (distributorId) {
+      const distAlias = await db.get(
+        'SELECT medicine_id FROM distributor_medicine_aliases WHERE distributor_id = ? AND LOWER(alias_name) = ?',
+        [distributorId, key]
+      );
+      if (distAlias?.medicine_id) {
+        return { medicineId: distAlias.medicine_id, confidence: 1.0, matchType: 'distributor_alias' };
+      }
+    }
+
+    // Tier 3: Global Medicine Alias
+    const globalAlias = await db.get(
+      'SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = ?',
+      [key]
+    );
+    if (globalAlias?.medicine_id) {
+      return { medicineId: globalAlias.medicine_id, confidence: 0.95, matchType: 'global_alias' };
+    }
+
+    // Tier 4: Legacy ID Map
+    const legacyRow = await db.get(
+      'SELECT canonical_medicine_id FROM legacy_id_map WHERE LOWER(legacy_id) = ?',
+      [key]
+    );
+    if (legacyRow?.canonical_medicine_id) {
+      return { medicineId: legacyRow.canonical_medicine_id, confidence: 0.95, matchType: 'legacy_map' };
+    }
+
+    // Tier 5: Prefix match fallback
+    if (cleanName.length >= 4) {
+      const prefixMatch = await db.get(
+        'SELECT id FROM medicines WHERE LOWER(name) LIKE ? LIMIT 1',
+        [`${key}%`]
+      );
+      if (prefixMatch?.id) {
+        return { medicineId: prefixMatch.id, confidence: 0.75, matchType: 'prefix_fuzzy' };
+      }
+    }
+
+    return { medicineId: null, confidence: 0, matchType: 'unmatched' };
   }
 }
 

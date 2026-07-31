@@ -948,6 +948,25 @@ export async function ensureSchema(dbPath: string) {
       FOREIGN KEY(medicine_id) REFERENCES medicines(id)
     );
 
+    CREATE TABLE IF NOT EXISTS distributor_medicine_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      alias_name TEXT NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      UNIQUE(distributor_id, alias_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS legacy_id_map (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      legacy_id TEXT NOT NULL UNIQUE,
+      canonical_medicine_id INTEGER NOT NULL,
+      source TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(canonical_medicine_id) REFERENCES medicines(id)
+    );
+
     CREATE TABLE IF NOT EXISTS catalog_mappings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       file_headers TEXT UNIQUE,

@@ -1883,6 +1883,26 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
             <ExternalLink size={13} />
             <span>Open Live Chrome Window</span>
           </button>
+
+          <button
+            onClick={async () => {
+              if (window.confirm('Are you sure you want to log out of WhatsApp? This will clear all saved login data so you can log in with a new account.')) {
+                try {
+                  toastEvent.trigger('Logging out of WhatsApp & clearing session data...', 'info');
+                  await apiClient.post('/messaging/logout');
+                  toastEvent.trigger('WhatsApp logged out successfully. You can now scan a new QR code.', 'success');
+                  checkStatus();
+                } catch (err: any) {
+                  toastEvent.trigger(err?.response?.data?.error || 'Failed to log out of WhatsApp', 'error');
+                }
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 text-xs font-bold transition-all active:scale-95"
+            title="Log out and clear all stored WhatsApp login data"
+          >
+            <LogOut size={13} />
+            <span>Logout WhatsApp</span>
+          </button>
         </div>
       </div>
 
@@ -1930,6 +1950,23 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
             >
               <ExternalLink size={13} /> Open Live Chrome Window
+            </button>
+            <button
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to log out & clear WhatsApp session data?')) {
+                  try {
+                    toastEvent.trigger('Clearing stored WhatsApp session data...', 'info');
+                    await apiClient.post('/messaging/logout');
+                    toastEvent.trigger('WhatsApp session cleared successfully. Generating fresh QR code...', 'success');
+                    checkStatus();
+                  } catch (err: any) {
+                    toastEvent.trigger(err?.response?.data?.error || 'Failed to clear WhatsApp session', 'error');
+                  }
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 rounded-xl text-xs font-bold transition-all active:scale-95"
+            >
+              <LogOut size={13} /> Logout / Clear Session Data
             </button>
           </div>
 

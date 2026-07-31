@@ -1195,6 +1195,7 @@ const Settings = () => {
             <input
               id="email"
               type="email"
+              autoComplete="off"
               className="premium-input w-full"
               placeholder="pharmacy@example.com"
               value={email}
@@ -2030,6 +2031,7 @@ const Settings = () => {
             <input
               id="adminUsername"
               type="text"
+              autoComplete="off"
               className="premium-input w-full"
               placeholder="admin"
               value={adminUsername}
@@ -2044,6 +2046,7 @@ const Settings = () => {
             <input
               id="adminPassword"
               type="password"
+              autoComplete="new-password"
               className="premium-input w-full"
               placeholder="••••••••"
               value={adminPassword}

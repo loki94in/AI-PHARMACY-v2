@@ -453,6 +453,19 @@ const Learning: React.FC = () => {
     }
   };
 
+  const handleLogoutWa = async () => {
+    if (window.confirm('Are you sure you want to log out of WhatsApp? This will clear all stored login session data so you can sign in with another account.')) {
+      try {
+        setWaStatus({ isReady: false, qrUrl: null, message: 'Logging out and clearing stored session data...' });
+        await apiClient.post('/messaging/logout');
+        toastEvent.trigger('WhatsApp logged out and session data cleared successfully.', 'success');
+      } catch (error) {
+        console.error('Failed to log out WhatsApp', error);
+        toastEvent.trigger('Failed to log out of WhatsApp', 'error');
+      }
+    }
+  };
+
   const handleOpenWaLoginWindow = async () => {
     setIsOpeningWaWindow(true);
     try {
@@ -1648,9 +1661,18 @@ const Learning: React.FC = () => {
 
                               <button 
                                 onClick={handleReconnect}
-                                className="text-[9px] font-bold bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/30 transition-all active:scale-95"
+                                className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded-lg hover:bg-amber-500/30 transition-all active:scale-95"
                               >
-                                Reconnect / Reset Session
+                                Reconnect / Refresh QR
+                              </button>
+
+                              <button 
+                                onClick={handleLogoutWa}
+                                className="text-[9px] font-bold bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded-lg hover:bg-rose-500/30 transition-all active:scale-95 flex items-center gap-1"
+                                title="Log out and clear all saved login session data"
+                              >
+                                <LogOut size={10} />
+                                <span>Logout & Clear Data</span>
                               </button>
                             </div>
                           </div>

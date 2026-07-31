@@ -15,6 +15,8 @@ import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 import { activityTracker } from '../utils/activityTracker.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import fs from 'fs';
+import { medicineService } from '../services/medicineService.js';
+import { OrderFulfillmentService } from '../services/orderFulfillmentService.js';
 
 
 
@@ -863,34 +865,33 @@ router.post('/manual', async (req, res) => {
         } catch (_) {}
 
         const cleanName = medName.trim();
-        let dbMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [cleanName]);
-        if (dbMed) {
-          medId = dbMed.id;
+        const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distributor_id);
+        if (resObj?.medicineId) {
+          medId = resObj.medicineId;
         } else {
-          // 1. Check learned medicine aliases
-          const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = LOWER(?)', [cleanName]);
-          if (aliasRow?.medicine_id) {
-            medId = aliasRow.medicine_id;
-          } else {
-            // 2. Check OCR corrections mapping
-            const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
-            if (ocrRow?.target_name) {
-              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
-              if (targetMed?.id) medId = targetMed.id;
-            }
-            // 3. Fallback: Prefix fuzzy match if cleanName >= 4 characters
-            if (!medId && cleanName.length >= 4) {
-              const fuzzyMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) LIKE LOWER(?) LIMIT 1', [`${cleanName}%`]);
-              if (fuzzyMed?.id) medId = fuzzyMed.id;
-            }
-            // 4. Auto-create new medicine if no existing match exists
-            if (!medId) {
-              const insMed = await db.run(
-                'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '']
-              );
-              medId = insMed.lastID;
-            }
+          // Check OCR corrections mapping
+          const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
+          if (ocrRow?.target_name) {
+            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
+            if (targetMed?.id) medId = targetMed.id;
+          }
+          // Auto-create new medicine if no existing match exists
+          if (!medId) {
+            const insMed = await db.run(
+              'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '']
+            );
+            medId = insMed.lastID;
+          }
+        }
+
+        // Register distributor alias & trigger CRM order reconciliation
+        if (medId) {
+          await medicineService.registerDistributorAlias(db, distributor_id, cleanName, medId);
+          try {
+            await OrderFulfillmentService.getInstance().reconcileIncomingInventory(db, cleanName);
+          } catch (recErr) {
+            console.warn('[Purchases] Reconcile incoming inventory non-fatal warning:', recErr);
           }
         }
       }

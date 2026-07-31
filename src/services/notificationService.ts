@@ -13,6 +13,12 @@ export interface NotificationData {
   caption?: string; // for WhatsApp media messages
 }
 
+export interface NotificationResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}
+
 export function formatDisplayPhone(rawPhone?: string | null): string {
   if (!rawPhone) return 'N/A';
   const clean = String(rawPhone).replace(/\D/g, '');
@@ -541,7 +547,7 @@ export class NotificationService {
       // (fire-and-forget — does not block the response)
       try {
         const batchDb = await dbManager.getConnection();
-        await recordPlacedOrder(batchDb, storeName, storeId, items, deliveryPersons);
+        await recordPlacedOrder(batchDb, storeName, storeId, items || [], deliveryPersons || []);
       } catch (recErr) {
         console.warn('[CartOrderNotif] Failed to record order for daily batch:', recErr);
       }

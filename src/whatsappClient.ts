@@ -23,6 +23,9 @@ export function isPuppeteerDetachedError(msg?: string): boolean {
   const str = String(msg);
   return (
     str.includes('detached Frame') ||
+    str.includes('Navigating frame was detached') ||
+    str.includes('LifecycleWatcher') ||
+    str.includes('ECONNREFUSED') ||
     str.includes('Execution context was destroyed') ||
     str.includes('Session closed') ||
     str.includes('Target closed') ||
@@ -523,7 +526,12 @@ export async function initClient(): Promise<WAClient> {
     });
 
     client.initialize().catch(err => {
-      console.error('[WhatsApp] Failed during initialize():', err);
+      const errMsg = err?.message || String(err);
+      if (isPuppeteerDetachedError(errMsg)) {
+        console.warn('[WhatsApp] Initialize interrupted by teardown/reconnect:', errMsg);
+      } else {
+        console.error('[WhatsApp] Failed during initialize():', err);
+      }
       initializing = false;
       isReady = false;
       clientInstance = null;
