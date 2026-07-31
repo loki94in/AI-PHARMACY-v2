@@ -73,7 +73,9 @@ export const ModuleSection: React.FC<ModuleSectionProps> = ({
       >
         <div className="flex items-center gap-3">
           <span className="text-xl">{label}</span>
-          <span className="text-muted text-sm">({totalRows.toLocaleString()} rows)</span>
+          <span className="text-muted text-xs font-mono font-medium bg-bg3/60 px-2 py-0.5 rounded border border-glass-border">
+            {samples.length > 0 ? `${samples.length} sample rows inspected` : `${headers.length} columns detected`}
+          </span>
           {!isAllRequiredMapped && (
             <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse">
               <AlertCircle size={12} />

@@ -617,7 +617,29 @@ router.post('/staging/finalize', async (req, res) => {
       console.warn('Failed to restart workers:', err);
     }
 
-    res.json({ success: true, message: 'Migration finalized and live!' });
+    // 13. Query actual live database counts for the success modal
+    let stats = { medicines: 0, inventory: 0, purchases: 0, sales: 0, returns: 0, distributors: 0 };
+    try {
+      const medRow = await activeDb.get('SELECT COUNT(*) as cnt FROM medicines');
+      const invRow = await activeDb.get('SELECT COUNT(*) as cnt FROM inventory_master');
+      const purRow = await activeDb.get('SELECT COUNT(*) as cnt FROM purchases');
+      const salRow = await activeDb.get('SELECT COUNT(*) as cnt FROM sales_invoices');
+      const retRow = await activeDb.get('SELECT COUNT(*) as cnt FROM returns');
+      const distRow = await activeDb.get('SELECT COUNT(*) as cnt FROM distributors');
+
+      stats = {
+        medicines: medRow?.cnt || 0,
+        inventory: invRow?.cnt || 0,
+        purchases: purRow?.cnt || 0,
+        sales: salRow?.cnt || 0,
+        returns: retRow?.cnt || 0,
+        distributors: distRow?.cnt || 0,
+      };
+    } catch (countErr) {
+      console.warn('[Migration Finalize] Could not query table counts:', countErr);
+    }
+
+    res.json({ success: true, message: 'Migration finalized and live!', stats });
   } catch (e: any) {
     console.error('[Migration Finalize] Error during finalize:', e);
 

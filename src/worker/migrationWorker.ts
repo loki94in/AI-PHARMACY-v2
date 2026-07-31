@@ -995,14 +995,36 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   migrationStatus.progress = 97;
   console.log(migrationStatus.message);
 
-    // ─── Generate Summary Report ──────────────────────────────
-    migrationStatus.message = 'Generating migration summary report...';
-    await generateMigrationReport(db, stats);
+  // ─── POST-MIGRATION SANITIZATION: Filter pre-expired & zero-stock batches ───
+  migrationStatus.message = 'Post-migration sanitization: Filtering pre-expired & zero-stock batches...';
+  try {
+    // 1. Zero out batches that expired prior to today so they never pollute near-expiry/non-moving reports
+    await db.run(`
+      UPDATE inventory_master 
+      SET quantity = 0, loose_quantity = 0 
+      WHERE expiry_date IS NOT NULL 
+        AND date(expiry_date) < date('now')
+    `);
 
-    migrationStatus.message = `Migration Complete! ${stats.medicines} medicines, ${stats.purchases} purchases, ${stats.salesInvoices} sales, ${stats.returns} returns, ${stats.payments} payments, ${stats.b2bInvoices} B2B invoices, ${stats.purchaseOrders} POs imported.`;
-    migrationStatus.progress = 100;
-    console.log('=== MIGRATION COMPLETE ===');
-    console.log(JSON.stringify(stats, null, 2));
+    // 2. Zero out batches with negative or missing ledger balances
+    await db.run(`
+      UPDATE inventory_master 
+      SET quantity = 0, loose_quantity = 0 
+      WHERE quantity < 0 OR loose_quantity < 0
+    `);
+    console.log('[Migration] Post-migration sanitization complete: pre-expired and zero/negative stock batches zeroed.');
+  } catch (cleanErr: any) {
+    console.warn('[Migration] Post-migration sanitization warning:', cleanErr.message);
+  }
+
+  // ─── Generate Summary Report ──────────────────────────────
+  migrationStatus.message = 'Generating migration summary report...';
+  await generateMigrationReport(db, stats);
+
+  migrationStatus.message = `Migration Complete! ${stats.medicines} medicines, ${stats.purchases} purchases, ${stats.salesInvoices} sales, ${stats.returns} returns, ${stats.payments} payments, ${stats.b2bInvoices} B2B invoices, ${stats.purchaseOrders} POs imported.`;
+  migrationStatus.progress = 100;
+  console.log('=== MIGRATION COMPLETE ===');
+  console.log(JSON.stringify(stats, null, 2));
   } finally {
     await db.close();
   }

@@ -49,10 +49,12 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   // Migration status and results
   const [status, setStatus] = useState<any>(null);
   const [summary, setSummary] = useState({
+    medicines: 0,
     inventory: 0,
     purchases: 0,
     sales: 0,
     returns: 0,
+    distributors: 0,
     errors: 0
   });
 
@@ -185,27 +187,18 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
   const handleFinalize = async () => {
     try {
-      // Get counts from staging before final swap
-      try {
-        const invData = await api.getStagingInventory();
-        const purData = await api.getStagingPurchases();
-        const salData = await api.getStagingSales();
-        const retData = await api.getStagingReturns();
-        const errData = await api.getStagingErrors();
-
-        setSummary({
-          inventory: Array.isArray(invData) ? invData.length : 0,
-          purchases: Array.isArray(purData) ? purData.length : 0,
-          sales: Array.isArray(salData) ? salData.length : 0,
-          returns: Array.isArray(retData) ? retData.length : 0,
-          errors: Array.isArray(errData) ? errData.length : 0
-        });
-      } catch (e) {
-        console.warn('Failed to fetch counts from staging db', e);
-      }
-
       const res = await api.finalizeMigration(false);
       if (res.success) {
+        const stats = res.stats || status?.stats || {};
+        setSummary({
+          medicines: stats.medicines || 0,
+          inventory: stats.inventory || 0,
+          purchases: stats.purchases || 0,
+          sales: stats.sales || 0,
+          returns: stats.returns || 0,
+          distributors: stats.distributors || 0,
+          errors: status?.errorCount || 0
+        });
         setPhase('success');
       } else {
         setPhase('error');
@@ -377,7 +370,12 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-xl font-semibold text-text">Migration Complete!</h4>
-                  <p className="text-sm text-muted">All staging records successfully committed to main database.</p>
+                  <p className="text-sm text-muted">All verified records committed to live pharmacy database.</p>
+                  <div className="pt-2 flex items-center justify-center gap-2">
+                    <span className="text-xs font-mono bg-bg3 text-sky px-2.5 py-1 rounded-md border border-glass-border">
+                      File: {fileEntry.originalName} ({fileEntry.ext.toUpperCase()})
+                    </span>
+                  </div>
                 </div>
 
                 {/* Import Results Table */}
@@ -385,45 +383,57 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="bg-bg3/60 text-muted border-b border-glass-border">
-                        <th className="px-4 py-2 font-medium">Module</th>
+                        <th className="px-4 py-2 font-medium">Entity / Module</th>
                         <th className="px-4 py-2 font-medium text-right">Imported Count</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-glass-border/30 text-text/90">
+                      {summary.medicines > 0 && (
+                        <tr className="hover:bg-white/[0.01] transition-colors">
+                          <td className="px-4 py-2.5 font-medium">💊 Medicine Catalog</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.medicines.toLocaleString()}</td>
+                        </tr>
+                      )}
                       {summary.inventory > 0 && (
                         <tr className="hover:bg-white/[0.01] transition-colors">
-                          <td className="px-4 py-2.5 font-medium">📦 Inventory</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400">{summary.inventory}</td>
+                          <td className="px-4 py-2.5 font-medium">📦 Inventory & Batches</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.inventory.toLocaleString()}</td>
                         </tr>
                       )}
                       {summary.purchases > 0 && (
                         <tr className="hover:bg-white/[0.01] transition-colors">
-                          <td className="px-4 py-2.5 font-medium">🛒 Purchases</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400">{summary.purchases}</td>
+                          <td className="px-4 py-2.5 font-medium">🛒 Purchase Invoices</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.purchases.toLocaleString()}</td>
                         </tr>
                       )}
                       {summary.sales > 0 && (
                         <tr className="hover:bg-white/[0.01] transition-colors">
                           <td className="px-4 py-2.5 font-medium">💰 Sales Invoices</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400">{summary.sales}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.sales.toLocaleString()}</td>
                         </tr>
                       )}
                       {summary.returns > 0 && (
                         <tr className="hover:bg-white/[0.01] transition-colors">
                           <td className="px-4 py-2.5 font-medium">🔄 Returns / Expiry</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400">{summary.returns}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.returns.toLocaleString()}</td>
+                        </tr>
+                      )}
+                      {summary.distributors > 0 && (
+                        <tr className="hover:bg-white/[0.01] transition-colors">
+                          <td className="px-4 py-2.5 font-medium">🏢 Suppliers / Distributors</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.distributors.toLocaleString()}</td>
                         </tr>
                       )}
                       {summary.errors > 0 && (
                         <tr className="bg-rose-500/5 hover:bg-rose-500/10 transition-colors">
                           <td className="px-4 py-2.5 font-medium text-rose-400">⚠️ Skipped / Errors</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-rose-400">{summary.errors}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-rose-400 font-semibold">{summary.errors.toLocaleString()}</td>
                         </tr>
                       )}
-                      {summary.inventory === 0 && summary.purchases === 0 && summary.sales === 0 && summary.returns === 0 && (
+                      {summary.medicines === 0 && summary.inventory === 0 && summary.purchases === 0 && summary.sales === 0 && summary.returns === 0 && (
                         <tr>
                           <td className="px-4 py-4 text-center text-muted italic" colSpan={2}>
-                            No records were written to staging
+                            Import finished successfully for <span className="text-sky font-mono font-medium">{fileEntry.originalName}</span>
                           </td>
                         </tr>
                       )}

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent, liveCartAddEvent } from '../services/events';
-import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
+
 import { findBestCartMatchForOrder } from '../utils/orderFuzzyMatcher';
 
 interface SuggestionMedicine {
@@ -284,6 +284,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [searchLoading, setSearchLoading] = useState(false);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>(cachedPrMode);
 
   // Cart Preview States (Hydrated instantly from module cache)
@@ -818,74 +819,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       setAddingOrderId(null);
     }
   };
-
-  // Cheaper option state
-  const [cheaperDistributor, setCheaperDistributor] = useState<any | null>(null);
-
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const productInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const ignoreNextSearchRef = useRef(false);
-
-  const handleSwitchToCheaper = () => {
-    if (cheaperDistributor) {
-      setSelectedDistributor(cheaperDistributor.distributor || '');
-      setSelectedRate(cheaperDistributor.rate !== undefined && cheaperDistributor.rate !== null ? cheaperDistributor.rate : '');
-      setSelectedMrp(cheaperDistributor.mrp !== undefined && cheaperDistributor.mrp !== null ? cheaperDistributor.mrp : '');
-      setSelectedMapped(cheaperDistributor.mapped !== undefined ? cheaperDistributor.mapped : null);
-      setSelectedScheme(cheaperDistributor.scheme || '');
-      setSelectedProductId(cheaperDistributor.productId || '');
-      setSelectedStoreId(cheaperDistributor.storeId || '');
-      setSelectedProductCode(cheaperDistributor.productCode || '');
-      setSelectedCompany(cheaperDistributor.company || '');
-      setSelectedPackaging(cheaperDistributor.packaging || '');
-      setSelectedMedicineName(cheaperDistributor.medicine_name || '');
-      toastEvent.trigger(`Switched to cheaper option from ${cheaperDistributor.distributor}!`, 'success');
-    }
-  };
-
-  useEffect(() => {
-    if (selectedStoreId && selectedProductId && selectedRate !== '' && selectedMedicineName) {
-      const currentEff = getEffectiveRate(Number(selectedRate), selectedScheme, qty);
-      
-      let bestOption: any = null;
-      let bestEff = currentEff;
-
-      const targetPackaging = `${selectedMedicineName} ${selectedPackaging}`;
-      const searchPool = candidateOptions.length > 0 ? candidateOptions : suggestions;
-
-      searchPool.forEach(item => {
-        if (item.storeId !== selectedStoreId && item.rate) {
-          // Check stock status: exclude 0 stock or unavailable items
-          const stockStr = (item.stock || '').toLowerCase().trim();
-          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock';
-          if (isOutOfStock) return;
-
-          // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
-          const candidatePackaging = `${item.medicine_name} ${item.packaging}`;
-          if (!isPackagingCompatible(targetPackaging, candidatePackaging)) return;
-
-          const nameClean1 = item.medicine_name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const nameClean2 = selectedMedicineName.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if ((nameClean1 === nameClean2 || nameClean1.includes(nameClean2) || nameClean2.includes(nameClean1)) && item.rate) {
-            const itemEff = getEffectiveRate(item.rate, item.scheme, qty);
-            if (itemEff < bestEff - 0.01) {
-              bestEff = itemEff;
-              bestOption = {
-                ...item,
-                effectiveRate: itemEff
-              };
-            }
-          }
-        }
-      });
-
-      setCheaperDistributor(bestOption);
-    } else {
-      setCheaperDistributor(null);
-    }
-  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, candidateOptions, selectedMedicineName, selectedPackaging]);
-
 
   // Find the minimum effective rate among all suggestions to identify the best rate option
   const minEffectiveRate = React.useMemo(() => {
@@ -903,7 +840,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   // fetchCart logic
   const fetchCart = async (silent?: boolean | any) => {
     const isSilent = typeof silent === 'boolean' ? silent : false;
-    if (!isSilent && cachedCartDistributors.length === 0) {
+    if (!isSilent) {
       setCartLoading(true);
     }
     setCartError(null);
@@ -924,6 +861,25 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       }
     } finally {
       setCartLoading(false);
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.allSettled([
+        fetchCart(false),
+        fetchPendingOrders(),
+        fetchPendingRefills(),
+        fetchReconOrders(),
+        fetchAutoRefillItems()
+      ]);
+      toastEvent.trigger('Cart & pending lists refreshed!', 'success');
+    } catch (err: any) {
+      console.error('Failed to refresh modal cart:', err);
+      toastEvent.trigger('Failed to refresh cart data', 'error');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1017,12 +973,31 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const delayDebounce = setTimeout(async () => {
       setSearchLoading(true);
       try {
+        // Fetch local database medicines instantly
+        const localData = await api.searchMedicine(cleanQuery).catch(() => []);
+        const localList: SuggestionMedicine[] = (Array.isArray(localData) ? localData : []).map((med: any) => ({
+          medicine_name: med.name || med.medicine_name,
+          shortName: med.name || med.medicine_name,
+          fullName: med.name || med.medicine_name,
+          mrp: med.mrp,
+          isPharmarack: false,
+          packaging: med.packaging || med.pack,
+          company: med.company || med.manufacturer
+        }));
+
+        // Render local items right away if found
+        if (localList.length > 0) {
+          setSuggestions(localList);
+          setShowSuggestions(true);
+        }
+
+        // Fetch Pharmarack live search in parallel
         const prData = await api.searchPharmarack(cleanQuery).catch((err: any) => {
           const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
         });
 
-        const mergedList: SuggestionMedicine[] = [];
+        const mergedList: SuggestionMedicine[] = [...localList];
 
         if (prData && !(prData as any).isError && Array.isArray(prData) && prData.length > 0) {
           prData.forEach((item: any) => {
@@ -1046,12 +1021,14 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             });
           });
         } else if (prData && (prData as any).isError) {
-          mergedList.push({
-            medicine_name: `⚠️ ${(prData as any).message}`,
-            isPharmarack: true,
-            isErrorMessage: true
-          });
-        } else {
+          if (localList.length === 0) {
+            mergedList.push({
+              medicine_name: `⚠️ ${(prData as any).message}`,
+              isPharmarack: true,
+              isErrorMessage: true
+            });
+          }
+        } else if (localList.length === 0) {
           mergedList.push({
             medicine_name: `No distributor matches found for "${cleanQuery}"`,
             isPharmarack: true,
@@ -1063,11 +1040,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         setShowSuggestions(mergedList.length > 0);
         setActiveSuggestionIndex(-1);
       } catch (err) {
-        console.error('Error searching Pharmarack live catalog:', err);
+        console.error('Error searching catalog:', err);
       } finally {
         setSearchLoading(false);
       }
-    }, 300);
+    }, 200);
 
     return () => clearTimeout(delayDebounce);
   }, [product]);
@@ -1273,25 +1250,27 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       {/* ponytail: fix height to h-[85vh] to prevent modal size from jumping when cart preview loads */}
       <div className="glass-panel max-w-5xl lg:max-w-6xl xl:max-w-7xl w-full h-[85vh] max-h-[85vh] p-5 md:p-6 relative border border-glass-border shadow-[0_0_60px_rgba(59,130,246,0.25)] bg-bg2 text-text animate-in fade-in zoom-in-95 duration-200 flex flex-col">
         
-        {/* Close Button */}
-        <button 
-          onClick={handleClose}
-          className="absolute top-4 right-4 p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all"
-          title="Close Modal (Esc)"
-        >
-          <X size={18} />
-        </button>
-
-        {/* Refresh Button */}
-        <button 
-          type="button"
-          onClick={() => fetchCart()}
-          disabled={cartLoading}
-          className="absolute top-4 right-4 md:right-[33.33%] md:mr-2.5 p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all flex items-center justify-center disabled:opacity-50"
-          title="Refresh Cart"
-        >
-          <RefreshCw size={14} className={cartLoading ? 'animate-spin text-emerald-400' : ''} />
-        </button>
+        {/* Header Action Buttons (Side-by-side flex container prevents button overlaps) */}
+        <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+          <button 
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing || cartLoading}
+            className="p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all flex items-center gap-1.5 text-xs font-semibold border border-glass-border/50 bg-bg3/60 hover:bg-bg3 disabled:opacity-50"
+            title="Refresh Cart & Pending Lists"
+          >
+            <RefreshCw size={14} className={isRefreshing || cartLoading ? 'animate-spin text-emerald-400' : ''} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          <button 
+            type="button"
+            onClick={handleClose}
+            className="p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all border border-glass-border/50 bg-bg3/60 hover:bg-bg3"
+            title="Close Modal (Esc)"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 divide-y md:divide-y-0 md:divide-x divide-glass-border/30 flex-1 overflow-hidden">
           
@@ -1773,28 +1752,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   </div>
                 )}
 
-                {/* Cheaper distributor suggestion banner */}
-                {cheaperDistributor && (
-                  <button
-                    type="button"
-                    onClick={handleSwitchToCheaper}
-                    className="w-full text-left p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-text flex items-center justify-between shadow-sm hover:bg-amber-500/15 transition-all select-none animate-in fade-in slide-in-from-top-2 duration-200"
-                  >
-                    <div className="pr-2.5 min-w-0 flex-1">
-                      <div className="font-bold text-amber-400 flex items-center gap-1 uppercase tracking-wider text-[10px] mb-1">
-                        <Sparkles size={12} />
-                        <span>Cheaper Distributor Offer Available!</span>
-                      </div>
-                      <div className="text-text/90 leading-relaxed text-[11px]">
-                        <span className="font-bold">{cheaperDistributor.distributor}</span> has this for an effective PTR of <span className="font-black text-emerald-400">₹{cheaperDistributor.effectiveRate.toFixed(2)}</span>
-                        {cheaperDistributor.scheme && ` (${cheaperDistributor.scheme} scheme)`}.
-                      </div>
-                    </div>
-                    <div className="text-[10px] font-bold text-amber-400 bg-amber-500/20 px-2 py-1 rounded-lg shrink-0 uppercase tracking-wider">
-                      Switch
-                    </div>
-                  </button>
-                )}
+
 
                 {/* Quantity Selector */}
                 <div>

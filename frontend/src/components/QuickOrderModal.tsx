@@ -4,7 +4,7 @@ import { X, Search, Plus, Minus, ClipboardList, ClipboardPlus, Sparkles, Loader2
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent, specialOrdersEvent } from '../services/events';
 import { useApiQuery } from '../hooks/useApiQuery';
-import { isPackagingCompatible, getMatchScore } from '../utils/packagingMatcher';
+
 
 
 interface SuggestionMedicine {
@@ -128,79 +128,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [duplicateMatchIndex, setDuplicateMatchIndex] = useState<number>(-1);
   const [pendingItemToAdd, setPendingItemToAdd] = useState<any | null>(null);
 
-  // Cheaper option state
-  const [cheaperDistributor, setCheaperDistributor] = useState<any | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      const fetchSessionStatus = async () => {
-        try {
-          const data = await api.checkPharmarackSession();
-          setPrMode(data.mode || 'Live');
-        } catch (err) {
-          console.error('Failed to fetch Pharmarack session status in modal:', err);
-          setPrMode('Live');
-        }
-      };
-      fetchSessionStatus();
-    }
-  }, [isOpen]);
-
-  const handleSwitchToCheaper = () => {
-    if (cheaperDistributor) {
-      setSelectedDistributor(cheaperDistributor.distributor || '');
-      setSelectedRate(cheaperDistributor.rate !== undefined && cheaperDistributor.rate !== null ? cheaperDistributor.rate : '');
-      setSelectedMrp(cheaperDistributor.mrp !== undefined && cheaperDistributor.mrp !== null ? cheaperDistributor.mrp : '');
-      setSelectedMapped(cheaperDistributor.mapped !== undefined ? cheaperDistributor.mapped : null);
-      setSelectedScheme(cheaperDistributor.scheme || '');
-      setSelectedProductId(cheaperDistributor.productId || '');
-      setSelectedStoreId(cheaperDistributor.storeId || '');
-      setSelectedProductCode(cheaperDistributor.productCode || '');
-      setSelectedCompany(cheaperDistributor.company || '');
-      setSelectedPackaging(cheaperDistributor.packaging || '');
-      toastEvent.trigger(`Switched to cheaper option from ${cheaperDistributor.distributor}!`, 'success');
-    }
-  };
-
-  useEffect(() => {
-    if (selectedStoreId && selectedProductId && selectedRate !== '') {
-      const currentEff = getEffectiveRate(Number(selectedRate), selectedScheme, qty);
-      
-      let bestOption: any = null;
-      let bestEff = currentEff;
-
-      const targetPackaging = `${product} ${selectedPackaging}`;
-
-      suggestions.forEach(item => {
-        if (item.storeId !== selectedStoreId && item.rate) {
-          const stockStr = (item.stock || '').toLowerCase().trim();
-          const isOutOfStock = stockStr === '0' || stockStr === 'out of stock' || stockStr === 'no stock';
-          if (isOutOfStock) return;
-
-          // Check packaging compatibility: exclude mismatched size/volume (e.g. 50 ML vs 100 ML)
-          const candidatePackaging = `${item.medicine_name} ${item.packaging}`;
-          if (!isPackagingCompatible(targetPackaging, candidatePackaging)) return;
-
-          const nameClean1 = item.medicine_name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const nameClean2 = product.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if ((nameClean1 === nameClean2 || nameClean1.includes(nameClean2) || nameClean2.includes(nameClean1)) && item.rate) {
-            const itemEff = getEffectiveRate(item.rate, item.scheme, qty);
-            if (itemEff < bestEff - 0.01) {
-              bestEff = itemEff;
-              bestOption = {
-                ...item,
-                effectiveRate: itemEff
-              };
-            }
-          }
-        }
-      });
-
-      setCheaperDistributor(bestOption);
-    } else {
-      setCheaperDistributor(null);
-    }
-  }, [selectedStoreId, selectedProductId, selectedRate, selectedScheme, qty, suggestions, product, selectedPackaging]);
 
   const resetInputsAndFocus = () => {
     setProduct('');
@@ -915,28 +843,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                     </div>
                   )}
 
-                  {/* Cheaper distributor suggestion banner */}
-                  {cheaperDistributor && (
-                    <button
-                      type="button"
-                      onClick={handleSwitchToCheaper}
-                      className="mt-3 w-full text-left p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs text-text flex items-center justify-between shadow-sm hover:bg-amber-500/15 transition-all select-none animate-in fade-in slide-in-from-top-2 duration-200"
-                    >
-                      <div className="pr-2 min-w-0 flex-1">
-                        <div className="font-bold text-amber-400 flex items-center gap-1 uppercase tracking-wider text-[10px] mb-1">
-                          <Sparkles size={13} />
-                          <span>Cheaper Distributor Offer Available!</span>
-                        </div>
-                        <div className="text-text/90">
-                          <span className="font-bold">{cheaperDistributor.distributor}</span> has this for an effective PTR of <span className="font-black text-emerald-400">₹{cheaperDistributor.effectiveRate.toFixed(2)}</span>
-                          {cheaperDistributor.scheme && ` (with ${cheaperDistributor.scheme} scheme)`}.
-                        </div>
-                      </div>
-                      <div className="text-[10px] font-bold text-amber-400 bg-amber-500/20 px-2 py-1 rounded-xl shrink-0 uppercase tracking-wider">
-                        Switch
-                      </div>
-                    </button>
-                  )}
+
                 </div>
 
                 {/* Quantity and Add Button Row */}
