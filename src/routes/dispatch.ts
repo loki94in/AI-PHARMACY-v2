@@ -191,8 +191,11 @@ router.get('/messages/dates', async (_req, res) => {
     const rows = await db.all(`
       SELECT DISTINCT date(created_at) as date_str
       FROM automation_notifications
-      WHERE type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
-         OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+      WHERE type IN (
+        'delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment',
+        'admin_shortage_reminder', 'dispatch', 'delivery_boy_cart_order',
+        'delivery_boy_summary', 'distributor_cart_order'
+      )
       ORDER BY date_str DESC
       LIMIT 30
     `);
@@ -213,9 +216,10 @@ router.get('/messages', async (req, res) => {
       SELECT id, type, recipient_name, recipient_phone, message, status, error_message, created_at
       FROM automation_notifications
       WHERE date(created_at) = ?
-        AND (
-          type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
-          OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+        AND type IN (
+          'delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment',
+          'admin_shortage_reminder', 'dispatch', 'delivery_boy_cart_order',
+          'delivery_boy_summary', 'distributor_cart_order'
         )
       ORDER BY created_at DESC
     `, [targetDate]);

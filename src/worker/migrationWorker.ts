@@ -998,21 +998,25 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
   // ─── POST-MIGRATION SANITIZATION: Filter pre-expired & zero-stock batches ───
   migrationStatus.message = 'Post-migration sanitization: Filtering pre-expired & zero-stock batches...';
   try {
-    // 1. Zero out batches that expired prior to today so they never pollute near-expiry/non-moving reports
-    await db.run(`
-      UPDATE inventory_master 
-      SET quantity = 0, loose_quantity = 0 
-      WHERE expiry_date IS NOT NULL 
+    // 1. Zero only batches with valid YYYY-MM-DD expiry clearly in the past (avoids garbage date strings)
+    const expiredRes = await db.run(`
+      UPDATE inventory_master
+      SET quantity = 0, loose_quantity = 0
+      WHERE expiry_date IS NOT NULL
+        AND expiry_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
         AND date(expiry_date) < date('now')
     `);
 
-    // 2. Zero out batches with negative or missing ledger balances
-    await db.run(`
-      UPDATE inventory_master 
-      SET quantity = 0, loose_quantity = 0 
+    // 2. Clamp negative ledger balances to zero
+    const negativeRes = await db.run(`
+      UPDATE inventory_master
+      SET quantity = CASE WHEN quantity < 0 THEN 0 ELSE quantity END,
+          loose_quantity = CASE WHEN loose_quantity < 0 THEN 0 ELSE loose_quantity END
       WHERE quantity < 0 OR loose_quantity < 0
     `);
-    console.log('[Migration] Post-migration sanitization complete: pre-expired and zero/negative stock batches zeroed.');
+    console.log(
+      `[Migration] Post-migration sanitization complete: ${expiredRes.changes || 0} expired batches zeroed, ${negativeRes.changes || 0} negative rows clamped.`
+    );
   } catch (cleanErr: any) {
     console.warn('[Migration] Post-migration sanitization warning:', cleanErr.message);
   }

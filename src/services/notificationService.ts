@@ -30,6 +30,12 @@ function isSendSuccess(result: SendMessageResult): boolean {
   return result.sent === true;
 }
 
+function sendLogStatus(result: SendMessageResult): 'sent' | 'suppressed' | 'failed' {
+  if (!result.sent) return 'failed';
+  if (result.suppressed) return 'suppressed';
+  return 'sent';
+}
+
 export function formatDisplayPhone(rawPhone?: string | null): string {
   if (!rawPhone) return 'N/A';
   const clean = String(rawPhone).replace(/\D/g, '');
@@ -348,16 +354,16 @@ export class NotificationService {
       for (const phone of uniqueDistPhones) {
         try {
           const sendResult = await sendMessage(phone, undefined, message);
+          const logStatus = sendLogStatus(sendResult);
           if (isSendSuccess(sendResult)) {
             sentCount++;
             if (sendResult.suppressed) suppressedCount++;
           }
 
-          // Log success to automation_notifications
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['distributor_invoice_order', purchase.distributor_name, phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `inv_${purchase.invoice_no}`]
+            ['distributor_invoice_order', purchase.distributor_name, phone, message, logStatus, `inv_${purchase.invoice_no}`]
           );
         } catch (wsError: any) {
           console.error(`[DistributorNotif] Failed to send WhatsApp to distributor number ${phone}:`, wsError);
@@ -525,6 +531,7 @@ export class NotificationService {
         for (const phone of uniqueDistPhones) {
           try {
             const sendResult = await sendMessage(phone, undefined, message);
+            const logStatus = sendLogStatus(sendResult);
             if (isSendSuccess(sendResult)) {
               sentCount++;
               if (sendResult.suppressed) suppressedCount++;
@@ -532,7 +539,7 @@ export class NotificationService {
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['distributor_cart_order', storeName, phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `store_${storeId}`]
+              ['distributor_cart_order', storeName, phone, message, logStatus, `store_${storeId}`]
             );
           } catch (err: any) {
             console.error(`[CartOrderNotif] Failed to notify distributor ${storeName} at ${phone}:`, err);
@@ -549,6 +556,7 @@ export class NotificationService {
       for (const boy of resolvedDeliveryBoys) {
         try {
           const sendResult = await sendMessage(boy.phone, undefined, message);
+          const logStatus = sendLogStatus(sendResult);
           if (isSendSuccess(sendResult)) {
             sentCount++;
             if (sendResult.suppressed) suppressedCount++;
@@ -556,7 +564,7 @@ export class NotificationService {
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_cart_order', boy.name, boy.phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `store_${storeId}`]
+            ['delivery_boy_cart_order', boy.name, boy.phone, message, logStatus, `store_${storeId}`]
           );
         } catch (err: any) {
           console.error(`[CartOrderNotif] Failed to notify delivery boy ${boy.name} at ${boy.phone}:`, err);

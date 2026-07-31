@@ -155,6 +155,25 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true, status: 'ok', time: new Date().toISOString() });
 });
 
+// Local SPA bootstrap: issue session token without embedding defaults in the client bundle
+app.get('/api/auth/bootstrap-token', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'license_session_token'"
+    );
+    const sessionToken = row?.value?.trim();
+    if (sessionToken) {
+      return res.json({ token: sessionToken, source: 'session' });
+    }
+    const { config } = await import('./config/index.js');
+    return res.json({ token: config.apiKey, source: 'legacy' });
+  } catch (err) {
+    console.error('[Auth] bootstrap-token error:', err);
+    return res.status(500).json({ error: 'Failed to resolve auth token' });
+  }
+});
+
 // Session token auth for all other API routes
 app.use('/api', authenticateApiKey);
 

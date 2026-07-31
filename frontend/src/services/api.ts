@@ -10,15 +10,41 @@ export const apiClient = axios.create({
   },
 });
 
-// Interceptor to attach the session token if available.
-// Falls back to the backend's own documented default API key (see
-// config.apiKey in src/config/index.ts) when no real license session token
-// has been issued yet — there's no activation flow wired up in this build,
-// so without this fallback every request 401s with no way to recover.
-apiClient.interceptors.request.use((config) => {
+let cachedBootstrapToken: string | null = null;
+let bootstrapTokenPromise: Promise<string | null> | null = null;
+
+/** Resolve auth token from storage or server bootstrap (no hardcoded fallback in bundle). */
+export async function ensureAuthToken(): Promise<string | null> {
   try {
-    const token = localStorage.getItem('session_token') || localStorage.getItem('api_key') || 'Pass@123';
-    config.headers['x-session-token'] = token;
+    const stored = localStorage.getItem('session_token') || localStorage.getItem('api_key');
+    if (stored) return stored;
+  } catch {
+    // localStorage unavailable
+  }
+  if (cachedBootstrapToken) return cachedBootstrapToken;
+  if (!bootstrapTokenPromise) {
+    bootstrapTokenPromise = fetch(`${API_URL}/auth/bootstrap-token`)
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        cachedBootstrapToken = data?.token?.trim() || null;
+        return cachedBootstrapToken;
+      })
+      .catch(() => null)
+      .finally(() => {
+        bootstrapTokenPromise = null;
+      });
+  }
+  return bootstrapTokenPromise;
+}
+
+// Interceptor to attach the session token if available.
+// When unactivated, fetches token from /api/auth/bootstrap-token (server-side legacy key).
+apiClient.interceptors.request.use(async (config) => {
+  try {
+    const token = await ensureAuthToken();
+    if (token) {
+      config.headers['x-session-token'] = token;
+    }
   } catch (err) {
     console.warn('localStorage access denied. Token not attached.');
   }

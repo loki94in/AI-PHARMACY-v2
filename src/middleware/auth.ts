@@ -64,6 +64,8 @@ export async function authenticateApiKey(req: Request, res: Response, next: Next
     path.startsWith('/notifications/register-token') ||
     originalUrl.startsWith('/api/health') ||
     path === '/health' ||
+    originalUrl.startsWith('/api/auth/bootstrap-token') ||
+    path === '/auth/bootstrap-token' ||
     originalUrl.startsWith('/api/security/admin/login') ||
     path.startsWith('/security/admin/login')
   ) {

@@ -103,7 +103,6 @@ class WhatsAppQueueWorker {
     const minTs = Math.floor((Date.now() - 60000) / 1000);
     const msgHash = hashMessageBody(message);
     const msgLen = (message || '').trim().length;
-    const trimmed = (message || '').trim();
 
     const rows = await db.all(
       `SELECT body FROM whatsapp_messages
@@ -120,23 +119,27 @@ class WhatsAppQueueWorker {
       if (hashMessageBody(body) === msgHash && body.length === msgLen) {
         return true;
       }
-      if (trimmed.length >= 20 && body.includes(trimmed.slice(0, 80))) {
-        return true;
-      }
     }
     return false;
   }
 
-  /** Mark pharmarack placed order as batch-sent when distributor queue message delivers */
+  /** Mark the oldest unsent pharmarack placed order for this store when distributor queue message delivers */
   private async markPharmarackOrderSent(db: any, targetName: string | null | undefined): Promise<void> {
     if (!targetName?.trim()) return;
     const today = new Date().toISOString().split('T')[0];
     const now = Date.now();
     try {
+      const pending = await db.get(
+        `SELECT id FROM pharmarack_placed_orders
+         WHERE order_date = ? AND store_name = ? AND batch_sent = 0
+         ORDER BY placed_at ASC
+         LIMIT 1`,
+        [today, targetName.trim()]
+      );
+      if (!pending?.id) return;
       await db.run(
-        `UPDATE pharmarack_placed_orders SET batch_sent = 1, batch_sent_at = ?
-         WHERE order_date = ? AND store_name = ? AND batch_sent = 0`,
-        [now, today, targetName.trim()]
+        `UPDATE pharmarack_placed_orders SET batch_sent = 1, batch_sent_at = ? WHERE id = ?`,
+        [now, pending.id]
       );
     } catch (err) {
       console.warn('[WhatsAppQueueWorker] Could not update pharmarack_placed_orders batch_sent:', err);

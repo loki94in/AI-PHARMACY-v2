@@ -1708,11 +1708,13 @@ export const Layout = ({
     (async () => {
       try {
         await api.getCompactInventory();
-        if (!cancelled) console.log('[Layout] Compact inventory cache loaded.');
+        if (!cancelled) {
+          console.log('[Layout] Compact inventory cache loaded.');
+          setCompactCacheLoaded(true);
+        }
       } catch (err) {
         if (!cancelled) console.warn('[Layout] Failed to load compact inventory:', err);
       }
-      if (!cancelled) setCompactCacheLoaded(true);
     })();
     return () => { cancelled = true; };
   }, [compactCacheLoaded]);

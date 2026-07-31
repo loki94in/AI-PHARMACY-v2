@@ -212,6 +212,19 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     try {
       const res = await api.finalizeMigration(false);
       if (res.success) {
+        if (res.stats) {
+          setSummary({
+            medicines: res.stats.medicines || 0,
+            inventory: res.stats.inventory || 0,
+            purchases: res.stats.purchases || 0,
+            sales: res.stats.sales || 0,
+            returns: res.stats.returns || 0,
+            distributors: res.stats.distributors || 0,
+            customers: res.stats.customers || 0,
+            doctors: res.stats.doctors || 0,
+            errors: status?.errorCount || 0,
+          });
+        }
         setPhase('success');
       } else {
         setPhase('error');
