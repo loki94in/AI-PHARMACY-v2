@@ -104,6 +104,37 @@ router.get('/status', (req, res) => {
   res.json(migrationStatus);
 });
 
+// Get active migration summary & table counts
+router.get('/summary', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const medRow = await db.get('SELECT COUNT(*) as cnt FROM medicines');
+    const invRow = await db.get('SELECT COUNT(*) as cnt FROM inventory_master');
+    const purRow = await db.get('SELECT COUNT(*) as cnt FROM purchases');
+    const salRow = await db.get('SELECT COUNT(*) as cnt FROM sales_invoices');
+    const retRow = await db.get('SELECT COUNT(*) as cnt FROM returns');
+    const distRow = await db.get('SELECT COUNT(*) as cnt FROM distributors');
+    const custRow = await db.get('SELECT COUNT(*) as cnt FROM customers');
+    const docRow = await db.get('SELECT COUNT(*) as cnt FROM doctors');
+
+    res.json({
+      success: true,
+      stats: {
+        medicines: medRow?.cnt || 0,
+        inventory: invRow?.cnt || 0,
+        purchases: purRow?.cnt || 0,
+        sales: salRow?.cnt || 0,
+        returns: retRow?.cnt || 0,
+        distributors: distRow?.cnt || 0,
+        customers: custRow?.cnt || 0,
+        doctors: docRow?.cnt || 0,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch migration summary', details: err.message });
+  }
+});
+
 // Helper: read headers from a CSV file
 async function readCsvHeaders(filePath: string, skipLines = 0): Promise<{ headers: string[], samples: any[] }> {
   const headers: string[] = [];

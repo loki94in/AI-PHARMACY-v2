@@ -372,6 +372,7 @@ export const api = {
   runMigrationQueue: (tasks: any[]) =>
     apiClient.post('/migration/run', { tasks }).then(r => r.data),
   getMigrationStatus: () => apiClient.get('/migration/status').then(r => r.data),
+  getMigrationSummary: () => apiClient.get('/migration/summary').then(r => r.data),
   getStagingInventory: () => apiClient.get('/migration/staging/inventory').then(r => r.data),
   updateStagingInventory: (id: number, data: any) => apiClient.put(`/migration/staging/inventory/${id}`, data).then(r => r.data),
   deleteStagingInventory: (id: number) => apiClient.delete(`/migration/staging/inventory/${id}`).then(r => r.data),

@@ -55,6 +55,8 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     sales: 0,
     returns: 0,
     distributors: 0,
+    customers: 0,
+    doctors: 0,
     errors: 0
   });
 
@@ -88,7 +90,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   useEffect(() => {
     if (isOpen && fileEntry) {
       setMappings(fileEntry.mapping || {});
-      setPhase('review');
+      setPhase(fileEntry.initialPhase || 'review');
       setErrorMessage(null);
     }
   }, [isOpen, fileEntry]);
@@ -185,20 +187,31 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     return () => clearInterval(pollInterval);
   }, [phase]);
 
+  // Fetch live migration summary whenever success phase is entered
+  useEffect(() => {
+    if (phase === 'success') {
+      api.getMigrationSummary().then(res => {
+        if (res.success && res.stats) {
+          setSummary({
+            medicines: res.stats.medicines || 0,
+            inventory: res.stats.inventory || 0,
+            purchases: res.stats.purchases || 0,
+            sales: res.stats.sales || 0,
+            returns: res.stats.returns || 0,
+            distributors: res.stats.distributors || 0,
+            customers: res.stats.customers || 0,
+            doctors: res.stats.doctors || 0,
+            errors: status?.errorCount || 0
+          });
+        }
+      }).catch(err => console.warn('Failed to load migration summary:', err));
+    }
+  }, [phase]);
+
   const handleFinalize = async () => {
     try {
       const res = await api.finalizeMigration(false);
       if (res.success) {
-        const stats = res.stats || status?.stats || {};
-        setSummary({
-          medicines: stats.medicines || 0,
-          inventory: stats.inventory || 0,
-          purchases: stats.purchases || 0,
-          sales: stats.sales || 0,
-          returns: stats.returns || 0,
-          distributors: stats.distributors || 0,
-          errors: status?.errorCount || 0
-        });
         setPhase('success');
       } else {
         setPhase('error');
@@ -424,13 +437,25 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                           <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.distributors.toLocaleString()}</td>
                         </tr>
                       )}
+                      {summary.customers > 0 && (
+                        <tr className="hover:bg-white/[0.01] transition-colors">
+                          <td className="px-4 py-2.5 font-medium">👥 Patients & Customers</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.customers.toLocaleString()}</td>
+                        </tr>
+                      )}
+                      {summary.doctors > 0 && (
+                        <tr className="hover:bg-white/[0.01] transition-colors">
+                          <td className="px-4 py-2.5 font-medium">🩺 Prescribing Doctors</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-400 font-semibold">{summary.doctors.toLocaleString()}</td>
+                        </tr>
+                      )}
                       {summary.errors > 0 && (
                         <tr className="bg-rose-500/5 hover:bg-rose-500/10 transition-colors">
                           <td className="px-4 py-2.5 font-medium text-rose-400">⚠️ Skipped / Errors</td>
                           <td className="px-4 py-2.5 text-right font-mono text-rose-400 font-semibold">{summary.errors.toLocaleString()}</td>
                         </tr>
                       )}
-                      {summary.medicines === 0 && summary.inventory === 0 && summary.purchases === 0 && summary.sales === 0 && summary.returns === 0 && (
+                      {summary.medicines === 0 && summary.inventory === 0 && summary.purchases === 0 && summary.sales === 0 && summary.returns === 0 && summary.customers === 0 && (
                         <tr>
                           <td className="px-4 py-4 text-center text-muted italic" colSpan={2}>
                             Import finished successfully for <span className="text-sky font-mono font-medium">{fileEntry.originalName}</span>
