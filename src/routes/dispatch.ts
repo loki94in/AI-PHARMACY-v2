@@ -184,6 +184,49 @@ router.delete('/delivery-boys/:id', async (req, res) => {
   }
 });
 
+// GET /api/dispatch/messages/dates - Available dates with delivery boy messages
+router.get('/messages/dates', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(`
+      SELECT DISTINCT date(created_at) as date_str
+      FROM automation_notifications
+      WHERE type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
+         OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+      ORDER BY date_str DESC
+      LIMIT 30
+    `);
+    const dates = rows.map((r: any) => r.date_str).filter(Boolean);
+    res.json({ success: true, dates });
+  } catch (error: any) {
+    console.error('Fetch delivery message dates error:', error);
+    res.status(500).json({ error: 'Failed to fetch message dates' });
+  }
+});
+
+// GET /api/dispatch/messages - Fetch sent messages for a specific date
+router.get('/messages', async (req, res) => {
+  const targetDate = req.query.date ? String(req.query.date) : new Date().toISOString().split('T')[0];
+  try {
+    const db = await dbManager.getConnection();
+    const messages = await db.all(`
+      SELECT id, type, recipient_name, recipient_phone, message, status, error_message, created_at
+      FROM automation_notifications
+      WHERE date(created_at) = ?
+        AND (
+          type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
+          OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+        )
+      ORDER BY created_at DESC
+    `, [targetDate]);
+
+    res.json({ success: true, date: targetDate, messages });
+  } catch (error: any) {
+    console.error('Fetch delivery messages error:', error);
+    res.status(500).json({ error: 'Failed to fetch delivery messages' });
+  }
+});
+
 // Legacy support route
 router.post('/', async (req, res) => {
   const { type, description } = req.body;

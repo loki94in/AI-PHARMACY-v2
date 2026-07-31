@@ -33,7 +33,9 @@ import {
   Truck,
   Check,
   Edit,
-  GitMerge
+  GitMerge,
+  Building2,
+  ExternalLink
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -81,17 +83,20 @@ const cachedProfileDetailsMap: Record<number, any> = {};
 
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const rawTab = searchParams.get('tab') || 'clinical';
-  const initialTab = (rawTab === 'distributor_layouts' || rawTab === 'distributors') ? 'distributors' : rawTab;
-  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const normalizeTab = (t: string | null) => {
+    if (!t) return 'clinical';
+    if (t === 'distributor_layouts' || t === 'distributors') return 'distributors';
+    if (t === 'messaging' || t === 'ingestion' || t === 'operations' || t === 'integrations') return 'operations';
+    return t;
+  };
+  const [activeTab, setActiveTab] = useState<string>(normalizeTab(searchParams.get('tab')));
 
   const qrPollControl = useFetchMode('learning.qrPoll');
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
     if (tabParam) {
-      const normalized = (tabParam === 'distributor_layouts' || tabParam === 'distributors') ? 'distributors' : tabParam;
-      setActiveTab(normalized);
+      setActiveTab(normalizeTab(tabParam));
     }
   }, [searchParams]);
 
@@ -922,11 +927,8 @@ const Learning: React.FC = () => {
         {[
           { id: 'clinical', label: 'Clinical AI Engine', icon: Brain },
           { id: 'doctors', label: 'Doctor Affiliations', icon: Stethoscope },
-          { id: 'dispatch', label: 'Dispatch / Delivery', icon: Truck },
           { id: 'distributors', label: 'Distributor Layouts', icon: Database },
-          { id: 'messaging', label: 'Messaging Channels', icon: MessageCircle },
-          { id: 'ingestion', label: 'Email Ingestion', icon: Mail },
-          { id: 'operations', label: 'Operations & Backups', icon: Settings }
+          { id: 'operations', label: 'Integrations & Credentials Hub', icon: Zap }
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -1530,8 +1532,8 @@ const Learning: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 3: Messaging Channels */}
-        {activeTab === 'messaging' && (
+        {/* Tab 4: Integrations & Credentials Hub */}
+        {activeTab === 'operations' && (
           <div className="flex-1 overflow-y-auto pr-1 space-y-6 custom-scrollbar text-left">
             {loadingSettings ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted">
@@ -1877,120 +1879,192 @@ const Learning: React.FC = () => {
                       </div>
                     )}
                   </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
 
-        {/* Tab 4: Email Ingestion */}
-        {activeTab === 'ingestion' && (
-          <div className="flex-1 overflow-y-auto pr-1 space-y-6 custom-scrollbar text-left">
-            {loadingSettings ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted">
-                <RefreshCw className="animate-spin text-sky" size={20} />
-                <span className="text-xs">Loading ingestion settings...</span>
-              </div>
-            ) : settingsData ? (
-              <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                      <Mail size={14} className="text-amber" />
-                      Email Invoice Ingestion System
-                    </h4>
-                    <p className="text-[10px] text-muted">
-                      Monitor incoming distributor purchase invoices and automatically process CSV/PDF attachment datasets.
-                    </p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only peer" 
-                      checked={settingsData.automation_enabled === 'true'} 
-                      onChange={() => handleToggleSetting('automation_enabled')}
-                      disabled={savingSetting === 'automation_enabled'}
-                    />
-                    <div className="w-9 h-5 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors peer-disabled:opacity-50" />
-                    <div className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-4 peer-disabled:opacity-50" />
-                  </label>
-                </div>
+                  {/* Pharmarack Credentials & Login Card */}
+                  <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4 lg:col-span-2">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-text flex items-center gap-2">
+                          <Building2 size={14} className="text-primary" />
+                          Pharmarack Account & Session Credentials
+                        </h4>
+                        <p className="text-[10px] text-muted">
+                          Manage retailer login credentials, automated Chrome profile sessions, and live order sync health.
+                        </p>
+                      </div>
+                      <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                        prHealth?.healthy ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                      }`}>
+                        {prHealth?.healthy ? 'Session Active' : 'Requires Login'}
+                      </span>
+                    </div>
 
-                {settingsData.automation_enabled === 'true' && (() => {
-                  const isGmailConfigured = settingsData.gmail_auth_method === 'oauth2'
-                    ? !!settingsData.gmail_oauth_refresh_token
-                    : (!!settingsData.gmail_user && !!settingsData.gmail_pass);
-
-                  let statusText = 'GMAIL NOT CONFIGURED';
-                  let statusColor = 'text-muted';
-
-                  if (isGmailConfigured) {
-                    if (settingsData.gmail_auth_status === 'failed') {
-                      statusText = 'GMAIL AUTHENTICATION FAILED';
-                      statusColor = 'text-red font-bold animate-pulse';
-                    } else {
-                      statusText = 'GMAIL MONITOR LISTENING';
-                      statusColor = 'text-green font-bold';
-                    }
-                  }
-
-                  return (
-                    <div className="space-y-4 pt-3 border-t border-glass-border/40">
+                    <div className="space-y-3 pt-3 border-t border-glass-border/40">
                       <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
-                        <div className="flex flex-col gap-0.5 text-left">
-                          <span>Status: <strong className={statusColor}>{statusText}</strong></span>
-                          {isGmailConfigured && settingsData.gmail_auth_status === 'failed' && settingsData.gmail_auth_error && (
-                            <span className="text-[9px] text-red/80 font-medium">
-                              Error: {settingsData.gmail_auth_error}
-                            </span>
-                          )}
-                        </div>
+                        <span>Mode: <strong className="text-primary font-bold">Live Retailer Session</strong></span>
                         <button 
-                          onClick={() => setShowEmailConfig(!showEmailConfig)}
+                          onClick={() => setShowPrConfig(!showPrConfig)}
                           className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
                         >
-                          {showEmailConfig ? 'Hide Credentials' : 'Configure Scanner'}
+                          {showPrConfig ? 'Hide Credentials' : 'Show Credentials'}
                         </button>
                       </div>
 
-                      {showEmailConfig && (
+                      {showPrConfig && (
                         <div className="space-y-4 bg-bg border border-glass-border/40 p-4 rounded-xl">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-muted uppercase">Ingestion Authentication Scheme</label>
-                            <div className="flex gap-4 py-1">
-                              <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
-                                <input
-                                  type="radio"
-                                  name="gmailAuthMethod"
-                                  value="password"
-                                  checked={settingsData.gmail_auth_method === 'password'}
-                                  onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'password' })}
-                                  className="mr-1 accent-green"
-                                />
-                                App-Specific Password
-                              </label>
-                              <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
-                                <input
-                                  type="radio"
-                                  name="gmailAuthMethod"
-                                  value="oauth2"
-                                  checked={settingsData.gmail_auth_method === 'oauth2'}
-                                  onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'oauth2' })}
-                                  className="mr-1 accent-green"
-                                />
-                                OAuth2 Google authorization
-                              </label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-muted uppercase">Pharmarack Retailer Username</label>
+                              <input
+                                type="text"
+                                className="premium-input w-full text-xs"
+                                placeholder="Retailer Username / Mobile"
+                                value={settingsData.pharmarack_username || ''}
+                                onChange={(e) => setSettingsData({ ...settingsData, pharmarack_username: e.target.value })}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-bold text-muted uppercase">Pharmarack Password</label>
+                              <input
+                                type="password"
+                                className="premium-input w-full text-xs"
+                                placeholder="Account Password"
+                                value={settingsData.pharmarack_password || ''}
+                                onChange={(e) => setSettingsData({ ...settingsData, pharmarack_password: e.target.value })}
+                              />
                             </div>
                           </div>
 
-                          {settingsData.gmail_auth_method === 'password' ? (
-                            <div className="space-y-3">
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="flex items-center gap-2 pt-2 border-t border-glass-border/30 flex-wrap">
+                            <button
+                              onClick={() => handleSaveConfig()}
+                              className="text-[10px] font-bold bg-green/20 text-green px-3.5 py-1.5 rounded-lg hover:bg-green/35"
+                            >
+                              Save Credentials
+                            </button>
+                            <button
+                              onClick={handleOpenLoginWindow}
+                              disabled={isOpeningWindow}
+                              className="text-[10px] font-bold bg-primary/20 text-primary px-3 py-1.5 rounded-lg hover:bg-primary/30 disabled:opacity-40 flex items-center gap-1"
+                            >
+                              <ExternalLink size={11} />
+                              <span>{isOpeningWindow ? 'Opening Chrome...' : 'Launch Chrome Auto-Login'}</span>
+                            </button>
+                            {settingsData.pharmarack_username && (
+                              <button
+                                onClick={handlePharmarackLogout}
+                                className="text-[10px] font-bold bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded-lg hover:bg-rose-500/30 flex items-center gap-1"
+                              >
+                                <LogOut size={11} />
+                                <span>Logout & Clear Session</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Gmail & Email Invoice Ingestion Card */}
+                  <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4 lg:col-span-2">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-text flex items-center gap-2">
+                          <Mail size={14} className="text-amber" />
+                          Email Invoice Ingestion System
+                        </h4>
+                        <p className="text-[10px] text-muted">
+                          Monitor incoming distributor purchase invoices and automatically process CSV/PDF attachment datasets.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={settingsData.automation_enabled === 'true'} 
+                          onChange={() => handleToggleSetting('automation_enabled')}
+                          disabled={savingSetting === 'automation_enabled'}
+                        />
+                        <div className="w-9 h-5 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors peer-disabled:opacity-50" />
+                        <div className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-4 peer-disabled:opacity-50" />
+                      </label>
+                    </div>
+
+                    {settingsData.automation_enabled === 'true' && (() => {
+                      const isGmailConfigured = settingsData.gmail_auth_method === 'oauth2'
+                        ? !!settingsData.gmail_oauth_refresh_token
+                        : (!!settingsData.gmail_user && !!settingsData.gmail_pass);
+
+                      let statusText = 'GMAIL NOT CONFIGURED';
+                      let statusColor = 'text-muted';
+
+                      if (isGmailConfigured) {
+                        if (settingsData.gmail_auth_status === 'failed') {
+                          statusText = 'GMAIL AUTHENTICATION FAILED';
+                          statusColor = 'text-red font-bold animate-pulse';
+                        } else {
+                          statusText = 'GMAIL MONITOR LISTENING';
+                          statusColor = 'text-green font-bold';
+                        }
+                      }
+
+                      return (
+                        <div className="space-y-4 pt-3 border-t border-glass-border/40">
+                          <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
+                            <div className="flex flex-col gap-0.5 text-left">
+                              <span>Status: <strong className={statusColor}>{statusText}</strong></span>
+                              {isGmailConfigured && settingsData.gmail_auth_status === 'failed' && settingsData.gmail_auth_error && (
+                                <span className="text-[9px] text-red/80 font-medium">
+                                  Error: {settingsData.gmail_auth_error}
+                                </span>
+                              )}
+                            </div>
+                            <button 
+                              onClick={() => setShowEmailConfig(!showEmailConfig)}
+                              className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
+                            >
+                              {showEmailConfig ? 'Hide Credentials' : 'Configure Scanner'}
+                            </button>
+                          </div>
+
+                          {showEmailConfig && (
+                            <div className="space-y-4 bg-bg border border-glass-border/40 p-4 rounded-xl">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-muted uppercase">Ingestion Authentication Scheme</label>
+                                <div className="flex gap-4 py-1">
+                                  <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
+                                    <input
+                                      type="radio"
+                                      name="gmailAuthMethod"
+                                      value="password"
+                                      checked={settingsData.gmail_auth_method === 'password'}
+                                      onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'password' })}
+                                      className="mr-1.5 accent-sky"
+                                    />
+                                    App Password (IMAP)
+                                  </label>
+                                  <label className="inline-flex items-center text-[10px] text-muted cursor-pointer hover:text-text">
+                                    <input
+                                      type="radio"
+                                      name="gmailAuthMethod"
+                                      value="oauth2"
+                                      checked={settingsData.gmail_auth_method === 'oauth2'}
+                                      onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'oauth2' })}
+                                      className="mr-1.5 accent-sky"
+                                    />
+                                    Google OAuth2 App Token
+                                  </label>
+                                </div>
+                              </div>
+
+                              {settingsData.gmail_auth_method !== 'oauth2' ? (
+                                <div className="space-y-3">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div className="space-y-1">
-                                  <label className="text-[9px] font-bold text-muted uppercase">Gmail Ingestion Account</label>
+                                  <label className="text-[9px] font-bold text-muted uppercase">Gmail User Account</label>
                                   <input
                                     type="email"
-                                    className="premium-input w-full text-xs"
+                                    className="premium-input w-full text-xs font-mono"
                                     placeholder="pharmacy@gmail.com"
                                     value={settingsData.gmail_user || ''}
                                     onChange={(e) => {
@@ -2123,259 +2197,12 @@ const Learning: React.FC = () => {
                   );
                 })()}
               </div>
-            ) : null}
+            </div>
           </div>
-        )}
-
-        {/* Tab 5: Operations & Backups */}
-        {activeTab === 'operations' && (
-          <div className="flex-1 overflow-y-auto pr-1 space-y-6 custom-scrollbar text-left">
-            {loadingSettings ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted">
-                <RefreshCw className="animate-spin text-sky" size={20} />
-                <span className="text-xs">Loading operational parameters...</span>
-              </div>
-            ) : settingsData ? (
-              <div className="space-y-6">
-                
-                {/* Backup Policies */}
-                <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                      <Database size={14} className="text-sky" />
-                      Automatic Database Backup System
-                    </h4>
-                    <p className="text-[10px] text-muted">
-                      Toggle automatic database compression check, startup restore audits, and multi-layer destinations.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-glass-border/40">
-                    {[
-                      { key: 'backup_auto_enabled', label: 'Auto Backup check' },
-                      { key: 'backup_local_enabled', label: 'Local Disk backup' },
-                      { key: 'backup_gdrive_enabled', label: 'Google Drive sync' },
-                      { key: 'backup_telegram_enabled', label: 'Telegram channel backup' },
-                      { key: 'backup_startup_restore_check', label: 'Startup integrity restore check' },
-                      { key: 'backup_daily_compression', label: 'Daily compression policies' },
-                      { key: 'backup_notifications_enabled', label: 'Notifications logging' },
-                      { key: 'backup_auto_delete_old_archives', label: 'Purge old archives automatically' },
-                      { key: 'backup_manual_access', label: 'Manual backup access endpoints' },
-                    ].map(item => {
-                      const isValChecked = settingsData[item.key] === 'true';
-                      return (
-                        <label key={item.key} className="flex items-center justify-between cursor-pointer p-2.5 bg-bg border border-glass-border/45 rounded-xl hover:bg-bg2/40 transition-all select-none">
-                          <span className="text-[10px] font-semibold text-text">{item.label}</span>
-                          <input
-                            type="checkbox"
-                            className="accent-green w-4 h-4 rounded cursor-pointer"
-                            checked={isValChecked}
-                            onChange={() => handleToggleSetting(item.key)}
-                            disabled={savingSetting === item.key}
-                          />
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Operations & POS Automation toggles */}
-                <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                      <Settings size={14} className="text-sky" />
-                      POS Counter Automation Flags
-                    </h4>
-                    <p className="text-[10px] text-muted">
-                      Trigger direct hardware actions, alerts, or remote management authorization gates from the main cashier.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-glass-border/40">
-                    {[
-                      { key: 'whatsapp_notif', label: 'Dispatch WhatsApp notifications', desc: 'Auto‑send bills & refill reminders' },
-                      { key: 'auto_print', label: 'Auto-print counter receipts', desc: 'Trigger print dialog immediately' },
-                      { key: 'admin_remote_mode', label: 'Admin remote API mode', desc: 'Expose remote database endpoints' },
-                    ].map(item => {
-                      const isValChecked = settingsData[item.key] === 'true';
-                      return (
-                        <div key={item.key} className="flex flex-col justify-between p-3 bg-bg border border-glass-border/45 rounded-xl text-left">
-                          <div className="space-y-0.5">
-                            <span className="text-[10px] font-bold text-text block">{item.label}</span>
-                            <span className="text-[9px] text-muted block leading-none">{item.desc}</span>
-                          </div>
-                          <div className="flex justify-end mt-3">
-                            <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                              <input
-                                type="checkbox"
-                                className="sr-only peer"
-                                checked={isValChecked}
-                                onChange={() => handleToggleSetting(item.key)}
-                                disabled={savingSetting === item.key}
-                              />
-                              <div className="w-8 h-4 bg-zinc-700 peer-checked:bg-green rounded-full transition-colors" />
-                              <div className="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-4" />
-                            </label>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* WhatsApp Alert Contacts */}
-                <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                      <Truck size={14} className="text-emerald-400" />
-                      Delivery Boy Contacts & Names
-                    </h4>
-                    <p className="text-[10px] text-muted">
-                      Configure Delivery Boy 1 and 2 names & WhatsApp numbers to automatically sync to database and embed in order templates.
-                    </p>
-                  </div>
-
-
-
-
-                  <div className="border-t border-glass-border/40 pt-4 flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold text-text block">Auto-share medicine matches to Admin WhatsApp</span>
-                      <span className="text-[9px] text-muted block leading-none">Auto‑escalate WhatsApp queries (found or catalog matches) directly to Admin</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                      <input
-                        type="checkbox"
-                        className="sr-only peer"
-                        checked={settingsData.wa_auto_share_admin === 'true'}
-                        onChange={() => handleToggleSetting('wa_auto_share_admin')}
-                        disabled={savingSetting === 'wa_auto_share_admin'}
-                      />
-                      <div className="w-8 h-4 bg-zinc-700 peer-checked:bg-green rounded-full transition-colors" />
-                      <div className="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-4" />
-                    </label>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={() => handleSaveConfig()}
-                      className="px-4 py-2 bg-green hover:bg-emerald-600 text-white font-bold text-xs rounded-xl active:scale-95 transition-all shadow-md shadow-green/10"
-                    >
-                      Save Contacts
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pharmarack Integration Settings */}
-                <div className="bg-bg3 border border-glass-border rounded-xl p-5 space-y-4">
-                  <div className="flex justify-between items-start border-b border-glass-border/30 pb-2">
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold text-text flex items-center gap-2">
-                        <Globe size={14} className="text-sky" />
-                        Pharmarack Ingestion credentials
-                        {prHealth && (
-                          <span className={`inline-flex items-center gap-1 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full border leading-none ${
-                            prHealth.healthy
-                              ? 'bg-green/10 text-green border-green/20'
-                              : 'bg-red-500/10 text-red-400 border-red-500/20'
-                          }`}>
-                            <span className={`w-1 h-1 rounded-full ${prHealth.healthy ? 'bg-green' : 'bg-red-400'}`} />
-                            {prHealth.healthy ? 'ACTIVE' : 'EXPIRED / DISCONNECTED'}
-                          </span>
-                        )}
-                      </h4>
-                      <p className="text-[10px] text-muted">
-                        Configure retailers.pharmarack.com integration session to check distributor listings.
-                      </p>
-                    </div>
-                    <button 
-                      onClick={() => setShowPrConfig(!showPrConfig)}
-                      className="text-[9px] font-bold text-sky hover:underline uppercase tracking-wider shrink-0"
-                    >
-                      {showPrConfig ? 'Hide' : 'Show Login'}
-                    </button>
-                  </div>
-
-                  {prHealth && !prHealth.healthy && settingsData?.pharmarack_mode === 'Live' && !showPrConfig && (
-                    <div className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg p-2.5 flex items-center justify-between">
-                      <span>Pharmarack session is expired or not linked.</span>
-                      <button
-                        onClick={() => {
-                          setShowPrConfig(true);
-                          handleOpenLoginWindow();
-                        }}
-                        className="text-[8px] bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 px-2 py-0.5 rounded font-black uppercase"
-                      >
-                        Link Now
-                      </button>
-                    </div>
-                  )}
-
-                  {showPrConfig && (
-                    <div className="space-y-3 pt-1">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-muted uppercase">Username</label>
-                          <input
-                            type="text"
-                            className="premium-input w-full text-xs"
-                            placeholder="Mobile No"
-                            value={settingsData.pharmarack_username || ''}
-                            onChange={(e) => setSettingsData({ ...settingsData, pharmarack_username: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-muted uppercase">Password</label>
-                          <input
-                            type="password"
-                            className="premium-input w-full text-xs"
-                            placeholder="Password"
-                            value={settingsData.pharmarack_password || ''}
-                            onChange={(e) => setSettingsData({ ...settingsData, pharmarack_password: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-muted uppercase">Session Cookie/Token</label>
-                          <input
-                            type="text"
-                            className="premium-input w-full text-xs"
-                            placeholder="Automatic session cookie"
-                            value={settingsData.pharmarack_session_token || ''}
-                            onChange={(e) => setSettingsData({ ...settingsData, pharmarack_session_token: e.target.value })}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-2 border-t border-glass-border/30">
-                        <button
-                          onClick={() => handleSaveConfig()}
-                          className="text-[9px] font-bold bg-green/20 text-green px-3.5 py-1.5 rounded-lg hover:bg-green/35"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={handleOpenLoginWindow}
-                          disabled={isOpeningWindow}
-                          className="text-[9px] font-bold bg-sky-500/20 text-sky px-3 py-1.5 rounded-lg hover:bg-sky-500/30 flex items-center gap-1"
-                        >
-                          <LogIn size={10} />
-                          {isOpeningWindow ? 'Opening...' : 'Chrome Login Window'}
-                        </button>
-                        <button
-                          onClick={handlePharmarackLogout}
-                          className="text-[9px] font-bold bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/30 flex items-center gap-1"
-                        >
-                          <LogOut size={10} /> Clear Token
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
+        ) : null}
       </div>
+    )}
+  </div>
 
       {/* Side-by-Side Comparator Modal */}
       {comparatorFileId && createPortal(

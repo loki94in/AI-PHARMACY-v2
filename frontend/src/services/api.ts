@@ -626,6 +626,8 @@ export const api = {
   updateDeliveryBoy: (id: number, data: { name?: string; whatsapp_number?: string; telegram_chat_id?: string; is_active?: number }) =>
     apiClient.put(`/dispatch/delivery-boys/${id}`, data).then(res => res.data),
   deleteDeliveryBoy: (id: number) => apiClient.delete(`/dispatch/delivery-boys/${id}`).then(res => res.data),
+  getDeliveryBoyMessageDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/dispatch/messages/dates').then(res => res.data),
+  getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: any[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
 
   // CRM — extended
   updatePatient: (id: number, data: Partial<import('../types/api').Patient>) => apiClient.put(`/crm/patients/${id}`, data).then(res => res.data),

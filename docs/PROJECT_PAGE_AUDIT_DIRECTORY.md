@@ -136,8 +136,8 @@
 * **Authoritative Responsibilities**: Customer special shortage requests, requester contact info, priority status (`Pending`, `Ordered`, `Fulfilled`).
 * **Authoritative Data Sources**: `GET /api/orders`, `POST /api/orders`, `PUT /api/orders/:id`.
 * **Database Tables**: `special_orders`.
-* **Identified Legacy Risk**:
-  - **Table Duality**: Backend `shortageReminderService.ts` writes to `pending_shortage_requests` table, whereas frontend `/orders` operates on `special_orders` table.
+* **Verified Status**:
+  - **Single Source of Truth**: Backend `shortageReminderService.ts` and frontend `/orders` are fully unified on `special_orders` table.
 
 ---
 
@@ -146,8 +146,8 @@
 * **Authoritative Responsibilities**: Live Pharmarack order placement, cart item grouping by distributor, batch WhatsApp order sending, left sidebar pending requests & refills launchpad.
 * **Authoritative Data Sources**: `GET /api/pharmarack/cart`, `POST /api/pharmarack/cart/add`, `GET /api/dispatch/delivery-boys`.
 * **Database Tables**: `distributors`, `delivery_boys`.
-* **Identified Legacy Fallback Risk**:
-  - **Delivery Boy Fallback Risk**: Component queries `apiClient.get('/dispatch/delivery-boys')`, but contains legacy fallback code reading `settings.delivery_boy_whatsapp` and `settings.dinesh_whatsapp_number` from `app_settings`.
+* **Verified Status**:
+  - **Single Source of Truth**: Resolves delivery boys strictly from `delivery_boys` DB table via `/api/dispatch/delivery-boys`.
 
 ---
 

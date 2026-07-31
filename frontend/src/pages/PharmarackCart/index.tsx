@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp } from 'lucide-react';
+import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
@@ -110,7 +110,7 @@ export default function PharmarackCart() {
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'requests' | 'refills' | 'sales_suggestions' | 'missing_phone' | 'history'>('requests');
+  const [sidebarTab, setSidebarTab] = useState<'all' | 'requests' | 'refills' | 'sales_suggestions' | 'missing_phone' | 'history'>('all');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
   const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
@@ -2101,8 +2101,19 @@ export default function PharmarackCart() {
                 {/* Sidebar Tabs */}
                 <div className="flex border-b border-glass-border/40 bg-bg3/10 shrink-0 select-none overflow-x-auto">
                   <button
+                    onClick={() => setSidebarTab('all')}
+                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'all'
+                      ? 'border-primary text-primary bg-primary/5'
+                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
+                      }`}
+                    title="View All Notifications & Items Combined"
+                  >
+                    <Layers size={11} />
+                    All ({pendingOrders.length + pendingRefills.length + reorderSuggestions.length})
+                  </button>
+                  <button
                     onClick={() => setSidebarTab('requests')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'requests'
+                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'requests'
                       ? 'border-primary text-primary bg-primary/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
@@ -2112,7 +2123,7 @@ export default function PharmarackCart() {
                   </button>
                   <button
                     onClick={() => setSidebarTab('refills')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'refills'
+                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[55px] ${sidebarTab === 'refills'
                       ? 'border-primary text-primary bg-primary/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
@@ -2122,7 +2133,7 @@ export default function PharmarackCart() {
                   </button>
                   <button
                     onClick={() => setSidebarTab('sales_suggestions')}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[65px] ${sidebarTab === 'sales_suggestions'
+                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'sales_suggestions'
                       ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
@@ -2133,7 +2144,7 @@ export default function PharmarackCart() {
                   </button>
                   <button
                     onClick={() => setSidebarTab('missing_phone' as any)}
-                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[70px] ${sidebarTab === ('missing_phone' as any)
+                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[55px] ${sidebarTab === ('missing_phone' as any)
                       ? 'border-amber-500 text-amber-400 bg-amber-500/5'
                       : 'border-transparent text-muted hover:text-text hover:bg-white/5'
                       }`}
@@ -2158,22 +2169,36 @@ export default function PharmarackCart() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {sidebarTab === 'requests' ? (
-                    (() => {
-                      const displayOrders = pendingOrders.filter(order => {
-                        const inCart = getOrderItemInCart(order);
-                        if (inCart && !showAddedItems) return false;
-                        return true;
-                      });
+                  {(sidebarTab === 'all' || sidebarTab === 'requests') && (() => {
+                    const displayOrders = pendingOrders.filter(order => {
+                      const inCart = getOrderItemInCart(order);
+                      if (inCart && !showAddedItems) return false;
+                      return true;
+                    });
 
-                      return displayOrders.length === 0 ? (
+                    if (sidebarTab === 'requests' && displayOrders.length === 0) {
+                      return (
                         <div className="text-center py-8 text-[11px] text-muted italic select-none">
                           {pendingOrders.length > 0 && !showAddedItems
                             ? 'All special requests have been added to the Pharmarack cart!'
                             : 'No pending special requests found.'}
                         </div>
-                      ) : (
-                        displayOrders.map(order => {
+                      );
+                    }
+
+                    if (displayOrders.length === 0 && sidebarTab === 'all') return null;
+
+                    return (
+                      <div className="space-y-2">
+                        {sidebarTab === 'all' && (
+                          <div className="text-[10px] font-black uppercase text-primary tracking-wider px-1 pt-1 pb-1 border-b border-glass-border/30 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Clock size={11} />
+                              Special Shortage Requests ({displayOrders.length})
+                            </span>
+                          </div>
+                        )}
+                        {displayOrders.map(order => {
                           const cartMatch = getOrderCartMatch(order);
                           const inCart = Boolean(cartMatch?.isHighMatch);
                           const isPartialMatch = Boolean(cartMatch?.isPartialMatch);
@@ -2321,26 +2346,41 @@ export default function PharmarackCart() {
                               )}
                             </div>
                           );
-                        })
+                        })}
+                      </div>
+                    );
+                  })()}
 
-                      );
-                    })()
-                  ) : sidebarTab === 'refills' ? (
-                    (() => {
-                      const displayRefills = pendingRefills.filter(refill => {
-                        const inCart = getRefillItemInCart(refill);
-                        if (inCart && !showAddedItems) return false;
-                        return true;
-                      });
+                  {(sidebarTab === 'all' || sidebarTab === 'refills') && (() => {
+                    const displayRefills = pendingRefills.filter(refill => {
+                      const inCart = getRefillItemInCart(refill);
+                      if (inCart && !showAddedItems) return false;
+                      return true;
+                    });
 
-                      return displayRefills.length === 0 ? (
+                    if (sidebarTab === 'refills' && displayRefills.length === 0) {
+                      return (
                         <div className="text-center py-8 text-[11px] text-muted italic select-none">
                           {pendingRefills.length > 0 && !showAddedItems
                             ? 'All refill medicines have been added to the Pharmarack cart!'
                             : 'No pending out-of-stock refill medicines due.'}
                         </div>
-                      ) : (
-                        displayRefills.map(refill => {
+                      );
+                    }
+
+                    if (displayRefills.length === 0 && sidebarTab === 'all') return null;
+
+                    return (
+                      <div className="space-y-2">
+                        {sidebarTab === 'all' && (
+                          <div className="text-[10px] font-black uppercase text-amber-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <ShoppingCart size={11} />
+                              Chronic Patient Refills ({displayRefills.length})
+                            </span>
+                          </div>
+                        )}
+                        {displayRefills.map(refill => {
                           const inCart = getRefillItemInCart(refill);
                           const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
                           const reqQty = Number(refill.quantity_needed || 10);
@@ -2403,81 +2443,117 @@ export default function PharmarackCart() {
                               </div>
                             </div>
                           );
-                        })
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  {(sidebarTab === 'all' || sidebarTab === 'sales_suggestions') && (() => {
+                    if (suggestionsLoading) {
+                      return (
+                        <div className="flex flex-col items-center justify-center py-10 gap-2">
+                          <div className="w-6 h-6 border-2 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
+                          <span className="text-[10px] text-muted animate-pulse font-bold uppercase tracking-wider">Calculating 6M & 2-Day Sales…</span>
+                        </div>
                       );
-                    })()
-                  ) : sidebarTab === 'sales_suggestions' ? (
-                    /* ── 2-Day & 6-Month Sales Reorder Suggestions ── */
-                    suggestionsLoading ? (
-                      <div className="flex flex-col items-center justify-center py-10 gap-2">
-                        <div className="w-6 h-6 border-2 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
-                        <span className="text-[10px] text-muted animate-pulse font-bold uppercase tracking-wider">Calculating 6M & 2-Day Sales…</span>
-                      </div>
-                    ) : reorderSuggestions.length === 0 ? (
-                      <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                        No 2-day sales suggestions found.
-                      </div>
-                    ) : (
-                      reorderSuggestions.map((sug) => (
-                        <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-bg/40 flex flex-col gap-2 shadow-sm hover:border-emerald-500/30 transition-all">
-                          <div className="flex justify-between items-start">
-                            <div className="flex flex-col min-w-0 pr-1">
-                              <span className="text-xs font-black text-text truncate" title={sug.medicineName}>
-                                {sug.medicineName}
-                              </span>
-                              <span className="text-[10px] text-muted truncate">
-                                {sug.company} {sug.packaging ? `• ${sug.packaging}` : ''}
+                    }
+
+                    if (sidebarTab === 'sales_suggestions' && reorderSuggestions.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
+                          No 2-day sales suggestions found.
+                        </div>
+                      );
+                    }
+
+                    if (reorderSuggestions.length === 0 && sidebarTab === 'all') return null;
+
+                    return (
+                      <div className="space-y-2">
+                        {sidebarTab === 'all' && (
+                          <div className="text-[10px] font-black uppercase text-emerald-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <TrendingUp size={11} />
+                              2-Day & 6M Sales Suggestions ({reorderSuggestions.length})
+                            </span>
+                          </div>
+                        )}
+                        {reorderSuggestions.map((sug) => (
+                          <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-bg/40 flex flex-col gap-2 shadow-sm hover:border-emerald-500/30 transition-all">
+                            <div className="flex justify-between items-start">
+                              <div className="flex flex-col min-w-0 pr-1">
+                                <span className="text-xs font-black text-text truncate" title={sug.medicineName}>
+                                  {sug.medicineName}
+                                </span>
+                                <span className="text-[10px] text-muted truncate">
+                                  {sug.company} {sug.packaging ? `• ${sug.packaging}` : ''}
+                                </span>
+                              </div>
+                              <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                🔥 {sug.twoDaySales} Sold (2d)
                               </span>
                             </div>
-                            <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                              🔥 {sug.twoDaySales} Sold (2d)
-                            </span>
-                          </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border/30">
-                            <span title="6-Month Daily Average Sales">
-                              📊 6M Avg: <strong className="text-emerald-400">{sug.sixMonthAvgDailySales}</strong>/day
-                            </span>
-                            <span title="Current Inventory Stock">
-                              📦 Stock: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
-                            </span>
-                          </div>
+                            <div className="flex items-center justify-between text-[10px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border/30">
+                              <span title="6-Month Daily Average Sales">
+                                📊 6M Avg: <strong className="text-emerald-400">{sug.sixMonthAvgDailySales}</strong>/day
+                              </span>
+                              <span title="Current Inventory Stock">
+                                📦 Stock: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
+                              </span>
+                            </div>
 
-                          <div className="flex items-center justify-between pt-1 border-t border-glass-border/30">
-                            <span className="text-[10px] font-bold text-muted">
-                              Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
-                            </span>
-                            <button
-                              onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
-                              className="shrink-0 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
-                              title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
-                            >
-                              <Plus size={11} />
-                              <span>Add ({sug.suggestedQty})</span>
-                            </button>
+                            <div className="flex items-center justify-between pt-1 border-t border-glass-border/30">
+                              <span className="text-[10px] font-bold text-muted">
+                                Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
+                              </span>
+                              <button
+                                onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
+                                className="shrink-0 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+                                title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
+                              >
+                                <Plus size={11} />
+                                <span>Add ({sug.suggestedQty})</span>
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))
-                    )
-                  ) : (
-                    /* ── Missing Phone Distributors in Cart ── */
-                    (() => {
-                      const missingPhoneDistributors = distributors.filter(dist => {
-                        let phoneNum = customDistributorPhones[dist.storeId];
-                        if (!phoneNum) {
-                          const matched = findSavedDistributorMatch(dist.storeName);
-                          phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
-                        }
-                        const cleanPhone = (phoneNum || '').replace(/\D/g, '');
-                        return !cleanPhone || !isValidPhoneNumber(cleanPhone);
-                      });
+                        ))}
+                      </div>
+                    );
+                  })()}
 
-                      return missingPhoneDistributors.length === 0 ? (
+                  {(sidebarTab === 'all' || sidebarTab === ('missing_phone' as any)) && (() => {
+                    const missingPhoneDistributors = distributors.filter(dist => {
+                      let phoneNum = customDistributorPhones[dist.storeId];
+                      if (!phoneNum) {
+                        const matched = findSavedDistributorMatch(dist.storeName);
+                        phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
+                      }
+                      const cleanPhone = (phoneNum || '').replace(/\D/g, '');
+                      return !cleanPhone || !isValidPhoneNumber(cleanPhone);
+                    });
+
+                    if (sidebarTab === ('missing_phone' as any) && missingPhoneDistributors.length === 0) {
+                      return (
                         <div className="text-center py-8 text-[11px] text-muted italic select-none">
                           All cart distributors have valid saved phone numbers!
                         </div>
-                      ) : (
-                        missingPhoneDistributors.map(dist => (
+                      );
+                    }
+
+                    if (missingPhoneDistributors.length === 0 && sidebarTab === 'all') return null;
+
+                    return (
+                      <div className="space-y-2">
+                        {sidebarTab === 'all' && (
+                          <div className="text-[10px] font-black uppercase text-amber-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Phone size={11} />
+                              Missing Contact Numbers ({missingPhoneDistributors.length})
+                            </span>
+                          </div>
+                        )}
+                        {missingPhoneDistributors.map(dist => (
                           <div key={dist.storeId} className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col gap-2 shadow-sm">
                             <div className="flex justify-between items-start">
                               <div className="flex flex-col min-w-0">
@@ -2515,10 +2591,10 @@ export default function PharmarackCart() {
                               </button>
                             </div>
                           </div>
-                        ))
-                      );
-                    })()
-                  )}
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

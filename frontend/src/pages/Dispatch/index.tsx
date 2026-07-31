@@ -87,12 +87,56 @@ const Dispatch = () => {
   const [editBoyPhone, setEditBoyPhone] = useState('');
   const [savingBoyEdit, setSavingBoyEdit] = useState(false);
 
+  // Delivery Boy Sent Message History states
+  const [messageDates, setMessageDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [sentMessages, setSentMessages] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+
+  const fetchMessageDates = useCallback(async () => {
+    try {
+      const res = await api.getDeliveryBoyMessageDates();
+      if (res && res.success && Array.isArray(res.dates)) {
+        setMessageDates(res.dates);
+        if (res.dates.length > 0 && !selectedDate) {
+          setSelectedDate(res.dates[0]);
+        } else if (!selectedDate) {
+          setSelectedDate(new Date().toISOString().split('T')[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch message dates:', err);
+    }
+  }, [selectedDate]);
+
+  const fetchMessagesForDate = useCallback(async (dateStr: string) => {
+    if (!dateStr) return;
+    setLoadingMessages(true);
+    try {
+      const res = await api.getDeliveryBoyMessages(dateStr);
+      if (res && res.success && Array.isArray(res.messages)) {
+        setSentMessages(res.messages);
+      }
+    } catch (err) {
+      console.error('Failed to fetch messages:', err);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchAll();
-    const handlePhoneUpdate = () => fetchAll();
+    fetchMessageDates();
+    const handlePhoneUpdate = () => { fetchAll(); fetchMessageDates(); };
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
     return () => window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
-  }, [fetchAll]);
+  }, [fetchAll, fetchMessageDates]);
+
+  useEffect(() => {
+    if (selectedDate) {
+      fetchMessagesForDate(selectedDate);
+    }
+  }, [selectedDate, fetchMessagesForDate]);
 
   const handleAddDeliveryBoy = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -213,6 +257,7 @@ const Dispatch = () => {
         deliveryBoyName: targetBoy?.name
       });
       showNotif(res.message || `Enqueued ${orderIds.length} collection messages for 8s-12s paced sending!`, 'success');
+      setTimeout(() => fetchMessageDates(), 2000);
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to enqueue WhatsApp messages', 'error');
     }
@@ -226,17 +271,15 @@ const Dispatch = () => {
   }).length;
 
   return (
-    <div className="w-full flex-1 flex flex-col gap-4 pb-4 animate-in fade-in duration-500">
-
-
+    <div className="w-full flex-1 flex flex-col gap-4 pb-6 animate-in fade-in duration-500 text-left">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-extrabold tracking-tight mb-1">Dispatch & Delivery</h2>
-          <p className="text-muted text-sm">Manage and track home delivery assignments & delivery personnel.</p>
+          <h2 className="text-2xl font-extrabold tracking-tight mb-1 text-text">Dispatch & Delivery Management</h2>
+          <p className="text-muted text-xs">Directly manage delivery staff, track active orders, and view WhatsApp dispatch message history.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={fetchAll} className="p-2 rounded-lg bg-white/5 border border-glass-border hover:bg-white/10 text-muted" title="Refresh">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => { fetchAll(); fetchMessageDates(); }} className="p-2 rounded-lg bg-bg2 border border-glass-border hover:bg-bg3 text-muted transition-all" title="Refresh">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
           <button
@@ -247,63 +290,199 @@ const Dispatch = () => {
             <Send size={15} /> Send All via WhatsApp
           </button>
           <button
-            onClick={() => setShowBoysModal(true)}
-            className="premium-btn bg-sky/20 border border-sky/30 text-sky hover:bg-sky/30 text-xs flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition-all"
-          >
-            <User size={15} /> Delivery Boys ({allBoys.length})
-          </button>
-          <button
             onClick={() => setShowModal(true)}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600"
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 text-xs px-3.5 py-2 rounded-xl font-bold"
           >
-            <Plus size={16} /> New Dispatch
+            <Plus size={16} /> New Dispatch Order
           </button>
         </div>
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-panel p-5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
-            <Clock size={24} className="text-amber-400" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="glass-panel p-4 flex items-center gap-3 bg-bg2/30">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Clock size={20} className="text-amber-400" />
           </div>
           <div>
-            <p className="text-xs text-muted font-bold uppercase tracking-wider mb-1">Pending Deliveries</p>
-            <p className="text-2xl font-extrabold text-amber-400">{pending}</p>
+            <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Pending</p>
+            <p className="text-xl font-extrabold text-amber-400">{pending}</p>
           </div>
         </div>
-        <div className="glass-panel p-5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-sky/10 flex items-center justify-center">
-            <Truck size={24} className="text-sky" />
+        <div className="glass-panel p-4 flex items-center gap-3 bg-bg2/30">
+          <div className="w-10 h-10 rounded-xl bg-sky/10 flex items-center justify-center shrink-0">
+            <Truck size={20} className="text-sky" />
           </div>
           <div>
-            <p className="text-xs text-muted font-bold uppercase tracking-wider mb-1">In Transit</p>
-            <p className="text-2xl font-extrabold text-sky">{inTransit}</p>
+            <p className="text-[10px] text-muted font-bold uppercase tracking-wider">In Transit</p>
+            <p className="text-xl font-extrabold text-sky">{inTransit}</p>
           </div>
         </div>
-        <div className="glass-panel p-5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-green/10 flex items-center justify-center">
-            <CheckCircle size={24} className="text-green" />
+        <div className="glass-panel p-4 flex items-center gap-3 bg-bg2/30">
+          <div className="w-10 h-10 rounded-xl bg-green/10 flex items-center justify-center shrink-0">
+            <CheckCircle size={20} className="text-green" />
           </div>
           <div>
-            <p className="text-xs text-muted font-bold uppercase tracking-wider mb-1">Delivered Today</p>
-            <p className="text-2xl font-extrabold text-green">{deliveredToday}</p>
+            <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Delivered Today</p>
+            <p className="text-xl font-extrabold text-green">{deliveredToday}</p>
+          </div>
+        </div>
+        <div className="glass-panel p-4 flex items-center gap-3 bg-bg2/30">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center shrink-0">
+            <User size={20} className="text-purple-400" />
+          </div>
+          <div>
+            <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Active Staff</p>
+            <p className="text-xl font-extrabold text-purple-400">{deliveryBoys.length}</p>
           </div>
         </div>
       </div>
 
-      {/* Dispatch Queue Table */}
-      <div className="glass-panel flex-1 flex flex-col overflow-hidden">
-        <div className="p-5 border-b border-glass-border flex justify-between items-center bg-white/5">
-          <h3 className="font-bold flex items-center gap-2 text-sm">
-            <Package size={16} className="text-primary" /> Dispatch Queue
-          </h3>
+      {/* ── SECTION 1: Delivery Staff Directory (Directly Visible) ── */}
+      <div className="glass-panel p-4 space-y-3 bg-bg2/20 border border-glass-border">
+        <div className="flex justify-between items-center flex-wrap gap-2 border-b border-glass-border/40 pb-2">
+          <div className="flex items-center gap-2">
+            <User size={16} className="text-sky" />
+            <h3 className="font-bold text-xs uppercase tracking-wider text-text">Delivery Staff Directory</h3>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky/15 text-sky border border-sky/20">
+              {allBoys.length} Total Registered
+            </span>
+          </div>
         </div>
-        <div className="flex-1 overflow-auto bg-black/20">
+
+        {/* Delivery Staff Cards & Add Form Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Add Delivery Boy Inline Form */}
+          <form onSubmit={handleAddDeliveryBoy} className="p-3.5 rounded-xl border border-dashed border-glass-border bg-bg/40 flex flex-col justify-between gap-2.5">
+            <span className="text-[11px] font-extrabold text-primary flex items-center gap-1">
+              <Plus size={13} /> Add Delivery Staff Member
+            </span>
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder="Full Name (e.g. Dinesh)"
+                value={newBoyName}
+                onChange={e => setNewBoyName(e.target.value)}
+                className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-bg2 border border-glass-border text-text focus:outline-none focus:border-primary"
+              />
+              <input
+                type="text"
+                placeholder="WhatsApp Phone (10 digits)"
+                value={newBoyPhone}
+                onChange={e => setNewBoyPhone(e.target.value)}
+                className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-bg2 border border-glass-border text-text focus:outline-none focus:border-primary font-mono"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={addingBoy || !newBoyName.trim()}
+              className="w-full text-xs py-1.5 font-bold rounded-lg bg-sky hover:bg-sky-400 text-black transition-all disabled:opacity-40"
+            >
+              {addingBoy ? 'Adding...' : 'Save Delivery Staff'}
+            </button>
+          </form>
+
+          {/* Delivery Staff List Cards */}
+          {allBoys.map(boy => {
+            const isEditing = editingBoyId === boy.id;
+            const cleanPhone = (boy.whatsapp_number || '').replace(/\D/g, '');
+            const formattedPhone = cleanPhone ? (cleanPhone.length === 10 ? `+91 ${cleanPhone.slice(0, 5)} ${cleanPhone.slice(5)}` : `+${cleanPhone}`) : 'No phone saved';
+
+            return (
+              <div key={boy.id} className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 transition-all shadow-sm ${boy.is_active ? 'bg-bg2/40 border-glass-border' : 'bg-bg/20 border-glass-border/30 opacity-60'}`}>
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={editBoyName}
+                      onChange={e => setEditBoyName(e.target.value)}
+                      className="w-full text-xs px-2 py-1 rounded bg-bg border border-glass-border text-text font-bold"
+                    />
+                    <input
+                      type="text"
+                      value={editBoyPhone}
+                      onChange={e => setEditBoyPhone(e.target.value)}
+                      className="w-full text-xs px-2 py-1 rounded bg-bg border border-glass-border text-text font-mono"
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button onClick={() => setEditingBoyId(null)} className="px-2 py-1 text-[10px] text-muted hover:text-text">Cancel</button>
+                      <button onClick={() => handleSaveBoyEdit(boy.id)} className="px-2.5 py-1 text-[10px] bg-green text-white font-bold rounded">Save</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${boy.is_active ? 'bg-sky/20 text-sky border border-sky/30' : 'bg-zinc-800 text-muted'}`}>
+                          {boy.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-black text-text truncate">{boy.name}</span>
+                          <span className="text-[10px] font-mono text-muted truncate">{formattedPhone}</span>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0" title={boy.is_active ? 'Deactivate' : 'Activate'}>
+                        <input
+                          type="checkbox"
+                          checked={boy.is_active === 1}
+                          onChange={() => handleToggleBoyActive(boy)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-7 h-4 rounded-full bg-zinc-700 peer-checked:bg-emerald-500 transition-colors" />
+                        <div className="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white transition-transform peer-checked:translate-x-3" />
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-glass-border/30 text-[10px]">
+                      {cleanPhone ? (
+                        <a
+                          href={`https://api.whatsapp.com/send?phone=${cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-400 hover:underline font-bold flex items-center gap-1"
+                        >
+                          <Send size={10} /> Send WhatsApp
+                        </a>
+                      ) : <span className="text-muted italic">No phone</span>}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setEditingBoyId(boy.id); setEditBoyName(boy.name); setEditBoyPhone(boy.whatsapp_number || ''); }}
+                          className="text-muted hover:text-sky font-bold"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteBoy(boy.id, boy.name)}
+                          className="text-muted hover:text-red-400 font-bold"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── SECTION 2: Active Dispatch Queue ── */}
+      <div className="glass-panel flex-1 flex flex-col overflow-hidden bg-bg2/20 border border-glass-border">
+        <div className="p-4 border-b border-glass-border flex justify-between items-center bg-bg3/20">
+          <h3 className="font-bold flex items-center gap-2 text-xs uppercase tracking-wider text-text">
+            <Package size={15} className="text-primary" /> Active Dispatch Queue
+          </h3>
+          <span className="text-[10px] text-muted font-bold font-mono">
+            {orders.length} Total Orders
+          </span>
+        </div>
+        <div className="flex-1 overflow-auto bg-bg/20">
           <table className="w-full text-left border-collapse text-xs">
-            <thead className="sticky top-0 bg-[#18181b]/95 backdrop-blur z-10">
+            <thead className="sticky top-0 bg-bg2/95 backdrop-blur z-10">
               <tr>
-                {['Patient', 'Phone', 'Items', 'Address', 'Delivery Boy', 'Invoice', 'Status', 'Actions'].map(h => (
+                {['Patient', 'Phone', 'Items', 'Address', 'Assigned Delivery Staff', 'Invoice', 'Status', 'Actions'].map(h => (
                   <th key={h} className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
                 ))}
               </tr>
@@ -317,10 +496,10 @@ const Dispatch = () => {
               ) : orders.length === 0 ? (
                 <tr><td colSpan={8} className="p-14 text-center text-muted">
                   <Truck size={32} className="mx-auto mb-3 opacity-20" />
-                  No dispatch orders yet. Click "New Dispatch" to create one.
+                  No dispatch orders created yet. Click "New Dispatch Order" to assign home delivery.
                 </td></tr>
               ) : orders.map(order => (
-                <tr key={order.id} className="hover:bg-white/5 border-b border-glass-border/30 transition-all">
+                <tr key={order.id} className="hover:bg-bg3/30 border-b border-glass-border/30 transition-all">
                   <td className="p-3 font-semibold text-text">{order.patient_name}</td>
                   <td className="p-3 font-mono text-muted">{order.patient_phone || '-'}</td>
                   <td className="p-3 text-muted max-w-[140px] truncate">{order.items || '-'}</td>
@@ -330,7 +509,7 @@ const Dispatch = () => {
                   <td className="p-3">
                     <div className="flex items-center gap-1">
                       <User size={11} className="text-muted" />
-                      <span className={order.delivery_boy_name ? 'text-sky font-semibold' : 'text-muted'}>
+                      <span className={order.delivery_boy_name ? 'text-sky font-bold' : 'text-muted'}>
                         {order.delivery_boy_name || 'Unassigned'}
                       </span>
                     </div>
@@ -340,7 +519,7 @@ const Dispatch = () => {
                     <select
                       value={order.status}
                       onChange={e => handleStatusChange(order.id, e.target.value)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded border cursor-pointer bg-transparent ${statusStyles[order.status]}`}
+                      className={`text-[10px] font-bold px-2 py-1 rounded border cursor-pointer bg-bg ${statusStyles[order.status]}`}
                     >
                       <option value="Pending">Pending</option>
                       <option value="In Transit">In Transit</option>
@@ -349,7 +528,8 @@ const Dispatch = () => {
                   </td>
                   <td className="p-3">
                     <button onClick={() => handleDelete(order.id)}
-                      className="p-1.5 rounded hover:bg-red/20 text-red-400 transition-colors">
+                      className="p-1.5 rounded hover:bg-red-500/20 text-red-400 transition-colors"
+                      title="Delete Dispatch Order">
                       <Trash2 size={13} />
                     </button>
                   </td>
@@ -358,8 +538,104 @@ const Dispatch = () => {
             </tbody>
           </table>
         </div>
-        <div className="p-3 border-t border-glass-border bg-black/10 text-[10px] text-muted px-4">
-          Total Orders: <strong>{orders.length}</strong> | Active: <strong>{pending + inTransit}</strong>
+      </div>
+
+      {/* ── SECTION 3: Delivery Staff Sent Message History (Dating Format) ── */}
+      <div className="glass-panel p-4 space-y-3 bg-bg2/20 border border-glass-border">
+        <div className="flex justify-between items-center flex-wrap gap-2 border-b border-glass-border/40 pb-2">
+          <div className="flex items-center gap-2">
+            <Send size={16} className="text-emerald-400" />
+            <h3 className="font-bold text-xs uppercase tracking-wider text-text">Delivery Staff WhatsApp Message History</h3>
+            <span className="text-[10px] font-mono text-muted">
+              App-dispatched collection & assignment messages
+            </span>
+          </div>
+
+          {/* Date Selector Chips / Dropdown */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted font-bold uppercase">Select Date:</span>
+            {messageDates.length > 0 ? (
+              <select
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-bg border border-glass-border text-text cursor-pointer"
+              >
+                {messageDates.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-bg border border-glass-border text-text"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Message Log Table */}
+        <div className="overflow-x-auto rounded-xl border border-glass-border/40 bg-bg/30">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead className="bg-bg3/30 border-b border-glass-border/40">
+              <tr>
+                <th className="p-2.5 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Time</th>
+                <th className="p-2.5 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[130px]">Delivery Staff</th>
+                <th className="p-2.5 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[110px]">Phone Number</th>
+                <th className="p-2.5 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Status</th>
+                <th className="p-2.5 text-[10px] font-bold text-muted uppercase tracking-wider">Exact Dispatched App Message</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-glass-border/30">
+              {loadingMessages ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-muted">
+                    <RefreshCw size={16} className="animate-spin mx-auto mb-1 text-emerald-400" />
+                    Loading delivery boy sent message logs...
+                  </td>
+                </tr>
+              ) : sentMessages.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-muted italic">
+                    No WhatsApp messages sent to delivery staff on {selectedDate || 'this date'}.
+                  </td>
+                </tr>
+              ) : (
+                sentMessages.map(msg => {
+                  const timeStr = msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                  const rawPhone = (msg.recipient_phone || '').replace(/\D/g, '');
+                  const formattedPhone = rawPhone.length === 10 ? `+91 ${rawPhone.slice(0, 5)} ${rawPhone.slice(5)}` : (rawPhone ? `+${rawPhone}` : 'N/A');
+
+                  return (
+                    <tr key={msg.id} className="hover:bg-bg3/20 transition-colors">
+                      <td className="p-2.5 font-mono text-muted text-[11px] whitespace-nowrap">{timeStr}</td>
+                      <td className="p-2.5 font-bold text-sky text-xs whitespace-nowrap">
+                        {msg.recipient_name || 'Delivery Staff'}
+                      </td>
+                      <td className="p-2.5 font-mono text-muted text-xs whitespace-nowrap">{formattedPhone}</td>
+                      <td className="p-2.5 whitespace-nowrap">
+                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
+                          msg.status === 'sent' || msg.status === 'sent_manually'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : msg.status === 'failed'
+                            ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                            : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                        }`}>
+                          {msg.status}
+                        </span>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="p-2 rounded-lg bg-bg2/60 border border-glass-border/40 text-[11px] text-text font-sans whitespace-pre-wrap max-h-28 overflow-y-auto font-medium leading-relaxed">
+                          {msg.message}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
