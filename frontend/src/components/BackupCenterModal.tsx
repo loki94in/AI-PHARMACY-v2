@@ -65,20 +65,29 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
 }) => {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [lastBackupError, setLastBackupError] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
+    setStatusError(null);
     try {
       const { data } = await apiClient.get('/utilities/backup/status');
       if (data.success) {
         setStatus(data);
+      } else {
+        const msg = data.error || 'Failed to retrieve backup system status';
+        setStatusError(msg);
+        toastEvent.trigger(msg, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err.response?.data?.error || err.message || 'Failed to retrieve backup system status';
       console.error('Failed to load backup status:', err);
-      toastEvent.trigger('Failed to retrieve backup system status', 'error');
+      setStatusError(msg);
+      toastEvent.trigger(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -90,14 +99,18 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
 
   const handleManualBackup = async () => {
     setActionLoading(true);
+    setLastBackupError(null);
     try {
       const { data } = await apiClient.post('/utilities/backup/manual');
       if (data.success) {
         toastEvent.trigger('Manual backup and cloud upload completed successfully!', 'success');
+        setLastBackupError(null);
         fetchStatus();
       }
     } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Manual backup failed', 'error');
+      const msg = err.response?.data?.error || err.message || 'Manual backup failed';
+      setLastBackupError(msg);
+      toastEvent.trigger(msg, 'error');
     } finally {
       setActionLoading(false);
     }
@@ -222,6 +235,24 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
                     Continue Fresh Installation
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {lastBackupError && (
+            <div className="bg-red/10 border border-red/25 p-4 rounded-xl flex gap-3 text-left">
+              <AlertTriangle className="text-red shrink-0 mt-0.5" size={18} />
+              <div className="flex-1 space-y-2">
+                <h4 className="text-xs font-black uppercase text-red tracking-wider">Backup Failed</h4>
+                <p className="text-[11px] text-muted leading-relaxed">{lastBackupError}</p>
+                <button
+                  onClick={handleManualBackup}
+                  disabled={actionLoading}
+                  className="px-3 py-1.5 bg-red/10 hover:bg-red/20 text-red border border-red/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <RotateCcw size={11} className={actionLoading ? 'animate-spin' : ''} />
+                  Retry Backup
+                </button>
               </div>
             </div>
           )}
@@ -417,7 +448,17 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex-1 py-16 text-center text-muted">Failed to retrieve status metrics.</div>
+        <div className="flex-1 py-16 px-6 text-center flex flex-col items-center gap-3">
+          <AlertTriangle className="text-amber" size={28} />
+          <p className="text-sm text-muted">{statusError || 'Failed to retrieve status metrics.'}</p>
+          <button
+            onClick={fetchStatus}
+            disabled={loading}
+            className="px-4 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Retry
+          </button>
+        </div>
       )}
 
       {/* Controls Footer */}

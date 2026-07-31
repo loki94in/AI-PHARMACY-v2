@@ -333,10 +333,17 @@ export default function PharmarackCart() {
           let cleanPhone = phoneNum.replace(/\D/g, '');
           if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
 
+          const distName = (dist.storeName || '').toLowerCase().trim();
           const matchingItem = recentItems.find((item: any) => {
             const itemPhone = (item.number || '').replace(/\D/g, '');
-            const matchPhone = itemPhone.length >= 7 && cleanPhone.length >= 7 && (itemPhone.endsWith(cleanPhone.slice(-10)) || cleanPhone.endsWith(itemPhone.slice(-10)));
-            const matchName = item.target_name && dist.storeName && item.target_name.toLowerCase().trim() === dist.storeName.toLowerCase().trim();
+            const matchPhone = itemPhone.length >= 7 && cleanPhone.length >= 7
+              && (itemPhone.endsWith(cleanPhone.slice(-10)) || cleanPhone.endsWith(itemPhone.slice(-10)));
+            const itemName = (item.target_name || '').toLowerCase().trim();
+            const matchName = distName.length > 0 && itemName.length > 0
+              && (itemName === distName || itemName.includes(distName) || distName.includes(itemName));
+            if (matchPhone && matchName) return true;
+            if (matchPhone && !itemName) return true;
+            if (matchName && !itemPhone) return true;
             return matchPhone || matchName;
           });
 
@@ -351,9 +358,6 @@ export default function PharmarackCart() {
               }
             } else if (matchingItem.status === 'failed_perm' || (matchingItem.status === 'failed_offline' && matchingItem.retry_count >= 3)) {
               updatedStatus[dist.storeId] = 'error';
-              if (sentWaStatusMap[dist.storeId] !== 'error') {
-                toastEvent.trigger(`❌ WhatsApp order to ${dist.storeName} failed: ${matchingItem.error_message || 'Could not deliver message'}`, 'error');
-              }
             } else if (matchingItem.status === 'pending' || matchingItem.status === 'failed_offline') {
               updatedStatus[dist.storeId] = 'queued';
             }
@@ -379,7 +383,7 @@ export default function PharmarackCart() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [distributors, sentWaStatusMap, pageActive]);
+  }, [distributors, pageActive]);
 
   // Saved distributor contacts, delivery boys, and store settings
   const [storeInfo, setStoreInfo] = useState<{ name: string; phone: string; address: string; email: string; adminPhone: string; deliveryBoyName1: string; deliveryBoyPhone: string; deliveryBoyName2: string; deliveryBoyPhone2: string; invoiceFileFormat: string }>({

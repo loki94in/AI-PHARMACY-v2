@@ -35,7 +35,8 @@ import {
   Edit,
   GitMerge,
   Building2,
-  ExternalLink
+  ExternalLink,
+  AlertCircle
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -124,7 +125,7 @@ const Learning: React.FC = () => {
   );
 
   // Profiles Query with module caching
-  const { data: profiles = cachedProfiles, isLoading: loadingProfiles } = useApiQuery<LearningProfileSummary[]>(
+  const { data: profiles = cachedProfiles, isLoading: loadingProfiles, isError: profilesError, refetch: refetchProfiles } = useApiQuery<LearningProfileSummary[]>(
     'learning-profiles',
     async () => {
       const res = await apiClient.get('/learning/profiles');
@@ -156,7 +157,7 @@ const Learning: React.FC = () => {
   );
 
   // Profile Detail Query with module caching and instant hydration
-  const { data: serverProfileDetail, isLoading: loadingDetail } = useApiQuery<any>(
+  const { data: serverProfileDetail, isLoading: loadingDetail, isError: detailError, refetch: refetchDetail } = useApiQuery<any>(
     ['learning-profile-detail', selectedProfileId],
     async () => {
       if (!selectedProfileId) return null;
@@ -1284,8 +1285,27 @@ const Learning: React.FC = () => {
                     <RefreshCw className="animate-spin text-sky" size={16} />
                     <span className="text-[10px]">Loading profiles...</span>
                   </div>
+                ) : profilesError ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center gap-3 px-4">
+                    <AlertCircle className="text-red" size={20} />
+                    <p className="text-xs text-muted">Failed to load distributor profiles.</p>
+                    <button
+                      onClick={() => refetchProfiles()}
+                      className="px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                    >
+                      <RefreshCw size={11} /> Retry
+                    </button>
+                  </div>
                 ) : profiles.length === 0 ? (
-                  <div className="text-center py-20 text-xs text-muted">No distributors found.</div>
+                  <div className="flex flex-col items-center justify-center py-16 text-center gap-3 px-4">
+                    <p className="text-xs text-muted">No distributors found.</p>
+                    <button
+                      onClick={() => setShowAddDistModal(true)}
+                      className="px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                    >
+                      <Plus size={11} /> Add Distributor
+                    </button>
+                  </div>
                 ) : (
                   profiles
                     .filter(p => !distributorSearchQuery.trim() || p.distributor_name.toLowerCase().includes(distributorSearchQuery.toLowerCase().trim()) || (p.distributor_phone && p.distributor_phone.includes(distributorSearchQuery.trim())))
@@ -1325,10 +1345,21 @@ const Learning: React.FC = () => {
             {/* Right Column: Profile details form */}
             <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
               {selectedProfileId !== null ? (
-                (loadingDetail || !selectedProfile || selectedProfile?.distributor?.id !== selectedProfileId) ? (
+                loadingDetail ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3">
                     <RefreshCw className="animate-spin text-sky" size={24} />
                     <span className="text-xs">Fetching profile details...</span>
+                  </div>
+                ) : detailError || !selectedProfile || selectedProfile?.distributor?.id !== selectedProfileId ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3 px-6 text-center">
+                    <AlertCircle className="text-red" size={24} />
+                    <span className="text-xs">Failed to load profile details.</span>
+                    <button
+                      onClick={() => refetchDetail()}
+                      className="px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1"
+                    >
+                      <RefreshCw size={11} /> Retry
+                    </button>
                   </div>
                 ) : selectedProfile ? (
                   <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0 space-y-4">

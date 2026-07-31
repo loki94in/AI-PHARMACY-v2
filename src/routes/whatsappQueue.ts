@@ -154,14 +154,13 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
         const placedAt = Date.now();
         await db.run(
           `INSERT INTO pharmarack_placed_orders (order_date, store_id, store_name, items_json, delivery_persons_json, placed_at, batch_sent, batch_sent_at)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
           [
             today,
             order.storeId || null,
             order.storeName,
             JSON.stringify(order.items || []),
             null,
-            placedAt,
             placedAt
           ]
         );

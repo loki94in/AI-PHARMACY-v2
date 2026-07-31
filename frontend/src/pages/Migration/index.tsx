@@ -100,7 +100,7 @@ const Migration: React.FC = () => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 15 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: 'easeOut' }}
       className="container mx-auto px-6 py-10 max-w-7xl relative"

@@ -613,16 +613,31 @@ export async function forceReconnect(): Promise<void> {
 
 const recentSendsCache = new Map<string, number>();
 
+export interface SendMessageResult {
+  sent: boolean;
+  suppressed?: boolean;
+}
+
+/** ponytail: shared hash for duplicate-suppress key and outbox verification */
+export function hashMessageBody(body: string): number {
+  const fullMsg = (body || '').trim();
+  let msgHash = 0;
+  for (let ci = 0; ci < fullMsg.length; ci++) {
+    msgHash = ((msgHash << 5) - msgHash + fullMsg.charCodeAt(ci)) | 0;
+  }
+  return msgHash;
+}
+
 /** Send a media or text message using the WhatsApp Business API or the live WhatsApp Web client, and log it to SQLite */
 export async function sendMessage(
   to: string,
   mediaPath?: string,
   caption?: string,
   file?: { mimetype: string; data: string; filename?: string }
-): Promise<void> {
+): Promise<SendMessageResult> {
   if (!to) {
     console.warn('Attempted to send WhatsApp message to an empty or null number. Skipping.');
-    return;
+    return { sent: false };
   }
 
   const db = await dbManager.getConnection();
@@ -630,6 +645,8 @@ export async function sendMessage(
     .split(/[,;\s]+/)
     .map(r => r.trim())
     .filter(r => r.length > 0);
+
+  let aggregateResult: SendMessageResult = { sent: false };
 
   for (const recipient of recipients) {
     let chatId = recipient;
@@ -650,15 +667,12 @@ export async function sendMessage(
     // Anti-duplicate protection: prevent identical sends to same recipient within 30s
     // Use a simple hash of the full message to avoid false collisions between different orders
     const fullMsg = (caption || '').trim();
-    let msgHash = 0;
-    for (let ci = 0; ci < fullMsg.length; ci++) {
-      msgHash = ((msgHash << 5) - msgHash + fullMsg.charCodeAt(ci)) | 0;
-    }
+    const msgHash = hashMessageBody(fullMsg);
     const sendKey = `${cleanPhone}:${msgHash}:${fullMsg.length}`;
     const nowTs = Date.now();
     if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey)! < 30000) {
       console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 30s.`);
-      return;
+      return { sent: true, suppressed: true };
     }
     recentSendsCache.set(sendKey, nowTs);
 
@@ -784,6 +798,7 @@ export async function sendMessage(
           console.warn('[WhatsApp] Provisional DB write failed (non-fatal):', provErr?.message);
         }
 
+        aggregateResult = { sent: true, suppressed: false };
         continue;
       } else {
         if (file && file.mimetype && file.data) {
@@ -857,7 +872,11 @@ export async function sendMessage(
     } catch (dbErr) {
       console.error('[WhatsApp Client Wrapper] SQLite write error:', dbErr);
     }
+
+    aggregateResult = { sent: true, suppressed: false };
   }
+
+  return aggregateResult.sent ? aggregateResult : { sent: false };
 }
 
 /** Drain pending outbound messages from whatsapp_send_queue once the client is ready */

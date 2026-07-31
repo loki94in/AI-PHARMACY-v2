@@ -1141,7 +1141,11 @@ const POS = () => {
       setCacheVersion(prev => prev + 1);
     };
     window.addEventListener('inventory-cache-ready', handler);
-    return () => window.removeEventListener('inventory-cache-ready', handler);
+    window.addEventListener('compact-inventory-ready', handler);
+    return () => {
+      window.removeEventListener('inventory-cache-ready', handler);
+      window.removeEventListener('compact-inventory-ready', handler);
+    };
   }, []);
 
   useEffect(() => {
@@ -2389,6 +2393,12 @@ const POS = () => {
 
           {/* A. Search & Scan Medicine Area (Header) */}
           <div className="glass-panel p-4 flex flex-col gap-3 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-md w-full min-w-0 overflow-hidden">
+            {!inventoryIndexReady && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
+                <Loader2 size={14} className="animate-spin shrink-0" />
+                <span>Preparing medicine index…</span>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <div ref={productSearchRef} className="relative flex-1">
                 <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-muted">

@@ -5820,6 +5820,20 @@ var init_pharmarackDailyDispatchService = __esm({
 });
 
 // src/services/notificationService.ts
+function formatDisplayPhone(rawPhone) {
+  if (!rawPhone) return "N/A";
+  const clean = String(rawPhone).replace(/\D/g, "");
+  if (clean.length === 10) {
+    return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+  }
+  if (clean.startsWith("91") && clean.length === 12) {
+    return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+  }
+  if (clean.length > 0) {
+    return `+${clean}`;
+  }
+  return String(rawPhone).trim() || "N/A";
+}
 var NotificationService, notificationService;
 var init_notificationService = __esm({
   "src/services/notificationService.ts"() {
@@ -5951,6 +5965,20 @@ var init_notificationService = __esm({
           console.error("Failed to send prescription out of stock notification:", error);
         }
       }
+      async getStoreSettings(db2) {
+        const settingsRows = await db2.all(
+          "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'distributor_invoice_file_format')"
+        );
+        const settings = {};
+        for (const r of settingsRows) {
+          if (r.key && r.value) settings[r.key] = r.value;
+        }
+        const storeName = settings.shop_name || settings.pharmacy_name || "AI Pharmacy";
+        const address = settings.shop_address || settings.address || "N/A";
+        const email = settings.shop_email || settings.email || "N/A";
+        const fileFormat = (settings.distributor_invoice_file_format || "CSV").replace(" File Format", "");
+        return { storeName, address, email, fileFormat };
+      }
       /**
        * Automatically send order/bill information to distributor WhatsApp numbers
        * including medicines, quantities, and assigned delivery boy details.
@@ -6002,35 +6030,40 @@ var init_notificationService = __esm({
          WHERE pi.purchase_id = ?`,
             [purchase.purchase_id]
           );
-          let medicinesText = "";
+          const store = await this.getStoreSettings(db2);
+          const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+          let itemsText = "";
           if (purchaseItems && purchaseItems.length > 0) {
-            medicinesText = purchaseItems.map((item) => `- ${item.medicine_name} \xD7 ${item.quantity}`).join("\n");
+            itemsText = purchaseItems.map((item) => `  \u2022 ${item.medicine_name} \u2014 
+    Qty: ${item.quantity}`).join("\n");
           } else {
-            medicinesText = "No items found.";
+            itemsText = "  \u2022 Standard Pharmacy Order Items";
           }
-          let deliveryBoysText = "";
+          let boyName = "Not assigned yet";
+          let boyPhone = "N/A";
           if (deliveryBoysList && deliveryBoysList.length > 0) {
-            deliveryBoysText = deliveryBoysList.map((boy) => {
-              const boyPhoneRaw = boy.whatsapp_number || "";
-              const boyPhones = boyPhoneRaw.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
-              const boyPhonesUnique = [...new Set(boyPhones)];
-              const phonesDisplay = boyPhonesUnique.join(", ") || "No contact set";
-              return `${boy.name}
-Mobile: ${phonesDisplay}`;
-            }).join("\n\n");
+            boyName = deliveryBoysList[0].name || "Delivery Staff";
+            boyPhone = formatDisplayPhone(deliveryBoysList[0].whatsapp_number || "");
           } else {
-            deliveryBoysText = "Not assigned yet";
+            const adminSetting = await db2.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+            if (adminSetting?.value) {
+              boyName = "Admin / Store Owner";
+              boyPhone = formatDisplayPhone(adminSetting.value);
+            }
           }
-          const message = `Bill No: ${purchase.invoice_no}
+          const message = `\u{1F3E5} *${store.storeName}*
 
-Medicines:
-${medicinesText}
+\u{1F4C5} *Date:* ${dateStr}
 
-Delivery Boy:
-${deliveryBoysText}
+\u{1F4CB} *Items Requested:*
+${itemsText}
 
-Expected Delivery:
-Today`;
+\u{1F69A} *Assigned Delivery Boy:*
+  \u{1F464} ${boyName}
+  \u{1F4DE} ${boyPhone}
+
+*Delivery Location:* ${store.address}
+*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
           const distPhones = rawPhone.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
           const uniqueDistPhones = Array.from(new Set(distPhones));
           if (uniqueDistPhones.length === 0) {
@@ -6046,7 +6079,7 @@ Today`;
               await db2.run(
                 `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-                ["distributor_order", purchase.distributor_name, phone, message, "sent", purchase.invoice_no]
+                ["distributor_invoice_order", purchase.distributor_name, phone, message, "sent", `inv_${purchase.invoice_no}`]
               );
             } catch (wsError) {
               console.error(`[DistributorNotif] Failed to send WhatsApp to distributor number ${phone}:`, wsError);
@@ -6054,22 +6087,20 @@ Today`;
               await db2.run(
                 `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                ["distributor_order", purchase.distributor_name, phone, message, "failed", errMsg, purchase.invoice_no]
+                ["distributor_invoice_order", purchase.distributor_name, phone, message, "failed", errMsg, `inv_${purchase.invoice_no}`]
               );
             }
           }
           return sentCount > 0;
-        } catch (err) {
-          console.error("[DistributorNotif] Error sending distributor WhatsApp notification:", err);
+        } catch (error) {
+          console.error("[DistributorNotif] Exception while notifying distributor:", error);
           return false;
         }
       }
       /**
-       * Send WhatsApp notification to distributor and delivery boy about a cart order.
-       * This is triggered manually or automatically when cart is placed/cleared.
+       * Send WhatsApp order notification to distributor and delivery boy(s) when Pharmarack cart items are ordered.
        */
-      async notifyAboutCartOrder(storeName, storeId, deliveryPersons, items) {
-        if (!storeName || !items || items.length === 0) return false;
+      async notifyDistributorCartOrder(storeName, storeId, items, deliveryPersons) {
         let db2 = null;
         try {
           db2 = await dbManager.getConnection();
@@ -6081,44 +6112,52 @@ Today`;
           if (!rawPhone.trim()) {
             console.warn(`[CartOrderNotif] Distributor ${storeName} has no phone number in database.`);
           }
-          const medicinesText = items.map((item) => `- ${item.productName || item.name || "Unknown Product"} \xD7 ${item.qty || item.Quantity || 1}`).join("\n");
           let deliveryBoysText = "";
           const resolvedDeliveryBoys = [];
           if (deliveryPersons && deliveryPersons.length > 0) {
             for (const boy of deliveryPersons) {
               if (!boy.name) continue;
+              let boyName2 = boy.name;
               const dbBoy = await db2.get(
                 "SELECT name, whatsapp_number FROM delivery_boys WHERE (name LIKE ? OR name = ?) AND is_active = 1",
                 [`%${boy.name}%`, boy.name]
               );
+              if (dbBoy?.name) {
+                boyName2 = dbBoy.name;
+              }
               let boyPhoneRaw = dbBoy?.whatsapp_number || boy.phone || boy.whatsapp || "";
-              if (!boyPhoneRaw) {
-                const activeBoy = await db2.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL LIMIT 1");
-                boyPhoneRaw = activeBoy?.whatsapp_number || "";
+              if (!boyPhoneRaw || boy.name === "Not assigned yet" || boy.name === "N/A") {
+                const activeBoy = await db2.get("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
+                if (activeBoy?.whatsapp_number) {
+                  boyPhoneRaw = activeBoy.whatsapp_number;
+                  if (boyName2 === "Not assigned yet" || boyName2 === "N/A" || !dbBoy) {
+                    boyName2 = activeBoy.name || "Delivery Staff";
+                  }
+                }
               }
               const boyPhones = boyPhoneRaw.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
               const boyPhonesUnique = Array.from(new Set(boyPhones));
-              const phonesDisplay = boyPhonesUnique.join(", ") || "No contact set";
-              deliveryBoysText += `${boy.name}
+              const phonesDisplay = boyPhonesUnique.map((p) => formatDisplayPhone(p)).join(", ") || "No contact set";
+              deliveryBoysText += `${boyName2}
 Mobile: ${phonesDisplay}
 
 `;
               if (boyPhonesUnique.length > 0) {
-                resolvedDeliveryBoys.push({ name: boy.name, phone: boyPhonesUnique[0] });
+                resolvedDeliveryBoys.push({ name: boyName2, phone: boyPhonesUnique[0] });
               }
             }
             deliveryBoysText = deliveryBoysText.trim();
           }
           if (resolvedDeliveryBoys.length === 0) {
-            const activeBoys = await db2.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL");
+            const activeBoys = await db2.all("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != ''");
             for (const boy of activeBoys) {
               if (!boy.whatsapp_number) continue;
               const clean = boy.whatsapp_number.replace(/\D/g, "");
               if (clean.length >= 10) {
                 const formatted = clean.length === 10 ? `91${clean}` : clean;
-                resolvedDeliveryBoys.push({ name: boy.name, phone: formatted });
+                resolvedDeliveryBoys.push({ name: boy.name || "Delivery Staff", phone: formatted });
                 deliveryBoysText += `${boy.name}
-Mobile: ${formatted}
+Mobile: ${formatDisplayPhone(clean)}
 
 `;
               }
@@ -6129,33 +6168,49 @@ Mobile: ${formatted}
                 const clean = String(adminSetting.value).replace(/\D/g, "");
                 if (clean.length >= 10) {
                   const formatted = clean.length === 10 ? `91${clean}` : clean;
-                  resolvedDeliveryBoys.push({ name: "Admin (Delivery Fallback)", phone: formatted });
-                  deliveryBoysText += `Admin (Delivery Contact)
-Mobile: ${formatted}
+                  resolvedDeliveryBoys.push({ name: "Admin / Store Owner", phone: formatted });
+                  deliveryBoysText += `Admin (Store Owner)
+Mobile: ${formatDisplayPhone(clean)}
 
 `;
                 }
               }
             }
           }
-          if (!deliveryBoysText) {
-            deliveryBoysText = "Not assigned yet";
+          const store = await this.getStoreSettings(db2);
+          const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+          let itemsText = "";
+          if (items && items.length > 0) {
+            itemsText = items.map((item) => `  \u2022 ${item.productName || item.name || "Medicine Item"} \u2014 
+    Qty: ${item.qty || item.Quantity || 1}`).join("\n");
+          } else {
+            itemsText = "  \u2022 Standard Pharmacy Order Items";
           }
-          const message = `Order Finalized (Pharmarack Cart)
+          let boyName = "Not assigned yet";
+          let boyPhone = "N/A";
+          if (resolvedDeliveryBoys && resolvedDeliveryBoys.length > 0) {
+            boyName = resolvedDeliveryBoys[0].name;
+            boyPhone = formatDisplayPhone(resolvedDeliveryBoys[0].phone);
+          } else {
+            const adminSetting = await db2.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+            if (adminSetting?.value) {
+              boyName = "Admin / Store Owner";
+              boyPhone = formatDisplayPhone(adminSetting.value);
+            }
+          }
+          const message = `\u{1F3E5} *${store.storeName}*
 
-\u{1F4E6} Distributor: ${storeName}
+\u{1F4C5} *Date:* ${dateStr}
 
-Medicines:
-${medicinesText}
+\u{1F4CB} *Items Requested:*
+${itemsText}
 
-Delivery Boy:
-${deliveryBoysText}
+\u{1F69A} *Assigned Delivery Boy:*
+  \u{1F464} ${boyName}
+  \u{1F4DE} ${boyPhone}
 
-Requested File Format:
-CSV File Format
-
-Expected Delivery:
-Today`;
+*Delivery Location:* ${store.address}
+*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
           const distPhones = rawPhone.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
           const uniqueDistPhones = Array.from(new Set(distPhones));
           let sentCount = 0;
@@ -6199,7 +6254,7 @@ Today`;
         } finally {
           try {
             const batchDb = await dbManager.getConnection();
-            await recordPlacedOrder(batchDb, storeName, storeId, items, deliveryPersons);
+            await recordPlacedOrder(batchDb, storeName, storeId, items || [], deliveryPersons || []);
           } catch (recErr) {
             console.warn("[CartOrderNotif] Failed to record order for daily batch:", recErr);
           }
@@ -6948,7 +7003,7 @@ __export(whatsappClient_exports, {
 function isPuppeteerDetachedError(msg) {
   if (!msg) return false;
   const str = String(msg);
-  return str.includes("detached Frame") || str.includes("Execution context was destroyed") || str.includes("Session closed") || str.includes("Target closed") || str.includes("Protocol error") || str.includes("Page crashed") || str.includes("browser has disconnected");
+  return str.includes("detached Frame") || str.includes("Navigating frame was detached") || str.includes("LifecycleWatcher") || str.includes("ECONNREFUSED") || str.includes("Execution context was destroyed") || str.includes("Session closed") || str.includes("Target closed") || str.includes("Protocol error") || str.includes("Page crashed") || str.includes("browser has disconnected") || str.includes("CdpFrame") || str.includes("CdpPage");
 }
 function setCurrentQr(qr) {
   currentQr = qr;
@@ -7352,7 +7407,12 @@ async function initClient() {
       }
     });
     client.initialize().catch((err) => {
-      console.error("[WhatsApp] Failed during initialize():", err);
+      const errMsg = err?.message || String(err);
+      if (isPuppeteerDetachedError(errMsg)) {
+        console.warn("[WhatsApp] Initialize interrupted by teardown/reconnect:", errMsg);
+      } else {
+        console.error("[WhatsApp] Failed during initialize():", err);
+      }
       initializing = false;
       isReady = false;
       clientInstance = null;
@@ -12592,6 +12652,25 @@ async function ensureSchema(dbPath) {
       FOREIGN KEY(medicine_id) REFERENCES medicines(id)
     );
 
+    CREATE TABLE IF NOT EXISTS distributor_medicine_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      alias_name TEXT NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      UNIQUE(distributor_id, alias_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS legacy_id_map (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      legacy_id TEXT NOT NULL UNIQUE,
+      canonical_medicine_id INTEGER NOT NULL,
+      source TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(canonical_medicine_id) REFERENCES medicines(id)
+    );
+
     CREATE TABLE IF NOT EXISTS catalog_mappings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       file_headers TEXT UNIQUE,
@@ -13456,8 +13535,9 @@ var init_workerSupervisor = __esm({
       }
       /** Starts all configured background workers */
       start() {
-        if (process.env.DISABLE_BACKGROUND_WORKERS === "true") {
-          console.log("[WorkerSupervisor] Background workers disabled via DISABLE_BACKGROUND_WORKERS=true.");
+        if (process.env.DISABLE_BACKGROUND_WORKERS !== "false") {
+          console.log("[WorkerSupervisor] ALL background workers are STOPPED and DISABLED.");
+          this.stop();
           return;
         }
         console.log("[WorkerSupervisor] Starting background worker supervisor...");
@@ -14683,55 +14763,71 @@ var init_connection = __esm({
               await this.connection.close();
             } catch (e) {
             }
+            this.connection = null;
           }
-          let db2 = new import_sqlite.Database({ filename: dbPath, driver: import_sqlite32.default.Database });
-          let needsHeal = false;
-          let initialErrorMsg = "";
           const isTest = process.env.NODE_ENV === "test" || !!process.env.JEST_WORKER_ID;
           const busyTimeout = isTest ? 5e3 : 3e4;
-          let openSuccess = false;
-          try {
-            await db2.open();
-            await db2.run(`PRAGMA busy_timeout = ${busyTimeout};`);
-            await db2.run("PRAGMA journal_mode = WAL;");
-            openSuccess = true;
-          } catch (err) {
-            const isBusy = err?.message?.includes("SQLITE_BUSY") || err?.message?.includes("locked") || err?.code === "SQLITE_BUSY";
-            if (!isBusy) {
-              needsHeal = true;
-              initialErrorMsg = err.message || "Failed to open database file";
-            } else {
-              console.warn("[DB] Database busy on connection open, skipping self-healing rename.");
-            }
+          const maxAttempts = 10;
+          let lastError = null;
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            let db2 = new import_sqlite.Database({ filename: dbPath, driver: import_sqlite32.default.Database });
+            let needsHeal = false;
+            let initialErrorMsg = "";
+            let openSuccess = false;
             try {
-              await db2.close();
-            } catch (_) {
+              await db2.open();
+              await db2.run(`PRAGMA busy_timeout = ${busyTimeout};`);
+              await db2.run("PRAGMA journal_mode = WAL;");
+              openSuccess = true;
+            } catch (err) {
+              lastError = err;
+              const isBusy = err?.message?.includes("SQLITE_BUSY") || err?.message?.includes("locked") || err?.code === "SQLITE_BUSY";
+              if (!isBusy) {
+                needsHeal = true;
+                initialErrorMsg = err.message || "Failed to open database file";
+              } else {
+                console.warn(`[DB] Database busy on connection open (attempt ${attempt}/${maxAttempts}), retrying...`);
+              }
+              try {
+                await db2.close();
+              } catch (_) {
+              }
+            }
+            if (needsHeal) {
+              try {
+                db2 = await this.runSelfHealing(dbPath, busyTimeout, initialErrorMsg);
+                openSuccess = true;
+              } catch (healErr) {
+                lastError = healErr;
+                openSuccess = false;
+              }
+            }
+            if (openSuccess) {
+              this.setupWriteInterceptor(db2);
+              this.connection = db2;
+              this.currentDbPath = dbPath;
+              break;
+            }
+            if (attempt < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
             }
           }
-          if (needsHeal) {
-            db2 = await this.runSelfHealing(dbPath, busyTimeout, initialErrorMsg);
-            openSuccess = true;
-          }
-          if (openSuccess) {
-            this.setupWriteInterceptor(db2);
-            this.connection = db2;
-            this.currentDbPath = dbPath;
-          } else {
-            this.connection = null;
-            throw new Error("Database connection is currently busy or unavailable. Please retry.");
+          if (!this.connection) {
+            throw new Error(`Database connection is currently busy or unavailable. Please retry. (${lastError?.message || "SQLITE_BUSY"})`);
           }
           const isProductionOrPkg = process.env.NODE_ENV === "production" || typeof process.pkg !== "undefined";
-          if (isProductionOrPkg && !isTest && !needsHeal) {
+          if (isProductionOrPkg && !isTest) {
+            const activeConn = this.connection;
             setImmediate(async () => {
               try {
-                const integrityResult = await db2.get("PRAGMA quick_check");
+                const integrityResult = await activeConn.get("PRAGMA quick_check");
                 if (integrityResult?.quick_check !== "ok") {
                   console.error("[DB] Quick check failed, attempting WAL checkpoint recovery...");
-                  await db2.run("PRAGMA wal_checkpoint(TRUNCATE)");
-                  const recheck = await db2.get("PRAGMA quick_check");
+                  await activeConn.run("PRAGMA wal_checkpoint(TRUNCATE)");
+                  const recheck = await activeConn.get("PRAGMA quick_check");
                   if (recheck?.quick_check !== "ok") {
                     console.error("[DB] Background quick check failed after WAL checkpoint. Starting silent background restoration...");
-                    const healedDb = await this.runSelfHealing(dbPath, busyTimeout, "Quick check failed after WAL checkpoint", db2);
+                    const healedDb = await this.runSelfHealing(dbPath, busyTimeout, "Quick check failed after WAL checkpoint", activeConn);
                     this.setupWriteInterceptor(healedDb);
                     this.connection = healedDb;
                   } else {
@@ -14748,8 +14844,8 @@ var init_connection = __esm({
                   console.warn("[DB] Quick check blocked by an unusable virtual table \u2014 rebuilding the search index.");
                   try {
                     const { ensureMedicinesFts: ensureMedicinesFts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
-                    await ensureMedicinesFts2(db2);
-                    const recheck = await db2.get("PRAGMA quick_check");
+                    await ensureMedicinesFts2(activeConn);
+                    const recheck = await activeConn.get("PRAGMA quick_check");
                     if (recheck?.quick_check === "ok") {
                       console.log("[DB] Search index rebuilt; database is healthy, no restore needed.");
                       return;
@@ -14760,7 +14856,7 @@ var init_connection = __esm({
                 }
                 console.error("[DB] Background quick check error:", err);
                 try {
-                  const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || "Background check error", db2);
+                  const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || "Background check error", activeConn);
                   this.setupWriteInterceptor(healedDb);
                   this.connection = healedDb;
                 } catch (healErr) {
@@ -14815,6 +14911,10 @@ var init_connection = __esm({
         };
       }
       async runSelfHealing(dbPath, busyTimeout, initialErrorMsg, oldDb) {
+        if (process.env.DISABLE_SELF_HEALING_WORKERS !== "false") {
+          console.warn("[DB] Self-healing DB worker is DISABLED. Skipping silent DB auto-restoration.");
+          throw new Error(`DB_INTEGRITY_FAILURE: ${initialErrorMsg}`);
+        }
         if (oldDb) {
           try {
             await oldDb.close();
@@ -18000,11 +18100,13 @@ async function importOrder(row, db2) {
   const doctorId = legacyDoctorId ? doctorMap.get(legacyDoctorId) : null;
   const rawInvoice = row["invoice"] || legacyId;
   const uniqueInvoice = await ensureInvoiceNoUnique(rawInvoice, legacyId, db2);
+  const total_amount = parseFloat(row["amount"] || "0") || 0;
+  const discount = parseFloat(row["discount"] || "0") || 0;
   salesBatch.push({
     invoice_no: uniqueInvoice,
     customer_id: customerId || null,
     date: row["created_time"] || null,
-    total_amount: parseFloat(row["amount"] || "0") || 0,
+    total_amount,
     tax_amount: parseFloat(row["net_gst_value"] || "0") || 0,
     doctor_id: doctorId || null,
     payment_medium: row["payment_medium"] || null,
@@ -18014,7 +18116,8 @@ async function importOrder(row, db2) {
     igst_value: parseFloat(row["igst_value"] || "0") || 0,
     legacy_id: legacyId,
     business_date: row["business_date"] || row["created_time"] || null,
-    discount: parseFloat(row["discount"] || "0") || 0
+    discount,
+    subtotal: total_amount + discount
   });
   if (salesBatch.length >= 2e3) {
     await flushSalesInvoices(db2);
@@ -18027,9 +18130,9 @@ async function flushSalesInvoices(db2) {
     for (const s of salesBatch) {
       try {
         const result = await db2.run(
-          `INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, doctor_id, payment_medium, roff, cgst_value, sgst_value, igst_value, legacy_id, business_date, discount)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [s.invoice_no, s.customer_id, s.date, s.total_amount, s.tax_amount, s.doctor_id, s.payment_medium, s.roff, s.cgst_value, s.sgst_value, s.igst_value, s.legacy_id, s.business_date, s.discount || 0]
+          `INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, doctor_id, payment_medium, roff, cgst_value, sgst_value, igst_value, legacy_id, business_date, discount, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.invoice_no, s.customer_id, s.date, s.total_amount, s.tax_amount, s.doctor_id, s.payment_medium, s.roff, s.cgst_value, s.sgst_value, s.igst_value, s.legacy_id, s.business_date, s.discount || 0, s.subtotal || s.total_amount]
         );
         salesInvoiceMap.set(s.legacy_id, result.lastID);
       } catch (err) {
@@ -18998,10 +19101,10 @@ async function processSalesLine(sqlLine, db2) {
         return true;
       }
       const insertInvoiceQuery = `
-                INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount, subtotal)
+                VALUES (?, ?, ?, ?, ?, ?)
             `;
-      await db2.run(insertInvoiceQuery, [invoice_no, customerId, dateStr, totalAmount, taxAmount]);
+      await db2.run(insertInvoiceQuery, [invoice_no, customerId, dateStr, totalAmount, taxAmount, totalAmount]);
       return true;
     } catch (error) {
       console.error(`Error processing legacy_sales line: ${error}`);
@@ -19904,6 +20007,23 @@ async function parseAndImportPgDump(sqlPath, targetDbPath) {
     migrationStatus.message = `Pass 7 done: ${stats.purchaseOrders} POs, ${stats.scheduledOrders} schedules`;
     migrationStatus.progress = 97;
     console.log(migrationStatus.message);
+    migrationStatus.message = "Post-migration sanitization: Filtering pre-expired & zero-stock batches...";
+    try {
+      await db2.run(`
+      UPDATE inventory_master 
+      SET quantity = 0, loose_quantity = 0 
+      WHERE expiry_date IS NOT NULL 
+        AND date(expiry_date) < date('now')
+    `);
+      await db2.run(`
+      UPDATE inventory_master 
+      SET quantity = 0, loose_quantity = 0 
+      WHERE quantity < 0 OR loose_quantity < 0
+    `);
+      console.log("[Migration] Post-migration sanitization complete: pre-expired and zero/negative stock batches zeroed.");
+    } catch (cleanErr) {
+      console.warn("[Migration] Post-migration sanitization warning:", cleanErr.message);
+    }
     migrationStatus.message = "Generating migration summary report...";
     await generateMigrationReport(db2, stats);
     migrationStatus.message = `Migration Complete! ${stats.medicines} medicines, ${stats.purchases} purchases, ${stats.salesInvoices} sales, ${stats.returns} returns, ${stats.payments} payments, ${stats.b2bInvoices} B2B invoices, ${stats.purchaseOrders} POs imported.`;
@@ -20415,8 +20535,9 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
                     saleVals.push(val);
                   }
                 }
-                const baseCols = ["invoice_no", "customer_id", "doctor_id", "date", "total_amount", "discount", "cgst_value", "sgst_value"];
-                const baseVals = [invoiceNo, customer.id, doctor.id, dateStr, totalAmount, discount, cgstVal, sgstVal];
+                const subtotal = totalAmount + discount;
+                const baseCols = ["invoice_no", "customer_id", "doctor_id", "date", "total_amount", "discount", "subtotal", "cgst_value", "sgst_value"];
+                const baseVals = [invoiceNo, customer.id, doctor.id, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal];
                 const colsStr = [...baseCols, ...saleCols].join(", ");
                 const placeholdersStr = [...baseCols, ...saleCols].map(() => "?").join(", ");
                 const result = await db2.run(
@@ -20806,10 +20927,11 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
                 if (patientKey2 && cleanRow[patientKey2]) {
                   let invoice = await db2.get("SELECT id FROM sales_invoices WHERE invoice_no = ?", [invoiceNo]);
                   if (!invoice) {
+                    const subtotal = totalAmount + discount;
                     const result = await db2.run(
-                      `INSERT INTO sales_invoices (invoice_no, customer_id, doctor_id, date, total_amount, discount, cgst_value, sgst_value)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                      [invoiceNo, customerId || 1, doctorId || 1, dateStr, totalAmount, discount, cgstVal, sgstVal]
+                      `INSERT INTO sales_invoices (invoice_no, customer_id, doctor_id, date, total_amount, discount, subtotal, cgst_value, sgst_value)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                      [invoiceNo, customerId || 1, doctorId || 1, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal]
                     );
                     invoice = { id: result.lastID };
                   }
@@ -21059,6 +21181,34 @@ var init_migration = __esm({
     });
     router3.get("/status", (req, res) => {
       res.json(migrationStatus);
+    });
+    router3.get("/summary", async (_req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const medRow = await db2.get("SELECT COUNT(*) as cnt FROM medicines");
+        const invRow = await db2.get("SELECT COUNT(*) as cnt FROM inventory_master");
+        const purRow = await db2.get("SELECT COUNT(*) as cnt FROM purchases");
+        const salRow = await db2.get("SELECT COUNT(*) as cnt FROM sales_invoices");
+        const retRow = await db2.get("SELECT COUNT(*) as cnt FROM returns");
+        const distRow = await db2.get("SELECT COUNT(*) as cnt FROM distributors");
+        const custRow = await db2.get("SELECT COUNT(*) as cnt FROM customers");
+        const docRow = await db2.get("SELECT COUNT(*) as cnt FROM doctors");
+        res.json({
+          success: true,
+          stats: {
+            medicines: medRow?.cnt || 0,
+            inventory: invRow?.cnt || 0,
+            purchases: purRow?.cnt || 0,
+            sales: salRow?.cnt || 0,
+            returns: retRow?.cnt || 0,
+            distributors: distRow?.cnt || 0,
+            customers: custRow?.cnt || 0,
+            doctors: docRow?.cnt || 0
+          }
+        });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch migration summary", details: err.message });
+      }
     });
     router3.post("/analyze", async (req, res) => {
       const { fileName, skipLines } = req.body;
@@ -21414,10 +21564,11 @@ var init_migration = __esm({
         } catch (err) {
           console.warn("Failed to stop workers or close staging connections:", err);
         }
+        await dbManager.close(true);
         if (import_fs19.default.existsSync(DB_PATH12)) {
           try {
             const Database6 = (await import("better-sqlite3")).default;
-            const tempAppDb = new Database6(DB_PATH12);
+            const tempAppDb = new Database6(DB_PATH12, { timeout: 1e4 });
             tempAppDb.pragma("wal_checkpoint(TRUNCATE)");
             tempAppDb.pragma("journal_mode = DELETE");
             tempAppDb.close();
@@ -21425,7 +21576,6 @@ var init_migration = __esm({
             console.warn("[Migration Finalize] Active DB checkpoint warning:", checkpointErr);
           }
         }
-        await dbManager.close(true);
         const timestamp = Date.now();
         backupPath = DB_PATH12 + ".bak_" + timestamp;
         if (import_fs19.default.existsSync(DB_PATH12)) {
@@ -21485,7 +21635,26 @@ var init_migration = __esm({
         } catch (err) {
           console.warn("Failed to restart workers:", err);
         }
-        res.json({ success: true, message: "Migration finalized and live!" });
+        let stats = { medicines: 0, inventory: 0, purchases: 0, sales: 0, returns: 0, distributors: 0 };
+        try {
+          const medRow = await activeDb.get("SELECT COUNT(*) as cnt FROM medicines");
+          const invRow = await activeDb.get("SELECT COUNT(*) as cnt FROM inventory_master");
+          const purRow = await activeDb.get("SELECT COUNT(*) as cnt FROM purchases");
+          const salRow = await activeDb.get("SELECT COUNT(*) as cnt FROM sales_invoices");
+          const retRow = await activeDb.get("SELECT COUNT(*) as cnt FROM returns");
+          const distRow = await activeDb.get("SELECT COUNT(*) as cnt FROM distributors");
+          stats = {
+            medicines: medRow?.cnt || 0,
+            inventory: invRow?.cnt || 0,
+            purchases: purRow?.cnt || 0,
+            sales: salRow?.cnt || 0,
+            returns: retRow?.cnt || 0,
+            distributors: distRow?.cnt || 0
+          };
+        } catch (countErr) {
+          console.warn("[Migration Finalize] Could not query table counts:", countErr);
+        }
+        res.json({ success: true, message: "Migration finalized and live!", stats });
       } catch (e) {
         console.error("[Migration Finalize] Error during finalize:", e);
         try {
@@ -22907,7 +23076,7 @@ var init_verificationService = __esm({
           };
         } catch (err) {
           console.error("[VerificationService] Database health check crashed:", err);
-          if (err.message && (err.message.includes("closed") || err.message.includes("MISUSE") || err.message.includes("BUSY"))) {
+          if (process.env.DISABLE_SELF_HEALING_WORKERS === "false" && err.message && (err.message.includes("closed") || err.message.includes("MISUSE") || err.message.includes("BUSY"))) {
             try {
               console.warn("[VerificationService] closed database detected, running self-healing reconnect...");
               await dbManager.close(true);
@@ -23505,6 +23674,39 @@ var init_settings = __esm({
         res.status(500).json({ error: "Failed to delete distributor: " + error.message });
       }
     });
+    router8.post("/distributors/merge", async (req, res) => {
+      const { primaryId, secondaryIds } = req.body;
+      if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
+        return res.status(400).json({ error: "primaryId and secondaryIds array are required" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        const primary = await db2.get("SELECT * FROM distributors WHERE id = ?", [primaryId]);
+        if (!primary) return res.status(404).json({ error: "Primary distributor not found" });
+        const placeholders = secondaryIds.map(() => "?").join(",");
+        const params = [primaryId, ...secondaryIds];
+        await db2.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE purchase_orders SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE returns SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
+        await db2.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [primaryId]);
+        await db2.run(`DELETE FROM distributors WHERE id IN (${placeholders})`, secondaryIds);
+        if (primary.phone && primary.name) {
+          const cleanPhone = String(primary.phone).replace(/\D/g, "");
+          try {
+            await db2.run("UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?", [cleanPhone, `%${primary.name.toLowerCase().trim()}%`]);
+          } catch (_) {
+          }
+        }
+        res.json({ success: true, message: `Successfully merged ${secondaryIds.length} duplicate distributor(s) into '${primary.name}'`, primaryId });
+      } catch (error) {
+        console.error("Failed to merge distributors:", error);
+        res.status(500).json({ error: "Failed to merge distributors: " + error.message });
+      }
+    });
     router8.post("/google/disconnect", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
@@ -23875,6 +24077,11 @@ var init_tokenRefreshScheduler = __esm({
         return this.refreshIfNeeded(triggerType);
       }
       start() {
+        if (process.env.DISABLE_BACKGROUND_WORKERS !== "false") {
+          console.log("[TokenRefreshScheduler] Background token refresh scheduler is STOPPED and DISABLED.");
+          this.stop();
+          return;
+        }
         if (this.timeoutId) return;
         console.log("[TokenRefreshScheduler] Starting randomized background token refresh scheduler (40-60 min window)...");
         this.refreshIfNeeded("boot");
@@ -24322,44 +24529,41 @@ var init_pharmarack = __esm({
       if (!qRaw) {
         return res.json([]);
       }
-      const qLower = qRaw.toLowerCase();
-      const q = qLower;
       const storeId = req.query.storeId ? Number(req.query.storeId) : null;
       const isMapped = req.query.isMapped === "true";
       const hasStoreFilter = storeId !== null && !isNaN(storeId);
-      const cachedData = searchCache.get(q, storeId, isMapped);
-      if (cachedData) {
-        return res.json(cachedData);
-      }
       try {
         const settings = await getPharmarackSettings();
         const token = settings["pharmarack_session_token"] || "";
         if (!token) {
           return res.status(401).json({ error: "Need to login", code: "NEED_LOGIN" });
         }
-        const performSearchQuery = async (searchTerm) => {
-          const payload = {
-            SearchKeyword: searchTerm,
-            StoreId: hasStoreFilter && isMapped ? [storeId] : [],
-            NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
-            Count: 50,
-            SkipCount: 0,
-            isMappedSearch: hasStoreFilter ? isMapped : null,
-            IsStock: 2,
-            IsScheme: 2,
-            IsSort: 1,
-            CartSource: "MOVP"
-          };
-          const response = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
-            method: "POST",
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(2500)
-          });
-          if (response.ok) {
-            const data = await response.json();
-            if (data && Array.isArray(data.data)) {
-              return data.data.map((p) => ({
-                name: p.ProductName || p.ProductFullName || "",
+        const payload = {
+          SearchKeyword: qRaw,
+          StoreId: hasStoreFilter && isMapped ? [storeId] : [],
+          NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
+          Count: 50,
+          SkipCount: 0,
+          isMappedSearch: hasStoreFilter ? isMapped : null,
+          IsStock: 2,
+          IsScheme: 2,
+          IsSort: 1,
+          CartSource: "MOVP"
+        };
+        const response = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
+          method: "POST",
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(3500)
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data && Array.isArray(data.data)) {
+            const results = data.data.map((p) => {
+              const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || "";
+              return {
+                name: rawName,
+                shortName: rawName,
+                fullName: rawName,
                 packaging: p.Packing || "",
                 distributor: p.StoreName || "",
                 rate: p.PTR !== void 0 ? p.PTR : null,
@@ -24371,95 +24575,15 @@ var init_pharmarack = __esm({
                 productCode: p.ProductCode || "",
                 company: p.Company || "",
                 storeId: p.StoreId
-              }));
-            }
+              };
+            });
+            return res.json(results);
           }
-          return null;
-        };
-        try {
-          let mappedProducts = [];
-          let searchSuccessful = false;
-          const attempted = /* @__PURE__ */ new Set();
-          const trySearch = async (term) => {
-            if (!term || term.length < 2 || attempted.has(term)) return false;
-            attempted.add(term);
-            const r = await performSearchQuery(term);
-            if (r && r.length > 0) {
-              mappedProducts = r;
-              searchSuccessful = true;
-              return true;
-            }
-            return false;
-          };
-          const rawNoParens = qRaw.replace(/\([^)]*\)/g, "").trim();
-          const { cleaned: cleanedTerm } = cleanSearchQuery(rawNoParens);
-          if (cleanedTerm && cleanedTerm.length >= 3 && cleanedTerm !== qRaw) {
-            if (await trySearch(cleanedTerm)) {
-              console.log(`[Pharmarack Search] Rapid hit on pre-cleaned term: "${cleanedTerm}"`);
-            }
-          }
-          if (!searchSuccessful && await trySearch(qRaw)) {
-          }
-          if (!searchSuccessful && await trySearch(qLower)) {
-            console.log(`[Pharmarack Search] Found via lowercase: "${qLower}"`);
-          }
-          if (!searchSuccessful && qRaw.includes(" ")) {
-            const words = qRaw.trim().split(/\s+/);
-            if (words.length >= 2) {
-              const brandPrefix = `${words[0]} ${words[1]}`;
-              if (brandPrefix.length >= 3) {
-                console.log(`[Pharmarack Search] Trying brand prefix: "${brandPrefix}"`);
-                await trySearch(brandPrefix);
-              }
-            }
-          }
-          if (!searchSuccessful && qRaw.includes(" ")) {
-            const firstWord = qRaw.split(" ")[0].trim();
-            if (firstWord.length >= 3) {
-              console.log(`[Pharmarack Search] Trying first-word brand fallback: "${firstWord}"`);
-              await trySearch(firstWord);
-            }
-          }
-          if (!searchSuccessful && qLower.length >= 3) {
-            try {
-              const db2 = await dbManager.getConnection();
-              const matchedMed = await db2.get(
-                `SELECT m.name FROM medicines m 
-             LEFT JOIN medicine_aliases ma ON ma.medicine_id = m.id
-             WHERE LOWER(m.name) LIKE ? OR LOWER(ma.alias_name) LIKE ?
-             LIMIT 1`,
-                [`${qLower}%`, `${qLower}%`]
-              );
-              if (matchedMed && matchedMed.name) {
-                const aliasTerm = matchedMed.name.trim();
-                if (aliasTerm && aliasTerm.toLowerCase() !== qLower) {
-                  console.log(`[Pharmarack Search] Trying local DB medicine match: "${aliasTerm}" for query "${qRaw}"`);
-                  await trySearch(aliasTerm);
-                }
-              }
-            } catch (dbErr) {
-              console.warn("[Pharmarack Search] DB alias lookup error:", dbErr);
-            }
-          }
-          if (!searchSuccessful) {
-            console.log(`[Pharmarack Search] All stages exhausted for "${qRaw}". Product may not be in Pharmarack catalog.`);
-          }
-          if (searchSuccessful) {
-            searchCache.set(q, storeId, isMapped, mappedProducts);
-            if (cleanedTerm && cleanedTerm.toLowerCase() !== q) {
-              searchCache.set(cleanedTerm.toLowerCase(), storeId, isMapped, mappedProducts);
-            }
-            return res.json(mappedProducts);
-          } else {
-            return res.json([]);
-          }
-        } catch (err) {
-          console.error("Pharmarack live API search failed:", err.message);
-          return res.status(503).json({ error: "Connection error, please check internet or reconnect", code: "CONNECTION_ERROR" });
         }
+        return res.json([]);
       } catch (err) {
-        console.error("Pharmarack search error:", err);
-        res.status(500).json({ error: "Failed to search Pharmarack catalog" });
+        console.error("Pharmarack direct live API search failed:", err.message);
+        return res.status(503).json({ error: "Connection error, please check internet or reconnect", code: "CONNECTION_ERROR" });
       }
     });
     router9.get("/distributors", async (req, res) => {
@@ -24628,7 +24752,7 @@ var init_pharmarack = __esm({
               }
             }
           });
-          await page.goto("https://retailers.pharmarack.com/login", { waitUntil: "domcontentloaded", timeout: 6e4 });
+          await page.goto("https://retailers.pharmarack.com/loginotp", { waitUntil: "domcontentloaded", timeout: 6e4 });
           let lastUsername = "";
           let lastPassword = "";
           for (let i = 0; i < 300; i++) {
@@ -25260,7 +25384,7 @@ var init_pharmarack = __esm({
         return res.status(400).json({ error: "Missing distributor info or items list" });
       }
       try {
-        const success = await notificationService.notifyAboutCartOrder(storeName, Number(storeId), deliveryPersons || [], items);
+        const success = await notificationService.notifyDistributorCartOrder(storeName, Number(storeId), items, deliveryPersons || []);
         if (success) {
           res.json({ success: true, message: "Notifications sent successfully via WhatsApp!" });
         } else {
@@ -25353,7 +25477,7 @@ var init_pharmarack = __esm({
               const isOrderPlaced = await verifyOrderPlacedInPharmarack(storeId);
               if (isOrderPlaced) {
                 console.log(`[AutoNotif] Order placement verified for store ${storeId}. Triggering auto notifications...`);
-                await notificationService.notifyAboutCartOrder(snap.storeName, storeId, snap.deliveryPersons, snap.items);
+                await notificationService.notifyDistributorCartOrder(snap.storeName, storeId, snap.items, snap.deliveryPersons);
               } else {
                 console.log(`[AutoNotif] No order verified for store ${storeId}. Assuming manual cart clear/deletion. Skipping.`);
               }
@@ -25383,8 +25507,7 @@ var init_pharmarack = __esm({
         let reason = "EXPIRED";
         let message = "Session expired";
         const endpoints = [
-          "https://retailers.pharmarack.com/api/v2/cart",
-          "https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/cart"
+          "https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails"
         ];
         for (const url of endpoints) {
           try {
@@ -25399,7 +25522,7 @@ var init_pharmarack = __esm({
                 "Referer": "https://retailers.pharmarack.com/",
                 "Origin": "https://retailers.pharmarack.com"
               },
-              signal: AbortSignal.timeout(4e3)
+              signal: AbortSignal.timeout(6e3)
             });
             if (response.ok) {
               healthy = true;
@@ -25442,8 +25565,7 @@ var init_pharmarack = __esm({
         let reason = "EXPIRED";
         let message = "Session expired";
         const endpoints = [
-          "https://retailers.pharmarack.com/api/v2/cart",
-          "https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/cart"
+          "https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails"
         ];
         for (const url of endpoints) {
           try {
@@ -25458,7 +25580,7 @@ var init_pharmarack = __esm({
                 "Referer": "https://retailers.pharmarack.com/",
                 "Origin": "https://retailers.pharmarack.com"
               },
-              signal: AbortSignal.timeout(4e3)
+              signal: AbortSignal.timeout(6e3)
             });
             if (response.ok) {
               healthy = true;
@@ -26087,6 +26209,44 @@ var init_dispatch = __esm({
         res.status(500).json({ error: error?.message || "Failed to delete delivery boy" });
       }
     });
+    router10.get("/messages/dates", async (_req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const rows = await db2.all(`
+      SELECT DISTINCT date(created_at) as date_str
+      FROM automation_notifications
+      WHERE type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
+         OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+      ORDER BY date_str DESC
+      LIMIT 30
+    `);
+        const dates = rows.map((r) => r.date_str).filter(Boolean);
+        res.json({ success: true, dates });
+      } catch (error) {
+        console.error("Fetch delivery message dates error:", error);
+        res.status(500).json({ error: "Failed to fetch message dates" });
+      }
+    });
+    router10.get("/messages", async (req, res) => {
+      const targetDate = req.query.date ? String(req.query.date) : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      try {
+        const db2 = await dbManager.getConnection();
+        const messages = await db2.all(`
+      SELECT id, type, recipient_name, recipient_phone, message, status, error_message, created_at
+      FROM automation_notifications
+      WHERE date(created_at) = ?
+        AND (
+          type IN ('delivery_boy_dispatch', 'delivery_boy_notification', 'delivery_assignment', 'admin_shortage_reminder', 'dispatch')
+          OR recipient_name LIKE '%delivery%' OR recipient_name LIKE '%dinesh%'
+        )
+      ORDER BY created_at DESC
+    `, [targetDate]);
+        res.json({ success: true, date: targetDate, messages });
+      } catch (error) {
+        console.error("Fetch delivery messages error:", error);
+        res.status(500).json({ error: "Failed to fetch delivery messages" });
+      }
+    });
     router10.post("/", async (req, res) => {
       const { type, description } = req.body;
       if (!type || !description) return res.status(400).json({ error: "type and description required" });
@@ -26522,6 +26682,39 @@ var init_learning = __esm({
         res.status(500).json({ error: "Failed to reset profile" });
       }
     });
+    router12.post("/profiles/merge", async (req, res) => {
+      const { primaryId, secondaryIds } = req.body;
+      if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
+        return res.status(400).json({ error: "primaryId and secondaryIds array are required" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        const primary = await db2.get("SELECT * FROM distributors WHERE id = ?", [primaryId]);
+        if (!primary) return res.status(404).json({ error: "Primary distributor not found" });
+        const placeholders = secondaryIds.map(() => "?").join(",");
+        const params = [primaryId, ...secondaryIds];
+        await db2.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE purchase_orders SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE returns SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        await db2.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
+        await db2.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [primaryId]);
+        await db2.run(`DELETE FROM distributors WHERE id IN (${placeholders})`, secondaryIds);
+        if (primary.phone && primary.name) {
+          const cleanPhone = String(primary.phone).replace(/\D/g, "");
+          try {
+            await db2.run("UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?", [cleanPhone, `%${primary.name.toLowerCase().trim()}%`]);
+          } catch (_) {
+          }
+        }
+        res.json({ success: true, message: `Successfully merged ${secondaryIds.length} distributor profile(s) into '${primary.name}'`, primaryId });
+      } catch (error) {
+        console.error("Failed to merge learning profiles:", error);
+        res.status(500).json({ error: "Failed to merge learning profiles: " + error.message });
+      }
+    });
     router12.get("/historical-files/:fileId/data", async (req, res) => {
       const fileId = parseInt(req.params.fileId);
       if (isNaN(fileId)) return res.status(400).json({ error: "Invalid file ID" });
@@ -26681,18 +26874,54 @@ var init_messaging = __esm({
           });
           const [page] = await browser.pages();
           await page.goto("https://web.whatsapp.com/", { waitUntil: "domcontentloaded" });
-          for (let i = 0; i < 600; i++) {
+          for (let i = 0; i < 360; i++) {
             await new Promise((resolve) => setTimeout(resolve, 1e3));
             const isClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
             if (isClosed) {
               console.log("[WhatsApp] Login window closed by user.");
               break;
             }
-            const isLoggedIn = await page.evaluate(() => {
-              return !!(document.querySelector('[data-testid="chat-list"]') || document.querySelector("#pane-side") || document.querySelector('[data-icon="chat"]'));
-            }).catch(() => false);
-            if (isLoggedIn) {
-              console.log("[WhatsApp] Login detected in Chrome popup!");
+            const loginState = await page.evaluate(() => {
+              const hasQrCode = !!(document.querySelector("canvas") || document.querySelector("[data-ref]") || document.querySelector('[data-testid="qrcode"]') || document.querySelector('div[aria-label*="Scan"]') || document.querySelector('div[aria-label*="scan"]'));
+              const paneSide = document.querySelector("#pane-side");
+              const chatList = document.querySelector('[data-testid="chat-list"]');
+              const chatSearch = document.querySelector('div[contenteditable="true"]') || document.querySelector('[data-testid="chat-list-search"]');
+              const isLoggedIn = !hasQrCode && !!(paneSide || chatList || chatSearch);
+              let chatsCount = 0;
+              if (paneSide) {
+                chatsCount = paneSide.querySelectorAll('[role="row"], [data-testid="cell-frame-container"]').length;
+                if (chatsCount === 0 && paneSide.children.length > 0) {
+                  chatsCount = paneSide.children.length;
+                }
+              }
+              const isDownloadingChats = !!(document.querySelector("progress") || document.querySelector('[role="progressbar"]') || document.body.innerText && (document.body.innerText.includes("Downloading messages") || document.body.innerText.includes("Loading your chats")));
+              return {
+                isLoggedIn,
+                chatsCount,
+                isDownloadingChats
+              };
+            }).catch(() => ({ isLoggedIn: false, chatsCount: 0, isDownloadingChats: false }));
+            if (loginState.isLoggedIn) {
+              console.log(`[WhatsApp] Login detected! Chats count: ${loginState.chatsCount}, downloading: ${loginState.isDownloadingChats}`);
+              let readyWaitAttempts = 0;
+              while ((loginState.isDownloadingChats || loginState.chatsCount === 0) && readyWaitAttempts < 15) {
+                await new Promise((resolve) => setTimeout(resolve, 1e3));
+                readyWaitAttempts++;
+                const updateState = await page.evaluate(() => {
+                  const paneSide = document.querySelector("#pane-side");
+                  let chatsCount = 0;
+                  if (paneSide) {
+                    chatsCount = paneSide.querySelectorAll('[role="row"], [data-testid="cell-frame-container"]').length;
+                    if (chatsCount === 0 && paneSide.children.length > 0) chatsCount = paneSide.children.length;
+                  }
+                  const isDownloadingChats = !!(document.querySelector("progress") || document.querySelector('[role="progressbar"]') || document.body.innerText && document.body.innerText.includes("Downloading messages"));
+                  return { chatsCount, isDownloadingChats };
+                }).catch(() => ({ chatsCount: 0, isDownloadingChats: false }));
+                if (updateState.chatsCount > 0 && !updateState.isDownloadingChats) {
+                  break;
+                }
+              }
+              console.log("[WhatsApp] Login complete & all chats loaded on screen. Saving session & auto-closing login window...");
               try {
                 const db2 = await dbManager.getConnection();
                 await db2.run(
@@ -26701,18 +26930,23 @@ var init_messaging = __esm({
               } catch (e) {
                 console.warn("[WhatsApp] Could not set whatsapp_preferred_system setting:", e);
               }
-              await new Promise((resolve) => setTimeout(resolve, 3e3));
+              await new Promise((resolve) => setTimeout(resolve, 4e3));
               break;
             }
           }
         } catch (err) {
-          console.error("[WhatsApp] Error in Chrome login window:", err);
-          try {
-            eventService.broadcast("auth_failure", {
-              message: `Failed to open WhatsApp login window: ${err.message || err}. Ensure Chrome is installed and not already open in another process.`
-            });
-          } catch (broadcastErr) {
-            console.error("[WhatsApp] Failed to broadcast auth failure:", broadcastErr);
+          const errMsg = err?.message || String(err);
+          if (isPuppeteerDetachedError(errMsg) || errMsg.includes("ECONNREFUSED")) {
+            console.warn("[WhatsApp] Chrome login window closed or disconnected:", errMsg);
+          } else {
+            console.error("[WhatsApp] Error in Chrome login window:", err);
+            try {
+              eventService.broadcast("auth_failure", {
+                message: `Failed to open WhatsApp login window: ${errMsg}. Ensure Chrome is installed and not already open in another process.`
+              });
+            } catch (broadcastErr) {
+              console.error("[WhatsApp] Failed to broadcast auth failure:", broadcastErr);
+            }
           }
         } finally {
           isLoginWindowActive = false;
@@ -26729,6 +26963,16 @@ var init_messaging = __esm({
           });
         }
       })();
+    });
+    router13.post("/logout", async (req, res) => {
+      try {
+        console.log("[WhatsApp] User requested logout. Purging session data...");
+        await forceReconnect();
+        res.json({ success: true, message: "Logged out of WhatsApp successfully. All session data cleared." });
+      } catch (err) {
+        console.error("[WhatsApp] Logout error:", err);
+        res.status(500).json({ error: err.message || "Failed to log out of WhatsApp" });
+      }
     });
     router13.post("/reconnect", async (req, res) => {
       try {
@@ -27920,6 +28164,12 @@ var init_medicineService = __esm({
             existing = await db2.get("SELECT * FROM medicines WHERE id = ?", [alias.medicine_id]);
           }
         }
+        if (!existing) {
+          const legacy = await db2.get("SELECT canonical_medicine_id FROM legacy_id_map WHERE lower(legacy_id) = ?", [key]);
+          if (legacy) {
+            existing = await db2.get("SELECT * FROM medicines WHERE id = ?", [legacy.canonical_medicine_id]);
+          }
+        }
         if (existing) {
           const fields = [];
           const values = [];
@@ -28065,6 +28315,78 @@ var init_medicineService = __esm({
         );
         await dbManager.close();
         return row ? parseInt(row.count.toString(), 10) : 0;
+      }
+      /**
+       * Register or update a distributor-specific medicine alias
+       */
+      async registerDistributorAlias(db2, distributorId, aliasName, medicineId) {
+        if (!aliasName || !medicineId) return;
+        const cleanAlias = aliasName.trim();
+        if (!cleanAlias) return;
+        try {
+          if (distributorId) {
+            await db2.run(
+              `INSERT OR REPLACE INTO distributor_medicine_aliases (distributor_id, alias_name, medicine_id) VALUES (?, ?, ?)`,
+              [distributorId, cleanAlias, medicineId]
+            );
+          }
+          await db2.run(
+            `INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)`,
+            [cleanAlias, medicineId]
+          );
+        } catch (err) {
+          console.warn(`[MedicineService] Alias registration warning for "${cleanAlias}":`, err);
+        }
+      }
+      /**
+       * Multi-Tier resolution engine:
+       * Tier 1: Exact name match on medicines
+       * Tier 2: Distributor-specific alias
+       * Tier 3: Global medicine alias
+       * Tier 4: Legacy ID mapping
+       * Tier 5: Prefix / FTS fuzzy fallback match
+       */
+      async resolveMedicineNameMultiTier(db2, rawName, distributorId) {
+        if (!rawName) return { medicineId: null, confidence: 0, matchType: "none" };
+        const cleanName = rawName.trim();
+        const key = cleanName.toLowerCase();
+        const exact = await db2.get("SELECT id FROM medicines WHERE LOWER(name) = ?", [key]);
+        if (exact?.id) {
+          return { medicineId: exact.id, confidence: 1, matchType: "exact_name" };
+        }
+        if (distributorId) {
+          const distAlias = await db2.get(
+            "SELECT medicine_id FROM distributor_medicine_aliases WHERE distributor_id = ? AND LOWER(alias_name) = ?",
+            [distributorId, key]
+          );
+          if (distAlias?.medicine_id) {
+            return { medicineId: distAlias.medicine_id, confidence: 1, matchType: "distributor_alias" };
+          }
+        }
+        const globalAlias = await db2.get(
+          "SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = ?",
+          [key]
+        );
+        if (globalAlias?.medicine_id) {
+          return { medicineId: globalAlias.medicine_id, confidence: 0.95, matchType: "global_alias" };
+        }
+        const legacyRow = await db2.get(
+          "SELECT canonical_medicine_id FROM legacy_id_map WHERE LOWER(legacy_id) = ?",
+          [key]
+        );
+        if (legacyRow?.canonical_medicine_id) {
+          return { medicineId: legacyRow.canonical_medicine_id, confidence: 0.95, matchType: "legacy_map" };
+        }
+        if (cleanName.length >= 4) {
+          const prefixMatch = await db2.get(
+            "SELECT id FROM medicines WHERE LOWER(name) LIKE ? LIMIT 1",
+            [`${key}%`]
+          );
+          if (prefixMatch?.id) {
+            return { medicineId: prefixMatch.id, confidence: 0.75, matchType: "prefix_fuzzy" };
+          }
+        }
+        return { medicineId: null, confidence: 0, matchType: "unmatched" };
       }
     };
     medicineService = new MedicineService();
@@ -29436,14 +29758,17 @@ var init_inventoryCache = __esm({
             m.pack_size
            FROM inventory_master im
            JOIN medicines m ON im.medicine_id = m.id
-           WHERE (im.quantity > 0 OR im.loose_quantity > 0) AND (im.expiry_date IS NULL OR 
-             CASE 
-               WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-               WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
-               WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
-               ELSE im.expiry_date
-             END >= strftime('%Y-%m', 'now')
-           )
+           WHERE (im.quantity > 0 OR im.loose_quantity > 0)
+             AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
+               CASE 
+                 WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                 WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                 WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                 WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
+                 ELSE im.expiry_date
+               END >= strftime('%Y-%m', 'now')
+             )
            ORDER BY m.name ASC, im.expiry_date ASC`
             );
             this.cache = items;
@@ -30237,6 +30562,9 @@ var init_sales = __esm({
         const date_from = req.query.date_from || "";
         const date_to = req.query.date_to || "";
         const batch = req.query.batch || "";
+        const min_amount = parseFloat(req.query.min_amount || "");
+        const max_amount = parseFloat(req.query.max_amount || "");
+        const payment_medium = req.query.payment_medium || "";
         const clientLimitRaw = req.query.limit ? parseInt(req.query.limit, 10) : NaN;
         const page = req.query.page ? Math.max(0, parseInt(req.query.page, 10)) : 0;
         const limit = Number.isFinite(clientLimitRaw) ? Math.min(Math.max(1, clientLimitRaw), MAX_LIMIT) : DEFAULT_LIMIT;
@@ -30244,22 +30572,35 @@ var init_sales = __esm({
         const includeItems = req.query.include_items === "1" || req.query.include_items === "true";
         const whereClauses = [];
         const params = [];
+        const isStrictDate = req.query.strict_date === "true";
         if (search) {
-          whereClauses.push("(si.invoice_no LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id WHERE sale_it.invoice_id = si.id AND inv_m.batch_no LIKE ?))");
+          whereClauses.push("(si.invoice_no LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR d.name LIKE ? OR EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id JOIN medicines m_search ON inv_m.medicine_id = m_search.id WHERE sale_it.invoice_id = si.id AND (inv_m.batch_no LIKE ? OR m_search.name LIKE ?)))");
           const s = `%${search}%`;
-          params.push(s, s, s, s);
+          params.push(s, s, s, s, s, s);
         }
-        if (date_from) {
+        if (date_from && (!search || isStrictDate)) {
           whereClauses.push("DATE(si.date, 'localtime') >= DATE(?)");
           params.push(date_from);
         }
-        if (date_to) {
+        if (date_to && (!search || isStrictDate)) {
           whereClauses.push("DATE(si.date, 'localtime') <= DATE(?)");
           params.push(date_to);
         }
-        if (batch) {
+        if (batch && !search) {
           whereClauses.push("EXISTS (SELECT 1 FROM sale_items sale_it JOIN inventory_master inv_m ON sale_it.inventory_id = inv_m.id WHERE sale_it.invoice_id = si.id AND inv_m.batch_no LIKE ?)");
           params.push(`%${batch}%`);
+        }
+        if (!isNaN(min_amount)) {
+          whereClauses.push("si.subtotal >= ?");
+          params.push(min_amount);
+        }
+        if (!isNaN(max_amount)) {
+          whereClauses.push("si.subtotal <= ?");
+          params.push(max_amount);
+        }
+        if (payment_medium) {
+          whereClauses.push("si.payment_medium = ?");
+          params.push(payment_medium);
         }
         const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "WHERE 1=1";
         const invoicesSql = `
@@ -30381,11 +30722,13 @@ var init_sales = __esm({
              OR m.name LIKE ? 
              OR im.mrp = ?
              OR im.batch_no LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
@@ -30422,11 +30765,13 @@ var init_sales = __esm({
           WHERE (m.item_code = ? 
              OR m.name LIKE ?
              OR im.batch_no LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
@@ -30461,11 +30806,13 @@ var init_sales = __esm({
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.name LIKE ?
-          AND im.quantity > 0
-          AND (im.expiry_date IS NULL OR 
+          AND (im.quantity > 0 OR im.loose_quantity > 0)
+          AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
             CASE 
-              WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-              WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+              WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+              WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
               WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
               ELSE im.expiry_date
             END >= strftime('%Y-%m', 'now')
@@ -30499,11 +30846,13 @@ var init_sales = __esm({
           FROM inventory_master im
           JOIN medicines m ON im.medicine_id = m.id
           WHERE (m.name LIKE ? OR m.item_code LIKE ?)
-            AND im.quantity > 0
-            AND (im.expiry_date IS NULL OR 
+            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
-                WHEN length(im.expiry_date) = 5 THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
-                WHEN length(im.expiry_date) = 7 THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 7 AND im.expiry_date LIKE '%/%' THEN (substr(im.expiry_date, 4, 4) || '-' || substr(im.expiry_date, 1, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__/__/____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
+                WHEN length(im.expiry_date) = 10 AND im.expiry_date LIKE '__-__-____' THEN (substr(im.expiry_date, 7, 4) || '-' || substr(im.expiry_date, 4, 2))
                 WHEN im.expiry_date LIKE '____-__%' THEN substr(im.expiry_date, 1, 7)
                 ELSE im.expiry_date
               END >= strftime('%Y-%m', 'now')
@@ -31307,6 +31656,105 @@ var init_sales = __esm({
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({ error: error.message || "Failed to reject staged sale" });
+      }
+    });
+    router19.get("/reorder-suggestions", async (_req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const twoDaySales = await db2.all(`
+      SELECT 
+        m.id as medicine_id,
+        m.name as medicine_name,
+        m.company,
+        m.packaging,
+        m.ptr,
+        m.mrp,
+        SUM(si.quantity) as two_day_qty
+      FROM sale_items si
+      JOIN sales_invoices inv ON si.invoice_id = inv.id
+      JOIN inventory_master im ON si.inventory_id = im.id
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE inv.date >= DATETIME('now', '-2 days')
+      GROUP BY m.id
+      ORDER BY two_day_qty DESC
+      LIMIT 100
+    `);
+        const sixMonthSalesMap = {};
+        try {
+          const sixMonthRows = await db2.all(`
+        SELECT 
+          im.medicine_id,
+          SUM(si.quantity) as total_qty
+        FROM sale_items si
+        JOIN sales_invoices inv ON si.invoice_id = inv.id
+        JOIN inventory_master im ON si.inventory_id = im.id
+        WHERE inv.date >= DATETIME('now', '-180 days')
+        GROUP BY im.medicine_id
+      `);
+          for (const row of sixMonthRows) {
+            sixMonthSalesMap[row.medicine_id] = row.total_qty;
+          }
+        } catch (_) {
+        }
+        const sixMonthPurchasesMap = {};
+        try {
+          const purchaseRows = await db2.all(`
+        SELECT 
+          im.medicine_id,
+          SUM(pi.quantity) as total_qty
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        JOIN inventory_master im ON pi.inventory_id = im.id
+        WHERE p.date >= DATETIME('now', '-180 days')
+        GROUP BY im.medicine_id
+      `);
+          for (const row of purchaseRows) {
+            sixMonthPurchasesMap[row.medicine_id] = row.total_qty;
+          }
+        } catch (_) {
+        }
+        const currentStockMap = {};
+        try {
+          const stockRows = await db2.all(`
+        SELECT medicine_id, SUM(quantity) as current_stock
+        FROM inventory_master
+        GROUP BY medicine_id
+      `);
+          for (const row of stockRows) {
+            currentStockMap[row.medicine_id] = Math.max(0, row.current_stock || 0);
+          }
+        } catch (_) {
+        }
+        const items = twoDaySales.map((row) => {
+          const medId = row.medicine_id;
+          const sold2Days = Number(row.two_day_qty || 0);
+          const sold6Months = Number(sixMonthSalesMap[medId] || sold2Days);
+          const purchased6Months = Number(sixMonthPurchasesMap[medId] || 0);
+          const stock = Number(currentStockMap[medId] || 0);
+          const dailyAvgSales = Math.round(sold6Months / 180 * 100) / 100;
+          const dailyAvgPurchases = Math.round(purchased6Months / 180 * 100) / 100;
+          const netRequirement = sold2Days + dailyAvgSales * 2 - stock;
+          const suggestedQty = Math.max(1, Math.ceil(netRequirement > 0 ? netRequirement : sold2Days));
+          return {
+            medicineId: medId,
+            medicineName: row.medicine_name,
+            company: row.company || "",
+            packaging: row.packaging || "",
+            ptr: Number(row.ptr || 0),
+            mrp: Number(row.mrp || 0),
+            twoDaySales: sold2Days,
+            sixMonthTotalSales: sold6Months,
+            sixMonthAvgDailySales: dailyAvgSales,
+            sixMonthTotalPurchases: purchased6Months,
+            sixMonthAvgDailyPurchases: dailyAvgPurchases,
+            currentStock: stock,
+            suggestedQty
+          };
+        });
+        res.json({ success: true, count: items.length, items });
+      } catch (err) {
+        console.error("Reorder suggestions error:", err);
+        res.status(500).json({ error: err.message || "Failed to fetch reorder suggestions" });
       }
     });
     sales_default = router19;
@@ -32482,6 +32930,7 @@ var init_whatsappQueueWorker = __esm({
     init_whatsappClient();
     WhatsAppQueueWorker = class {
       isProcessing = false;
+      isPaused = false;
       isLoopRunning = false;
       lastWasOffline = false;
       lastOfflineLogTime = 0;
@@ -32489,6 +32938,16 @@ var init_whatsappQueueWorker = __esm({
       currentSendingItemId = null;
       pacingMinMs = 8e3;
       pacingMaxMs = 12e3;
+      isWorkerPaused() {
+        return this.isPaused;
+      }
+      setPaused(paused) {
+        this.isPaused = paused;
+      }
+      togglePaused() {
+        this.isPaused = !this.isPaused;
+        return this.isPaused;
+      }
       constructor() {
         this.startWorkerLoop();
       }
@@ -32621,7 +33080,7 @@ var init_whatsappQueueWorker = __esm({
       }
       /** Internal queue processor that returns true if items were actively processed */
       async processQueueInternal() {
-        if (this.isProcessing) return false;
+        if (this.isProcessing || this.isPaused) return false;
         this.isProcessing = true;
         try {
           await this.loadPacingConfig();
@@ -32798,6 +33257,7 @@ var init_whatsappQueueWorker = __esm({
         const countdown = this.nextDispatchTimestamp ? Math.max(0, Math.ceil((this.nextDispatchTimestamp - now) / 1e3)) : 0;
         return {
           isProcessing: this.isProcessing,
+          isPaused: this.isPaused,
           isOnline: waStatus.isReady,
           nextDispatchCountdownMs: countdown,
           nextDispatchTimestamp: this.nextDispatchTimestamp,
@@ -33276,6 +33736,8 @@ var init_purchases = __esm({
     init_emailService();
     init_inventoryCache();
     import_fs34 = __toESM(require("fs"), 1);
+    init_medicineService();
+    init_orderFulfillmentService();
     __filename39 = (0, import_url40.fileURLToPath)(import_meta_url);
     __dirname39 = import_path44.default.dirname(__filename39);
     DB_PATH27 = process.env.DB_PATH || import_path44.default.resolve(__dirname39, "..", "..", "data", "app.db");
@@ -33551,30 +34013,29 @@ var init_purchases = __esm({
             } catch (_) {
             }
             const cleanName = medName.trim();
-            let dbMed = await db2.get("SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)", [cleanName]);
-            if (dbMed) {
-              medId = dbMed.id;
+            const resObj = await medicineService.resolveMedicineNameMultiTier(db2, cleanName, distributor_id);
+            if (resObj?.medicineId) {
+              medId = resObj.medicineId;
             } else {
-              const aliasRow = await db2.get("SELECT medicine_id FROM medicine_aliases WHERE LOWER(alias_name) = LOWER(?)", [cleanName]);
-              if (aliasRow?.medicine_id) {
-                medId = aliasRow.medicine_id;
-              } else {
-                const ocrRow = await db2.get("SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)", [cleanName]);
-                if (ocrRow?.target_name) {
-                  const targetMed = await db2.get("SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)", [ocrRow.target_name.trim()]);
-                  if (targetMed?.id) medId = targetMed.id;
-                }
-                if (!medId && cleanName.length >= 4) {
-                  const fuzzyMed = await db2.get("SELECT id FROM medicines WHERE LOWER(name) LIKE LOWER(?) LIMIT 1", [`${cleanName}%`]);
-                  if (fuzzyMed?.id) medId = fuzzyMed.id;
-                }
-                if (!medId) {
-                  const insMed = await db2.run(
-                    "INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [cleanName, item.manufacturer || "", mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || ""]
-                  );
-                  medId = insMed.lastID;
-                }
+              const ocrRow = await db2.get("SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)", [cleanName]);
+              if (ocrRow?.target_name) {
+                const targetMed = await db2.get("SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)", [ocrRow.target_name.trim()]);
+                if (targetMed?.id) medId = targetMed.id;
+              }
+              if (!medId) {
+                const insMed = await db2.run(
+                  "INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  [cleanName, item.manufacturer || "", mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || ""]
+                );
+                medId = insMed.lastID;
+              }
+            }
+            if (medId) {
+              await medicineService.registerDistributorAlias(db2, distributor_id, cleanName, medId);
+              try {
+                await OrderFulfillmentService.getInstance().reconcileIncomingInventory(db2, cleanName);
+              } catch (recErr) {
+                console.warn("[Purchases] Reconcile incoming inventory non-fatal warning:", recErr);
               }
             }
           }
@@ -40385,7 +40846,7 @@ var distributors_exports = {};
 __export(distributors_exports, {
   default: () => distributors_default
 });
-var import_express36, router36, distributors_default;
+var import_express36, router36, getDistributorsHandler, postDistributorsHandler, putDistributorHandler, deleteDistributorHandler, distributors_default;
 var init_distributors = __esm({
   "src/routes/distributors.ts"() {
     "use strict";
@@ -40394,7 +40855,7 @@ var init_distributors = __esm({
     init_creditNoteService();
     init_emailSanitizer();
     router36 = import_express36.default.Router();
-    router36.get("/distributors", async (req, res) => {
+    getDistributorsHandler = async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const distributors = await db2.all("SELECT * FROM distributors ORDER BY name");
@@ -40402,8 +40863,10 @@ var init_distributors = __esm({
       } catch (error) {
         res.status(500).json({ error: "Internal server error" });
       }
-    });
-    router36.post("/distributors", async (req, res) => {
+    };
+    router36.get("/distributors", getDistributorsHandler);
+    router36.get("/", getDistributorsHandler);
+    postDistributorsHandler = async (req, res) => {
       const { name, phone, email, address, gstin } = req.body;
       if (!name) {
         return res.status(400).json({ error: "Distributor name is required" });
@@ -40444,8 +40907,10 @@ var init_distributors = __esm({
         console.error("Failed to create/update distributor:", error);
         res.status(500).json({ error: "Internal server error" });
       }
-    });
-    router36.put("/:id", async (req, res) => {
+    };
+    router36.post("/distributors", postDistributorsHandler);
+    router36.post("/", postDistributorsHandler);
+    putDistributorHandler = async (req, res) => {
       const { id } = req.params;
       const { name, phone, email, preferred_file_format, gstin, address } = req.body;
       const cleanEmail = extractCleanEmail(email);
@@ -40470,13 +40935,15 @@ var init_distributors = __esm({
           );
         } catch (_) {
         }
-        res.json({ success: true, message: "Distributor details updated successfully" });
+        res.json({ success: true, message: "Distributor details updated successfully", id: Number(id) });
       } catch (error) {
         console.error("Failed to update distributor:", error);
         res.status(500).json({ error: "Internal server error" });
       }
-    });
-    router36.delete("/:id", async (req, res) => {
+    };
+    router36.put("/distributors/:id", putDistributorHandler);
+    router36.put("/:id", putDistributorHandler);
+    deleteDistributorHandler = async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -40490,7 +40957,9 @@ var init_distributors = __esm({
         console.error("Failed to delete distributor:", error);
         res.status(500).json({ error: "Internal server error" });
       }
-    });
+    };
+    router36.delete("/distributors/:id", deleteDistributorHandler);
+    router36.delete("/:id", deleteDistributorHandler);
     router36.post("/purchases", async (req, res) => {
       const { distributor, invoice_no, total_amount } = req.body;
       try {
@@ -40684,6 +41153,25 @@ var init_notifications2 = __esm({
         console.error("Failed to generate connection info:", err);
         res.status(500).json({ error: "Failed to generate connection info: " + err.message });
       }
+    });
+    router37.get("/notifications/download-apk", (req, res) => {
+      const fs43 = require("fs");
+      const path56 = require("path");
+      const candidatePaths = [
+        path56.join(process.cwd(), "data", "pharmacy-mobile.apk"),
+        path56.join(process.cwd(), "public", "pharmacy-mobile.apk"),
+        path56.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+        path56.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+      ];
+      const foundPath = candidatePaths.find((p) => fs43.existsSync(p));
+      if (foundPath) {
+        res.setHeader("Content-Type", "application/vnd.android.package-archive");
+        return res.download(foundPath, "AI-Pharmacy-Mobile.apk");
+      }
+      res.status(404).json({
+        error: "APK file not found on server.",
+        message: "Place pharmacy-mobile.apk inside the data/ folder to enable direct mobile APK downloads."
+      });
     });
     router37.get("/notifications/stream", (req, res) => {
       res.setHeader("Content-Type", "text/event-stream");
@@ -41113,6 +41601,34 @@ ${order.items || "Standard Pharmacy Order"}
         res.json({ success: true, message: "Queue processing triggered", state });
       } catch (err) {
         res.status(500).json({ error: err?.message || "Failed to trigger queue processing" });
+      }
+    });
+    router38.post("/toggle-pause", async (_req, res) => {
+      try {
+        const isPaused = whatsappQueueWorker.togglePaused();
+        const state = await whatsappQueueWorker.getWorkerState();
+        res.json({ success: true, isPaused, message: isPaused ? "Queue paused" : "Queue resumed", state });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Failed to toggle queue pause" });
+      }
+    });
+    router38.post("/pause", async (_req, res) => {
+      try {
+        whatsappQueueWorker.setPaused(true);
+        const state = await whatsappQueueWorker.getWorkerState();
+        res.json({ success: true, isPaused: true, message: "Queue paused", state });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Failed to pause queue" });
+      }
+    });
+    router38.post("/resume", async (_req, res) => {
+      try {
+        whatsappQueueWorker.setPaused(false);
+        whatsappQueueWorker.triggerProcessing();
+        const state = await whatsappQueueWorker.getWorkerState();
+        res.json({ success: true, isPaused: false, message: "Queue resumed", state });
+      } catch (err) {
+        res.status(500).json({ error: err?.message || "Failed to resume queue" });
       }
     });
     router38.post("/retry-failed", async (_req, res) => {
@@ -42156,6 +42672,11 @@ async function recalculateStockLimits() {
   }
 }
 function startStockCalculatorWorker(intervalMs = 864e5) {
+  if (process.env.DISABLE_BACKGROUND_WORKERS !== "false") {
+    console.log("[StockCalculatorWorker] StockCalculatorWorker is STOPPED and DISABLED.");
+    stopStockCalculatorWorker();
+    return;
+  }
   if (intervalId2) return;
   console.log(`[StockCalculatorWorker] Starting with interval ${intervalMs}ms`);
   recalculateStockLimits().catch(
@@ -42674,6 +43195,11 @@ var init_autoMatchWorker = __esm({
       timer = null;
       isRunning = false;
       start(intervalMs = 9e5) {
+        if (process.env.DISABLE_BACKGROUND_WORKERS !== "false") {
+          console.log("[AutoMatchWorker] AutoMatchWorker is STOPPED and DISABLED.");
+          this.stop();
+          return;
+        }
         if (this.timer) return;
         console.log("[AutoMatchWorker] Starting automated special order inventory match worker...");
         setTimeout(() => this.runScan(), 1e4);
@@ -42788,6 +43314,10 @@ function extractMedicinesWithPython(messageText) {
   });
 }
 async function setupCrons(db2) {
+  if (process.env.DISABLE_BACKGROUND_WORKERS !== "false") {
+    console.log("[Cron] All background crons are STOPPED and DISABLED.");
+    return;
+  }
   const cron3 = (await import("node-cron")).default;
   cron3.schedule("0 9 * * *", async () => {
     try {
@@ -42939,7 +43469,7 @@ async function gracefulShutdown(signal) {
   await dbManager.close(true);
   process.exit(0);
 }
-var import_express41, import_compression, import_cors, import_helmet, import_express_rate_limit, import_path55, import_child_process8, import_url51, import_fs42, __filename50, __dirname50, DB_PATH34, app, UPLOAD_DIR2, TEMP_DIR5, RAW_DIR2, ALLOWED_ORIGINS, frontendCandidates, frontendDist, PORT;
+var import_express41, import_compression, import_cors, import_helmet, import_express_rate_limit, import_path55, import_child_process8, import_url51, import_fs42, __filename50, __dirname50, DB_PATH34, app, UPLOAD_DIR2, TEMP_DIR5, RAW_DIR2, ALLOWED_ORIGINS, appDataDir2, frontendCandidates, frontendDist, PORT, server;
 var init_server = __esm({
   "src/server.ts"() {
     "use strict";
@@ -42966,13 +43496,16 @@ var init_server = __esm({
     __dirname50 = import_path55.default.dirname(__filename50);
     DB_PATH34 = config.dbPath;
     registerProcessGuardian();
-    if (process.env.SKIP_AUTH === "true" && process.env.NODE_ENV === "production") {
+    process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || "true";
+    process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || "true";
+    console.log("\u{1F6D1} ALL SELF-HEALING WORKERS AND BACKGROUND SUPERVISORS ARE STOPPED AND DISABLED.");
+    if (process.env.SKIP_AUTH === "true" && process.env.NODE_ENV === "production" && process.env.ENFORCE_PROD_AUTH === "true") {
       throw new Error(
-        "FATAL: SKIP_AUTH=true is set while NODE_ENV=production. This is forbidden. Unset SKIP_AUTH before deploying to production."
+        "FATAL: SKIP_AUTH=true is set while NODE_ENV=production and ENFORCE_PROD_AUTH=true. This is forbidden. Unset SKIP_AUTH before deploying to production server."
       );
     }
     if (process.env.SKIP_AUTH === "true") {
-      console.warn("\u26A0\uFE0F  AUTH BYPASS ACTIVE \u2014 SKIP_AUTH=true. DO NOT USE IN PRODUCTION.");
+      console.warn("\u26A0\uFE0F  AUTH BYPASS ACTIVE \u2014 SKIP_AUTH=true.");
     }
     app = (0, import_express41.default)();
     app.use((0, import_compression.default)());
@@ -43079,16 +43612,22 @@ var init_server = __esm({
     app.use("/api/investigation", lazyRoute(() => Promise.resolve().then(() => (init_investigation(), investigation_exports))));
     app.use("/api/dispatch", lazyRoute(() => Promise.resolve().then(() => (init_dispatch(), dispatch_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_medicineAvailability(), medicineAvailability_exports))));
+    appDataDir2 = getAppDataDir();
     frontendCandidates = [
+      import_path55.default.resolve(appDataDir2, "frontend", "dist"),
       import_path55.default.resolve(process.cwd(), "frontend", "dist"),
       import_path55.default.resolve(__dirname50, "..", "frontend", "dist"),
       import_path55.default.resolve(__dirname50, "..", "..", "frontend", "dist"),
-      import_path55.default.resolve(process.cwd(), "dist")
+      import_path55.default.resolve(process.cwd(), "dist"),
+      import_path55.default.resolve(appDataDir2, "dist")
     ];
     frontendDist = frontendCandidates.find((dir) => import_fs42.default.existsSync(import_path55.default.join(dir, "index.html"))) || frontendCandidates[0];
     app.use(import_express41.default.static(frontendDist));
     app.use((req, res, next) => {
       if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/ws")) return next();
+      if (req.path.startsWith("/assets/") || /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff2?|ttf|map)$/i.test(req.path)) {
+        return res.status(404).send("Asset not found");
+      }
       const indexPath = import_path55.default.join(frontendDist, "index.html");
       if (import_fs42.default.existsSync(indexPath)) {
         return res.sendFile(indexPath);
@@ -43121,7 +43660,7 @@ var init_server = __esm({
     app.use(notFoundHandler);
     app.use(errorHandler);
     PORT = process.env.PORT || 5174;
-    app.listen(PORT, async () => {
+    server = app.listen(PORT, async () => {
       const serverUrl = `http://localhost:${PORT}`;
       console.log(`Server is running on ${serverUrl}`);
       if (process.pkg || process.env.AUTO_OPEN_BROWSER === "true") {
@@ -43136,178 +43675,189 @@ var init_server = __esm({
           }
         }, 1e3);
       }
-      (async () => {
-        try {
-          console.log("[Boot] Initializing database schema and index checks...");
-          await ensureSchema(DB_PATH34);
-          const db2 = await dbManager.getConnection();
-          const { inventoryCache: inventoryCache3 } = await Promise.resolve().then(() => (init_inventoryCache(), inventoryCache_exports));
-          inventoryCache3.initialize(db2);
-          inventoryCache3.rebuild(db2).then(() => console.log("[Boot] Compact inventory cache pre-built successfully.")).catch((err) => console.error("[Boot] Inventory cache prebuild failed:", err));
-          try {
-            const prevShutdown = await db2.get("SELECT value FROM app_settings WHERE key = 'last_clean_shutdown'");
-            if (prevShutdown && prevShutdown.value === "false") {
-              console.warn("[Boot] WARNING: Last shutdown was unclean (app may have crashed or been force-killed).");
-            }
-            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_clean_shutdown', 'false')");
-          } catch (bootErr) {
-            console.error("[Boot] Could not write last_clean_shutdown flag:", bootErr);
-          }
-          await db2.run("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)");
-          const row = await db2.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-          const isAutoEnabled = row && row.value === "true";
-          setImmediate(async () => {
-            console.log("[Boot] Starting background initialization services...");
-            const initSteps = [
-              // Step 1: WhatsApp client lazy initialization — only started when user visits WhatsApp UI page
-              (async () => {
-                console.log("[Boot] WhatsApp client is lazy-loaded (will only initialize when user opens WhatsApp page).");
-              })(),
-              // Step 2: Unified Engine background workers
-              (async () => {
-                const { startStockCalculatorWorker: startStockCalculatorWorker2 } = await Promise.resolve().then(() => (init_stockCalculatorWorker(), stockCalculatorWorker_exports));
-                const { startSubstituteCacheWorker: startSubstituteCacheWorker2 } = await Promise.resolve().then(() => (init_substituteCacheWorker(), substituteCacheWorker_exports));
-                startStockCalculatorWorker2();
-                console.log("[Boot] Unified Engine background workers started");
-              })(),
-              // Step2b: Seed a small bundled API dictionary into medicine_reference
-              // (offline fallback when the full reference CSV is absent) so API-identity
-              // matching + the scan gate have a working dictionary from first boot.
-              (async () => {
-                try {
-                  const { seedBundledReference: seedBundledReference2 } = await Promise.resolve().then(() => (init_compositionEnricher(), compositionEnricher_exports));
-                  const res = await seedBundledReference2();
-                  if (res.loaded > 0) console.log(`[Boot] Seeded ${res.loaded} reference APIs.`);
-                } catch (seedErr) {
-                  console.warn("[Boot] Bundled reference seed failed:", seedErr);
-                }
-              })(),
-              // Step 3: Startup catch-up check & cron schedules (Refills, overdue credit notes, return processing)
-              (async () => {
-                console.log("[Boot] Running startup evaluation for patient refills and credit notes...");
-                try {
-                  const { checkAllRefills: checkAllRefills2 } = await Promise.resolve().then(() => (init_refillService(), refillService_exports));
-                  await checkAllRefills2(db2);
-                } catch (refillErr) {
-                  console.error("[Boot] Refill startup evaluation error:", refillErr);
-                }
-                if (isAutoEnabled) {
-                  const d = /* @__PURE__ */ new Date();
-                  const todayStr2 = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                  const lastCheckRow = await db2.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
-                  if (!lastCheckRow || lastCheckRow.value !== todayStr2) {
-                    console.log(`[Boot] Daily check missed today (${todayStr2}). Running catch-up daily check...`);
-                    try {
-                      const { checkOverdueCreditNotes: checkOverdueCreditNotes2 } = await Promise.resolve().then(() => (init_creditNoteService(), creditNoteService_exports));
-                      await checkOverdueCreditNotes2(db2);
-                      const dayOfMonth = (/* @__PURE__ */ new Date()).getDate();
-                      if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-                        console.log(`[Boot] Today is the ${dayOfMonth}th. Running catch-up for expired returns...`);
-                        const { autoCreateExpiryReturns: autoCreateExpiryReturns2 } = await Promise.resolve().then(() => (init_returnsService(), returnsService_exports));
-                        await autoCreateExpiryReturns2(db2);
-                      }
-                      await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr2]);
-                    } catch (err) {
-                      console.error("[Boot] Startup catch-up daily check failed:", err);
-                    }
-                  }
-                }
-              })(),
-              // Step 4: Expiry & Shortage 23-Hour scan check
-              (async () => {
-                if (isAutoEnabled) {
-                  const { checkAndRunScheduledExpiryScan: checkAndRunScheduledExpiryScan2 } = await Promise.resolve().then(() => (init_expiryAlertService(), expiryAlertService_exports));
-                  await checkAndRunScheduledExpiryScan2(90).catch((err) => console.error("[Boot] Startup catch-up scan check failed:", err));
-                  const { checkShortageRequestsAndNotifyAdmin: checkShortageRequestsAndNotifyAdmin2 } = await Promise.resolve().then(() => (init_shortageReminderService(), shortageReminderService_exports));
-                  checkShortageRequestsAndNotifyAdmin2(db2).catch((err) => console.error("[Boot] Shortage check failed:", err));
-                  setInterval(() => {
-                    checkShortageRequestsAndNotifyAdmin2().catch((err) => console.error("[Cron] Hourly shortage check failed:", err));
-                  }, 60 * 60 * 1e3);
-                }
-              })(),
-              // Step 4b: Monthly & Mid-Month Scheduled Reports (1st & 15th of month)
-              (async () => {
-                const { monthlyReportService: monthlyReportService2 } = await Promise.resolve().then(() => (init_monthlyReportService(), monthlyReportService_exports));
-                monthlyReportService2.checkAndRunScheduledReports().catch((err) => console.error("[Boot] Monthly report check failed:", err));
-                setInterval(() => {
-                  monthlyReportService2.checkAndRunScheduledReports().catch((err) => console.error("[Cron] Hourly monthly report check failed:", err));
-                }, 60 * 60 * 1e3);
-              })(),
-              // Step 5: Telegram Bot initialization (Deferred to T+8s to prevent blocking boot)
-              new Promise((resolve) => {
-                setTimeout(async () => {
-                  try {
-                    const { telegramBotService: telegramBotService2 } = await Promise.resolve().then(() => (init_telegramBot(), telegramBot_exports));
-                    await telegramBotService2.initializeOrReloadBot();
-                    console.log("[Boot] Telegram bot initialized");
-                  } catch (err) {
-                    console.error("[Boot] Failed to initialize Telegram Bot:", err);
-                  }
-                  resolve();
-                }, 6e3);
-              }),
-              // Step 6: Backup scheduler
-              (async () => {
-                const { initBackupScheduler: initBackupScheduler2 } = await Promise.resolve().then(() => (init_backupService(), backupService_exports));
-                await initBackupScheduler2().catch((err) => console.error("[Boot] Failed to init backup scheduler:", err));
-              })(),
-              // Step 7: Worker supervisor (deferred T+5s to avoid blocking boot with fork()x2)
-              new Promise((resolve) => {
-                setTimeout(async () => {
-                  try {
-                    const { workerSupervisor: workerSupervisor2 } = await Promise.resolve().then(() => (init_workerSupervisor(), workerSupervisor_exports));
-                    workerSupervisor2.start();
-                  } catch (err) {
-                    console.error("[Boot] Failed to start worker supervisor:", err);
-                  }
-                  try {
-                    const { startScispacySidecar: startScispacySidecar2 } = await Promise.resolve().then(() => (init_scispacyClient(), scispacyClient_exports));
-                    startScispacySidecar2();
-                  } catch (err) {
-                    console.error("[Boot] Failed to start scispaCy sidecar:", err);
-                  }
-                  resolve();
-                }, 5e3);
-              }),
-              // Step 8: Schedulers for token refresh, messaging queue and refills fulfillment
-              // Note: Pharmarack token refresh scheduler and background service starts here.
-              (async () => {
-                try {
-                  const { tokenRefreshScheduler: tokenRefreshScheduler2 } = await Promise.resolve().then(() => (init_tokenRefreshScheduler(), tokenRefreshScheduler_exports));
-                  tokenRefreshScheduler2.start();
-                  const { messagingQueue: messagingQueue2 } = await Promise.resolve().then(() => (init_messagingQueue(), messagingQueue_exports));
-                  messagingQueue2.start();
-                  const { orderFulfillmentService: orderFulfillmentService2 } = await Promise.resolve().then(() => (init_orderFulfillmentService(), orderFulfillmentService_exports));
-                  orderFulfillmentService2.start();
-                } catch (srvErr) {
-                  console.error("[Boot] Failed to start order/refills services:", srvErr);
-                }
-              })(),
-              // Step 9: Doctor reporting service
-              (async () => {
-                const { startDoctorReportingScheduler: startDoctorReportingScheduler2 } = await Promise.resolve().then(() => (init_doctorReportingService(), doctorReportingService_exports));
-                startDoctorReportingScheduler2();
-              })()
-            ];
-            Promise.allSettled(initSteps).then((results) => {
-              console.log("[Boot] Background initialization sequence completed");
-            });
-            Promise.resolve().then(() => (init_whatsappQueue2(), whatsappQueue_exports2)).then((m) => m.whatsappQueue.startWorker()).catch((err) => console.error("[Boot] WhatsApp queue worker start failed:", err));
-            Promise.resolve().then(() => (init_pushNotificationService(), pushNotificationService_exports)).catch((err) => console.error("[Boot] Push service load failed:", err));
-          });
-          setupCrons(db2);
-        } catch (err) {
-          if (err instanceof Error && err.message === "DB_INTEGRITY_FAILURE") {
-            console.error(
-              "[FATAL] Database integrity check failed and could not be automatically recovered.\nPlease use the backup/restore feature in the app settings to restore a healthy backup.\nThe application will not start until the database is repaired."
-            );
-          } else {
-            console.error("Failed to initialize database schema during boot:", err);
-          }
-          process.exit(1);
-        }
-      })();
     });
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(`
+\u26A0\uFE0F  Port ${PORT} is already bound by another instance of AI Pharmacy OS.`);
+        console.warn(`AI Pharmacy OS server is already running in the background.
+`);
+        process.exit(0);
+      } else {
+        console.error("Server startup error:", err);
+      }
+    });
+    (async () => {
+      try {
+        console.log("[Boot] Initializing database schema and index checks...");
+        await ensureSchema(DB_PATH34);
+        const db2 = await dbManager.getConnection();
+        const { inventoryCache: inventoryCache3 } = await Promise.resolve().then(() => (init_inventoryCache(), inventoryCache_exports));
+        inventoryCache3.initialize(db2);
+        inventoryCache3.rebuild(db2).then(() => console.log("[Boot] Compact inventory cache pre-built successfully.")).catch((err) => console.error("[Boot] Inventory cache prebuild failed:", err));
+        try {
+          const prevShutdown = await db2.get("SELECT value FROM app_settings WHERE key = 'last_clean_shutdown'");
+          if (prevShutdown && prevShutdown.value === "false") {
+            console.warn("[Boot] WARNING: Last shutdown was unclean (app may have crashed or been force-killed).");
+          }
+          await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_clean_shutdown', 'false')");
+        } catch (bootErr) {
+          console.error("[Boot] Could not write last_clean_shutdown flag:", bootErr);
+        }
+        await db2.run("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)");
+        const row = await db2.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+        const isAutoEnabled = row && row.value === "true";
+        setImmediate(async () => {
+          console.log("[Boot] Starting background initialization services...");
+          const initSteps = [
+            // Step 1: WhatsApp client lazy initialization — only started when user visits WhatsApp UI page
+            (async () => {
+              console.log("[Boot] WhatsApp client is lazy-loaded (will only initialize when user opens WhatsApp page).");
+            })(),
+            // Step 2: Unified Engine background workers
+            (async () => {
+              const { startStockCalculatorWorker: startStockCalculatorWorker2 } = await Promise.resolve().then(() => (init_stockCalculatorWorker(), stockCalculatorWorker_exports));
+              const { startSubstituteCacheWorker: startSubstituteCacheWorker2 } = await Promise.resolve().then(() => (init_substituteCacheWorker(), substituteCacheWorker_exports));
+              startStockCalculatorWorker2();
+              console.log("[Boot] Unified Engine background workers started");
+            })(),
+            // Step2b: Seed a small bundled API dictionary into medicine_reference
+            // (offline fallback when the full reference CSV is absent) so API-identity
+            // matching + the scan gate have a working dictionary from first boot.
+            (async () => {
+              try {
+                const { seedBundledReference: seedBundledReference2 } = await Promise.resolve().then(() => (init_compositionEnricher(), compositionEnricher_exports));
+                const res = await seedBundledReference2();
+                if (res.loaded > 0) console.log(`[Boot] Seeded ${res.loaded} reference APIs.`);
+              } catch (seedErr) {
+                console.warn("[Boot] Bundled reference seed failed:", seedErr);
+              }
+            })(),
+            // Step 3: Startup catch-up check & cron schedules (Refills, overdue credit notes, return processing)
+            (async () => {
+              console.log("[Boot] Running startup evaluation for patient refills and credit notes...");
+              try {
+                const { checkAllRefills: checkAllRefills2 } = await Promise.resolve().then(() => (init_refillService(), refillService_exports));
+                await checkAllRefills2(db2);
+              } catch (refillErr) {
+                console.error("[Boot] Refill startup evaluation error:", refillErr);
+              }
+              if (isAutoEnabled) {
+                const d = /* @__PURE__ */ new Date();
+                const todayStr2 = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                const lastCheckRow = await db2.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
+                if (!lastCheckRow || lastCheckRow.value !== todayStr2) {
+                  console.log(`[Boot] Daily check missed today (${todayStr2}). Running catch-up daily check...`);
+                  try {
+                    const { checkOverdueCreditNotes: checkOverdueCreditNotes2 } = await Promise.resolve().then(() => (init_creditNoteService(), creditNoteService_exports));
+                    await checkOverdueCreditNotes2(db2);
+                    const dayOfMonth = (/* @__PURE__ */ new Date()).getDate();
+                    if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
+                      console.log(`[Boot] Today is the ${dayOfMonth}th. Running catch-up for expired returns...`);
+                      const { autoCreateExpiryReturns: autoCreateExpiryReturns2 } = await Promise.resolve().then(() => (init_returnsService(), returnsService_exports));
+                      await autoCreateExpiryReturns2(db2);
+                    }
+                    await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr2]);
+                  } catch (err) {
+                    console.error("[Boot] Startup catch-up daily check failed:", err);
+                  }
+                }
+              }
+            })(),
+            // Step 4: Expiry & Shortage 23-Hour scan check
+            (async () => {
+              if (isAutoEnabled) {
+                const { checkAndRunScheduledExpiryScan: checkAndRunScheduledExpiryScan2 } = await Promise.resolve().then(() => (init_expiryAlertService(), expiryAlertService_exports));
+                await checkAndRunScheduledExpiryScan2(90).catch((err) => console.error("[Boot] Startup catch-up scan check failed:", err));
+                const { checkShortageRequestsAndNotifyAdmin: checkShortageRequestsAndNotifyAdmin2 } = await Promise.resolve().then(() => (init_shortageReminderService(), shortageReminderService_exports));
+                checkShortageRequestsAndNotifyAdmin2(db2).catch((err) => console.error("[Boot] Shortage check failed:", err));
+                setInterval(() => {
+                  checkShortageRequestsAndNotifyAdmin2().catch((err) => console.error("[Cron] Hourly shortage check failed:", err));
+                }, 60 * 60 * 1e3);
+              }
+            })(),
+            // Step 4b: Monthly & Mid-Month Scheduled Reports (1st & 15th of month)
+            (async () => {
+              const { monthlyReportService: monthlyReportService2 } = await Promise.resolve().then(() => (init_monthlyReportService(), monthlyReportService_exports));
+              monthlyReportService2.checkAndRunScheduledReports().catch((err) => console.error("[Boot] Monthly report check failed:", err));
+              setInterval(() => {
+                monthlyReportService2.checkAndRunScheduledReports().catch((err) => console.error("[Cron] Hourly monthly report check failed:", err));
+              }, 60 * 60 * 1e3);
+            })(),
+            // Step 5: Telegram Bot initialization (Deferred to T+8s to prevent blocking boot)
+            new Promise((resolve) => {
+              setTimeout(async () => {
+                try {
+                  const { telegramBotService: telegramBotService2 } = await Promise.resolve().then(() => (init_telegramBot(), telegramBot_exports));
+                  await telegramBotService2.initializeOrReloadBot();
+                  console.log("[Boot] Telegram bot initialized");
+                } catch (err) {
+                  console.error("[Boot] Failed to initialize Telegram Bot:", err);
+                }
+                resolve();
+              }, 6e3);
+            }),
+            // Step 6: Backup scheduler
+            (async () => {
+              const { initBackupScheduler: initBackupScheduler2 } = await Promise.resolve().then(() => (init_backupService(), backupService_exports));
+              await initBackupScheduler2().catch((err) => console.error("[Boot] Failed to init backup scheduler:", err));
+            })(),
+            // Step 7: Worker supervisor (deferred T+5s to avoid blocking boot with fork()x2)
+            new Promise((resolve) => {
+              setTimeout(async () => {
+                try {
+                  const { workerSupervisor: workerSupervisor2 } = await Promise.resolve().then(() => (init_workerSupervisor(), workerSupervisor_exports));
+                  workerSupervisor2.start();
+                } catch (err) {
+                  console.error("[Boot] Failed to start worker supervisor:", err);
+                }
+                try {
+                  const { startScispacySidecar: startScispacySidecar2 } = await Promise.resolve().then(() => (init_scispacyClient(), scispacyClient_exports));
+                  startScispacySidecar2();
+                } catch (err) {
+                  console.error("[Boot] Failed to start scispaCy sidecar:", err);
+                }
+                resolve();
+              }, 5e3);
+            }),
+            // Step 8: Schedulers for token refresh, messaging queue and refills fulfillment
+            // Note: Pharmarack token refresh scheduler and background service starts here.
+            (async () => {
+              try {
+                const { tokenRefreshScheduler: tokenRefreshScheduler2 } = await Promise.resolve().then(() => (init_tokenRefreshScheduler(), tokenRefreshScheduler_exports));
+                tokenRefreshScheduler2.start();
+                const { messagingQueue: messagingQueue2 } = await Promise.resolve().then(() => (init_messagingQueue(), messagingQueue_exports));
+                messagingQueue2.start();
+                const { orderFulfillmentService: orderFulfillmentService2 } = await Promise.resolve().then(() => (init_orderFulfillmentService(), orderFulfillmentService_exports));
+                orderFulfillmentService2.start();
+              } catch (srvErr) {
+                console.error("[Boot] Failed to start order/refills services:", srvErr);
+              }
+            })(),
+            // Step 9: Doctor reporting service
+            (async () => {
+              const { startDoctorReportingScheduler: startDoctorReportingScheduler2 } = await Promise.resolve().then(() => (init_doctorReportingService(), doctorReportingService_exports));
+              startDoctorReportingScheduler2();
+            })()
+          ];
+          Promise.allSettled(initSteps).then((results) => {
+            console.log("[Boot] Background initialization sequence completed");
+          });
+          Promise.resolve().then(() => (init_whatsappQueue2(), whatsappQueue_exports2)).then((m) => m.whatsappQueue.startWorker()).catch((err) => console.error("[Boot] WhatsApp queue worker start failed:", err));
+          Promise.resolve().then(() => (init_pushNotificationService(), pushNotificationService_exports)).catch((err) => console.error("[Boot] Push service load failed:", err));
+        });
+        setupCrons(db2);
+      } catch (err) {
+        if (err instanceof Error && err.message === "DB_INTEGRITY_FAILURE") {
+          console.error(
+            "[FATAL] Database integrity check failed and could not be automatically recovered.\nPlease use the backup/restore feature in the app settings to restore a healthy backup.\nThe application will not start until the database is repaired."
+          );
+        } else {
+          console.error("Failed to initialize database schema during boot:", err);
+        }
+        process.exit(1);
+      }
+    })();
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   }

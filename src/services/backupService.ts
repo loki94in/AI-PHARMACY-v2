@@ -24,6 +24,14 @@ let scheduledTask: ScheduledTask | null = null;
  * @param reason - A short description for the action log (e.g. 'Manual', 'Scheduled 3h', 'Shutdown')
  */
 export async function createBackup(reason: string = 'Manual'): Promise<{ filename: string }> {
+  // ponytail: defer auto-backups during cold boot to avoid SQLite lock contention
+  const isManual = reason === 'Manual';
+  const isShutdown = reason.startsWith('Shutdown');
+  if (!isManual && !isShutdown && process.uptime() < 60) {
+    console.log(`[Backup] Skipping ${reason} — server uptime ${Math.round(process.uptime())}s < 60s`);
+    throw new Error('Backup deferred: server still starting up (retry after 60s)');
+  }
+
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
   }

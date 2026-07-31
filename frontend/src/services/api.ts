@@ -146,7 +146,25 @@ export type {
 };
 
 
+const COMPACT_INVENTORY_SESSION_KEY = 'pharmacy_compact_inventory_v1';
+
 let compactInventoryCache: any[] | null = null;
+
+function tryHydrateCompactCacheFromSession(): void {
+  if (compactInventoryCache || typeof window === 'undefined') return;
+  try {
+    const stored = sessionStorage.getItem(COMPACT_INVENTORY_SESSION_KEY);
+    if (!stored) return;
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      setCompactInventoryCache(parsed, { persist: false });
+    }
+  } catch {
+    // ponytail: ignore corrupt session cache
+  }
+}
+
+tryHydrateCompactCacheFromSession();
 
 export const getCompactInventoryCache = (): any[] => {
   if (compactInventoryCache) return compactInventoryCache;
@@ -159,10 +177,21 @@ export const getCompactInventoryCache = (): any[] => {
 
 export const isCompactInventoryCacheReady = (): boolean => compactInventoryCache !== null;
 
-export const setCompactInventoryCache = (data: any[]) => {
+export const setCompactInventoryCache = (
+  data: any[],
+  options?: { persist?: boolean }
+) => {
   compactInventoryCache = data;
   if (typeof window !== 'undefined') {
+    if (options?.persist !== false) {
+      try {
+        sessionStorage.setItem(COMPACT_INVENTORY_SESSION_KEY, JSON.stringify(data));
+      } catch {
+        // ponytail: sessionStorage may be unavailable
+      }
+    }
     window.dispatchEvent(new Event('inventory-cache-ready'));
+    window.dispatchEvent(new Event('compact-inventory-ready'));
   }
 };
 

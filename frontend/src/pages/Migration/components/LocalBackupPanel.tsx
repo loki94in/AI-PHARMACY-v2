@@ -128,13 +128,22 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-start gap-3"
+              className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 flex flex-col items-center gap-3"
             >
-              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <p className="font-medium">Backup Scanner Error</p>
-                <p className="opacity-90 mt-0.5 text-xs">{error}</p>
+              <div className="flex items-start gap-3 w-full">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-left">
+                  <p className="font-medium">Backup Scanner Error</p>
+                  <p className="opacity-90 mt-0.5 text-xs">{error}</p>
+                </div>
               </div>
+              <button
+                onClick={fetchBackups}
+                disabled={loading}
+                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Retry Scan
+              </button>
             </motion.div>
           ) : backups.length === 0 ? (
             <motion.div

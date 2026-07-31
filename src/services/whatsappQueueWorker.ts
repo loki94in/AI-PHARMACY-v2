@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient } from '../whatsappClient.js';
+import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody } from '../whatsappClient.js';
 
 export interface QueueItem {
   id: number;
@@ -93,6 +93,54 @@ class WhatsAppQueueWorker {
 
     this.pacingMinMs = minMs;
     this.pacingMaxMs = maxMs;
+  }
+
+  /** Check outbox for a recent matching outbound message (phone + body hash within 60s) */
+  private async hasRecentOutboxMatch(db: any, phone: string, message: string): Promise<boolean> {
+    const last10 = phone.replace(/\D/g, '').slice(-10);
+    if (!last10 || last10.length < 7) return false;
+
+    const minTs = Math.floor((Date.now() - 60000) / 1000);
+    const msgHash = hashMessageBody(message);
+    const msgLen = (message || '').trim().length;
+    const trimmed = (message || '').trim();
+
+    const rows = await db.all(
+      `SELECT body FROM whatsapp_messages
+       WHERE from_me = 1
+         AND (chat_id LIKE ? OR chat_id LIKE ?)
+         AND timestamp >= ?
+       ORDER BY timestamp DESC
+       LIMIT 10`,
+      [`%${last10}%`, `%${phone.replace(/\D/g, '')}%`, minTs]
+    );
+
+    for (const row of rows || []) {
+      const body = String(row.body || '').trim();
+      if (hashMessageBody(body) === msgHash && body.length === msgLen) {
+        return true;
+      }
+      if (trimmed.length >= 20 && body.includes(trimmed.slice(0, 80))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Mark pharmarack placed order as batch-sent when distributor queue message delivers */
+  private async markPharmarackOrderSent(db: any, targetName: string | null | undefined): Promise<void> {
+    if (!targetName?.trim()) return;
+    const today = new Date().toISOString().split('T')[0];
+    const now = Date.now();
+    try {
+      await db.run(
+        `UPDATE pharmarack_placed_orders SET batch_sent = 1, batch_sent_at = ?
+         WHERE order_date = ? AND store_name = ? AND batch_sent = 0`,
+        [now, today, targetName.trim()]
+      );
+    } catch (err) {
+      console.warn('[WhatsAppQueueWorker] Could not update pharmarack_placed_orders batch_sent:', err);
+    }
   }
 
   /** Enqueue message into whatsapp_send_queue with optional explicit or setting-based delay */
@@ -286,7 +334,11 @@ class WhatsAppQueueWorker {
 
         try {
           // Send message via WhatsApp (sendMessage handles Business API routing and Web client sending)
-          await sendMessage(item.number, undefined, item.message);
+          const sendResult = await sendMessage(item.number, undefined, item.message);
+
+          if (!sendResult.sent) {
+            throw new Error('sendMessage returned without sending');
+          }
 
           // STRICT OUTBOX VERIFICATION:
           // Check if an outbound message record (from_me = 1) exists in whatsapp_messages sent in the last 120 seconds
@@ -301,19 +353,42 @@ class WhatsAppQueueWorker {
             [`%${last10}%`, `%${item.number}%`, minTs]
           );
 
-          if (!outboxRecord) {
+          if (!outboxRecord && !sendResult.suppressed) {
             console.warn(`[WhatsAppQueueWorker] Outbox verification note for #${item.id} (${item.number}): message sent via sendMessage, recorded in outbound history.`);
           }
 
           // Mark sent
+          const sentAt = Date.now();
           await db.run(
             "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
-            [Date.now(), item.id]
+            [sentAt, item.id]
           );
-          console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}`);
+
+          if (item.type === 'pharmarack_distributor_order') {
+            await this.markPharmarackOrderSent(db, item.target_name);
+          }
+
+          const suppressedNote = sendResult.suppressed ? ' (duplicate suppressed)' : '';
+          console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}${suppressedNote}`);
         } catch (err: any) {
-          const newRetryCount = item.retry_count + 1;
           const errMsg = err?.message || 'Failed to send message';
+
+          // Puppeteer detached-frame errors can occur after delivery — verify outbox before failing
+          const outboxMatch = await this.hasRecentOutboxMatch(db, item.number, item.message);
+          if (outboxMatch) {
+            const sentAt = Date.now();
+            await db.run(
+              "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
+              [sentAt, item.id]
+            );
+            if (item.type === 'pharmarack_distributor_order') {
+              await this.markPharmarackOrderSent(db, item.target_name);
+            }
+            console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
+            continue;
+          }
+
+          const newRetryCount = item.retry_count + 1;
           const newStatus = newRetryCount >= 3 ? 'failed_perm' : 'failed_offline';
 
           console.warn(`[WhatsAppQueueWorker] Failed to send #${item.id} (attempt ${newRetryCount}/3): ${errMsg}`);

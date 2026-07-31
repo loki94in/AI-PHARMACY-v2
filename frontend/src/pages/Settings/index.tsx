@@ -549,10 +549,12 @@ const Settings = () => {
 
   const queryClient = useQueryClient();
 
-  const { data: serverSettings } = useApiQuery(
+  const { data: serverSettings, isLoading: loadingSettings } = useApiQuery(
     'settings',
     () => apiClient.get('/settings').then(res => res.data)
   );
+
+  const settingsHydrated = !!serverSettings;
 
   useEffect(() => {
     if (serverSettings) {
@@ -650,6 +652,10 @@ const Settings = () => {
   }, [whatsappEnabled, waStatus.isReady, pageActive]);
 
   const handleSaveSettings = async () => {
+    if (!settingsHydrated) {
+      toastEvent.trigger('Loading settings from server — please wait', 'info');
+      return;
+    }
     const payload = {
       shop_name: pharmacyName,
       store_name: pharmacyName,
@@ -1207,10 +1213,11 @@ const Settings = () => {
         <div className="mt-6 flex justify-end">
           <button 
             onClick={handleSaveSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
+            disabled={!settingsHydrated || loadingSettings}
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
-            Save Details
+            {loadingSettings ? 'Loading…' : 'Save Details'}
           </button>
         </div>
       </div>
@@ -1676,10 +1683,11 @@ const Settings = () => {
         <div className="mt-6 flex justify-end">
           <button 
             onClick={handleSaveSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
+            disabled={!settingsHydrated || loadingSettings}
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
-            Save Preferences
+            {loadingSettings ? 'Loading…' : 'Save Preferences'}
           </button>
         </div>
       </div>
@@ -2105,10 +2113,11 @@ const Settings = () => {
         <div className="mt-6 flex justify-end">
           <button 
             onClick={handleSaveSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
+            disabled={!settingsHydrated || loadingSettings}
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
-            Save Admin Settings
+            {loadingSettings ? 'Loading…' : 'Save Admin Settings'}
           </button>
         </div>
       </div>
@@ -2154,10 +2163,11 @@ const Settings = () => {
         <div className="mt-6 flex justify-end">
           <button 
             onClick={handleSaveSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2"
+            disabled={!settingsHydrated || loadingSettings}
+            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
-            Save Automations
+            {loadingSettings ? 'Loading…' : 'Save Automations'}
           </button>
         </div>
       </div>

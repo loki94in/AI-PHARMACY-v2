@@ -106,7 +106,7 @@ function App() {
     }, 1500);
 
     // Pre-fetch data for key pages so they show instantly with no loading spinner on first visit.
-    // Runs 3s after startup to avoid competing with POS initial render.
+    // Runs 8s after startup — after compact cache + settings load on cold boot.
     const dataTimer = setTimeout(() => {
       // Dashboard — single query
       queryClient.prefetchQuery({
@@ -126,7 +126,7 @@ function App() {
         ]).then(([summary, records]) => ({ summary, records })),
         staleTime: 5 * 60_000,
       }).catch(() => {});
-    }, 3000);
+    }, 8000);
 
     return () => {
       clearTimeout(timer);

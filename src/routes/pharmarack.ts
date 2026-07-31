@@ -1159,9 +1159,9 @@ router.post('/cart/notify-manual', async (req, res) => {
   }
 
   try {
-    const success = await notificationService.notifyDistributorCartOrder(storeName, Number(storeId), items, deliveryPersons || []);
-    if (success) {
-      res.json({ success: true, message: 'Notifications sent successfully via WhatsApp!' });
+    const result = await notificationService.notifyDistributorCartOrder(storeName, Number(storeId), items, deliveryPersons || []);
+    if (result.ok) {
+      res.json({ success: true, message: 'Notifications sent successfully via WhatsApp!', sentCount: result.sentCount, suppressedCount: result.suppressedCount });
     } else {
       res.status(500).json({ error: 'Failed to send WhatsApp messages.' });
     }

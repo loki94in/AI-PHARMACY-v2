@@ -65,7 +65,7 @@ import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { ConnectedDevicesFooterBar } from './ConnectedDevicesFooterBar';
-import { api, apiClient } from '../services/api';
+import { api, apiClient, isCompactInventoryCacheReady } from '../services/api';
 import { useOnClickOutside } from '../hooks/useOnClickOutside';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
@@ -635,6 +635,7 @@ const Topbar = ({
   onOpenConnectModal,
   onOpenWaQueue,
   onMenuClick,
+  compactCacheLoaded = false,
 }: {
   theme: string;
   setTheme: React.Dispatch<React.SetStateAction<string>>;
@@ -648,6 +649,7 @@ const Topbar = ({
   onOpenConnectModal: () => void;
   onOpenWaQueue?: () => void;
   onMenuClick?: () => void;
+  compactCacheLoaded?: boolean;
 }) => {
   const location = useLocation();
   const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
@@ -662,43 +664,7 @@ const Topbar = ({
   } | null>(null);
   const [enrichmentRunning, setEnrichmentRunning] = useState(false);
 
-  const [orderAlertCount, setOrderAlertCount] = useState(0);
-
   const enrichmentPollControl = useFetchMode('layout.enrichmentPoll');
-
-  const fetchAlertCount = useCallback(async () => {
-    try {
-      const [orders, refills] = await Promise.all([
-        api.getOrders(),
-        api.getRefills(),
-      ]);
-      const pendingOrdersCount = Array.isArray(orders) 
-        ? orders.filter(o => o.status === 'Pending' || o.status === 'Ordered').length 
-        : 0;
-      const pendingRefillsCount = Array.isArray(refills)
-        ? refills.filter(r => r.is_active === 1 && r.status === 'pending' && r.hold_for_stock === 1).length
-        : 0;
-      setOrderAlertCount(pendingOrdersCount + pendingRefillsCount);
-    } catch (err) {
-      console.warn('Failed to fetch alert counts for Topbar:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchAlertCount();
-    
-    // Also refresh on cart refresh/update events
-    const handleRefresh = () => {
-      fetchAlertCount();
-    };
-    window.addEventListener('refresh-pharmarack-cart', handleRefresh);
-    window.addEventListener('refresh-special-orders', handleRefresh);
-    
-    return () => {
-      window.removeEventListener('refresh-pharmarack-cart', handleRefresh);
-      window.removeEventListener('refresh-special-orders', handleRefresh);
-    };
-  }, [fetchAlertCount]);
 
   useEffect(() => {
     const fetchActiveJob = async () => {
@@ -724,6 +690,8 @@ const Topbar = ({
     };
     fetchActiveJob();
 
+    if (!compactCacheLoaded) return;
+
     // Poll enrichment status to show/hide the header pill
     const pollEnrichment = async () => {
       try {
@@ -744,7 +712,7 @@ const Topbar = ({
         clearInterval(enrichmentPollInterval);
       };
     }
-  }, [enrichmentPollControl.shouldFetch]);
+  }, [enrichmentPollControl.shouldFetch, compactCacheLoaded]);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [connectedDevices, setConnectedDevices] = useState<{ token: string; device_name: string; os: string; is_online: number; last_seen: string; offline_seconds?: number }[]>([]);
@@ -792,6 +760,16 @@ const Topbar = ({
   const notifiedFailedQueueIdsRef = useRef<Set<number>>(new Set());
 
   const waQueueActiveRef = useRef(false);
+  const prevQueueActiveRef = useRef(false);
+  const [lastQueueCompletedAt, setLastQueueCompletedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!lastQueueCompletedAt) return;
+    const elapsed = Date.now() - lastQueueCompletedAt;
+    const remaining = Math.max(0, 5000 - elapsed);
+    const timer = setTimeout(() => setLastQueueCompletedAt(null), remaining);
+    return () => clearTimeout(timer);
+  }, [lastQueueCompletedAt]);
 
   const fetchServicesStatus = useCallback(async () => {
     try {
@@ -809,8 +787,18 @@ const Topbar = ({
           activeTargetName: qData.activeTargetName,
           counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
         });
+        const pending = qData.counts?.pending || 0;
+        const sending = qData.counts?.sending || 0;
+        const sent = qData.counts?.sent || 0;
+        const isQueueActive = pending > 0 || sending > 0 || qData.isProcessing;
         // Update ref for polling interval adjustment (avoids effect re-trigger)
-        waQueueActiveRef.current = (qData.counts?.pending || 0) > 0 || qData.isProcessing;
+        waQueueActiveRef.current = isQueueActive;
+
+        if (prevQueueActiveRef.current && !isQueueActive && sent > 0) {
+          setLastQueueCompletedAt(Date.now());
+          toastEvent.trigger(`✅ All ${sent} WhatsApp message${sent === 1 ? '' : 's'} sent`, 'success');
+        }
+        prevQueueActiveRef.current = isQueueActive;
 
         if (Array.isArray(qData.recentItems)) {
           qData.recentItems.forEach((item: any) => {
@@ -827,6 +815,7 @@ const Topbar = ({
     }
   }, []);
   useEffect(() => {
+    if (!compactCacheLoaded) return;
     // Poll faster (every 3s) when queue has pending/sending items, otherwise 8s
     let interval: ReturnType<typeof setInterval> | undefined;
     const poll = () => {
@@ -845,7 +834,7 @@ const Topbar = ({
       cancelDefer();
       clearInterval(interval);
     };
-  }, [fetchServicesStatus]);
+  }, [fetchServicesStatus, compactCacheLoaded]);
 
   useEffect(() => {
     fetchDevices();
@@ -885,17 +874,13 @@ const Topbar = ({
     });
   }, [onNewNotification]);
 
-  // Warm up client compact inventory cache on boot
-  useEffect(() => {
-    import('../services/api.js').then(async ({ api }) => {
-      try {
-        await api.getCompactInventory();
-        console.log('[Layout] Compact inventory cache loaded.');
-      } catch (err) {
-        console.warn('[Layout] Failed to load compact inventory:', err);
-      }
-    });
-  }, []);
+  const queuePillVisible = Boolean(
+    waQueueDetail?.isProcessing
+    || (waQueueDetail?.counts?.pending || 0) > 0
+    || (waQueueDetail?.counts?.sending || 0) > 0
+    || (lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000)
+  );
+  const queueCompletedRecently = lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000;
 
   const onlineDevicesCount = connectedDevices.filter(d => d.is_online === 1).length;
 
@@ -1048,8 +1033,24 @@ const Topbar = ({
           </Link>
 
           {/* WhatsApp Connection & Background Queue Status (Live Header Pill with Auto-Hide & Inline Play/Pause) */}
-          {(waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0) && (
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold uppercase tracking-wider shadow-lg shadow-emerald-500/10 shrink-0">
+          {queuePillVisible && (
+            <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-semibold uppercase tracking-wider shrink-0 ${
+              queueCompletedRecently
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-lg shadow-emerald-500/10'
+                : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-lg shadow-emerald-500/10'
+            }`}>
+              {queueCompletedRecently ? (
+                <button
+                  type="button"
+                  onClick={onOpenWaQueue}
+                  className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
+                  title="All WhatsApp messages sent"
+                >
+                  <Check size={12} className="text-emerald-400 shrink-0" />
+                  <span className="font-bold text-white">All sent</span>
+                </button>
+              ) : (
+                <>
               <button
                 type="button"
                 onClick={onOpenWaQueue}
@@ -1092,6 +1093,8 @@ const Topbar = ({
               >
                 {waQueueDetail?.isPaused ? <PlayIcon size={12} className="fill-current" /> : <PauseIcon size={12} className="fill-current" />}
               </button>
+                </>
+              )}
             </div>
           )}
 
@@ -1645,7 +1648,7 @@ export const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
-  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales', '/refills'].includes(location.pathname);
+  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales', '/refills', '/migration'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {
@@ -1695,8 +1698,24 @@ export const Layout = ({
     setMobileNavOpen(false);
   }, [location.pathname]);
 
-  const [refills, setRefills] = useState<any[]>([]);
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
+  const [compactCacheLoaded, setCompactCacheLoaded] = useState(() => isCompactInventoryCacheReady());
+
+  // Priority 0 on cold boot: compact inventory cache before other startup polls
+  useEffect(() => {
+    if (compactCacheLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await api.getCompactInventory();
+        if (!cancelled) console.log('[Layout] Compact inventory cache loaded.');
+      } catch (err) {
+        if (!cancelled) console.warn('[Layout] Failed to load compact inventory:', err);
+      }
+      if (!cancelled) setCompactCacheLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [compactCacheLoaded]);
 
   const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<any[]>(
     'orders',
@@ -1704,7 +1723,16 @@ export const Layout = ({
       const data = await api.getOrders();
       return Array.isArray(data) ? data : [];
     },
-    { refetchInterval: 15000, staleTime: 5000 }
+    { refetchInterval: 15000, staleTime: 5000, enabled: compactCacheLoaded }
+  );
+
+  const { data: refillsList = [], refetch: refetchRefills } = useApiQuery<any[]>(
+    'refills',
+    async () => {
+      const data = await api.getRefills();
+      return Array.isArray(data) ? data : [];
+    },
+    { refetchInterval: 15000, staleTime: 5000, enabled: compactCacheLoaded }
   );
 
   useEffect(() => {
@@ -1731,14 +1759,7 @@ export const Layout = ({
     } catch {}
   }, [isSidebarExpanded]);
 
-  const fetchRefillData = useCallback(async () => {
-    try {
-      const data = await api.getRefills();
-      setRefills(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.warn('Failed to load refills in layout:', err);
-    }
-
+  const fetchStagedNotifications = useCallback(async () => {
     try {
       const notifications = await api.getAutomationNotifications({ status: 'staged' });
       setStagedNotifications(Array.isArray(notifications) ? notifications : []);
@@ -1748,15 +1769,18 @@ export const Layout = ({
   }, []);
 
   useEffect(() => {
-    fetchRefillData();
+    if (!compactCacheLoaded) return;
+    fetchStagedNotifications();
     const unsubRefill = refillEvent.subscribeRefresh(() => {
-      fetchRefillData();
+      fetchStagedNotifications();
       refetchSpecialOrders();
+      refetchRefills();
     });
 
     const handleDataRefresh = () => {
-      fetchRefillData();
+      fetchStagedNotifications();
       refetchSpecialOrders();
+      refetchRefills();
     };
 
     window.addEventListener('focus', handleDataRefresh);
@@ -1771,12 +1795,14 @@ export const Layout = ({
       window.removeEventListener('refresh-special-orders', handleDataRefresh);
       window.removeEventListener('app-purchases-updated', handleDataRefresh);
     };
-  }, [fetchRefillData, refetchSpecialOrders]);
+  }, [compactCacheLoaded, fetchStagedNotifications, refetchSpecialOrders, refetchRefills]);
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [isBackupStartupMode, setIsBackupStartupMode] = useState(false);
 
   useEffect(() => {
+    if (!compactCacheLoaded) return;
+
     const checkBackupStatus = async () => {
       try {
         const { data } = await apiClient.get('/utilities/backup/status');
@@ -1798,7 +1824,7 @@ export const Layout = ({
     return () => {
       delete window.openBackupCenter;
     };
-  }, []);
+  }, [compactCacheLoaded]);
 
   const fetchStagedCounts = useCallback(async (force = false) => {
     const now = Date.now();
@@ -1988,6 +2014,7 @@ export const Layout = ({
           onOpenConnectModal={() => setShowConnectModal(true)}
           onOpenWaQueue={() => setShowWaQueuePopover(true)}
           onMenuClick={() => setMobileNavOpen(true)}
+          compactCacheLoaded={compactCacheLoaded}
         />
         <div className="flex-1 flex flex-row overflow-hidden relative">
           <main className={`flex-1 flex flex-col ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative transition-all duration-200`}>
@@ -1997,12 +2024,13 @@ export const Layout = ({
           <QuickAssistSidebar
             expanded={isSidebarExpanded}
             setExpanded={setIsSidebarExpanded}
-            refills={refills}
+            refills={refillsList}
             notifications={stagedNotifications}
             specialOrders={specialOrdersList}
             onActionComplete={() => {
-              fetchRefillData();
+              fetchStagedNotifications();
               refetchSpecialOrders();
+              refetchRefills();
             }}
           />
         </div>

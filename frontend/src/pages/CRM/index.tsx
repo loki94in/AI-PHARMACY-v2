@@ -16,6 +16,20 @@ import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../util
 // ─── Module-level Cache (SPA Performance Contract) ──────────────────────
 let cachedRefillsData: RefillPatient[] = [];
 
+/** Silent retry for cold-boot transient failures — toast only after retries exhausted */
+async function withSilentRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 2000): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface RefillPatient {
@@ -148,7 +162,7 @@ const RefillsSection: React.FC = () => {
   const load = useCallback(async (silent = false) => {
     if (!silent && cachedRefillsData.length === 0) setLoading(true);
     try {
-      const r = await apiClient.get<RefillPatient[]>('/refills/panel');
+      const r = await withSilentRetry(() => apiClient.get<RefillPatient[]>('/refills/panel'));
       const list = Array.isArray(r.data) ? r.data : [];
       cachedRefillsData = list;
       setData(list);
@@ -1199,14 +1213,14 @@ const DistributorMessagesSection: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await apiClient.get('/automation/notifications', {
+      const r = await withSilentRetry(() => apiClient.get('/automation/notifications', {
         params: {
           type: typeFilter !== 'all' ? typeFilter : undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           search: search || undefined,
           limit: 200
         }
-      });
+      }));
       setLogs(Array.isArray(r.data) ? r.data : []);
     } catch { toastEvent.trigger('Failed to load messages', 'error', '/crm'); }
     finally { setLoading(false); }
@@ -1436,7 +1450,7 @@ const WhatsAppSection: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [attachedFile, setAttachedFile] = useState<{ filename: string; mimetype: string; data: string } | null>(null);
 
-  const [isReady, setIsReady] = useState(true);
+  const [isReady, setIsReady] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrMessage, setQrMessage] = useState<string>('');
   const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
@@ -1531,7 +1545,7 @@ const WhatsAppSection: React.FC = () => {
   const loadChats = useCallback(async () => {
     setLoadingChats(true);
     try {
-      const res = await apiClient.get<WaChatItem[]>('/messaging/chats');
+      const res = await withSilentRetry(() => apiClient.get<WaChatItem[]>('/messaging/chats'));
       setChats(Array.isArray(res.data) ? res.data : []);
     } catch {
       toastEvent.trigger('Failed to load WhatsApp chats', 'error', '/crm');
@@ -1554,9 +1568,15 @@ const WhatsAppSection: React.FC = () => {
 
   useEffect(() => {
     checkStatus();
-    loadChats();
     loadTemplates();
+  }, [checkStatus, loadTemplates]);
 
+  // Gate chat list behind WhatsApp ready — avoids cold-boot false-failure toasts
+  useEffect(() => {
+    if (isReady) loadChats();
+  }, [isReady, loadChats]);
+
+  useEffect(() => {
     // Poll status every 5s when not ready (for QR), every 30s when ready (for chat list) —
     // paused while this page isn't the one visible (keep-alive keeps it mounted in the background).
     if (!statusPollActive) return;
@@ -1565,7 +1585,7 @@ const WhatsAppSection: React.FC = () => {
       if (isReady) loadChats();
     }, 5_000);
     return () => clearInterval(pollId);
-  }, [checkStatus, loadChats, loadTemplates, isReady, statusPollActive]);
+  }, [checkStatus, loadChats, isReady, statusPollActive]);
 
   const messagePollActive = usePageActive();
 
@@ -2646,7 +2666,7 @@ const SpecialOrdersSection: React.FC = () => {
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.getOrders();
+      const data = await withSilentRetry(() => api.getOrders());
       setOrders(Array.isArray(data) ? data : []);
     } catch {
       toastEvent.trigger('Failed to load special requests', 'error', '/crm');

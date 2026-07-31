@@ -1,4 +1,4 @@
-import { sendMessage } from '../whatsappClient.js';
+import { sendMessage, type SendMessageResult } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
 import { whatsappBusinessService } from './whatsappBusinessService.js';
 import { config } from '../config/index.js';
@@ -17,6 +17,17 @@ export interface NotificationResult {
   success: boolean;
   messageId?: string;
   error?: string;
+  suppressed?: boolean;
+}
+
+export interface CartOrderNotifyResult {
+  ok: boolean;
+  sentCount: number;
+  suppressedCount: number;
+}
+
+function isSendSuccess(result: SendMessageResult): boolean {
+  return result.sent === true;
 }
 
 export function formatDisplayPhone(rawPhone?: string | null): string {
@@ -45,8 +56,11 @@ export class NotificationService {
     caption?: string
   ): Promise<NotificationResult> {
     try {
-      await sendMessage(phoneNumber, mediaPath, message);
-      return { success: true };
+      const result = await sendMessage(phoneNumber, mediaPath, message);
+      if (isSendSuccess(result)) {
+        return { success: true, suppressed: result.suppressed };
+      }
+      return { success: false, error: 'Message was not sent' };
     } catch (error) {
       console.error('Failed to send WhatsApp message:', error);
       return {
@@ -330,16 +344,20 @@ export class NotificationService {
       console.log(`[DistributorNotif] Preparing WhatsApp auto-notification to ${purchase.distributor_name} at: ${uniqueDistPhones.join(', ')}`);
 
       let sentCount = 0;
+      let suppressedCount = 0;
       for (const phone of uniqueDistPhones) {
         try {
-          await sendMessage(phone, undefined, message);
-          sentCount++;
+          const sendResult = await sendMessage(phone, undefined, message);
+          if (isSendSuccess(sendResult)) {
+            sentCount++;
+            if (sendResult.suppressed) suppressedCount++;
+          }
 
           // Log success to automation_notifications
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['distributor_invoice_order', purchase.distributor_name, phone, message, 'sent', `inv_${purchase.invoice_no}`]
+            ['distributor_invoice_order', purchase.distributor_name, phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `inv_${purchase.invoice_no}`]
           );
         } catch (wsError: any) {
           console.error(`[DistributorNotif] Failed to send WhatsApp to distributor number ${phone}:`, wsError);
@@ -368,7 +386,7 @@ export class NotificationService {
     storeId: number,
     items: any[],
     deliveryPersons?: any[]
-  ): Promise<boolean> {
+  ): Promise<CartOrderNotifyResult> {
     let db = null;
     try {
       db = await dbManager.getConnection();
@@ -500,17 +518,21 @@ export class NotificationService {
       const uniqueDistPhones: string[] = Array.from(new Set(distPhones));
 
       let sentCount = 0;
+      let suppressedCount = 0;
 
       // Send to distributor
       if (uniqueDistPhones.length > 0) {
         for (const phone of uniqueDistPhones) {
           try {
-            await sendMessage(phone, undefined, message);
-            sentCount++;
+            const sendResult = await sendMessage(phone, undefined, message);
+            if (isSendSuccess(sendResult)) {
+              sentCount++;
+              if (sendResult.suppressed) suppressedCount++;
+            }
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['distributor_cart_order', storeName, phone, message, 'sent', `store_${storeId}`]
+              ['distributor_cart_order', storeName, phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `store_${storeId}`]
             );
           } catch (err: any) {
             console.error(`[CartOrderNotif] Failed to notify distributor ${storeName} at ${phone}:`, err);
@@ -526,22 +548,25 @@ export class NotificationService {
       // Send to delivery boy(s)
       for (const boy of resolvedDeliveryBoys) {
         try {
-          await sendMessage(boy.phone, undefined, message);
-          sentCount++;
+          const sendResult = await sendMessage(boy.phone, undefined, message);
+          if (isSendSuccess(sendResult)) {
+            sentCount++;
+            if (sendResult.suppressed) suppressedCount++;
+          }
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_cart_order', boy.name, boy.phone, message, 'sent', `store_${storeId}`]
+            ['delivery_boy_cart_order', boy.name, boy.phone, message, sendResult.suppressed ? 'suppressed' : 'sent', `store_${storeId}`]
           );
         } catch (err: any) {
           console.error(`[CartOrderNotif] Failed to notify delivery boy ${boy.name} at ${boy.phone}:`, err);
         }
       }
 
-      return sentCount > 0;
+      return { ok: sentCount > 0, sentCount, suppressedCount };
     } catch (err) {
       console.error('[CartOrderNotif] Error sending cart order notifications:', err);
-      return false;
+      return { ok: false, sentCount: 0, suppressedCount: 0 };
     } finally {
       // Always record this order for the daily morning batch to delivery boys
       // (fire-and-forget — does not block the response)
@@ -675,26 +700,33 @@ export class NotificationService {
 
       // 5. Send to each delivery boy (Summary FIRST, then per-distributor messages with 1.5s gap)
       let sentCount = 0;
+      let suppressedCount = 0;
       for (const boy of resolvedDeliveryBoys) {
         try {
           // A. Send Summary Message
-          await sendMessage(boy.phone, undefined, summaryMessage);
-          sentCount++;
+          const summaryResult = await sendMessage(boy.phone, undefined, summaryMessage);
+          if (isSendSuccess(summaryResult)) {
+            sentCount++;
+            if (summaryResult.suppressed) suppressedCount++;
+          }
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${Date.now()}`]
+            ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, summaryResult.suppressed ? 'suppressed' : 'sent', `batch_summary_${Date.now()}`]
           );
 
           // B. Send Individual Distributor Messages with 1.5s gap
           for (const distObj of distMessages) {
             await new Promise(r => setTimeout(r, 1500));
-            await sendMessage(boy.phone, undefined, distObj.message);
-            sentCount++;
+            const distResult = await sendMessage(boy.phone, undefined, distObj.message);
+            if (isSendSuccess(distResult)) {
+              sentCount++;
+              if (distResult.suppressed) suppressedCount++;
+            }
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, 'sent', `batch_${Date.now()}_${distObj.distName}`]
+              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, distResult.suppressed ? 'suppressed' : 'sent', `batch_${Date.now()}_${distObj.distName}`]
             );
           }
 
