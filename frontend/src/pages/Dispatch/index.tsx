@@ -3,6 +3,15 @@ import { createPortal } from 'react-dom';
 import { Truck, Package, Clock, CheckCircle, MapPin, Plus, X, User, Trash2, RefreshCw, ChevronDown, Send, Check, Edit3 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import {
+  getDispatchDeliveryBoysCache,
+  getDispatchOrdersCache,
+  setDispatchDeliveryBoysCache,
+  setDispatchOrdersCache,
+  clearDispatchPageCache,
+  type CachedDeliveryBoy,
+} from '../../utils/pageModuleCaches';
+import { broadcastContactDataChanged } from '../../utils/settingsSync';
 
 interface DispatchOrder {
   id: number;
@@ -34,11 +43,9 @@ const statusStyles: Record<string, string> = {
 
 const emptyForm = { patient_name: '', patient_phone: '', address: '', items: '', notes: '', delivery_boy_id: '', invoice_no: '' };
 
-// Module-level cache for instant re-mount
-let cachedOrders: DispatchOrder[] | null = null;
-let cachedDeliveryBoys: DeliveryBoy[] | null = null;
-
 const Dispatch = () => {
+  const cachedOrders = getDispatchOrdersCache() as DispatchOrder[] | null;
+  const cachedDeliveryBoys = getDispatchDeliveryBoysCache() as DeliveryBoy[] | null;
   const [orders, setOrders] = useState<DispatchOrder[]>(cachedOrders || []);
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>(cachedDeliveryBoys || []);
   const [allBoys, setAllBoys] = useState<DeliveryBoy[]>([]);
@@ -58,7 +65,8 @@ const Dispatch = () => {
   };
 
   const fetchAll = useCallback(async () => {
-    if (!cachedOrders || cachedOrders.length === 0) {
+    const ordersCache = getDispatchOrdersCache();
+    if (!ordersCache || (Array.isArray(ordersCache) && ordersCache.length === 0)) {
       setLoading(true);
     }
     try {
@@ -69,8 +77,8 @@ const Dispatch = () => {
       const ordersArr = Array.isArray(ordersData) ? ordersData : [];
       const rawBoys = Array.isArray(boysData) ? boysData : [];
       const activeBoysArr = rawBoys.filter((b: DeliveryBoy) => b.is_active);
-      cachedOrders = ordersArr;
-      cachedDeliveryBoys = activeBoysArr;
+      setDispatchOrdersCache(ordersArr);
+      setDispatchDeliveryBoysCache(activeBoysArr as CachedDeliveryBoy[]);
       setOrders(ordersArr);
       setAllBoys(rawBoys);
       setDeliveryBoys(activeBoysArr);
@@ -127,9 +135,17 @@ const Dispatch = () => {
   useEffect(() => {
     fetchAll();
     fetchMessageDates();
-    const handlePhoneUpdate = () => { fetchAll(); fetchMessageDates(); };
+    const handlePhoneUpdate = () => {
+      clearDispatchPageCache();
+      fetchAll();
+      fetchMessageDates();
+    };
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
-    return () => window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
+    window.addEventListener('settings-updated', handlePhoneUpdate);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
+      window.removeEventListener('settings-updated', handlePhoneUpdate);
+    };
   }, [fetchAll, fetchMessageDates]);
 
   useEffect(() => {
@@ -151,7 +167,7 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${newBoyName.trim()}" added successfully!`);
       setNewBoyName('');
       setNewBoyPhone('');
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      await broadcastContactDataChanged();
       fetchAll();
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to add delivery boy', 'error');
@@ -168,7 +184,7 @@ const Dispatch = () => {
       });
       showNotif(`Delivery boy updated successfully!`);
       setEditingBoyId(null);
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      await broadcastContactDataChanged();
       fetchAll();
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to update delivery boy', 'error');
@@ -180,7 +196,7 @@ const Dispatch = () => {
       const newActive = boy.is_active ? 0 : 1;
       await api.updateDeliveryBoy(boy.id, { is_active: newActive });
       showNotif(`Delivery boy "${boy.name}" ${newActive ? 'activated' : 'deactivated'}`);
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      await broadcastContactDataChanged();
       fetchAll();
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to update status', 'error');
@@ -192,7 +208,7 @@ const Dispatch = () => {
     try {
       await api.deleteDeliveryBoy(id);
       showNotif(`Delivery boy "${name}" deleted`);
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      await broadcastContactDataChanged();
       fetchAll();
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to delete delivery boy', 'error');

@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { apiClient, api } from '../../services/api';
+import { useSettingsQuery } from '../../hooks/useSettingsQuery';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { broadcastContactDataChanged, updateSettingsCache } from '../../utils/settingsSync';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
   Settings as SettingsIcon,
@@ -549,10 +551,7 @@ const Settings = () => {
 
   const queryClient = useQueryClient();
 
-  const { data: serverSettings, isLoading: loadingSettings } = useApiQuery(
-    'settings',
-    () => apiClient.get('/settings').then(res => res.data)
-  );
+  const { data: serverSettings, isLoading: loadingSettings } = useSettingsQuery();
 
   const settingsHydrated = !!serverSettings;
 
@@ -725,6 +724,7 @@ const Settings = () => {
 
     try {
       await apiClient.post('/settings/save', payload);
+      updateSettingsCache(queryClient, payload as Record<string, string>);
       if (ownerWhatsappNumber) {
         try {
           await api.saveContact({
@@ -737,10 +737,8 @@ const Settings = () => {
           });
         } catch (_) {}
       }
+      await broadcastContactDataChanged(queryClient);
       toastEvent.trigger('Settings saved successfully', 'success');
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
-      window.dispatchEvent(new CustomEvent('contacts-updated'));
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to save settings', error);
       toastEvent.trigger('Failed to save settings', 'error');
@@ -766,8 +764,8 @@ const Settings = () => {
       await apiClient.post('/settings/save', {
         data_fetch_control: modesString
       });
-      window.dispatchEvent(new CustomEvent('settings-updated'));
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      updateSettingsCache(queryClient, { data_fetch_control: modesString });
+      await broadcastContactDataChanged(queryClient);
       toastEvent.trigger('Fetch mode updated successfully', 'success');
     } catch (error) {
       console.error('Failed to save fetch mode', error);
@@ -797,7 +795,7 @@ const Settings = () => {
             setPrToken(data.pharmarack_session_token);
             setPrMode(data.pharmarack_mode || 'Live');
             toastEvent.trigger('Successfully linked Pharmarack session!', 'success');
-            queryClient.invalidateQueries({ queryKey: ['settings'] });
+            await broadcastContactDataChanged(queryClient);
             clearInterval(interval);
             setIsOpeningWindow(false);
           }
@@ -869,8 +867,9 @@ const Settings = () => {
     try {
       await apiClient.post('/settings/save', payload);
       await apiClient.post('/pharmarack/logout');
+      updateSettingsCache(queryClient, payload as Record<string, string>);
+      await broadcastContactDataChanged(queryClient);
       toastEvent.trigger('Logged out and cleared Pharmarack credentials successfully.', 'success');
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
     } catch (error) {
       console.error('Failed to logout from Pharmarack', error);
       toastEvent.trigger('Failed to logout from Pharmarack', 'error');

@@ -9,7 +9,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import NonMappedDistributors from '../NonMappedDistributors';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
-import { findBestCartMatchForOrder, evaluateOrderCartMatch } from '../../utils/orderFuzzyMatcher';
+import { broadcastContactDataChanged } from '../../utils/settingsSync';
 
 interface CartLineItem {
   productId: number | null;
@@ -452,14 +452,18 @@ export default function PharmarackCart() {
     try {
       const res = await apiClient.get('/dispatch/delivery-boys');
       if (Array.isArray(res.data)) {
-        setDeliveryBoysList(res.data.filter((b: any) => b.is_active !== 0));
+        const active = res.data.filter((b: any) => b.is_active !== 0);
+        setDeliveryBoysList(active);
+        return active as { id?: number; name: string; whatsapp_number: string; is_active?: number }[];
       }
     } catch (err) {
       console.warn('Failed to load delivery boys list for WhatsApp template:', err);
     }
+    return [];
   };
 
-  const fetchStoreInfo = async () => {
+  const fetchStoreInfo = async (boys?: { id?: number; name: string; whatsapp_number: string; is_active?: number }[]) => {
+    const activeBoys = boys ?? deliveryBoysList;
     try {
       const res = await apiClient.get('/settings');
       if (res.data) {
@@ -470,16 +474,21 @@ export default function PharmarackCart() {
           address: s.address || s.shop_address || s.store_address || '',
           email: s.email || '',
           adminPhone: s.admin_whatsapp || s.admin_phone || s.owner_whatsapp_number || '',
-          deliveryBoyName1: deliveryBoysList[0]?.name || '',
-          deliveryBoyPhone: deliveryBoysList[0]?.whatsapp_number || '',
-          deliveryBoyName2: deliveryBoysList[1]?.name || '',
-          deliveryBoyPhone2: deliveryBoysList[1]?.whatsapp_number || '',
+          deliveryBoyName1: activeBoys[0]?.name || '',
+          deliveryBoyPhone: activeBoys[0]?.whatsapp_number || '',
+          deliveryBoyName2: activeBoys[1]?.name || '',
+          deliveryBoyPhone2: activeBoys[1]?.whatsapp_number || '',
           invoiceFileFormat: s.distributor_invoice_file_format || 'CSV File Format'
         });
       }
     } catch (err) {
       console.warn('Failed to load store settings for WhatsApp template:', err);
     }
+  };
+
+  const loadContactData = async () => {
+    const boys = await fetchDeliveryBoys();
+    await fetchStoreInfo(boys);
   };
 
   const hasPharmacySettings = () => {
@@ -492,18 +501,19 @@ export default function PharmarackCart() {
   useEffect(() => {
     fetchSavedDistributors();
     fetchDistributorMappings();
-    fetchStoreInfo();
-    fetchDeliveryBoys();
+    loadContactData();
 
-    // Listen to global phone-numbers-updated event to update contacts instantly without page reload
     const handlePhoneUpdate = () => {
       fetchSavedDistributors();
       fetchDistributorMappings();
-      fetchStoreInfo();
-      fetchDeliveryBoys();
+      loadContactData();
     };
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
-    return () => window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
+    window.addEventListener('settings-updated', handlePhoneUpdate);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
+      window.removeEventListener('settings-updated', handlePhoneUpdate);
+    };
   }, []);
 
   // Session custom phone number override map by storeId (transient in-memory fallback)
@@ -1121,7 +1131,8 @@ export default function PharmarackCart() {
         });
       } catch (_) {}
       toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
-      await Promise.all([fetchDeliveryBoys(), fetchStoreInfo()]);
+      await broadcastContactDataChanged();
+      await loadContactData();
       setShowMissingBoyModal(false);
       const distTarget = pendingTargetDistributor;
       setQuickBoyName('');
@@ -1540,9 +1551,7 @@ export default function PharmarackCart() {
         });
       } catch (_) {}
 
-      // 3. Broadcast real-time update events
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
-      window.dispatchEvent(new CustomEvent('contacts-updated'));
+      await broadcastContactDataChanged();
     } catch (err: any) {
       console.warn('Background save distributor contact error:', err);
     } finally {

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api';
+import { SETTINGS_QUERY_KEY } from '../utils/settingsSync';
 import { DEFAULT_FETCH_MODES, type FetchMode } from '../services/dataFetchControl';
 import { useState, useCallback, useEffect } from 'react';
 
@@ -10,9 +11,9 @@ const manualOverrides = new Set<string>();
 export function useFetchMode(key: string) {
   // Use React Query to fetch settings. It shares the same query cache.
   const { data: serverSettings } = useQuery<Record<string, any>>({
-    queryKey: ['settings'],
+    queryKey: SETTINGS_QUERY_KEY,
     queryFn: () => apiClient.get('/settings').then(res => res.data),
-    staleTime: 5 * 60 * 1000, // cache settings for 5 minutes
+    staleTime: 0,
   });
 
   const [localOverride, setLocalOverride] = useState(() => manualOverrides.has(key));
