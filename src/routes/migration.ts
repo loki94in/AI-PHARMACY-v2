@@ -866,6 +866,13 @@ router.post('/staging/finalize', async (req, res) => {
         await setReportCutoverDate(activeDb, String(reportCutoverDate));
       }
       await clearStagedModuleTracking(activeDb);
+      try {
+        const { backfillInventoryActiveFlags, deactivateExpiredInventory } = await import('../utils/inventoryActive.js');
+        await backfillInventoryActiveFlags(activeDb);
+        await deactivateExpiredInventory(activeDb);
+      } catch (activeErr: any) {
+        console.warn('[Migration Finalize] is_active sync warning:', activeErr.message);
+      }
     } catch (dbErr) {
       console.error('Failed to log snapshot:', dbErr);
     }
