@@ -140,6 +140,7 @@ const Sidebar = ({
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
+    { path: '/dispatch', label: 'Dispatch', icon: <Truck size={18} /> },
     { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },
     { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
     { path: '/database', label: 'Master Database', icon: <Database size={18} /> },

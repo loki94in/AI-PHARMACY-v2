@@ -13,6 +13,7 @@ interface FileEntry {
   ext: string;
   headers: string[];
   samples: any[];
+  totalRows?: number;
   detected: { type: string; confidence: number };
   userSelectedType: string;
   mapping: Record<string, string>;
@@ -355,7 +356,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                     <ModuleSection
                       dataType={fileEntry.userSelectedType}
                       label={getModuleLabel(fileEntry.userSelectedType)}
-                      totalRows={fileEntry.samples.length}
+                      totalRows={fileEntry.totalRows || fileEntry.samples.length}
                       headers={fileEntry.headers}
                       mapping={mappings}
                       onMappingChange={handleMappingChange}

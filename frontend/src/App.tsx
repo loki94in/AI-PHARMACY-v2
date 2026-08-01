@@ -67,6 +67,7 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/settings', element: <Settings /> },
   { path: '/mail', element: <Mail /> },
   { path: '/learning', element: <Learning /> },
+  { path: '/dispatch', element: <DispatchPage /> },
   { path: '/database', element: <DatabasePage /> },
   { path: '/composition-queue', element: <CompositionQueue /> },
 ];
@@ -148,7 +149,6 @@ function App() {
               <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
               <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />
               <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
-              <Route path="/dispatch" element={<Navigate to="/learning?tab=dispatch" replace />} />
               <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
               <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
               <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />

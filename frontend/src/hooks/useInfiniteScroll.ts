@@ -4,7 +4,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 interface UseInfiniteScrollOptions<T> {
   queryKey: string;
   cacheKey: string;
-  fetchPage: (pageParam: number, filters: any) => Promise<{ data: T[]; totalItems: number; totalPages: number }>;
+  fetchPage: (pageParam: number, filters: any) => Promise<{ data: T[]; totalItems: number; totalPages: number; meta?: Record<string, any> }>;
   serverFilters?: any;
   clientFilterFn?: (item: T) => boolean;
   pageSize?: number;
@@ -12,6 +12,7 @@ interface UseInfiniteScrollOptions<T> {
 
 const globalModuleCache: Record<string, any[]> = {};
 const globalTotalItems: Record<string, number> = {};
+const globalMeta: Record<string, Record<string, any>> = {};
 
 export const clearInfiniteScrollCache = (cacheKey?: string) => {
   if (cacheKey) {
@@ -44,6 +45,10 @@ export function useInfiniteScroll<T>({
     return globalTotalItems[cacheKey] || 0;
   });
 
+  const [meta, setMeta] = useState<Record<string, any>>(() => {
+    return globalMeta[cacheKey] || {};
+  });
+
   // Listen for global cache clear events to update mounted states immediately
   useEffect(() => {
     const handleClear = (e: Event) => {
@@ -52,6 +57,7 @@ export function useInfiniteScroll<T>({
       if (!targetKey || targetKey === cacheKey) {
         setItems([]);
         setTotalItems(0);
+        setMeta({});
       }
     };
     window.addEventListener('clear-module-cache', handleClear);
@@ -73,8 +79,10 @@ export function useInfiniteScroll<T>({
     if (filtersChanged) {
       globalModuleCache[cacheKey] = [];
       globalTotalItems[cacheKey] = 0;
+      globalMeta[cacheKey] = {};
       setItems([]);
       setTotalItems(0);
+      setMeta({});
     }
   }, [filtersChanged, cacheKey]);
 
@@ -115,7 +123,11 @@ export function useInfiniteScroll<T>({
         globalTotalItems[cacheKey] = lastPage.totalItems;
         setTotalItems(lastPage.totalItems);
       }
-      
+      if (lastPage && lastPage.meta) {
+        globalMeta[cacheKey] = lastPage.meta;
+        setMeta(lastPage.meta);
+      }
+
       setItems(flat);
     }
   }, [data, cacheKey]);
@@ -152,6 +164,7 @@ export function useInfiniteScroll<T>({
     items: filteredItems,
     allItems: items,
     totalItems,
+    meta,
     isFetching,
     isFetchingNextPage,
     hasNextPage,

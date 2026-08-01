@@ -116,7 +116,7 @@ const Inventory = () => {
       ...(col('id') ? [{ key: 'id', label: 'ID' }] : []),
       ...(col('batch') ? [{ key: 'batch_number', label: 'Batch' }] : []),
       ...(col('expiry') ? [{ key: 'expiry_date', label: 'Expiry' }] : []),
-      ...(col('packs') ? [{ key: 'quantity', label: 'Packs' }] : []),
+      ...(col('packs') ? [{ key: 'stock_quantity', label: 'Packs' }] : []),
       ...(col('loose') ? [{ key: 'loose_quantity', label: 'Loose' }] : []),
       ...(col('mrp') ? [{ key: 'mrp', label: 'MRP' }] : []),
       ...(col('rack') ? [{ key: 'rack_location', label: 'Rack' }] : []),
