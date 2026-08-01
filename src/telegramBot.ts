@@ -27,6 +27,11 @@ class TelegramBotService {
     this.lang = process.env.TELEGRAM_LANG || 'en';
   }
 
+  /** True when the bot has an active, authenticated polling connection to Telegram. */
+  public isReady(): boolean {
+    return !!this.bot && this.bot.isPolling();
+  }
+
   public async initializeOrReloadBot(): Promise<void> {
     try {
       const db = await dbManager.getConnection();

@@ -47,7 +47,7 @@ const Orders = () => {
     'orders',
     async () => {
       const data = await api.getOrders();
-      return Array.isArray(data) ? data.slice(0, 100) : [];
+      return Array.isArray(data) ? data : [];
     }
   );
   const [searchQuery, setSearchQuery] = useState('');

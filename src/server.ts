@@ -16,7 +16,7 @@ import { ensureSchema } from './database.js';
 import { registerProcessGuardian } from './process/processGuardian.js';
 import { activityTracker } from './utils/activityTracker.js';
 import { getBackendFetchMode } from './services/dataFetchControl.js';
-import { config, getAppDataDir } from './config/index.js';
+import { config, getAppDataDir, isPackagedApp } from './config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -333,7 +333,7 @@ const server = app.listen(PORT, async () => {
   console.log(`Server is running on ${serverUrl}`);
 
   // Auto-open browser when launched from the packaged Windows executable (.exe)
-  if ((process as any).pkg || process.env.AUTO_OPEN_BROWSER === 'true') {
+  if (isPackagedApp() || process.env.AUTO_OPEN_BROWSER === 'true') {
     setTimeout(() => {
       console.log(`[Boot] Launching default browser at ${serverUrl}...`);
       if (process.platform === 'win32') {
