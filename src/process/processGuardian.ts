@@ -1,6 +1,6 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import { config } from '../config/index.js';
+import { config, isPackagedApp } from '../config/index.js';
 
 const DB_PATH = config.dbPath;
 
@@ -42,7 +42,7 @@ async function writeCrashLog(message: string, stack: string): Promise<void> {
  * more reliable than limping on in an unknown state.
  */
 export function registerProcessGuardian(): void {
-  const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';
+  const isProductionOrPkg = process.env.NODE_ENV === 'production' || isPackagedApp();
   if (!isProductionOrPkg) {
     // ponytail: skip registration in dev mode
     console.log('[ProcessGuardian] Development mode detected: Bypassing registration.');

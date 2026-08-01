@@ -42,12 +42,10 @@ const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
-const NonMappedDistributorsPage = lazy(pageImports['/non-mapped-distributors']);
 
 // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
 // NOTE: /non-mapped-distributors redirects to /learning?tab=distributors (see Routes below),
-// so NonMappedDistributorsPage above is intentionally not included here — it wasn't rendered
-// by the old route table either.
+// so it has no page component or chunk to prefetch here.
 const pageRoutes: KeepAliveRoute[] = [
   { path: '/dashboard', element: <Dashboard /> },
   { path: '/inventory', element: <Inventory /> },

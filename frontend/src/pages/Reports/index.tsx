@@ -1011,7 +1011,7 @@ const Reports = () => {
           {activeTab === 'nonMoving' && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="p-4 border-b border-glass-border/30 flex justify-between items-center bg-bg2/30 flex-shrink-0">
-                <h3 className="font-bold text-xs uppercase tracking-wider flex items-center gap-2 text-text">
+                <h3 className="font-bold text-xs uppercase tracking-wider flex items-center gap-2 text-text" title="Rows are per inventory batch. If the same medicine name has multiple medicine records (duplicates are not auto-merged), each is listed separately rather than combined into one line.">
                   <PieChart size={15} className="text-purple-400" />
                   <span>Dormant / Non-Moving Stock (Inactive for {nonMovingDays} days)</span>
                 </h3>

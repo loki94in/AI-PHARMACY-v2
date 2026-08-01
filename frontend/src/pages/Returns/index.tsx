@@ -910,6 +910,26 @@ const Returns: React.FC = () => {
                   ))}
                 </select>
               </div>
+              <div className="flex items-center gap-1">
+                <label className="text-muted w-7">Min ₹</label>
+                <input
+                  type="number"
+                  value={minAmount}
+                  min="0"
+                  placeholder="0"
+                  onChange={e => setMinAmount(e.target.value)}
+                  className="flex-1 px-1.5 py-0.5 bg-bg border border-glass-border rounded text-[10px] text-text focus:outline-none"
+                />
+                <label className="text-muted w-4">Max</label>
+                <input
+                  type="number"
+                  value={maxAmount}
+                  min="0"
+                  placeholder="Any"
+                  onChange={e => setMaxAmount(e.target.value)}
+                  className="flex-1 px-1.5 py-0.5 bg-bg border border-glass-border rounded text-[10px] text-text focus:outline-none"
+                />
+              </div>
               {(distributorFilter || minAmount || maxAmount) && (
                 <button
                   onClick={() => { setDistributorFilter(''); setMinAmount(''); setMaxAmount(''); }}

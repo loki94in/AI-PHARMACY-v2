@@ -774,7 +774,10 @@ const Mail = () => {
                 {/* Attachments Section */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5">
+                    <h4
+                      className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5"
+                      title="Attachments are not auto-processed into purchases. Select the invoice file(s) below and click Process to parse them."
+                    >
                       <Paperclip size={12} />
                       Attachments ({attachments.length})
                     </h4>
