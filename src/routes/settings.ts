@@ -40,6 +40,11 @@ router.get('/', async (_req, res) => {
   }
 });
 
+// Telegram bot real connection status (polling active vs merely enabled)
+router.get('/telegram-status', async (_req, res) => {
+  res.json({ isReady: telegramBotService.isReady() });
+});
+
 // Get a setting value
 router.get('/:key', async (req, res) => {
   const { key } = req.params;

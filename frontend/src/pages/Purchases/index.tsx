@@ -385,7 +385,7 @@ const Purchases: React.FC = () => {
 
   const { data: purchaseHistory = [] } = useApiQuery<PurchaseHistory[]>(
     'purchase-history',
-    () => api.getPurchases().then(res => Array.isArray(res) ? res.slice(0, 100) : [])
+    () => api.getPurchases({ limit: 5000 }).then(res => Array.isArray(res) ? res : [])
   );
 
   const [selectedDistributor, setSelectedDistributor] = useState<number | null>(initialActiveTab?.selectedDistributor || null);

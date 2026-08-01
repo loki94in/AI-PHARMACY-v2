@@ -41,7 +41,7 @@ import {
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { getNDaysAgoString } from '../../utils/date';
+import { getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useFetchMode } from '../../hooks/useFetchMode';
@@ -156,6 +156,23 @@ const Learning: React.FC = () => {
     }
   );
 
+  // Intelligent Suggestions stats (live counts, replaces hardcoded placeholder numbers)
+  const { data: learningStats, isLoading: loadingLearningStats } = useApiQuery<{
+    activeOcrCorrections: number;
+    learnedRxCombos: number;
+    lastRetrainedAt: string | null;
+  }>(
+    'learning-stats',
+    async () => {
+      const res = await apiClient.get('/learning/stats');
+      return res.data;
+    },
+    {
+      staleTime: 60000,
+      refetchOnWindowFocus: false
+    }
+  );
+
   // Profile Detail Query with module caching and instant hydration
   const { data: serverProfileDetail, isLoading: loadingDetail, isError: detailError, refetch: refetchDetail } = useApiQuery<any>(
     ['learning-profile-detail', selectedProfileId],
@@ -204,6 +221,7 @@ const Learning: React.FC = () => {
 
   // WhatsApp Web Status
   const [waStatus, setWaStatus] = useState({ isReady: false, qrUrl: null as string | null, message: '' });
+  const [tgReady, setTgReady] = useState(false);
   const [isOpeningWaWindow, setIsOpeningWaWindow] = useState(false);
 
   // WhatsApp Business API testing
@@ -447,6 +465,26 @@ const Learning: React.FC = () => {
     }
     return () => clearInterval(timer);
   }, [settingsData?.whatsapp_enabled, waStatus.isReady, qrPollControl.shouldFetch, qrPollActive]);
+
+  useEffect(() => {
+    let timer: any;
+    if (settingsData?.telegram_enabled === 'true' && qrPollActive) {
+      const fetchTgStatus = async () => {
+        try {
+          const { data } = await apiClient.get('/settings/telegram-status');
+          setTgReady(!!data?.isReady);
+        } catch (error) {
+          console.error('Failed to fetch Telegram bot status', error);
+          setTgReady(false);
+        }
+      };
+      fetchTgStatus();
+      timer = setInterval(fetchTgStatus, 5000);
+    } else {
+      setTgReady(false);
+    }
+    return () => clearInterval(timer);
+  }, [settingsData?.telegram_enabled, qrPollActive]);
 
   const handleReconnect = async () => {
     try {
@@ -1010,11 +1048,15 @@ const Learning: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-bg/40 border border-glass-border rounded-xl p-3 text-center">
                     <p className="text-[10px] text-muted uppercase font-bold tracking-wider">Active OCR Corrections</p>
-                    <p className="text-lg font-black text-sky mt-1 font-mono">842</p>
+                    <p className="text-lg font-black text-sky mt-1 font-mono">
+                      {loadingLearningStats ? '—' : (learningStats?.activeOcrCorrections ?? 0)}
+                    </p>
                   </div>
                   <div className="bg-bg/40 border border-glass-border rounded-xl p-3 text-center">
                     <p className="text-[10px] text-muted uppercase font-bold tracking-wider">Learned Rx Combos</p>
-                    <p className="text-lg font-black text-green mt-1 font-mono">157</p>
+                    <p className="text-lg font-black text-green mt-1 font-mono">
+                      {loadingLearningStats ? '—' : (learningStats?.learnedRxCombos ?? 0)}
+                    </p>
                   </div>
                 </div>
 
@@ -1027,7 +1069,11 @@ const Learning: React.FC = () => {
                   </div>
                   <div className="flex justify-between py-1 border-b border-glass-border/10">
                     <span className="text-muted">Last Model Retraining Date</span>
-                    <span className="text-text font-mono">Today, 21:40</span>
+                    <span className="text-text font-mono">
+                      {loadingLearningStats
+                        ? '—'
+                        : (learningStats?.lastRetrainedAt ? formatDisplayDate(learningStats.lastRetrainedAt, true) : 'Never')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1634,8 +1680,14 @@ const Learning: React.FC = () => {
                     {settingsData.whatsapp_enabled === 'true' && (
                       <div className="space-y-3 pt-3 border-t border-glass-border/40">
                         <div className="flex items-center justify-between text-[10px] bg-bg border border-glass-border p-2 rounded">
-                          <span>Status: <strong className="text-green font-bold">ACTIVE SCANNER</strong></span>
-                          <button 
+                          <span>Status: {waStatus.isReady ? (
+                            <strong className="text-green font-bold">ACTIVE SCANNER</strong>
+                          ) : waStatus.qrUrl ? (
+                            <strong className="text-amber font-bold">SCAN QR TO CONNECT</strong>
+                          ) : (
+                            <strong className="text-amber font-bold">CONNECTING...</strong>
+                          )}</span>
+                          <button
                             onClick={() => setShowWaConfig(!showWaConfig)}
                             className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
                           >
@@ -1742,8 +1794,12 @@ const Learning: React.FC = () => {
                     {settingsData.telegram_enabled === 'true' && (
                       <div className="space-y-3 pt-3 border-t border-glass-border/40">
                         <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
-                          <span>Status: <strong className="text-green font-bold">BOT LISTENING</strong></span>
-                          <button 
+                          <span>Status: {tgReady ? (
+                            <strong className="text-green font-bold">BOT LISTENING</strong>
+                          ) : (
+                            <strong className="text-amber font-bold">CONNECTING...</strong>
+                          )}</span>
+                          <button
                             onClick={() => setShowTgConfig(!showTgConfig)}
                             className="text-sky hover:underline font-bold uppercase tracking-wider text-[9px]"
                           >
