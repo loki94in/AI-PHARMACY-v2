@@ -2,13 +2,20 @@ import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { exportToExcel, exportToPdf } from '../utils/reportExporter.js';
 import { nonMovingReportService } from '../services/nonMovingReportService.js';
+import { getReportCutoverDate, effectiveReportFromDate } from '../utils/reportCutover.js';
 
 const router = express.Router();
+
+async function resolveFromDate(requestedFrom: string): Promise<string> {
+  const db = await dbManager.getConnection();
+  const cutover = await getReportCutoverDate(db);
+  return effectiveReportFromDate(requestedFrom, cutover);
+}
 
 // Fetch summary metrics for stats cards
 router.get('/', async (req, res) => {
   const { fromDate, toDate, type } = req.query;
-  const from = fromDate ? String(fromDate) : '1970-01-01';
+  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
   const to = toDate ? String(toDate) : '9999-12-31';
   const reportType = type ? String(type) : 'sales';
 
@@ -138,7 +145,7 @@ router.get('/', async (req, res) => {
 // Fetch report raw data lists for the UI table
 router.get('/data', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = fromDate ? String(fromDate) : '1970-01-01';
+  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
   const to = toDate ? String(toDate) : '9999-12-31';
 
   try {
@@ -192,7 +199,7 @@ router.get('/data', async (req, res) => {
 // PDF export endpoint
 router.get('/export-pdf', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = fromDate ? String(fromDate) : '1970-01-01';
+  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
   const to = toDate ? String(toDate) : '9999-12-31';
 
   try {
@@ -261,7 +268,7 @@ router.get('/export-pdf', async (req, res) => {
 // Excel export endpoint
 router.get('/export-excel', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = fromDate ? String(fromDate) : '1970-01-01';
+  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
   const to = toDate ? String(toDate) : '9999-12-31';
 
   try {

@@ -61,6 +61,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [status, setStatus] = useState<any>(null);
   const [stagingConflicts, setStagingConflicts] = useState<StagingConflict[]>([]);
   const [resolvingConflictId, setResolvingConflictId] = useState<number | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const [importStats, setImportStats] = useState<{ totalRows: number; errorRows: number; validRows: number } | null>(null);
+  const [reportCutoverDate, setReportCutoverDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [summary, setSummary] = useState({
     medicines: 0,
     inventory: 0,
@@ -118,6 +121,14 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
           errors: stagingRes.errorCount || 0,
           conflicts: stagingRes.conflictCount || 0,
         });
+        setImportWarnings(Array.isArray(stagingRes.warnings) ? stagingRes.warnings : []);
+        if (stagingRes.importStats) {
+          setImportStats({
+            totalRows: stagingRes.importStats.totalRows || 0,
+            errorRows: stagingRes.importStats.errorRows || 0,
+            validRows: stagingRes.importStats.validRows || 0,
+          });
+        }
       }
       setStagingConflicts(Array.isArray(conflicts) ? conflicts : []);
     } catch (err) {
@@ -215,7 +226,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     setPhase('finalizing');
     setErrorMessage(null);
     try {
-      const res = await api.finalizeMigration(false);
+      const res = await api.finalizeMigration(false, reportCutoverDate);
       if (res.success) {
         if (res.stats) {
           setSummary(prev => ({
@@ -409,8 +420,20 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                   </div>
                 )}
 
-                {(summary.errors > 0 || summary.conflicts > 0) && (
+                {(summary.errors > 0 || summary.conflicts > 0 || importWarnings.length > 0) && (
                   <div className="space-y-2">
+                    {importStats && (
+                      <div className="p-3 rounded-lg bg-bg3/40 border border-glass-border text-sm text-muted">
+                        File validation: {importStats.validRows.toLocaleString()} valid / {importStats.totalRows.toLocaleString()} total rows
+                        {importStats.errorRows > 0 && ` (${importStats.errorRows.toLocaleString()} skipped)`}
+                      </div>
+                    )}
+                    {importWarnings.map((w, i) => (
+                      <div key={i} className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-start gap-2">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                        <span>{w}</span>
+                      </div>
+                    ))}
                     {summary.errors > 0 && (
                       <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
                         <AlertTriangle size={16} />
@@ -425,6 +448,17 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                     )}
                   </div>
                 )}
+
+                <div className="p-4 rounded-xl border border-glass-border bg-bg3/30 space-y-2">
+                  <label className="text-sm font-medium text-text">Report cutover date (GST/P&amp;L)</label>
+                  <p className="text-xs text-muted">Sales and purchase reports will exclude transactions before this date. Pre-migration history stays in the database but won&apos;t appear in financial reports.</p>
+                  <input
+                    type="date"
+                    value={reportCutoverDate}
+                    onChange={(e) => setReportCutoverDate(e.target.value)}
+                    className="px-3 py-2 rounded-lg bg-bg border border-glass-border text-text text-sm"
+                  />
+                </div>
 
                 {stagingConflicts.length > 0 && (
                   <div className="border border-glass-border rounded-xl overflow-hidden">

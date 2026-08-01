@@ -29,10 +29,31 @@ function isNodeSea(): boolean {
 /** True when running as a packaged single executable (pkg or Node SEA), not from source. */
 export const isPackagedApp = (): boolean => isPkg || isNodeSea();
 
+function migrateLegacyPackagedDataIfNeeded(oldRoot: string, newRoot: string): void {
+  const oldData = path.join(oldRoot, 'data', 'app.db');
+  const newData = path.join(newRoot, 'data', 'app.db');
+  if (fs.existsSync(newData) || !fs.existsSync(oldData)) return;
+
+  for (const sub of ['data', 'uploads', 'backup']) {
+    const src = path.join(oldRoot, sub);
+    const dest = path.join(newRoot, sub);
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.cpSync(src, dest, { recursive: true });
+      console.log(`[Config] Migrated ${sub}/ from legacy install path to ${newRoot}`);
+    }
+  }
+}
+
 export const getAppDataDir = (): string => {
   if (isPackagedApp()) {
-    // Under a packaged single executable, process.execPath points to the
-    // PharmacyOS.exe file. Resolve paths relative to the directory containing it.
+    // Windows: store writable data under %LOCALAPPDATA% — not beside the exe in Program Files.
+    if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+      const newDir = path.join(process.env.LOCALAPPDATA, 'AI Pharmacy OS');
+      const legacyDir = path.dirname(process.execPath);
+      migrateLegacyPackagedDataIfNeeded(legacyDir, newDir);
+      return newDir;
+    }
     return path.dirname(process.execPath);
   }
   // In development/source mode, we resolve relative to the project root.

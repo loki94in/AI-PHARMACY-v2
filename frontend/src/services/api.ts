@@ -456,8 +456,8 @@ export const api = {
   deleteStagingReturnItem: (returnId: number, itemId: number) => apiClient.delete(`/migration/staging/returns/${returnId}/items/${itemId}`).then(r => r.data),
   addStagingReturnItem: (returnId: number, data: any) => apiClient.post(`/migration/staging/returns/${returnId}/items`, data).then(r => r.data),
   getStagingErrors: () => apiClient.get('/migration/staging/errors').then(r => r.data),
-  finalizeMigration: (regenerateInvoices: boolean = false) => 
-    apiClient.post('/migration/staging/finalize', { regenerateInvoices }).then(r => r.data),
+  finalizeMigration: (regenerateInvoices: boolean = false, reportCutoverDate?: string) =>
+    apiClient.post('/migration/staging/finalize', { regenerateInvoices, reportCutoverDate }).then(r => r.data),
   rollbackMigration: () =>
     apiClient.delete('/migration/staging/rollback').then(r => r.data),
   getLocalBackups: () => apiClient.get('/migration/local-backups').then(r => r.data),

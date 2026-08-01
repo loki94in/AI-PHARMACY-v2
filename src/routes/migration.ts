@@ -12,6 +12,9 @@ import { migrationStatus, runManualMigration, runManualMigrationQueue } from '..
 import csvParser from 'csv-parser';
 import { detectDataModules, autoMapColumn } from '../utils/preMigrationIntelligence.js';
 import { normalizeDate } from '../utils/migrationUtils.js';
+import { rebuildMigrationInventoryStock } from '../utils/migrationStockRebuild.js';
+import { getStagedModules, getImportOrderWarnings, getImportStats, clearStagedModuleTracking } from '../utils/migrationMeta.js';
+import { setReportCutoverDate } from '../utils/reportCutover.js';
 import { config } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -397,78 +400,93 @@ router.post('/run', async (req, res) => {
 // --- STAGING APIS ---
 
 router.get('/staging/errors', async (req, res) => {
-  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
   try {
     const db = await openStagingDb();
+    const totalRow = await db.get('SELECT COUNT(*) as cnt FROM migration_errors');
     const rows = await db.all(`
       SELECT id, file_name, row_index, raw_data, error_message, created_at 
       FROM migration_errors 
-      ORDER BY id DESC LIMIT 500
-    `);
+      ORDER BY id DESC LIMIT ? OFFSET ?
+    `, [limit, offset]);
     await db.close();
-    res.json(rows);
+    res.json({ rows, total: totalRow?.cnt || 0, limit, offset });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/staging/inventory', async (req, res) => {
-  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
   try {
     const db = await openStagingDb();
+    const totalRow = await db.get('SELECT COUNT(*) as cnt FROM inventory_master');
     const rows = await db.all(`
       SELECT m.name as medicine_name, m.api_reference, m.hsn_code, m.manufacturer, m.marketed_by, m.cgst_per AS cgst, m.sgst_per AS sgst,
              i.id, i.batch_no, i.expiry_date, i.quantity, i.loose_quantity, i.mrp, i.cost_price, i.rack_location 
       FROM inventory_master i
       LEFT JOIN medicines m ON i.medicine_id = m.id
-      ORDER BY i.id DESC LIMIT 500
-    `);
+      ORDER BY i.id DESC LIMIT ? OFFSET ?
+    `, [limit, offset]);
     await db.close();
-    res.json(rows);
+    res.json({ rows, total: totalRow?.cnt || 0, limit, offset });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/staging/sales', async (req, res) => {
-  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
   try {
     const db = await openStagingDb();
+    const totalRow = await db.get('SELECT COUNT(*) as cnt FROM sales_invoices');
     const rows = await db.all(`
       SELECT s.id, s.invoice_no, s.date, s.total_amount, c.name as patient_name, d.name as doctor_name
       FROM sales_invoices s
       LEFT JOIN customers c ON s.customer_id = c.id
       LEFT JOIN doctors d ON s.doctor_id = d.id
-      ORDER BY s.id DESC LIMIT 500
-    `);
+      ORDER BY s.id DESC LIMIT ? OFFSET ?
+    `, [limit, offset]);
     await db.close();
-    res.json(rows);
+    res.json({ rows, total: totalRow?.cnt || 0, limit, offset });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/staging/purchases', async (req, res) => {
-  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
   try {
     const db = await openStagingDb();
+    const totalRow = await db.get('SELECT COUNT(*) as cnt FROM purchases');
     const rows = await db.all(`
       SELECT p.id, p.invoice_no, p.date, p.total_amount, d.name as distributor_name
       FROM purchases p
       LEFT JOIN distributors d ON p.distributor_id = d.id
-      ORDER BY p.id DESC LIMIT 500
-    `);
+      ORDER BY p.id DESC LIMIT ? OFFSET ?
+    `, [limit, offset]);
     await db.close();
-    res.json(rows);
+    res.json({ rows, total: totalRow?.cnt || 0, limit, offset });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/staging/returns', async (req, res) => {
-  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
   try {
     const db = await openStagingDb();
+    const totalRow = await db.get('SELECT COUNT(*) as cnt FROM returns');
     const rows = await db.all(`
       SELECT r.id, r.return_no, r.date, r.total_amount, d.name as distributor_name
       FROM returns r
       LEFT JOIN distributors d ON r.distributor_id = d.id
-      ORDER BY r.id DESC LIMIT 500
-    `);
+      ORDER BY r.id DESC LIMIT ? OFFSET ?
+    `, [limit, offset]);
     await db.close();
-    res.json(rows);
+    res.json({ rows, total: totalRow?.cnt || 0, limit, offset });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -501,6 +519,9 @@ router.get('/staging/summary', async (_req, res) => {
     };
     const errRow = await db.get('SELECT COUNT(*) as cnt FROM migration_errors').catch(() => ({ cnt: 0 }));
     const conflictRow = await db.get(`SELECT COUNT(*) as cnt FROM migration_conflicts WHERE status = 'pending'`).catch(() => ({ cnt: 0 }));
+    const stagedModules = await getStagedModules(db);
+    const importStats = await getImportStats(db);
+    const warnings = getImportOrderWarnings(stagedModules);
     const stats = {
       medicines: await count('medicines'),
       inventory: await count('inventory_master'),
@@ -518,6 +539,9 @@ router.get('/staging/summary', async (_req, res) => {
       stats,
       errorCount: errRow?.cnt || 0,
       conflictCount: conflictRow?.cnt || 0,
+      stagedModules,
+      importStats,
+      warnings,
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -680,10 +704,22 @@ router.post('/snapshots/restore', async (req, res) => {
 
 router.post('/staging/finalize', async (req, res) => {
   if (!fs.existsSync(STAGING_DB_PATH)) return res.status(400).json({ error: 'No staging DB found' });
-  const { regenerateInvoices } = req.body;
+  const { regenerateInvoices, reportCutoverDate } = req.body;
   let backupPath: string | null = null;
 
   try {
+    // 0. Final stock reconciliation on staging before swap
+    try {
+      const stagingDb = await openStagingDb();
+      try {
+        await rebuildMigrationInventoryStock(stagingDb);
+      } finally {
+        await stagingDb.close();
+      }
+    } catch (rebuildErr: any) {
+      console.warn('[Migration Finalize] Pre-finalize stock rebuild warning:', rebuildErr.message);
+    }
+
     // 1. If requested, regenerate invoice numbers on staging.db
     if (regenerateInvoices) {
       const db = await openStagingDb();
@@ -826,6 +862,10 @@ router.post('/staging/finalize', async (req, res) => {
       if (backupPath) {
         await activeDb.run('INSERT INTO migration_snapshots (backup_path) VALUES (?)', [backupPath]);
       }
+      if (reportCutoverDate) {
+        await setReportCutoverDate(activeDb, String(reportCutoverDate));
+      }
+      await clearStagedModuleTracking(activeDb);
     } catch (dbErr) {
       console.error('Failed to log snapshot:', dbErr);
     }
@@ -992,6 +1032,87 @@ router.post('/run-local-backup', async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to run local backup migration', details: err.message });
+  }
+});
+
+// Migration projects — saved import sessions
+router.get('/projects', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      'SELECT id, name, status, created_at as createdAt FROM migration_projects ORDER BY id DESC'
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/projects', async (req, res) => {
+  const { name } = req.body;
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const result = await db.run(
+      'INSERT INTO migration_projects (name) VALUES (?)',
+      [String(name).trim()]
+    );
+    res.json({ success: true, id: result.lastID, name: String(name).trim() });
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'A project with this name already exists' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/projects/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid project id' });
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('DELETE FROM migration_projects WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Column mapping templates for repeated CSV imports
+router.get('/templates', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      'SELECT id, name, module_type as moduleType, mappings, created_at as createdAt FROM migration_templates ORDER BY name ASC'
+    );
+    res.json(rows.map((r: any) => ({
+      ...r,
+      mappings: typeof r.mappings === 'string' ? JSON.parse(r.mappings) : r.mappings,
+    })));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/templates', async (req, res) => {
+  const { name, moduleType, mappings } = req.body;
+  if (!name || !moduleType || !mappings) {
+    return res.status(400).json({ error: 'name, moduleType, and mappings are required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const result = await db.run(
+      'INSERT INTO migration_templates (name, module_type, mappings) VALUES (?, ?, ?)',
+      [String(name).trim(), String(moduleType), JSON.stringify(mappings)]
+    );
+    res.json({ success: true, id: result.lastID });
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'A template with this name already exists' });
+    }
+    res.status(500).json({ error: e.message });
   }
 });
 
