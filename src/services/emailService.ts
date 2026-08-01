@@ -1687,7 +1687,13 @@ export class EmailService {
   }
 
   /**
-   * Process a medicine list attachment (CSV/XLS)
+   * Background hook for auto-detected CSV/XLS medicine-list attachments — currently
+   * logs only; no parsing/inventory/purchase-order logic is implemented here.
+   * The supported, working path for turning an email attachment into a purchase is
+   * manual: the Mail page lets a user select attachment(s) and process them via the
+   * OCR purchase-parsing flow (see Mail/index.tsx attachment selection + "process"
+   * action, which posts to the same invoice-parsing endpoints used by Purchases/
+   * Investigation). Do not treat this method as a live automated import feature.
    */
   private async processMedicineListAttachment(attachment: {
     filename: string;
@@ -1710,13 +1716,7 @@ export class EmailService {
         ['EMAIL_ATTACHMENT_PROCESSED', `Medicine list attachment processed: ${attachment.filename}`]
       );
       
-      // TODO: Implement actual attachment processing logic here
-      // This could involve:
-      // - Parsing CSV files for medicine lists
-      // - Updating inventory levels
-      // - Creating purchase orders based on the list
-      // - Validating medicine IDs and quantities
-      console.log('Medicine list attachment processed:', attachment.filename);
+      console.log('Medicine list attachment logged (no auto-parsing implemented):', attachment.filename);
     } catch (error) {
       console.error('Error processing medicine list attachment:', error);
 

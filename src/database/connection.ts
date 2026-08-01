@@ -7,7 +7,7 @@ import fs from 'fs';
 import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
-import { config, getAppDataDir } from '../config/index.js';
+import { config, getAppDataDir, isPackagedApp } from '../config/index.js';
 
 const DB_PATH = config.dbPath;
 
@@ -101,8 +101,8 @@ class DatabaseManager {
         throw new Error(`Database connection is currently busy or unavailable. Please retry. (${lastError?.message || 'SQLITE_BUSY'})`);
       }
 
-      // Run background integrity check if production/pkg and not test
-      const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';
+      // Run background integrity check if production/packaged and not test
+      const isProductionOrPkg = process.env.NODE_ENV === 'production' || isPackagedApp();
       if (isProductionOrPkg && !isTest) {
         const activeConn = this.connection;
         setImmediate(async () => {

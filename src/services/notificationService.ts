@@ -96,7 +96,14 @@ export class NotificationService {
   }
 
   /**
-   * Send a notification via the appropriate channel based on type
+   * Send a notification via the appropriate channel based on type.
+   * Channel status: whatsapp, telegram, and whatsapp_business are live and used
+   * elsewhere in the app (via sendWhatsApp/sendTelegram/sendWhatsAppBusiness, and
+   * the dedicated notifyDistributor... / notifyDeliveryBoys... methods below). `email`
+   * has no sending implementation — outbound mail in this app goes through
+   * emailService.ts directly, not through this notifier. This 'email' branch and
+   * this generic dispatcher are not currently called from anywhere in the app;
+   * treat 'email' as planned-but-not-implemented rather than a live channel.
    */
   async sendNotification(data: NotificationData): Promise<NotificationResult> {
     switch (data.type) {
@@ -112,8 +119,6 @@ export class NotificationService {
       case 'whatsapp_business':
         return await this.sendWhatsAppBusiness(data.recipient, data.message);
       case 'email':
-        // Email implementation would go here
-        // For now, return not implemented
         return {
           success: false,
           error: 'Email notifications not yet implemented'
