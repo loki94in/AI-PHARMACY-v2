@@ -1074,18 +1074,32 @@ router.put('/purchases/:purchaseId', async (req, res) => {
     // Step 3: Remove old and insert new purchase items
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId]);
     let totalAmount = 0;
+    let totalCgst = 0;
+    let totalSgst = 0;
     for (const item of items) {
       const { medicine_id, batch_no, expiry_date = '12/28', quantity, free_qty = 0, cost_price, mrp } = item;
+      const cgstPer = parseFloat(item.cgst_per) || 0;
+      const sgstPer = parseFloat(item.sgst_per) || 0;
+      const cdValue = parseFloat(item.cd_value) || 0;
+      const baseAmt = quantity * cost_price;
+      const taxable = baseAmt - cdValue;
+      const cgstValue = taxable * (cgstPer / 100);
+      const sgstValue = taxable * (sgstPer / 100);
       await db.run(
-        `INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [purchaseId, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp]
+        `INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [purchaseId, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgstPer, cgstValue, sgstPer, sgstValue, cdValue]
       );
-      totalAmount += quantity * cost_price;
+      totalAmount += taxable + cgstValue + sgstValue;
+      totalCgst += cgstValue;
+      totalSgst += sgstValue;
     }
 
-    // Update purchase invoice total
-    await db.run('UPDATE purchases SET total_amount = ? WHERE id = ?', [totalAmount, purchaseId]);
+    // Update purchase invoice total (preserving GST breakdown for audit trail)
+    await db.run(
+      'UPDATE purchases SET total_amount = ?, cgst_value = ?, sgst_value = ?, original_amount = ? WHERE id = ?',
+      [totalAmount, totalCgst, totalSgst, totalAmount, purchaseId]
+    );
 
     // Audit logging
     const desc = `Corrected Purchase Bill #${existingPurchase.invoice_no || purchaseId}. Total Amount: ₹${existingPurchase.total_amount} -> ₹${totalAmount}.`;

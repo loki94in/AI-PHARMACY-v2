@@ -435,6 +435,9 @@ const InvestigationCenter = () => {
           cost_price: it.cost_price,
           mrp: it.mrp,
           free_qty: it.free_qty || 0,
+          cgst_per: it.cgst_per || 0,
+          sgst_per: it.sgst_per || 0,
+          cd_value: it.cd_value || 0,
           original_qty: it.quantity
         }));
         setBillItems(mapped);
@@ -452,7 +455,11 @@ const InvestigationCenter = () => {
       return Math.round(subtotal + tax - billDiscount);
     }
     if (editingType === 'purchase') {
-      return billItems.reduce((acc, it) => acc + (it.quantity * it.cost_price), 0);
+      return Math.round(billItems.reduce((acc, it) => {
+        const taxable = (it.quantity * it.cost_price) - (it.cd_value || 0);
+        const gstPer = (it.cgst_per || 0) + (it.sgst_per || 0);
+        return acc + taxable + (taxable * gstPer / 100);
+      }, 0));
     }
     return 0;
   };
@@ -535,6 +542,9 @@ const InvestigationCenter = () => {
           cost_price: med.cost_price || (med.mrp * 0.7),
           mrp: med.mrp,
           free_qty: 0,
+          cgst_per: med.cgst_per || 0,
+          sgst_per: med.sgst_per || 0,
+          cd_value: 0,
           original_qty: 0
         }
       ]);
@@ -1376,6 +1386,28 @@ const InvestigationCenter = () => {
                           <span>GST / Taxes (5%)</span>
                           <span className="font-mono font-bold text-text">
                             ₹{(billItems.reduce((acc, it) => acc + (it.quantity * it.unit_price), 0) * 0.05).toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+
+                      {editingType === 'purchase' && (
+                        <div className="flex justify-between items-center text-muted">
+                          <span>GST / Taxes (CGST+SGST)</span>
+                          <span className="font-mono font-bold text-text">
+                            ₹{billItems.reduce((acc, it) => {
+                              const taxable = (it.quantity * it.cost_price) - (it.cd_value || 0);
+                              const gstPer = (it.cgst_per || 0) + (it.sgst_per || 0);
+                              return acc + (taxable * gstPer / 100);
+                            }, 0).toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+
+                      {editingType === 'purchase' && (
+                        <div className="flex justify-between items-center text-muted">
+                          <span>Cash Discount</span>
+                          <span className="font-mono font-bold text-text">
+                            ₹{billItems.reduce((acc, it) => acc + (it.cd_value || 0), 0).toFixed(2)}
                           </span>
                         </div>
                       )}
