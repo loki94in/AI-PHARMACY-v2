@@ -655,6 +655,11 @@ const Settings = () => {
       toastEvent.trigger('Loading settings from server — please wait', 'info');
       return;
     }
+    // NOTE: Gmail, WhatsApp/Telegram, WhatsApp Business API, and Pharmarack credential
+    // fields are owned and edited exclusively on the Learning page. Settings has no
+    // editable UI for them, so they must NOT be included here — resubmitting stale
+    // local state for these keys silently overwrites whatever was last saved on
+    // Learning (see SMALL_BUG_FIX_PLAN.md P0-02).
     const payload = {
       shop_name: pharmacyName,
       store_name: pharmacyName,
@@ -664,15 +669,8 @@ const Settings = () => {
       gstin: gstin,
       shop_licence: drugLicense,
       email: email,
-      
-      gmail_user: gmailUser,
-      gmail_pass: gmailPass || serverSettings?.gmail_pass || '',
-      google_client_id: googleClientId,
-      google_client_secret: googleClientSecret,
+
       google_search_daily_limit: googleSearchDailyLimit.toString(),
-      gmail_auth_method: gmailAuthMethod,
-      email_autodelete_enabled: emailAutodeleteEnabled.toString(),
-      email_autodelete_limit: emailAutodeleteLimit.toString(),
       email_retention_limit: emailRetentionLimit.toString(),
       automation_enabled: automationEnabled.toString(),
       admin_remote_mode: adminRemoteMode.toString(),
@@ -704,21 +702,6 @@ const Settings = () => {
       owner_whatsapp_number: ownerWhatsappNumber,
       monthly_report_template_theme: monthlyReportTemplateTheme,
 
-      whatsapp_enabled: whatsappEnabled.toString(),
-
-       // WhatsApp Business API
-      wa_business_enabled: waBusinessEnabled.toString(),
-      wa_business_phone_number_id: waBusinessPhoneNumberId,
-      wa_business_access_token: waBusinessAccessToken,
-      wa_business_waba_id: waBusinessWabaId,
-      wa_business_webhook_verify_token: waBusinessWebhookVerifyToken,
-      whatsapp_preferred_system: whatsappPreferredSystem,
-
-      // Pharmarack Settings (preserve existing server credentials if state is empty)
-      pharmarack_username: prUsername || serverSettings?.pharmarack_username || '',
-      pharmarack_password: prPassword || serverSettings?.pharmarack_password || '',
-      pharmarack_session_token: prToken || serverSettings?.pharmarack_session_token || '',
-      pharmarack_mode: prMode || serverSettings?.pharmarack_mode || 'Live',
       data_fetch_control: settings.dataFetchControl,
     };
 
@@ -823,13 +806,7 @@ const Settings = () => {
       gstin: gstin,
       shop_licence: drugLicense,
       email: email,
-      
-      gmail_user: gmailUser,
-      google_client_id: googleClientId,
-      google_client_secret: googleClientSecret,
-      gmail_auth_method: gmailAuthMethod,
-      email_autodelete_enabled: emailAutodeleteEnabled.toString(),
-      email_autodelete_limit: emailAutodeleteLimit.toString(),
+
       automation_enabled: automationEnabled.toString(),
       admin_remote_mode: adminRemoteMode.toString(),
       admin_username: adminUsername,
@@ -848,26 +825,22 @@ const Settings = () => {
       low_stock_threshold: lowStockThreshold.toString(),
       expiry_alert_days: expiryAlertDays.toString(),
 
-      whatsapp_enabled: whatsappEnabled.toString(),
-
-      wa_business_enabled: waBusinessEnabled.toString(),
-      wa_business_phone_number_id: waBusinessPhoneNumberId,
-      wa_business_access_token: waBusinessAccessToken,
-      wa_business_waba_id: waBusinessWabaId,
-      wa_business_webhook_verify_token: waBusinessWebhookVerifyToken,
-      whatsapp_preferred_system: whatsappPreferredSystem,
-
-      pharmarack_username: '',
-      pharmarack_password: '',
-      pharmarack_session_token: '',
-      pharmarack_mode: 'Live',
       data_fetch_control: settings.dataFetchControl
     };
 
+    // Pharmarack credentials are cleared server-side by /pharmarack/logout itself;
+    // do not resend gmail/WhatsApp/pharmarack keys here — those are Learning-owned
+    // and stale local state for them would silently clobber the latest Learning save.
     try {
       await apiClient.post('/settings/save', payload);
       await apiClient.post('/pharmarack/logout');
-      updateSettingsCache(queryClient, payload as Record<string, string>);
+      updateSettingsCache(queryClient, {
+        ...payload,
+        pharmarack_username: '',
+        pharmarack_password: '',
+        pharmarack_session_token: '',
+        pharmarack_mode: 'Live',
+      } as Record<string, string>);
       await broadcastContactDataChanged(queryClient);
       toastEvent.trigger('Logged out and cleared Pharmarack credentials successfully.', 'success');
     } catch (error) {
