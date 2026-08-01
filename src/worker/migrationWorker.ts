@@ -2129,9 +2129,11 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
       })
       .on('end', async () => {
         try {
+
           if (inTxn) {
             await db.run('COMMIT');
             inTxn = false;
+
           }
 
           await recordStagedModule(db, dataType);
