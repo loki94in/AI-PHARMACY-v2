@@ -104,7 +104,7 @@ router.get('/', async (req, res) => {
         )
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
-        WHERE im.quantity > 0
+        WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
           AND date(im.expiry_date) >= date(?)
           AND date(im.expiry_date) <= date(?)
         ORDER BY im.expiry_date ASC
@@ -178,7 +178,7 @@ router.get('/export', async (req, res) => {
         )
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
-        WHERE im.quantity > 0
+        WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
           AND date(im.expiry_date) >= date(?)
           AND date(im.expiry_date) <= date(?)
         ORDER BY im.expiry_date ASC
@@ -360,7 +360,7 @@ router.post('/send-alerts', async (req, res) => {
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
       WHERE date(im.expiry_date) <= date('now', '+' || ? || ' days')
-      AND im.quantity > 0
+      AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
       ORDER BY im.expiry_date ASC
       LIMIT 10
     `, [targetDays]);

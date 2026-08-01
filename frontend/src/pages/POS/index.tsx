@@ -1356,7 +1356,7 @@ const POS = () => {
         expDate = new Date(expiryStr);
       }
       if (expDate < new Date()) {
-        alert(`❌ CANNOT ADD EXPIRED PRODUCT!\n\n${med.name} expired on ${expiryStr}.\nPlease remove it from physical inventory.`);
+        toastEvent.trigger(`Cannot add expired product: ${med.name} (expired ${expiryStr})`, 'error');
         return;
       }
     }
@@ -1367,7 +1367,10 @@ const POS = () => {
            med.name.toLowerCase().includes(o.product.toLowerCase().trim())
     );
     if (pendingMatches.length > 0) {
-      alert(`🔔 Pending Out-of-Stock Request:\nCustomer "${pendingMatches[0].requester}" requested ${pendingMatches[0].qty} unit(s) of "${med.name}". Please ensure it is reserved or reconciled if needed!`);
+      toastEvent.trigger(
+        `Pending request: ${pendingMatches[0].requester} asked for ${pendingMatches[0].qty} × ${med.name}`,
+        'info'
+      );
     }
 
     const cleanCart = cart.filter(item => !item.isEmptyRow);
@@ -1496,42 +1499,49 @@ const POS = () => {
   };
 
   const fetchDetailsAndAddToCart = async (item: any) => {
+    const basePayload = {
+      id: item.inventory_id,
+      medicine_id: item.medicine_id,
+      name: item.medicine_name,
+      batch: item.batch_no,
+      expiry: item.expiry_date,
+      mrp: item.mrp,
+      costPrice: item.cost_price,
+      salts: item.salts || item.hsn_code || 'Generic',
+      packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
+      quantity: item.quantity,
+      batch_quantity: item.batch_quantity,
+      loose_quantity: item.loose_quantity,
+      alternatives: item.alternatives || [],
+      recommendedQty: item.recommendedQty,
+      recommendedLooseQty: item.recommendedLooseQty,
+    };
+
+    addToCart(basePayload);
+    setSearchTerm('');
+    setSearchResults([]);
+
     try {
       const details = await api.getMedicineQuickDetails(item.medicine_id);
-      addToCart({
-        id: item.inventory_id,
-        medicine_id: item.medicine_id,
-        name: item.medicine_name,
-        batch: item.batch_no,
-        expiry: item.expiry_date,
-        mrp: item.mrp,
-        costPrice: item.cost_price,
-        salts: details.api_reference || details.hsn_code || 'Generic',
-        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
-        quantity: item.quantity,
-        batch_quantity: item.batch_quantity,
-        loose_quantity: item.loose_quantity,
-        alternatives: details.alternatives,
-        recommendedQty: item.recommendedQty,
-        recommendedLooseQty: item.recommendedLooseQty
+      updateCart(prevCart => {
+        const cleanPrev = prevCart.filter(row => !row.isEmptyRow);
+        const targetId = item.inventory_id;
+        const idx = cleanPrev.findIndex(row =>
+          row.medicine_id === item.medicine_id &&
+          (row.id === targetId || row.batch === item.batch_no)
+        );
+        if (idx === -1) return prevCart;
+        const updated = [...cleanPrev];
+        updated[idx] = {
+          ...updated[idx],
+          salts: details.api_reference || details.hsn_code || updated[idx].salts,
+          packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || updated[idx].packSize,
+          alternatives: details.alternatives || [],
+        };
+        return updated;
       });
     } catch (error) {
-      console.warn('Failed to load quick details, adding with fallback values:', error);
-      addToCart({
-        id: item.inventory_id,
-        medicine_id: item.medicine_id,
-        name: item.medicine_name,
-        batch: item.batch_no,
-        expiry: item.expiry_date,
-        mrp: item.mrp,
-        costPrice: item.cost_price,
-        salts: item.salts || item.hsn_code || 'Generic',
-        packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
-        quantity: item.quantity,
-        batch_quantity: item.batch_quantity,
-        loose_quantity: item.loose_quantity,
-        recommendedQty: item.recommendedQty
-      });
+      console.warn('Failed to load quick details after add (using cache data):', error);
     }
   };
 

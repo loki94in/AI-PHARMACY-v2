@@ -13,6 +13,7 @@ import { productNameFilterService } from '../services/productNameFilterService.j
 import { emailService, isNonMedicineNoise, cleanMedicineName } from '../services/emailService.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 import { activityTracker } from '../utils/activityTracker.js';
+import { refreshInventoryActiveStatus, refreshInventoryActiveByBatch } from '../utils/inventoryActive.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import fs from 'fs';
 import { medicineService } from '../services/medicineService.js';
@@ -922,11 +923,13 @@ router.post('/manual', async (req, res) => {
       if (invRow) {
         await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
+        await refreshInventoryActiveStatus(db, invRow.id);
       } else {
         await db.run(`
-          INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, 1)
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+        await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
 
       // Keep medicines.mrp, rate, and GST in sync for future purchases
@@ -1229,11 +1232,13 @@ router.put('/:id/full', async (req, res) => {
       if (invRow) {
         await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
+        await refreshInventoryActiveStatus(db, invRow.id);
       } else {
         await db.run(`
-          INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, 1)
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+        await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
 
       if (mrp && mrp > 0) {

@@ -1,4 +1,5 @@
 import { applyStockDelta, rebuildStockFromLedger, type RebuiltStock } from './stockRebuild.js';
+import { computeIsActive, isExpiredForSale } from './inventoryActive.js';
 
 export interface MigrationStockRebuildResult {
   updated: number;
@@ -19,7 +20,7 @@ export async function rebuildMigrationInventoryStock(db: {
 }): Promise<MigrationStockRebuildResult> {
   const batches = await db.all(`
     SELECT im.id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity,
-           im.legacy_batch_id, COALESCE(m.pack_size, 10) as pack_size
+           im.legacy_batch_id, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
     FROM inventory_master im
     JOIN medicines m ON m.id = im.medicine_id
   `);
@@ -83,11 +84,12 @@ export async function rebuildMigrationInventoryStock(db: {
 
       const newQty = Math.max(0, recomputed.quantity);
       const newLoose = Math.max(0, recomputed.loose_quantity);
+      const active = computeIsActive(newQty, newLoose, b.expiry_date) ? 1 : 0;
 
       if (newQty !== b.quantity || newLoose !== (b.loose_quantity || 0)) {
         await db.run(
-          'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
-          [newQty, newLoose, b.id]
+          'UPDATE inventory_master SET quantity = ?, loose_quantity = ?, is_active = ? WHERE id = ?',
+          [newQty, newLoose, active, b.id]
         );
         updated++;
         if (newQty === 0 && newLoose === 0) zeroed++;
@@ -96,11 +98,11 @@ export async function rebuildMigrationInventoryStock(db: {
 
     const expiredRes = await db.run(`
       UPDATE inventory_master
-      SET quantity = 0, loose_quantity = 0
+      SET quantity = 0, loose_quantity = 0, is_active = 0
       WHERE expiry_date IS NOT NULL
         AND expiry_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
         AND date(expiry_date) < date('now')
-        AND (quantity > 0 OR loose_quantity > 0)
+        AND (quantity > 0 OR loose_quantity > 0 OR COALESCE(is_active, 1) = 1)
     `);
 
     await db.run('COMMIT');

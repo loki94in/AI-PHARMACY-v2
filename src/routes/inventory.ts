@@ -115,7 +115,7 @@ router.get('/', async (req, res) => {
     } else if (stock_filter === 'negative') {
       baseQuery += ` AND (im.quantity < 0 OR im.loose_quantity < 0)`;
     } else if (stock_filter === 'positive') {
-      baseQuery += ` AND (im.quantity > 0 OR im.loose_quantity > 0)`;
+      baseQuery += ` AND COALESCE(im.is_active, 1) = 1 AND (im.quantity > 0 OR im.loose_quantity > 0)`;
     }
     
     // If limit is 0, fetch all (warning: can cause frontend lag)

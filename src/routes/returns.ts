@@ -362,6 +362,8 @@ router.post('/process-returns', async (req, res) => {
       if (invItem) {
         const newQty = Math.max(0, invItem.quantity - item.quantity);
         await db.run('UPDATE inventory_master SET quantity = ? WHERE id = ?', [newQty, invItem.id]);
+        const { refreshInventoryActiveStatus } = await import('../utils/inventoryActive.js');
+        await refreshInventoryActiveStatus(db, invItem.id);
       }
     }
 

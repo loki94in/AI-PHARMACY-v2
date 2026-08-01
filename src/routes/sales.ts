@@ -1,4 +1,5 @@
 import express from 'express';
+import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
@@ -282,6 +283,11 @@ router.post('/', async (req, res) => {
       if (!currentStock) {
         throw new Error(`Inventory item ID ${inventory_id} does not exist.`);
       }
+      const { isExpiredForSale, refreshInventoryActiveStatus } = await import('../utils/inventoryActive.js');
+      if (isExpiredForSale(currentStock.expiry_date)) {
+        await refreshInventoryActiveStatus(db, inventory_id);
+        throw new Error(`Cannot sell expired batch for "${currentStock.db_medicine_name || medicine_name || 'Medicine'}". Remove or return this stock first.`);
+      }
       const packSize = currentStock.pack_size;
       const soldQty = Number(quantity);
       const soldLoose = Number(loose_qty);
@@ -310,6 +316,7 @@ router.post('/', async (req, res) => {
       if (decrementResult.changes === 0) {
         throw new Error(`Failed to decrement stock for inventory ID ${inventory_id}`);
       }
+      await refreshInventoryActiveStatus(db, inventory_id);
 
       // Handle refill logic if enabled
       if (refillEnabled && inventory_id) {
@@ -1082,7 +1089,7 @@ router.get('/search-medicine', async (req, res) => {
              OR m.name LIKE ? 
              OR im.mrp = ?
              OR im.batch_no LIKE ?)
-            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND ${INVENTORY_ACTIVE_WHERE}
             AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
                 WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
@@ -1125,7 +1132,7 @@ router.get('/search-medicine', async (req, res) => {
           WHERE (m.item_code = ? 
              OR m.name LIKE ?
              OR im.batch_no LIKE ?)
-            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND ${INVENTORY_ACTIVE_WHERE}
             AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
                 WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
@@ -1167,7 +1174,7 @@ router.get('/search-medicine', async (req, res) => {
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.name LIKE ?
-          AND (im.quantity > 0 OR im.loose_quantity > 0)
+          AND ${INVENTORY_ACTIVE_WHERE}
           AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
             CASE 
               WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))
@@ -1209,7 +1216,7 @@ router.get('/search-medicine', async (req, res) => {
           FROM inventory_master im
           JOIN medicines m ON im.medicine_id = m.id
           WHERE (m.name LIKE ? OR m.item_code LIKE ?)
-            AND (im.quantity > 0 OR im.loose_quantity > 0)
+            AND ${INVENTORY_ACTIVE_WHERE}
             AND (im.expiry_date IS NULL OR im.expiry_date = '' OR 
               CASE 
                 WHEN length(im.expiry_date) = 5 AND im.expiry_date LIKE '%/%' THEN ('20' || substr(im.expiry_date, 4, 2) || '-' || substr(im.expiry_date, 1, 2))

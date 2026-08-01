@@ -1,4 +1,5 @@
 import { dbManager } from '../database/connection.js';
+import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -19,7 +20,7 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
       WHERE date(im.expiry_date) <= date('now', '+' || ? || ' days')
-      AND im.quantity > 0
+      AND ${INVENTORY_ACTIVE_WHERE}
       ORDER BY im.expiry_date ASC
       LIMIT 10
     `, [days]);
@@ -184,7 +185,7 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
       )
       LEFT JOIN purchases p ON pi.purchase_id = p.id
       LEFT JOIN distributors d ON p.distributor_id = d.id
-      WHERE im.quantity > 0
+      WHERE ${INVENTORY_ACTIVE_WHERE}
       ORDER BY im.expiry_date ASC
     `);
 

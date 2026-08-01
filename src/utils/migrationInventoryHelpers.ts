@@ -1,4 +1,5 @@
 import { applyStockDelta } from './stockRebuild.js';
+import { refreshInventoryActiveStatus } from './inventoryActive.js';
 
 /** Add purchased stock to inventory_master (create batch row if missing). */
 export async function upsertInventoryFromPurchase(
@@ -30,12 +31,18 @@ export async function upsertInventoryFromPurchase(
        WHERE id = ?`,
       [quantity, costPrice, costPrice, mrp, mrp, expiryDate || null, existing.id]
     );
+    await refreshInventoryActiveStatus(db, existing.id);
   } else {
     await db.run(
-      `INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, cost_price, mrp)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, cost_price, mrp, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
       [medicineId, batchNo, expiryDate, quantity, costPrice, mrp]
     );
+    const inserted = await db.get(
+      'SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?',
+      [medicineId, batchNo]
+    );
+    if (inserted?.id) await refreshInventoryActiveStatus(db, inserted.id);
   }
 }
 
@@ -71,4 +78,5 @@ export async function deductInventoryFromSupplierReturn(
     'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
     [Math.max(0, newStock.quantity), Math.max(0, newStock.loose_quantity), inv.id]
   );
+  await refreshInventoryActiveStatus(db, inv.id);
 }

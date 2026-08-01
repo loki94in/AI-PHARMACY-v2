@@ -21,7 +21,8 @@ describe('migrationStockRebuild', () => {
       CREATE TABLE inventory_master (
         id INTEGER PRIMARY KEY, medicine_id INTEGER, batch_no TEXT,
         quantity INTEGER DEFAULT 0, loose_quantity INTEGER DEFAULT 0, legacy_batch_id TEXT,
-        expiry_date TEXT
+        expiry_date TEXT,
+        is_active INTEGER DEFAULT 1
       );
       CREATE TABLE purchase_items (id INTEGER PRIMARY KEY, medicine_id INTEGER, batch_no TEXT, quantity INTEGER);
       CREATE TABLE sale_items (id INTEGER PRIMARY KEY, invoice_id INTEGER, inventory_id INTEGER, quantity INTEGER, loose_qty INTEGER);

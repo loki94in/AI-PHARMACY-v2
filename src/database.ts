@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 22;
+const CURRENT_SCHEMA_VERSION = 23;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -277,6 +277,7 @@ export async function ensureSchema(dbPath: string) {
       rack_location TEXT,
       batch_no TEXT,
       expiry_date DATETIME,
+      is_active INTEGER DEFAULT 1,
       FOREIGN KEY(medicine_id) REFERENCES medicines(id)
     );
     CREATE INDEX IF NOT EXISTS idx_inventory_master_medicine_id ON inventory_master (medicine_id);
@@ -617,6 +618,7 @@ export async function ensureSchema(dbPath: string) {
     ['inventory_master', 'mrp', 'ALTER TABLE inventory_master ADD COLUMN mrp REAL DEFAULT 0'],
     ['inventory_master', 'legacy_batch_id', 'ALTER TABLE inventory_master ADD COLUMN legacy_batch_id TEXT'],
     ['inventory_master', 'loose_quantity', 'ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0'],
+    ['inventory_master', 'is_active', 'ALTER TABLE inventory_master ADD COLUMN is_active INTEGER DEFAULT 1'],
     ['medicines', 'max_stock_level', 'ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL'],
     ['medicines', 'mrp', 'ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0'],
     ['medicines', 'hsn_code', 'ALTER TABLE medicines ADD COLUMN hsn_code TEXT'],
@@ -750,6 +752,17 @@ export async function ensureSchema(dbPath: string) {
     } catch (_e) {}
   }
 
+  try {
+    const { backfillInventoryActiveFlags, deactivateExpiredInventory } = await import('./utils/inventoryActive.js');
+    const invCols = await db.all('PRAGMA table_info(inventory_master)');
+    if (invCols.some((c: { name: string }) => c.name === 'is_active')) {
+      await backfillInventoryActiveFlags(db);
+      await deactivateExpiredInventory(db);
+    }
+  } catch (err) {
+    console.warn('[Database] inventory is_active backfill warning:', err);
+  }
+
   // Pre-check PRAGMA table_info before ALTER TABLE DROP COLUMN to prevent SQLite error outputs
   const dropStatements: Array<[string, string, string]> = [
     ['medicines', 'manufactured_by', 'ALTER TABLE medicines DROP COLUMN manufactured_by'],
@@ -850,6 +863,7 @@ export async function ensureSchema(dbPath: string) {
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_item_code ON medicines (item_code);');
     await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_quantity ON inventory_master (quantity);');
     await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_expiry ON inventory_master (expiry_date);');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_active_stock ON inventory_master (expiry_date, medicine_id) WHERE is_active = 1 AND quantity > 0');
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_generic_name ON medicines (generic_name);');
     await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_manufacturer ON medicines (manufacturer);');
 

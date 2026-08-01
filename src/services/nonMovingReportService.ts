@@ -1,4 +1,5 @@
 import { Database } from 'sqlite';
+import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import { dbManager } from '../database/connection.js';
 import { sendMessage } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
@@ -64,7 +65,7 @@ export class NonMovingReportService {
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
-        WHERE im.quantity > 0
+        WHERE ${INVENTORY_ACTIVE_WHERE}
           -- Exclude any items with sales in POS within cutoff period
           AND NOT EXISTS (
             SELECT 1 

@@ -1,4 +1,5 @@
 import express from 'express';
+import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import { dbManager } from '../database/connection.js';
 import { exportToExcel, exportToPdf } from '../utils/reportExporter.js';
 import { nonMovingReportService } from '../services/nonMovingReportService.js';
@@ -175,7 +176,7 @@ router.get('/data', async (req, res) => {
           SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0
+          WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
           ORDER BY im.expiry_date ASC LIMIT 100
         `, [from, to]);
       } else {
@@ -183,7 +184,7 @@ router.get('/data', async (req, res) => {
           SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) <= date('now', '+180 days') AND im.quantity > 0
+          WHERE date(im.expiry_date) <= date('now', '+180 days') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
           ORDER BY im.expiry_date ASC LIMIT 100
         `);
       }
@@ -238,11 +239,11 @@ router.get('/export-pdf', async (req, res) => {
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
         title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price', 'Expiry Date', 'Cost Value'];
@@ -299,11 +300,11 @@ router.get('/export-excel', async (req, res) => {
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
         title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
