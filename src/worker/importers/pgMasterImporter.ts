@@ -379,6 +379,13 @@ export async function flushMedicines(db: Database) {
         );
         medicineMap.set(m.legacy_id, result.lastID!);
         medicineImportResult.inserted++;
+        // Map legacy medicine IDs so POS/purchases can resolve canonical records later
+        if (m.legacy_id) {
+          await db.run(
+            `INSERT OR IGNORE INTO legacy_id_map (legacy_id, canonical_medicine_id, source) VALUES (?, ?, 'pg_migration')`,
+            [m.legacy_id, result.lastID!]
+          );
+        }
       } catch (err: any) {
         medicineImportResult.skipped++;
         if (!medicineImportResult.firstError) medicineImportResult.firstError = err.message;

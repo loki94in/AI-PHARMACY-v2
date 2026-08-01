@@ -484,6 +484,200 @@ router.delete('/staging/rollback', async (_req, res) => {
   }
 });
 
+// Staging summary — row counts + error/conflict tallies before commit
+router.get('/staging/summary', async (_req, res) => {
+  if (!fs.existsSync(STAGING_DB_PATH)) {
+    return res.json({ success: true, ready: false, stats: {}, errorCount: 0, conflictCount: 0 });
+  }
+  try {
+    const db = await openStagingDb();
+    const count = async (table: string) => {
+      try {
+        const row = await db.get(`SELECT COUNT(*) as cnt FROM ${table}`);
+        return row?.cnt || 0;
+      } catch {
+        return 0;
+      }
+    };
+    const errRow = await db.get('SELECT COUNT(*) as cnt FROM migration_errors').catch(() => ({ cnt: 0 }));
+    const conflictRow = await db.get(`SELECT COUNT(*) as cnt FROM migration_conflicts WHERE status = 'pending'`).catch(() => ({ cnt: 0 }));
+    const stats = {
+      medicines: await count('medicines'),
+      inventory: await count('inventory_master'),
+      purchases: await count('purchases'),
+      sales: await count('sales_invoices'),
+      returns: await count('returns'),
+      distributors: await count('distributors'),
+      customers: await count('customers'),
+      doctors: await count('doctors'),
+    };
+    await db.close();
+    res.json({
+      success: true,
+      ready: true,
+      stats,
+      errorCount: errRow?.cnt || 0,
+      conflictCount: conflictRow?.cnt || 0,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/staging/conflicts', async (_req, res) => {
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json([]);
+  try {
+    const db = await openStagingDb();
+    const rows = await db.all(`
+      SELECT c.id, c.module_type, c.raw_imported_data, c.matching_record_id, c.conflict_reason, c.status,
+             m.name as existing_medicine_name, i.batch_no as existing_batch_no, i.quantity as existing_quantity
+      FROM migration_conflicts c
+      LEFT JOIN inventory_master i ON c.matching_record_id = i.id
+      LEFT JOIN medicines m ON i.medicine_id = m.id
+      WHERE c.status = 'pending'
+      ORDER BY c.id ASC
+      LIMIT 500
+    `);
+    await db.close();
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/staging/resolve', async (req, res) => {
+  const { conflictId, resolution } = req.body;
+  if (!conflictId || !resolution) {
+    return res.status(400).json({ error: 'conflictId and resolution are required' });
+  }
+  if (!fs.existsSync(STAGING_DB_PATH)) {
+    return res.status(400).json({ error: 'No staging database found' });
+  }
+  const allowed = ['merge', 'overwrite', 'skip'];
+  if (!allowed.includes(resolution)) {
+    return res.status(400).json({ error: `resolution must be one of: ${allowed.join(', ')}` });
+  }
+
+  try {
+    const db = await openStagingDb();
+    const conflict = await db.get('SELECT * FROM migration_conflicts WHERE id = ? AND status = ?', [conflictId, 'pending']);
+    if (!conflict) {
+      await db.close();
+      return res.status(404).json({ error: 'Conflict not found or already resolved' });
+    }
+
+    const rawRow = JSON.parse(conflict.raw_imported_data);
+
+    if (resolution === 'merge' && conflict.module_type === 'inventory') {
+      const existing = await db.get('SELECT * FROM inventory_master WHERE id = ?', [conflict.matching_record_id]);
+      if (existing) {
+        const newQty = (existing.quantity || 0) + (rawRow.quantity || 0);
+        const newLoose = (existing.loose_quantity || 0) + (rawRow.loose_quantity || 0);
+        await db.run(
+          'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+          [newQty, newLoose, conflict.matching_record_id]
+        );
+      }
+      await db.run('UPDATE migration_conflicts SET status = ? WHERE id = ?', ['resolved_merge', conflictId]);
+    } else if (resolution === 'overwrite' && conflict.module_type === 'inventory') {
+      await db.run(
+        `UPDATE inventory_master SET quantity = ?, loose_quantity = ?, rack_location = COALESCE(?, rack_location),
+         expiry_date = COALESCE(?, expiry_date), cost_price = COALESCE(?, cost_price), mrp = COALESCE(?, mrp)
+         WHERE id = ?`,
+        [
+          rawRow.quantity ?? 0,
+          rawRow.loose_quantity ?? 0,
+          rawRow.rack_location || null,
+          rawRow.expiry_date || null,
+          rawRow.cost_price ?? null,
+          rawRow.mrp ?? null,
+          conflict.matching_record_id,
+        ]
+      );
+      await db.run('UPDATE migration_conflicts SET status = ? WHERE id = ?', ['resolved_overwrite', conflictId]);
+    } else if (resolution === 'skip') {
+      await db.run('UPDATE migration_conflicts SET status = ? WHERE id = ?', ['resolved_skip', conflictId]);
+    } else {
+      await db.close();
+      return res.status(400).json({ error: 'Unsupported resolution for this conflict type' });
+    }
+
+    await db.close();
+    res.json({ success: true, message: `Conflict ${conflictId} resolved as ${resolution}` });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/snapshots', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all(
+      'SELECT id, backup_path, created_at FROM migration_snapshots ORDER BY id DESC LIMIT 20'
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/snapshots/restore', async (req, res) => {
+  const { snapshotId } = req.body;
+  if (!snapshotId) return res.status(400).json({ error: 'snapshotId required' });
+
+  try {
+    const db = await dbManager.getConnection();
+    const snap = await db.get('SELECT * FROM migration_snapshots WHERE id = ?', [snapshotId]);
+    if (!snap?.backup_path || !fs.existsSync(snap.backup_path)) {
+      return res.status(404).json({ error: 'Snapshot backup file not found on disk' });
+    }
+
+    try {
+      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
+      workerSupervisor.stop();
+    } catch (_) {}
+
+    await closeAllStagingConnections();
+    await dbManager.close(true);
+
+    if (fs.existsSync(DB_PATH)) {
+      const emergency = DB_PATH + '.pre_restore_' + Date.now();
+      fs.copyFileSync(DB_PATH, emergency);
+    }
+
+    fs.copyFileSync(snap.backup_path, DB_PATH);
+
+    ['app.db-wal', 'app.db-shm'].forEach(f => {
+      const p = path.join(path.dirname(DB_PATH), f);
+      if (fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch (_) {}
+      }
+    });
+
+    const activeDb = await dbManager.getConnection();
+    try {
+      const { ensureMedicinesFts } = await import('../database.js');
+      await ensureMedicinesFts(activeDb);
+    } catch (ftsErr: any) {
+      console.warn('[Migration Restore] FTS repair warning:', ftsErr.message);
+    }
+
+    try {
+      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
+      workerSupervisor.start();
+    } catch (_) {}
+
+    res.json({ success: true, message: 'Database restored from snapshot. Please reload the app.', requiresReload: true });
+  } catch (e: any) {
+    try {
+      await dbManager.getConnection();
+      const { workerSupervisor } = await import('../worker/workerSupervisor.js');
+      workerSupervisor.start();
+    } catch (_) {}
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/staging/finalize', async (req, res) => {
   if (!fs.existsSync(STAGING_DB_PATH)) return res.status(400).json({ error: 'No staging DB found' });
   const { regenerateInvoices } = req.body;
@@ -648,6 +842,20 @@ router.post('/staging/finalize', async (req, res) => {
       console.warn('Failed to restart workers:', err);
     }
 
+    // 12b. Rebuild derived tables in the background (stock limits, substitutes)
+    try {
+      const { recalculateStockLimits } = await import('../worker/stockCalculatorWorker.js');
+      const { precomputeSubstitutes } = await import('../worker/substituteCacheWorker.js');
+      recalculateStockLimits().catch((err: any) =>
+        console.warn('[Migration Finalize] Stock recalculation failed:', err.message)
+      );
+      precomputeSubstitutes().catch((err: any) =>
+        console.warn('[Migration Finalize] Substitute rebuild failed:', err.message)
+      );
+    } catch (rebuildErr: any) {
+      console.warn('[Migration Finalize] Post-migration rebuild skipped:', rebuildErr.message);
+    }
+
     // 13. Query actual live database counts for the success modal
     let stats = { medicines: 0, inventory: 0, purchases: 0, sales: 0, returns: 0, distributors: 0 };
     try {
@@ -670,7 +878,7 @@ router.post('/staging/finalize', async (req, res) => {
       console.warn('[Migration Finalize] Could not query table counts:', countErr);
     }
 
-    res.json({ success: true, message: 'Migration finalized and live!', stats });
+    res.json({ success: true, message: 'Migration finalized and live!', stats, requiresReload: true });
   } catch (e: any) {
     console.error('[Migration Finalize] Error during finalize:', e);
 

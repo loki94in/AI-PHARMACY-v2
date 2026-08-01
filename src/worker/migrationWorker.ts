@@ -1634,10 +1634,27 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                 med = { id: result.lastID };
               }
 
-              let inv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ?', [med.id]);
+              let inv: { id: number } | undefined;
+              const batchNoKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'batch_no');
+              const batchVal = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : '';
+              if (batchVal) {
+                inv = await db.get(
+                  'SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?',
+                  [med.id, batchVal]
+                );
+              }
               if (!inv) {
-                const result = await db.run('INSERT INTO inventory_master (medicine_id, quantity) VALUES (?, 0)', [med.id]);
-                inv = { id: result.lastID };
+                inv = await db.get(
+                  'SELECT id FROM inventory_master WHERE medicine_id = ? ORDER BY quantity DESC LIMIT 1',
+                  [med.id]
+                );
+              }
+              if (!inv) {
+                const result = await db.run(
+                  'INSERT INTO inventory_master (medicine_id, quantity, batch_no) VALUES (?, 0, ?)',
+                  [med.id, batchVal || 'MIGRATED']
+                );
+                inv = { id: result.lastID! };
               }
 
               const qtyKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'quantity' || mapping?.[k] === 'quantity_sold');
