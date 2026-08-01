@@ -11,6 +11,7 @@ export interface FileEntry {
   ext: string;
   headers: string[];
   samples: any[];
+  totalRows?: number;
   detected: { type: string; confidence: number };
   userSelectedType: string;
   mapping: Record<string, string>;
@@ -43,9 +44,11 @@ const Migration: React.FC = () => {
       }
 
       let samples: any[] = [];
+      let totalRows = 0;
       try {
         const sampleData = await api.analyzeMigrationFile(uploadedFileName, 0);
         samples = sampleData.samples || [];
+        totalRows = sampleData.totalRows || 0;
       } catch (err) {
         console.warn('Failed to retrieve preview samples', err);
       }
@@ -56,6 +59,7 @@ const Migration: React.FC = () => {
         ext,
         headers: analyzeRes.columns || [],
         samples,
+        totalRows,
         detected: analyzeRes.module || { type: 'unknown', confidence: 0 },
         userSelectedType: analyzeRes.module?.type || 'inventory',
         mapping: analyzeRes.autoMapping || {},

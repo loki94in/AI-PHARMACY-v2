@@ -139,32 +139,44 @@ router.get('/summary', async (_req, res) => {
 });
 
 // Helper: read headers from a CSV file
-async function readCsvHeaders(filePath: string, skipLines = 0): Promise<{ headers: string[], samples: any[] }> {
+async function readCsvHeaders(filePath: string, skipLines = 0): Promise<{ headers: string[], samples: any[], totalRows: number }> {
   const headers: string[] = [];
   const samples: any[] = [];
+  let totalRows = 0;
   await new Promise<void>((resolve, reject) => {
     fs.createReadStream(filePath)
       .pipe(csvParser({ skipLines }))
       .on('headers', (h: string[]) => headers.push(...h))
-      .on('data', (row: any) => { if (samples.length < 100) samples.push(row); })
+      .on('data', (row: any) => { totalRows++; if (samples.length < 100) samples.push(row); })
       .on('end', resolve)
       .on('error', reject);
   });
-  return { headers, samples };
+  return { headers, samples, totalRows };
 }
 
 // Helper: read headers from an Excel file
-function readExcelHeaders(filePath: string, skipLines = 0, sheetIdx = 0): { headers: string[], samples: any[], sheetNames: string[] } {
+function readExcelHeaders(filePath: string, skipLines = 0, sheetIdx = 0): { headers: string[], samples: any[], sheetNames: string[], totalRows: number } {
   const wb = XLSX.readFile(filePath, { sheetRows: skipLines + 105 });
   const sheetName = wb.SheetNames[sheetIdx] || wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[];
-  if (!rows || rows.length === 0) return { headers: [], samples: [], sheetNames: wb.SheetNames };
+  if (!rows || rows.length === 0) return { headers: [], samples: [], sheetNames: wb.SheetNames, totalRows: 0 };
   const headers = (rows[skipLines] as string[]).map(String).filter(h => h.trim());
   const samples = rows.slice(skipLines + 1, skipLines + 101).map(row =>
     Object.fromEntries(headers.map((h, i) => [h, (row as any[])[i] ?? '']))
   );
-  return { headers, samples, sheetNames: wb.SheetNames };
+  // sheetRows truncates the parsed rows, but the sheet's original dimensions survive on
+  // !fullref (SheetJS keeps the untruncated range there when sheetRows is set) — use that
+  // for an accurate total instead of the capped rows.length.
+  let totalRows = Math.max(0, rows.length - skipLines - 1);
+  const fullRef = (ws['!fullref'] || ws['!ref']) as string | undefined;
+  if (fullRef) {
+    try {
+      const range = XLSX.utils.decode_range(fullRef);
+      totalRows = Math.max(0, (range.e.r - range.s.r + 1) - skipLines - 1);
+    } catch (_) { /* fall back to the capped count above */ }
+  }
+  return { headers, samples, sheetNames: wb.SheetNames, totalRows };
 }
 
 // Analyze a CSV file to return headers and a sample row for the UI Mapping Wizard
@@ -184,18 +196,21 @@ router.post('/analyze', async (req, res) => {
     let isCsv = false;
     let isExcel = false;
     let sheetNames: string[] = [];
+    let totalRows = 0;
 
     if (ext === '.csv') {
       isCsv = true;
       const r = await readCsvHeaders(filePath, skipCount);
       headers = r.headers;
       samples = r.samples;
+      totalRows = r.totalRows;
     } else if (ext === '.xlsx' || ext === '.xls') {
       isExcel = true;
       const r = readExcelHeaders(filePath, skipCount, 0);
       headers = r.headers;
       samples = r.samples;
       sheetNames = r.sheetNames;
+      totalRows = r.totalRows;
     }
 
     const stat = fs.statSync(filePath);
@@ -207,6 +222,7 @@ router.post('/analyze', async (req, res) => {
       isExcel,
       headers: headers.filter(h => h.trim() !== ''),
       samples: samples.slice(0, 5),
+      totalRows,
       sheetNames,
       fileSize: stat.size,
       detected: detected[0] || { type: 'unknown', confidence: 0 }

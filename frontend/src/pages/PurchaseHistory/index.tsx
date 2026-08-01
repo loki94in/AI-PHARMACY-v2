@@ -81,6 +81,7 @@ const PurchaseHistory = () => {
     items,
     allItems,
     totalItems,
+    meta,
     isFetching,
     isFetchingNextPage,
     hasNextPage,
@@ -109,13 +110,16 @@ const PurchaseHistory = () => {
           data: response.data || [],
           totalItems: response.totalItems || 0,
           totalPages: response.totalPages || 1,
+          meta: { totalAmount: response.totalAmount || 0 },
         };
       } else {
         const list = Array.isArray(response) ? response : [];
+        const listAmount = list.reduce((sum: number, t: any) => sum + (t.total_amount || 0), 0);
         return {
           data: list,
           totalItems: list.length,
           totalPages: 1,
+          meta: { totalAmount: listAmount },
         };
       }
     },
@@ -277,9 +281,15 @@ const PurchaseHistory = () => {
     }
   };
 
-  // Purchase Analytics
-  const totalPurchases = items.length;
-  const totalAmount = items.reduce((sum, t) => sum + (t.total_amount || 0), 0);
+  // Purchase Analytics — driven by server aggregates (totalItems/meta.totalAmount) so the
+  // cards reflect the full filtered result set, not just the batch loaded so far by
+  // infinite scroll. Column filters are client-only, so fall back to the loaded batch
+  // when any are active (server aggregates can't account for them).
+  const hasColumnFilters = !!(colFilterId || colFilterDistributor || colFilterInvoiceNo || colFilterDate || colFilterMinAmount || colFilterMaxAmount);
+  const totalPurchases = hasColumnFilters ? items.length : totalItems;
+  const totalAmount = hasColumnFilters
+    ? items.reduce((sum, t) => sum + (t.total_amount || 0), 0)
+    : (meta.totalAmount ?? 0);
   const paidAmount = totalAmount; // Cash workflow, all are paid
 
   const handleExport = (type: 'csv' | 'pdf') => {

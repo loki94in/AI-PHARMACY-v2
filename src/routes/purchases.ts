@@ -624,11 +624,21 @@ router.get('/', async (req, res) => {
     }
     
     if (search) {
-      conditions.push('(p.invoice_no LIKE ? OR d.name LIKE ?)');
       const s = `%${search}%`;
-      params.push(s, s);
+      const trimmedSearch = search.trim();
+      if (/^\d+$/.test(trimmedSearch)) {
+        conditions.push('(p.invoice_no LIKE ? OR d.name LIKE ? OR p.id = ?)');
+        params.push(s, s, parseInt(trimmedSearch, 10));
+      } else {
+        conditions.push(`(p.invoice_no LIKE ? OR d.name LIKE ? OR EXISTS (
+          SELECT 1 FROM purchase_items pi
+          JOIN medicines m ON m.id = pi.medicine_id
+          WHERE pi.purchase_id = p.id AND m.name LIKE ?
+        ))`);
+        params.push(s, s, s);
+      }
     }
-    
+
     if (conditions.length > 0) {
       filterQuery = 'WHERE ' + conditions.join(' AND ');
     }
@@ -640,28 +650,30 @@ router.get('/', async (req, res) => {
       const offset = (pageVal - 1) * limit;
       
       const countRow = await db.get(`
-        SELECT COUNT(*) as count
-        FROM purchases p 
-        LEFT JOIN distributors d ON p.distributor_id = d.id 
+        SELECT COUNT(*) as count, COALESCE(SUM(p.total_amount), 0) as sum_amount
+        FROM purchases p
+        LEFT JOIN distributors d ON p.distributor_id = d.id
         ${filterQuery}
       `, params);
-      
+
       const totalItems = countRow?.count || 0;
+      const totalAmount = countRow?.sum_amount || 0;
       const totalPages = Math.ceil(totalItems / limit);
-      
+
       const purchases = await db.all(`
         SELECT p.id, p.invoice_no, p.date, p.total_amount, p.cn_amount, p.cn_number, p.original_amount, d.name as distributor_name,
                COALESCE((SELECT SUM(quantity) FROM purchase_items WHERE purchase_id = p.id), 0) as total_qty
-        FROM purchases p 
-        LEFT JOIN distributors d ON p.distributor_id = d.id 
+        FROM purchases p
+        LEFT JOIN distributors d ON p.distributor_id = d.id
         ${filterQuery}
-        ORDER BY p.date DESC 
+        ORDER BY p.date DESC
         LIMIT ? OFFSET ?
       `, [...params, limit, offset]);
-      
+
       res.json({
         data: purchases,
         totalItems,
+        totalAmount,
         totalPages,
         currentPage: pageVal
       });

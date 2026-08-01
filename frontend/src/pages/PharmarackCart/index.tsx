@@ -534,8 +534,6 @@ export default function PharmarackCart() {
     return false;
   };
 
-  const [batchCountdownSec, setBatchCountdownSec] = useState<number | null>(null);
-
   // Distributor filter sub-tab state ('active' | 'all' | 'success' | 'failed' | 'unmapped')
   const [distributorFilterTab, setDistributorFilterTab] = useState<'active' | 'unsent' | 'sent' | 'all' | 'success' | 'failed' | 'unmapped'>('active');
 
@@ -683,8 +681,7 @@ export default function PharmarackCart() {
   };
 
   const isDistributorMapped = (dist: Distributor) => {
-    const phone = getDistributorPhoneNumber(dist);
-    return Boolean(phone && phone.trim().length > 0);
+    return isValidPhoneNumber(getDistributorPhoneNumber(dist).replace(/\D/g, ''));
   };
 
   const mappedDistributors = React.useMemo(() => {
@@ -901,6 +898,17 @@ export default function PharmarackCart() {
     const match = getOrderCartMatch(order);
     return match ? match.item : null;
   };
+
+  // Single source of truth for the "Req"/"Refills" tab badge counts, so they match what
+  // the "Show Added" toggle actually leaves visible in the list below instead of the raw,
+  // unfiltered pending counts.
+  const visiblePendingOrders = React.useMemo(() => {
+    return showAddedItems ? pendingOrders : pendingOrders.filter(order => !getOrderItemInCart(order));
+  }, [pendingOrders, showAddedItems]);
+
+  const visiblePendingRefills = React.useMemo(() => {
+    return showAddedItems ? pendingRefills : pendingRefills.filter(refill => !getRefillItemInCart(refill));
+  }, [pendingRefills, showAddedItems]);
 
   const handleConfirmCandidateMatch = async (order: SpecialOrder, candidateItem: any) => {
     try {
@@ -1428,7 +1436,6 @@ export default function PharmarackCart() {
       }
     } finally {
       setIsSendingBatchWhatsApp(false);
-      setBatchCountdownSec(null);
     }
   };
 
@@ -2078,11 +2085,9 @@ export default function PharmarackCart() {
                   <MessageSquare size={13} />
                 )}
                 <span>
-                  {batchCountdownSec !== null
-                    ? `Next send in ${batchCountdownSec}s…`
-                    : isSendingBatchWhatsApp
-                      ? 'Sending orders…'
-                      : `Send All via WhatsApp (${mappedDistributors.length})`}
+                  {isSendingBatchWhatsApp
+                    ? 'Sending orders…'
+                    : `Send All via WhatsApp (${mappedDistributors.length})`}
                 </span>
               </button>
 
@@ -2122,7 +2127,7 @@ export default function PharmarackCart() {
                     title="View All Notifications & Items Combined"
                   >
                     <Layers size={11} />
-                    All ({pendingOrders.length + pendingRefills.length + reorderSuggestions.length})
+                    All ({visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length})
                   </button>
                   <button
                     onClick={() => setSidebarTab('requests')}
@@ -2132,7 +2137,7 @@ export default function PharmarackCart() {
                       }`}
                   >
                     <Clock size={11} />
-                    Req ({pendingOrders.length})
+                    Req ({visiblePendingOrders.length})
                   </button>
                   <button
                     onClick={() => setSidebarTab('refills')}
@@ -2142,7 +2147,7 @@ export default function PharmarackCart() {
                       }`}
                   >
                     <ShoppingCart size={11} />
-                    Refills ({pendingRefills.length})
+                    Refills ({visiblePendingRefills.length})
                   </button>
                   <button
                     onClick={() => setSidebarTab('sales_suggestions')}
@@ -2183,11 +2188,7 @@ export default function PharmarackCart() {
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {(sidebarTab === 'all' || sidebarTab === 'requests') && (() => {
-                    const displayOrders = pendingOrders.filter(order => {
-                      const inCart = getOrderItemInCart(order);
-                      if (inCart && !showAddedItems) return false;
-                      return true;
-                    });
+                    const displayOrders = visiblePendingOrders;
 
                     if (sidebarTab === 'requests' && displayOrders.length === 0) {
                       return (
@@ -2365,11 +2366,7 @@ export default function PharmarackCart() {
                   })()}
 
                   {(sidebarTab === 'all' || sidebarTab === 'refills') && (() => {
-                    const displayRefills = pendingRefills.filter(refill => {
-                      const inCart = getRefillItemInCart(refill);
-                      if (inCart && !showAddedItems) return false;
-                      return true;
-                    });
+                    const displayRefills = visiblePendingRefills;
 
                     if (sidebarTab === 'refills' && displayRefills.length === 0) {
                       return (
@@ -2536,15 +2533,7 @@ export default function PharmarackCart() {
                   })()}
 
                   {(sidebarTab === 'all' || sidebarTab === ('missing_phone' as any)) && (() => {
-                    const missingPhoneDistributors = distributors.filter(dist => {
-                      let phoneNum = customDistributorPhones[dist.storeId];
-                      if (!phoneNum) {
-                        const matched = findSavedDistributorMatch(dist.storeName);
-                        phoneNum = matched?.phone || matched?.mobile || matched?.whatsapp || matched?.contact || '';
-                      }
-                      const cleanPhone = (phoneNum || '').replace(/\D/g, '');
-                      return !cleanPhone || !isValidPhoneNumber(cleanPhone);
-                    });
+                    const missingPhoneDistributors = distributors.filter(dist => !isDistributorMapped(dist));
 
                     if (sidebarTab === ('missing_phone' as any) && missingPhoneDistributors.length === 0) {
                       return (
