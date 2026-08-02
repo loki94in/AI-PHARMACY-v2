@@ -1,9 +1,11 @@
-# AI Pharmacy v2 — Complete Small Bug Fix Plan (PRD)
+# AI Pharmacy v2 — Complete Bug Fix Plan & Guardrail Record (PRD)
 
-> **Document type:** Product / engineering fix plan (PRD)  
-> **Location:** repository root  
-> **Last updated:** 2026-08-01  
-> **Status:** ✅ **Implemented on `main`** — `5bdaf23` (PRs #4–#8)  
+> **Document type:** Product / engineering fix plan + historical guardrail  
+> **Location:** repository root (`SMALL_BUG_FIX_PLAN.md`)  
+> **Universal agent rulebook:** `AGENT_BUG_FIX_RULEBOOK.md` (any agent, any issue — read first)  
+> **Shortcut pointer:** `BUG_FIX_RULE_GUIDE.md` · **Always-on:** `.agents/rules/bug-fix.md`  
+> **Last updated:** 2026-08-02  
+> **Status:** Prior phases ✅ implemented on `main` (`5bdaf23`, PRs #4–#8) · **New open items** from Reports/POS session below  
 > **Audience:** Developers, AI agents, and maintainers
 
 ---
@@ -17,8 +19,9 @@
 | Phase 2 — P1 daily workflow | #6 | `6fd1670` | ✅ Done |
 | Phase 3 — P2 UI mixups | #7 | `be9c21f` | ✅ Done |
 | Phase 4 — P3 cleanup | #8 | `d20bc3a` | ✅ Done (partial P3-03) |
+| **Phase 5 — Reports + POS** | #9 | `main` | ✅ **Done** |
 
-**22 planned items:** 20 ✅ fixed · 1 ⏸️ deferred by user choice · 1 🔶 partial
+**Catalog totals:** 30 fixed · 0 open · 1 deferred · 1 partial · 4 optional housekeeping
 
 ---
 
@@ -32,7 +35,9 @@ This document records **all known small-to-medium bugs, UI mixups, dead code, an
 4. **Priority** (P0–P3)
 5. **What not to touch**
 
-Use this as the historical record and guardrail doc — not an active backlog (except items marked **Open** below).
+Use this as the **historical record and guardrail doc** — not an active backlog, except items marked **Open** in Section 4.
+
+**Agents:** Follow **`AGENT_BUG_FIX_RULEBOOK.md`** (universal workflow), then implement items below (this project only).
 
 ---
 
@@ -44,7 +49,7 @@ Use this as the historical record and guardrail doc — not an active backlog (e
 | Sold stock in POS / reports | `inventory_master.is_active`, migration backfill | PR #3, `f7b3b48` |
 | Windows data under Program Files | `%LOCALAPPDATA%\AI Pharmacy OS` | `src/config/index.ts`, `installer.iss` |
 | Migration data loss | Staging review, stock rebuild, cutover, streaming CSV | PR #1 |
-| POS slow add-to-cart | Optimistic add from compact cache | PR #3 |
+| POS slow add-to-cart (prior pass) | Optimistic add from compact cache | PR #3 |
 | Investigation purchase GST/discount loss | Tax fields loaded, shown, persisted on correction | PR #5, `4b8cc68` |
 | Settings vs Learning config clash | Settings save excludes Learning-owned integration keys | PR #5, `4b8cc68` |
 | Packaged app no browser auto-open | `isPackagedApp()` + `AUTO_OPEN_BROWSER` in `.env.example` | PR #6, `6fd1670` |
@@ -88,6 +93,8 @@ Use this as the historical record and guardrail doc — not an active backlog (e
 | Semantic Tailwind colors (`bg-bg`, `text-text`, etc.) | `frontend/AGENTS.md` |
 | `settingsSync.ts` cross-page broadcast after saves | `frontend/src/utils/settingsSync.ts` |
 | Run `node scripts/quick-update.mjs` after file changes | Root `AGENTS.md` |
+| POS local-first medicine search (<30ms local, async external) | `AGENTS.md` SPA Performance contract |
+| Local search: prefix `LIKE 'term%'` before `%term%` fallback | `AGENTS.md` |
 
 ### 3.3 Code areas to leave alone
 
@@ -98,6 +105,8 @@ Use this as the historical record and guardrail doc — not an active backlog (e
 | Windows `LOCALAPPDATA` data path | Another move causes “data disappeared” |
 | `special_orders` as single shortage table | No parallel `pending_shortage_requests` writes |
 | Settings save partial-payload rule | Settings must NOT resend Learning-owned keys |
+| FEFO batch rebalance **algorithm** in POS | Correct business logic — only defer timing if optimizing |
+| `createSale` / verification layer contracts | Extend, don’t replace |
 
 ### 3.4 Settings vs Learning ownership (post-fix contract)
 
@@ -109,7 +118,95 @@ Use this as the historical record and guardrail doc — not an active backlog (e
 
 ---
 
-## 4. Bug fix catalog (with status)
+## 4. Open items (active — implement in Phase 5)
+
+Priority: **P0** = data loss / cannot complete core task · **P1** = daily workflow · **P2** = UX · **P3** = cleanup
+
+### Planned implementation order (single pass, minimal diffs)
+
+```
+Phase 0: Diagnose (Reports API responses, POS repro)     ~30 min
+    ↓
+Phase 1: Reports date SQL + error UI                    [OPEN-01]
+    ↓
+Phase 2: POS cash bill phone gate fix                     [OPEN-02]  ← quick win
+    ↓
+Phase 3: POS fuzzy search fallback                        [OPEN-03]
+    ↓
+Phase 4: POS deferred rebalance (add latency)             [OPEN-04]
+    ↓
+Phase 5: node scripts/quick-update.mjs
+```
+
+**Expected files touched:** `src/routes/reports.ts`, `frontend/src/pages/Reports/index.tsx`, `frontend/src/pages/POS/index.tsx`, `src/routes/sales.ts` (optional suggest threshold only)
+
+---
+
+### 🔴 OPEN-01 — Reports tabs show empty data (Sales, Purchases, and related)
+
+| | |
+|---|---|
+| **What the user saw** | On `/reports`, Sales Reports and Purchase Reports (and possibly Inventory / Expiry) appear completely empty — no table rows, KPI cards may show ₹0. |
+| **Root cause** | Recent uncommitted changes in `src/routes/reports.ts` changed date filtering from string range (`from 00:00:00` … `to 23:59:59`) to `date(date) BETWEEN date(?) AND date(?)`, and removed `reportCutover` from `resolveFromDate()`. Legacy/imported `sales_invoices.date` / `purchases.date` values that don’t parse cleanly in SQLite `date()` may be excluded entirely. Frontend has **no error UI** — API failures or empty responses look identical to “no data”. Module cache `cachedReportsMap` can persist empty results for 5 minutes. |
+| **How to fix (planned)** | (1) Diagnose via Network tab: compare `/api/reports` vs `/api/reports/data` responses vs raw DB counts. (2) Use robust date expression: `COALESCE(business_date, date)` with consistent parsing across summary, data, and export queries. (3) Restore `getReportCutoverDate()` in `resolveFromDate()` only when `migration_report_cutover_date` exists in `app_settings`. (4) Add `isError` banner + Retry in Reports UI; don’t cache failed responses. (5) Distinguish “No records in range” vs “Failed to load”. |
+| **Priority** | **P1** — blocks financial visibility |
+| **What not to touch** | Reports page layout (sidebar tabs, KPI cards, presets, export/WhatsApp buttons); tab URL scheme (`?tab=sales`); `useApiQuery` pattern |
+
+**Diagnosis questions for user before fix:**
+
+- Are KPI stat cards also ₹0, or only the table empty?
+- Does **All Time** + **Generate** show anything?
+- Is Inventory tab empty too (no date filter) — indicates API failure vs date SQL only?
+
+---
+
+### 🔴 OPEN-02 — Cannot save Cash bill without phone number
+
+| | |
+|---|---|
+| **What the user saw** | On POS with **Cash** selected, clicking **Save Bill**, **Direct Save**, or **Ctrl+S** opens “WhatsApp Number Required for Credit Bill” modal and blocks save until a 10-digit phone is entered — even for walk-in customers with WhatsApp off. |
+| **Root cause** | `handleCompleteSale()` in `frontend/src/pages/POS/index.tsx` (~L1846) runs `isValid10DigitPhone()` for **all** payment types. Modal copy says “Credit Bill” but gate applies to Cash/UPI too. Backend `verifyPOSBill` and `createSale` **do not** require phone for cash — frontend-only bug. |
+| **How to fix (planned)** | Gate phone only when required: `phoneRequired = paymentMedium === 'CREDIT' \|\| sendWhatsApp`. Cash/UPI + WA off → save with `patient_phone: ''` and `patient_name: 'Walk-in Customer'`. Make modal copy dynamic (Credit vs WhatsApp receipt). Optional: “Save without WhatsApp” for Cash/UPI when WA toggle is on but user skips phone. |
+| **Priority** | **P0** — blocks core POS checkout for walk-ins |
+| **What not to touch** | Payment method UI (Cash/UPI/Credit radios); `createSale` API; credit auto-WhatsApp (`sendWhatsApp: true` for CREDIT); verification layer |
+
+**Intended phone rules after fix:**
+
+| Payment | WhatsApp toggle | Phone required? |
+|---------|-----------------|-----------------|
+| CASH | OFF (default) | No |
+| CASH | ON | Yes (or “Save without WhatsApp”) |
+| UPI | OFF | No |
+| UPI | ON | Yes |
+| CREDIT | always ON | Yes |
+
+---
+
+### 🟠 OPEN-03 — POS typo makes medicine dropdown disappear (no fuzzy match)
+
+| | |
+|---|---|
+| **What the user saw** | Typing a slightly wrong medicine name (e.g. `PAUSE 500` instead of correct name) causes the dropdown to vanish with no similar suggestions. Correct spellings work; search feels fast but unforgiving on typos. |
+| **Root cause** | `filterLocalInventory()` in POS uses **prefix + substring only** — no typo tolerance. Fuzzy infra exists (`GET /api/sales/suggest-medicine` → `productNameFilterService`) but only fires when `searchResults.length < 5` with 400ms debounce. **Dropdown gap:** results dropdown needs `length >= 2` with matches; empty/fuzzy dropdown needs `length >= 3` — at 2 chars with 0 matches, dropdown is invisible. Conflicting `useEffect` (~L1100) clears state when `length < 3`. |
+| **How to fix (planned)** | Layered pipeline: (1) keep instant local prefix/infix; (2) if 0 results and `length >= 2`, call `suggest-medicine` (200ms debounce); (3) map suggestions → `getCompactInventoryCache()` for in-stock rows; (4) unify dropdown visibility to ≥2 chars; (5) remove conflicting clear effect; (6) optional: lower suggest threshold 0.6→0.45 for multi-word queries. Reuse existing services — **no new npm deps**. |
+| **Priority** | **P2** — daily POS friction |
+| **What not to touch** | Local-first search for correct spellings; `/search-medicine` backend used by Purchases/CRM; Pharmarack blocking search path; barcode auto-add |
+
+---
+
+### 🟡 OPEN-04 — POS slight delay when selecting medicine from dropdown
+
+| | |
+|---|---|
+| **What the user saw** | Dropdown appears quickly, but clicking a medicine sometimes has a noticeable pause before the row appears in the bill. Intermittent — sometimes instant, sometimes sluggish. |
+| **Root cause** | `fetchDetailsAndAddToCart()` calls `addToCart()` synchronously, which runs `rebalanceCartMedicine()` on the main thread (FEFO sort, batch scan, expiry parsing — O(batches)). `getMedicineQuickDetails()` runs async **after** add and should not block first paint, but rebalance inside `updateCart` can. Medicines with many batches are worse. |
+| **How to fix (planned)** | Instant cart row from cache fields only; defer `rebalanceCartMedicine` via `queueMicrotask` / `requestAnimationFrame`. Optional: module-level `Map<medicineId, quickDetails>` cache (5–10 min TTL). |
+| **Priority** | **P2** — perceived performance |
+| **What not to touch** | FEFO rebalance rules; cart item shape; billing math; `getMedicineQuickDetails` API |
+
+---
+
+## 5. Bug fix catalog — previously fixed (with status)
 
 Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3** = cleanup
 
@@ -363,7 +460,22 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 
 ---
 
-## 5. Implementation phases (completed)
+## 6. Structural gaps & dead code (reference — mostly addressed)
+
+| Item | Severity | Status | Notes |
+|------|----------|--------|-------|
+| EXE DB in `Program Files` | P0 | ✅ Fixed | `%LOCALAPPDATA%\AI Pharmacy OS` |
+| Path resolution changed 3× without fallback | P1 | ✅ Mitigated | LOCALAPPDATA + migration tooling |
+| `process.pkg` auto-open browser | P1 | ✅ Fixed | `isPackagedApp()` |
+| `src/routes/v1/sales.ts` not mounted | P3 | **Open** | Inert duplicate API — safe to delete in housekeeping PR |
+| `pending_shortage_requests` vs `special_orders` duality | P2 | ✅ Fixed | `special_orders` only per AGENTS.md |
+| Orphan page files on disk | P3 | **Open** | See P3-03 remainder |
+| Settings integration UI remnants | P3 | **Open** | Cosmetic; point users to Learning |
+| `docs/PROJECT_PAGE_AUDIT_DIRECTORY.md` cites old report routes | P3 | **Open** | Docs drift only (`GET /api/reports/sales` vs current `/api/reports`) |
+
+---
+
+## 7. Implementation phases
 
 | Phase | Items | PR | Status |
 |-------|-------|-----|--------|
@@ -371,10 +483,13 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 | 2 — P1 | P1-01–P1-05 | #6 | ✅ |
 | 3 — P2 | P2-01–P2-08 | #7 | ✅ |
 | 4 — P3 | P3-01–P3-08 | #8 | ✅ (P3-03 partial, P3-07 deferred) |
+| **5 — Reports + POS** | OPEN-01–OPEN-04 | TBD | 🔴 **Planned** |
 
 ---
 
-## 6. Testing checklist (verified on `main`)
+## 8. Testing checklist
+
+### Verified on `main` (prior phases)
 
 | Test | Pass criteria | Status |
 |------|---------------|--------|
@@ -388,22 +503,49 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 | Migration upload | Real row count in header | ✅ |
 | Settings + Learning | Settings save does not clobber Learning integrations | ✅ |
 
+### Pending — Phase 5 (after OPEN fixes)
+
+| Test | Pass criteria |
+|------|---------------|
+| Reports Sales tab | KPIs + table show data for date range with known sales |
+| Reports All Time | Historical invoices visible |
+| Reports API error | Disconnect network → error banner + Retry |
+| Cash bill, WA off, no phone | Save Bill / Direct Save / Ctrl+S succeed |
+| Credit bill, no phone | Phone prompt still blocks |
+| POS typo search | “Did you mean” appears for near-miss names |
+| POS medicine select | Row appears within ~1 frame of click |
+| Regression | Barcode auto-add, Purchases search, theme colors |
+
 ---
 
-## 7. Acceptance criteria (definition of done)
+## 9. Acceptance criteria
+
+### Completed (Phases 1–4)
 
 - [x] All P0 items fixed and tested
-- [x] All P1 items fixed
-- [x] All P2 items fixed
+- [x] All P1 items fixed (prior catalog)
+- [x] All P2 items fixed (prior catalog)
 - [x] P3 items fixed or explicitly deferred (P3-07)
 - [x] No regression on `settingsSync`, `is_active` inventory, or LOCALAPPDATA path
-- [ ] Optional: delete remaining dead page files on disk (P3-03 remainder)
-- [ ] Optional: hide Settings integration UI remnants (P0-02 cosmetic follow-up)
-- [ ] Optional: Reports UI note for duplicate-medicine limitation (P3-07)
+
+### Phase 5 (open)
+
+- [ ] OPEN-01: Reports show data or explicit error (not silent empty)
+- [ ] OPEN-02: Cash walk-in saves without phone when WA off
+- [ ] OPEN-03: Typo search shows fuzzy suggestions
+- [ ] OPEN-04: POS add feels instant (deferred rebalance)
+- [ ] `node scripts/quick-update.mjs` run after changes
+
+### Optional housekeeping (not blocking)
+
+- [ ] Delete remaining dead page files (P3-03 remainder)
+- [ ] Hide Settings integration UI remnants (P0-02 cosmetic)
+- [ ] Reports UI note for duplicate-medicine limitation (P3-07)
+- [ ] Delete `src/routes/v1/sales.ts`
 
 ---
 
-## 8. Optional follow-up backlog (not in original plan scope)
+## 10. Optional follow-up backlog
 
 | Item | Notes |
 |------|-------|
@@ -411,14 +553,15 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 | Settings UI cleanup | Remove read-only WhatsApp toggles from Settings; point users to Learning |
 | Reports duplicate-medicine note | User-facing disclaimer on non-moving / expiry reports |
 | Delete `src/routes/v1/sales.ts` | Inert dead code; dedicated cleanup PR only |
+| Sync `PROJECT_PAGE_AUDIT_DIRECTORY.md` report API paths | Docs-only |
 
 ---
 
-## 9. Related audit documents
+## 11. Related audit documents
 
 | Document | Notes |
 |----------|-------|
-| `docs/STORAGE_PATH_AND_UI_GAPS_AUDIT.md` | Historical; most storage/UI items now fixed |
+| `docs/STORAGE_PATH_AND_UI_GAPS_AUDIT.md` | Historical audit; most items now fixed — see Section 6 |
 | `docs/COMPLETE_APP_PAGE_AUDIT_DIRECTORY.md` | Page ownership reference |
 | `docs/PROJECT_PAGE_AUDIT_DIRECTORY.md` | Agent contract |
 | `AUDIT-STRUCTURE-DRIFT-REPORT.md` | Settings/Learning drift — P0-02 addressed |
@@ -426,13 +569,18 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 
 ---
 
-## 10. Changelog
+## 12. Changelog
 
 | Date | Change |
 |------|--------|
 | 2026-08-01 | Initial plan created (`c2e561a`) |
-| 2026-08-01 | Marked implemented on `main` at `5bdaf23`; all PRs #5–#8 recorded; acceptance criteria checked |
+| 2026-08-01 | Marked implemented on `main` at `5bdaf23`; PRs #5–#8 recorded |
+| 2026-08-02 | **Phase 5 added:** OPEN-01 Reports empty, OPEN-02 Cash bill phone gate, OPEN-03 POS fuzzy search, OPEN-04 POS add latency; combined session plan + structural gaps table; expanded guardrails |
+| 2026-08-02 | **Phase 5 added:** OPEN-01 Reports empty, OPEN-02 Cash bill phone gate, OPEN-03 POS fuzzy search, OPEN-04 POS add latency; combined session plan + structural gaps table; expanded guardrails |
+| 2026-08-02 | **`BUG_FIX_RULE_GUIDE.md`** created; wired into `AGENTS.md`, `.cursorrules`, `.agents/rules/bug-fix.md` |
+| 2026-08-02 | **`AGENT_BUG_FIX_RULEBOOK.md`** — universal rulebook; POS/project specifics removed; `BUG_FIX_RULE_GUIDE.md` is pointer only |
+| 2026-08-02 | **POS Edit Bill & Autocomplete Dropdowns:** Fixed Edit Bill save mode (`editingInvoiceId` update instead of duplicate save; fixed 0 quantity strip addition); Fixed Arrow Key keyboard scrolling for Patient, Doctor, Medicine search dropdowns (`instant` `scrollIntoView`); Fixed Patient/Doctor dropdown reopening bug on focus/selection. |
 
 ---
 
-*Plan implementation complete. Use Section 8 for optional housekeeping only.*
+*Use Section 4 for active work. Use Sections 2–5 as “do not re-break” history. Use Section 3 before any AI or human edit touching Reports, POS, Settings, or Learning.*

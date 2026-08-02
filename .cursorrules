@@ -1,5 +1,15 @@
 # Cursor Rules
 
+## Bug Fix & Issue Resolution (MANDATORY)
+
+When the user reports a **bug**, **issue**, **regression**, or asks to **fix** something broken, read **before coding**:
+
+1. `AGENT_BUG_FIX_RULEBOOK.md` - Universal workflow, guardrails, and checklist (any agent, any issue)
+2. `AGENTS.md` - This project's contracts and page ownership
+3. `SMALL_BUG_FIX_PLAN.md` - This project's bug catalog (open vs fixed)
+
+Shortcut pointer: `BUG_FIX_RULE_GUIDE.md`. Always-on: `.agents/rules/bug-fix.md`.
+
 ## Auto-Knowledge Graph
 
 Before starting work, ALWAYS read these files first:

@@ -284,6 +284,8 @@ const POS = () => {
     const locState = location.state as any;
     if (locState && locState.editSale) {
       const editSale = locState.editSale;
+      setEditingInvoiceId(editSale.id || null);
+      setEditingInvoiceNo(editSale.invoice_no || editSale.id || null);
       if (editSale.customer_name) setPatientName(editSale.customer_name);
       if (editSale.customer_phone) setPatientPhone(editSale.customer_phone);
       if (editSale.doctor_name) setDoctor(editSale.doctor_name);
@@ -291,24 +293,27 @@ const POS = () => {
       if (editSale.payment_medium) setPaymentMedium(editSale.payment_medium);
 
       if (Array.isArray(editSale.items) && editSale.items.length > 0) {
-        const cartItems = editSale.items.map((it: any) => ({
-          id: it.inventory_id || it.id,
-          inventory_id: it.inventory_id,
-          medicine_id: it.medicine_id,
-          name: it.medicine_name || it.name || 'Medicine',
-          batch: it.batch_number || it.batch_no || 'AUTO',
-          expiry: it.expiry_date || '12/28',
-          mrp: it.item_mrp || it.mrp || 100,
-          qty: Number(it.quantity || 1),
-          quantity: Number(it.quantity || 1),
-          unitPrice: Number(it.unit_price || it.rate || it.mrp || 100),
-          looseQty: Number(it.loose_qty || 0),
-          discount: Number(it.discount_per || 0),
-          packSize: Number(it.pack_size || 10),
-        }));
+        const cartItems = editSale.items.map((it: any) => {
+          const itemQty = it.quantity !== undefined && it.quantity !== null ? Number(it.quantity) : 1;
+          return {
+            id: it.inventory_id || it.id,
+            inventory_id: it.inventory_id,
+            medicine_id: it.medicine_id,
+            name: it.medicine_name || it.name || 'Medicine',
+            batch: it.batch_number || it.batch_no || 'AUTO',
+            expiry: it.expiry_date || '12/28',
+            mrp: it.item_mrp || it.mrp || 100,
+            qty: itemQty,
+            quantity: itemQty,
+            unitPrice: Number(it.unit_price || it.rate || it.mrp || 100),
+            looseQty: Number(it.loose_qty || 0),
+            discount: Number(it.discount_per || 0),
+            packSize: Number(it.pack_size || 10),
+          };
+        });
         setCart(cartItems);
       }
-      toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS`, 'info');
+      toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS for Editing`, 'info');
       navigate(location.pathname, { replace: true, state: {} });
       return;
     }
@@ -426,6 +431,8 @@ const POS = () => {
   const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
   const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
   const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
+  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(null);
   const pendingDirectSaveRef = useRef<boolean>(false);
   const [doctor, setDoctor] = useState(initialActiveTab.doctor || '');
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
@@ -829,23 +836,39 @@ const POS = () => {
   const activeRowRef = useRef<HTMLDivElement>(null);
   const skipEmptyRowAutofocusRef = useRef(false);
   const patientSuggestionsRef = useRef<HTMLDivElement>(null);
+  const doctorSuggestionsRef = useRef<HTMLDivElement>(null);
+  const patientSectionRef = useRef<HTMLDivElement>(null);
+  const doctorSectionRef = useRef<HTMLDivElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
   const rowSearchResultsRef = useRef<HTMLDivElement>(null);
+  const selectedCustomerIdRef = useRef<number | null>(null);
+  const justSelectedPatientRef = useRef<boolean>(false);
+  const selectedDoctorIdRef = useRef<number | null>(null);
+  const justSelectedDoctorRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (patientHighlightIndex >= 0 && patientSuggestionsRef.current) {
       const highlighted = patientSuggestionsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
       if (highlighted) {
-        highlighted.scrollIntoView({ block: 'nearest' });
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
       }
     }
   }, [patientHighlightIndex]);
 
   useEffect(() => {
+    if (doctorHighlightIndex >= 0 && doctorSuggestionsRef.current) {
+      const highlighted = doctorSuggestionsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      }
+    }
+  }, [doctorHighlightIndex]);
+
+  useEffect(() => {
     if (searchHighlightIndex >= 0 && searchResultsRef.current) {
       const highlighted = searchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
       if (highlighted) {
-        highlighted.scrollIntoView({ block: 'nearest' });
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
       }
     }
   }, [searchHighlightIndex]);
@@ -854,7 +877,7 @@ const POS = () => {
     if (rowSearchHighlightIndex >= 0 && rowSearchResultsRef.current) {
       const highlighted = rowSearchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
       if (highlighted) {
-        highlighted.scrollIntoView({ block: 'nearest' });
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
       }
     }
   }, [rowSearchHighlightIndex]);
@@ -868,6 +891,16 @@ const POS = () => {
   useOnClickOutside(activeRowRef, () => {
     setRowSearchResults([]);
     setActiveRowSearchIndex(null);
+  });
+
+  useOnClickOutside(patientSectionRef, () => {
+    setShowPatientSuggestions(false);
+    setPatientHighlightIndex(-1);
+  });
+
+  useOnClickOutside(doctorSectionRef, () => {
+    setIsDoctorDropdownOpen(false);
+    setDoctorHighlightIndex(-1);
   });
 
   // Local row search autocomplete
@@ -893,9 +926,24 @@ const POS = () => {
     setRowSearchHighlightIndex(-1);
   }, [rowSearchTerm, activeRowSearchIndex]);
 
+  // Synchronize selection refs to avoid closure staleness in async callbacks
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomerId;
+  }, [selectedCustomerId]);
+
+  useEffect(() => {
+    selectedDoctorIdRef.current = selectedDoctorId;
+  }, [selectedDoctorId]);
+
   // Fetch customer suggestions for patient autocomplete (P2)
   useEffect(() => {
-    if (patientName.trim().length < 2) {
+    if (justSelectedPatientRef.current) {
+      justSelectedPatientRef.current = false;
+      setShowPatientSuggestions(false);
+      return;
+    }
+
+    if (patientName.trim().length < 2 || selectedCustomerIdRef.current !== null) {
       setPatientSuggestions([]);
       setShowPatientSuggestions(false);
       return;
@@ -907,7 +955,7 @@ const POS = () => {
           if (Array.isArray(data)) {
             setPatientSuggestions(data);
             const isFocused = document.activeElement && document.activeElement.getAttribute('aria-label') === 'Patient Name';
-            if (isFocused) {
+            if (isFocused && selectedCustomerIdRef.current === null && !justSelectedPatientRef.current) {
               setShowPatientSuggestions(data.length > 0);
             }
           }
@@ -916,7 +964,7 @@ const POS = () => {
     }, 300); // 300ms debounce
 
     return () => clearTimeout(delayDebounce);
-  }, [patientName]);
+  }, [patientName, selectedCustomerId]);
 
   // Search for pending refills matching the patient's name to display the name-match alert banner
   useEffect(() => {
@@ -1098,7 +1146,7 @@ const POS = () => {
   }, []);
 
   useEffect(() => {
-    if (searchTerm.trim().length < 3) {
+    if (searchTerm.trim().length < 2) {
       setSearchResults([]);
       setSearchHighlightIndex(-1);
       setOnlineResults([]);
@@ -1110,7 +1158,7 @@ const POS = () => {
 
   // Fetch fuzzy did-you-mean suggestions when results are thin
   useEffect(() => {
-    if (searchTerm.trim().length < 3 || searchResults.length >= 5) {
+    if (searchTerm.trim().length < 2 || searchResults.length >= 5) {
       setSuggestions([]);
       return;
     }
@@ -1125,7 +1173,7 @@ const POS = () => {
       } catch (err) {
         console.error('Failed to load suggestions in POS:', err);
       }
-    }, 400);
+    }, 200);
     return () => clearTimeout(timer);
   }, [searchTerm, searchResults]);
 
@@ -1429,7 +1477,10 @@ const POS = () => {
       };
       
       const nextCart = [...cleanPrev, newItem];
-      return rebalanceCartMedicine(nextCart, newItem.medicine_id, newItem.id, { qty: incQty, looseQty: incLooseQty });
+      queueMicrotask(() => {
+        updateCart(currCart => rebalanceCartMedicine(currCart, newItem.medicine_id, newItem.id, { qty: incQty, looseQty: incLooseQty }));
+      });
+      return nextCart;
     });
 
     // Fetch doctor combination recommendations
@@ -1843,12 +1894,14 @@ const POS = () => {
       return;
     }
 
-    if (!isValid10DigitPhone(phoneToUse)) {
+    const isPhoneRequired = paymentMedium === 'CREDIT' || sendWhatsApp;
+    if (isPhoneRequired && !isValid10DigitPhone(phoneToUse)) {
       setPromptPhoneValue(phoneToUse);
       pendingDirectSaveRef.current = isDirectSave;
       setShowPhonePromptModal(true);
       return;
     }
+    const finalPhone = isValid10DigitPhone(phoneToUse) ? phoneToUse : '';
 
     // Expiry check
     for (const item of cart) {
@@ -1927,7 +1980,7 @@ const POS = () => {
         discount: discountAmount,
         patient_id: selectedCustomerId || undefined,
         patient_name: patientName || 'Walk-in Customer',
-        patient_phone: phoneToUse,
+        patient_phone: finalPhone,
         doctor_name: doctor || undefined,
         total_amount: grandTotal,
         sale_date: (() => {
@@ -1962,8 +2015,17 @@ const POS = () => {
         return;
       }
 
-      // Proceed to save bill
-      const result = await api.createSale(payload);
+      // Proceed to save or update bill
+      let result: any;
+      let isEditMode = false;
+      if (editingInvoiceId) {
+        isEditMode = true;
+        result = await api.updateSale(editingInvoiceId, payload);
+        if (!result) result = {};
+        result.invoice_no = editingInvoiceNo || result.invoice_no || result.invoiceNo || `INV-${editingInvoiceId}`;
+      } else {
+        result = await api.createSale(payload);
+      }
       const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
 
       // Verification Layer Check: Post-save history validation
@@ -2011,10 +2073,12 @@ const POS = () => {
       if (!isDirectSave) {
         setShowBarcodeModal(true);
       } else {
-        toastEvent.trigger(`Bill #${invoiceNo} saved successfully! ${isWaSent ? '(SMS dispatched)' : ''}`, 'success');
+        toastEvent.trigger(isEditMode ? `Bill #${invoiceNo} updated successfully!` : `Bill #${invoiceNo} saved successfully! ${isWaSent ? '(SMS dispatched)' : ''}`, 'success');
       }
       
       // Clear cart and states
+      setEditingInvoiceId(null);
+      setEditingInvoiceNo(null);
       updateCart([]);
       setPatientName('');
       setPatientPhone('');
@@ -2152,6 +2216,28 @@ const POS = () => {
         {/* LEFT WORKSPACE (approx 72-75% width) - Takes up full height */}
         <div className="flex-1 flex flex-col gap-4 min-h-0 min-w-0">
           
+          {/* Editing Bill Banner */}
+          {editingInvoiceId && (
+            <div className="bg-amber-500/15 border border-amber-500/30 text-amber-500 px-4 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md animate-pulse">
+              <div className="flex items-center gap-2">
+                <Edit size={16} />
+                <span>Editing Saved Bill #{editingInvoiceNo || editingInvoiceId} (Modifying Existing Bill)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingInvoiceId(null);
+                  setEditingInvoiceNo(null);
+                  clearCart();
+                  toastEvent.trigger('Cancelled edit bill mode', 'info');
+                }}
+                className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-xl text-amber-300 text-[11px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
+              >
+                Cancel Edit Mode
+              </button>
+            </div>
+          )}
+
           {/* Patient & Doctor Context Bar */}
           <div className="glass-panel p-3 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl w-full min-w-0">
             {matchedRefill && (
@@ -2180,7 +2266,7 @@ const POS = () => {
             )}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
               {/* Patient Name */}
-              <div className="relative z-20">
+              <div ref={patientSectionRef} className="relative z-20">
                 <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Patient / Customer</label>
                 <div className="flex gap-1.5 items-center">
                   <input 
@@ -2190,8 +2276,14 @@ const POS = () => {
                     className="premium-input text-sm font-semibold h-10 px-3.5 flex-1 w-full bg-bg2/50 border-border/80 rounded-xl" 
                     placeholder="Walk-in Customer" 
                     value={patientName}
-                    onChange={e => { updatePatientName(e.target.value); setPatientHighlightIndex(-1); }}
-                    onFocus={() => { if (patientSuggestions.length > 0) setShowPatientSuggestions(true); }}
+                    onChange={e => {
+                      justSelectedPatientRef.current = false;
+                      selectedCustomerIdRef.current = null;
+                      updatePatientName(e.target.value);
+                      setSelectedCustomerId(null);
+                      setPatientHighlightIndex(-1);
+                    }}
+                    onFocus={() => { if (selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientSuggestions.length > 0) setShowPatientSuggestions(true); }}
                     onBlur={() => setTimeout(() => setShowPatientSuggestions(false), 180)}
                     onKeyDown={e => {
                       if (!showPatientSuggestions || patientSuggestions.length === 0) return;
@@ -2204,6 +2296,8 @@ const POS = () => {
                       } else if ((e.key === 'Enter' || e.key === 'Tab') && patientHighlightIndex >= 0) {
                         e.preventDefault();
                         const sel = patientSuggestions[patientHighlightIndex];
+                        justSelectedPatientRef.current = true;
+                        selectedCustomerIdRef.current = sel.id;
                         updatePatientName(sel.name);
                         setPatientPhone(sel.phone || '');
                         setSelectedCustomerId(sel.id);
@@ -2226,6 +2320,8 @@ const POS = () => {
                             type="button"
                             data-highlighted={idx === patientHighlightIndex ? "true" : "false"}
                             onMouseDown={() => {
+                              justSelectedPatientRef.current = true;
+                              selectedCustomerIdRef.current = c.id;
                               updatePatientName(c.name);
                               setPatientPhone(c.phone || '');
                               setSelectedCustomerId(c.id);
@@ -2303,7 +2399,7 @@ const POS = () => {
               </div>
 
               {/* Doctor */}
-              <div className="relative z-20">
+              <div ref={doctorSectionRef} className="relative z-20">
                 <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Prescribing Doctor</label>
                 <div className="flex gap-1.5 relative">
                   <input 
@@ -2313,9 +2409,18 @@ const POS = () => {
                     className="premium-input text-sm font-semibold h-10 pl-3.5 pr-7 bg-bg2/50 border-border/80 w-full text-text focus:border-sky rounded-xl"
                     placeholder="Type or Select Doctor..."
                     value={doctor}
-                    onChange={e => { setDoctor(e.target.value); setDoctorHighlightIndex(-1); }}
-                    onFocus={() => {
+                    onChange={e => {
+                      justSelectedDoctorRef.current = false;
+                      selectedDoctorIdRef.current = null;
+                      setDoctor(e.target.value);
+                      setSelectedDoctorId(null);
+                      setDoctorHighlightIndex(-1);
                       setIsDoctorDropdownOpen(true);
+                    }}
+                    onFocus={() => {
+                      if (selectedDoctorIdRef.current === null && !justSelectedDoctorRef.current) {
+                        setIsDoctorDropdownOpen(true);
+                      }
                       doctorsControl.requestLoad();
                     }}
                     onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)}
@@ -2330,6 +2435,8 @@ const POS = () => {
                       } else if ((e.key === 'Enter' || e.key === 'Tab') && doctorHighlightIndex >= 0) {
                         e.preventDefault();
                         const sel = filteredDoctors[doctorHighlightIndex];
+                        justSelectedDoctorRef.current = true;
+                        selectedDoctorIdRef.current = sel.id;
                         setDoctor(sel.name);
                         setSelectedDoctorId(sel.id);
                         setIsDoctorDropdownOpen(false);
@@ -2348,13 +2455,16 @@ const POS = () => {
                   </span>
                   
                   {isDoctorDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl">
+                    <div ref={doctorSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl">
                       {filteredDoctors.length > 0 ? (
                         filteredDoctors.map((doc, idx) => (
                           <button
                             key={doc.id}
                             type="button"
+                            data-highlighted={idx === doctorHighlightIndex ? "true" : "false"}
                             onMouseDown={() => {
+                              justSelectedDoctorRef.current = true;
+                              selectedDoctorIdRef.current = doc.id;
                               setDoctor(doc.name);
                               setSelectedDoctorId(doc.id);
                               setIsDoctorDropdownOpen(false);

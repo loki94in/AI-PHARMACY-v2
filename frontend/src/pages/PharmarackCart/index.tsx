@@ -4,6 +4,7 @@ import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clo
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
+import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';

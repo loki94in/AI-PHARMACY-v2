@@ -794,6 +794,16 @@ const Purchases: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchHighlightIndex >= 0 && searchResultsRef.current) {
+      const highlighted = searchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      }
+    }
+  }, [searchHighlightIndex]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [schemeMatchStatus, setSchemeMatchStatus] = useState<{ [key: string]: string }>({});
@@ -2342,7 +2352,7 @@ const Purchases: React.FC = () => {
                             </div>
                           ) : null}
                           {activeSearchIndex === index && searchResults.length > 0 && (
-                            <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            <div ref={searchResultsRef} className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                               {item.original_name && (
                                 <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
                                   📄 Original Bill Name: {item.original_name}
@@ -2351,6 +2361,8 @@ const Purchases: React.FC = () => {
                               {searchResults.map((medicine, idx) => (
                                 <button
                                   key={medicine.id}
+                                  type="button"
+                                  data-highlighted={idx === searchHighlightIndex ? "true" : "false"}
                                   onClick={() => selectMedicine(medicine, index)}
                                   className={`w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
                                 >

@@ -45,6 +45,34 @@ const Reports = () => {
       return prev;
     });
   };
+
+  useEffect(() => {
+    if (activeTab === 'expiry') {
+      setFromDate(getTodayString());
+      setToDate(getNDaysAgoString(-365));
+      setManualToDate(true);
+    }
+  }, [activeTab]);
+
+  const setPresetRange = (preset: '30d' | '1y' | 'all' | 'expiry365') => {
+    if (preset === '30d') {
+      setFromDate(getNDaysAgoString(30));
+      setToDate(getTodayString());
+      setManualToDate(false);
+    } else if (preset === '1y') {
+      setFromDate(getNDaysAgoString(365));
+      setToDate(getTodayString());
+      setManualToDate(false);
+    } else if (preset === 'all') {
+      setFromDate('2020-01-01');
+      setToDate(getTodayString());
+      setManualToDate(false);
+    } else if (preset === 'expiry365') {
+      setFromDate(getTodayString());
+      setToDate(getNDaysAgoString(-365));
+      setManualToDate(true);
+    }
+  };
   
   // Non-moving report local settings
   const [nonMovingDays, setNonMovingDays] = useState(90);
@@ -129,7 +157,7 @@ const Reports = () => {
   const cacheKeyStr = `${activeTab}:${fromDate}:${toDate}`;
 
   // Main reports query (sales, purchases, inventory, expiry) - enabled by default so it auto-loads
-  const { data: reportData = cachedReportsMap[cacheKeyStr], isLoading: loading, refetch } = useApiQuery<{
+  const { data: reportData = cachedReportsMap[cacheKeyStr], isLoading: loading, isError, refetch } = useApiQuery<{
     summary: any;
     records: any[];
   }>(
@@ -139,7 +167,7 @@ const Reports = () => {
       if (activeTab === 'nonMoving' || activeTab === 'trace') {
         const summaryData = await api.getReportsSummary({ type: activeTab, fromDate, toDate });
         const result = { summary: summaryData, records: [] };
-        cachedReportsMap[cacheKeyStr] = result;
+        if (summaryData) cachedReportsMap[cacheKeyStr] = result;
         return result;
       }
 
@@ -147,8 +175,8 @@ const Reports = () => {
         api.getReportsSummary({ type: activeTab, fromDate, toDate }),
         api.getReportsData({ type: activeTab, fromDate, toDate })
       ]);
-      const result = { summary: summaryData, records: tableData };
-      cachedReportsMap[cacheKeyStr] = result;
+      const result = { summary: summaryData, records: Array.isArray(tableData) ? tableData : [] };
+      if (summaryData && Array.isArray(tableData)) cachedReportsMap[cacheKeyStr] = result;
       return result;
     },
     { 
@@ -504,10 +532,10 @@ const Reports = () => {
   };
 
   return (
-    <div className="h-full flex flex-col gap-5 min-h-0 overflow-hidden text-text bg-bg p-1 animate-in fade-in duration-300">
+    <div className="h-full flex flex-col gap-4 min-h-0 overflow-hidden text-text bg-bg p-4 animate-in fade-in duration-300">
       
       {/* Dynamic Date Controls & Custom Toolbars */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-bg2 border border-border/80 p-4 rounded-2xl flex-shrink-0 shadow-lg relative overflow-hidden backdrop-blur-md">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-bg2 border border-border p-4 rounded-2xl flex-shrink-0 shadow-lg relative overflow-hidden backdrop-blur-md">
         <div className="absolute top-0 left-0 w-2 h-full bg-primary" />
         
         <div className="flex items-center gap-2.5">
@@ -530,12 +558,35 @@ const Reports = () => {
           {/* Controls for Standard Date Filter Tabs */}
           {activeTab !== 'nonMoving' && activeTab !== 'trace' && (
             <>
+              <div className="flex items-center gap-1 bg-bg3/60 border border-glass-border p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setPresetRange(activeTab === 'expiry' ? 'expiry365' : '30d')}
+                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
+                >
+                  {activeTab === 'expiry' ? 'Upcoming 1Yr' : '30 Days'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetRange('1y')}
+                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
+                >
+                  1 Year
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetRange('all')}
+                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
+                >
+                  All Time
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
                 <span>From</span>
                 <input
                   type="date"
                   min="2020-01-01"
-                  max={getTodayString()}
                   className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold cursor-pointer"
                   value={fromDate}
                   onChange={(e) => handleFromDateChange(e.target.value)}
@@ -547,7 +598,6 @@ const Reports = () => {
                 <input
                   type="date"
                   min="2020-01-01"
-                  max={getTodayString()}
                   disabled={!manualToDate}
                   className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold disabled:opacity-50 cursor-pointer"
                   value={toDate}
@@ -570,32 +620,29 @@ const Reports = () => {
           {/* Controls for Non-Moving dead stock filter */}
           {activeTab === 'nonMoving' && (
             <div className="flex items-center gap-2.5 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
-              <span>Dormancy Period</span>
-              <select
+              <span>Show Inactive Stock ({'>='} Days)</span>
+              <input
+                type="number"
+                min="1"
+                max="3650"
+                className="w-16 bg-bg border border-glass-border rounded-lg text-text text-xs focus:outline-none px-2 py-0.5 font-mono font-bold text-center"
                 value={localNonMovingDays}
-                onChange={e => setLocalNonMovingDays(Number(e.target.value))}
-                className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-bold cursor-pointer pr-5 font-mono"
-              >
-                <option value={30}>30 Days (Slow)</option>
-                <option value={60}>60 Days (Inactive)</option>
-                <option value={90}>90 Days (Stagnant)</option>
-                <option value={120}>120 Days (Critical)</option>
-                <option value={180}>180 Days (Dead Stock)</option>
-              </select>
+                onChange={(e) => setLocalNonMovingDays(Math.max(1, parseInt(e.target.value) || 1))}
+              />
             </div>
           )}
 
-          {/* Controls for Product Trace Search input */}
+          {/* Controls for Product trace & audit */}
           {activeTab === 'trace' && (
             <form onSubmit={handleTraceSearch} className="flex items-center gap-2">
               <div className="relative">
-                <Search size={12} className="absolute left-3 top-2.5 text-muted" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
                   placeholder="Enter Batch, Invoice, or Distributor..."
+                  className="pl-9 pr-3 py-1.5 bg-bg3/60 border border-glass-border rounded-xl text-text text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 w-64 font-medium"
                   value={traceQuery}
-                  onChange={e => setTraceQuery(e.target.value)}
-                  className="bg-bg3 border border-glass-border rounded-xl pl-8 pr-3 py-1.5 text-xs text-text placeholder-muted/60 focus:outline-none focus:border-primary/50 w-64 transition-all font-bold"
+                  onChange={(e) => setTraceQuery(e.target.value)}
                 />
               </div>
             </form>
@@ -646,14 +693,14 @@ const Reports = () => {
         {getStatsCards().map((card, idx) => {
           const Icon = card.icon;
           return (
-            <div key={idx} className={`bg-glass-bg border ${borderMap[card.color]} rounded-2xl p-4.5 relative overflow-hidden group shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300`}>
+            <div key={idx} className={`bg-glass-bg border ${borderMap[card.color]} rounded-2xl p-4 relative overflow-hidden group shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300`}>
               <div
                 className="absolute top-0 right-0 w-24 h-24 translate-x-6 -translate-y-6 pointer-events-none rounded-full blur-xl"
                 style={{ background: `radial-gradient(circle, ${card.gradient} 0%, transparent 70%)` }}
               />
               <div className="flex justify-between items-start mb-2">
                 <div className="text-[10px] text-muted font-black uppercase tracking-wider">{card.label}</div>
-                <span className={`p-2 rounded-xl bg-bg2 border border-glass-border/30 ${colorMap[card.color]}`}>
+                <span className={`p-2 rounded-xl bg-bg2 border border-glass-border ${colorMap[card.color]}`}>
                   <Icon size={14} className="group-hover:scale-110 transition-transform duration-300" />
                 </span>
               </div>
@@ -669,10 +716,10 @@ const Reports = () => {
       </div>
 
       {/* Main Split Panel Area */}
-      <div className="flex-1 flex gap-5 min-h-0 overflow-hidden">
+      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
         
         {/* Left Selector Sidebar */}
-        <div className="w-64 flex-shrink-0 flex flex-col gap-2 bg-glass-bg border border-border/80 rounded-2xl p-3.5 overflow-y-auto scrollbar-thin shadow-lg">
+        <div className="w-64 flex-shrink-0 flex flex-col gap-2 bg-glass-bg border border-border rounded-2xl p-3.5 overflow-y-auto scrollbar-thin shadow-lg">
           <h3 className="text-[10px] font-black uppercase tracking-widest text-muted px-2.5 mb-2">Report Modules</h3>
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -684,7 +731,7 @@ const Reports = () => {
                 className={`flex items-center gap-3 px-3.5 py-3 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer group ${
                   isActive
                     ? `${tab.activeBg} font-black shadow-sm`
-                    : 'bg-bg3/20 border-glass-border/40 text-muted hover:text-text hover:bg-bg3/60'
+                    : 'bg-bg3/20 border-glass-border text-muted hover:text-text hover:bg-bg3/60'
                 }`}
               >
                 <Icon size={16} className={`shrink-0 transition-transform group-hover:scale-105 duration-200 ${isActive ? tab.color : 'text-muted'}`} />
@@ -695,7 +742,21 @@ const Reports = () => {
         </div>
 
         {/* Right Content Table Panel */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg border border-border/80 rounded-2xl shadow-xl">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg border border-border rounded-2xl shadow-xl">
+          {isError && (
+            <div className="m-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between text-xs text-red-400 font-semibold shrink-0">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={16} className="shrink-0 text-red-400" />
+                <span>Failed to fetch report data from server. Please check date filters or database connection.</span>
+              </div>
+              <button
+                onClick={() => refetch()}
+                className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
+              >
+                Retry
+              </button>
+            </div>
+          )}
           
           {/* SALES TAB */}
           {activeTab === 'sales' && (
@@ -1010,7 +1071,7 @@ const Reports = () => {
           {/* NON-MOVING INVENTORY TAB */}
           {activeTab === 'nonMoving' && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="p-4 border-b border-glass-border/30 flex justify-between items-center bg-bg2/30 flex-shrink-0">
+              <div className="p-4 border-b border-border flex justify-between items-center bg-bg2/40 flex-shrink-0">
                 <h3 className="font-bold text-xs uppercase tracking-wider flex items-center gap-2 text-text" title="Rows are per inventory batch. If the same medicine name has multiple medicine records (duplicates are not auto-merged), each is listed separately rather than combined into one line.">
                   <PieChart size={15} className="text-purple-400" />
                   <span>Dormant / Non-Moving Stock (Inactive for {nonMovingDays} days)</span>
@@ -1019,7 +1080,7 @@ const Reports = () => {
                   <button
                     onClick={() => handleSendToWhatsapp('combined')}
                     disabled={sendingWhatsapp}
-                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                     title="Send Non-Moving Stock Report to Owner WhatsApp"
                   >
                     <Send size={12} />
@@ -1029,15 +1090,15 @@ const Reports = () => {
               </div>
               <div className="flex-1 overflow-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead className="sticky top-0 bg-bg2 border-b border-glass-border/30 shadow-sm z-10">
+                  <thead className="sticky top-0 bg-bg2 border-b border-border shadow-sm z-10">
                     <tr className="text-muted/80 text-[10px] font-black uppercase tracking-wider">
-                      <th className="p-3.5 border-b border-glass-border/20 pl-5">Medicine Name</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Batch</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Quantity</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Unit Cost (₹)</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Hold Value (Cost)</th>
-                      <th className="p-3.5 border-b border-glass-border/20">Hold Value (MRP)</th>
-                      <th className="p-3.5 border-b border-glass-border/20 text-right pr-5">Dormant Period</th>
+                      <th className="p-3.5 border-b border-border/50 pl-5">Medicine Name</th>
+                      <th className="p-3.5 border-b border-border/50">Batch</th>
+                      <th className="p-3.5 border-b border-border/50">Quantity</th>
+                      <th className="p-3.5 border-b border-border/50">Unit Cost (₹)</th>
+                      <th className="p-3.5 border-b border-border/50">Hold Value (Cost)</th>
+                      <th className="p-3.5 border-b border-border/50">Hold Value (MRP)</th>
+                      <th className="p-3.5 border-b border-border/50 text-right pr-5">Dormant Period</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -137,6 +137,16 @@ const Returns: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchHighlightIndex >= 0 && searchResultsRef.current) {
+      const highlighted = searchResultsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      }
+    }
+  }, [searchHighlightIndex]);
   
   const activeSearchRef = useRef<HTMLDivElement>(null);
   useOnClickOutside(activeSearchRef, () => {
@@ -1438,10 +1448,12 @@ const Returns: React.FC = () => {
                             </button>
                           </div>
                           {activeSearchIndex === index && searchResults.length > 0 && (
-                            <div className="absolute z-30 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            <div ref={searchResultsRef} className="absolute z-30 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                               {searchResults.map((result, idx) => (
                                 <button
                                   key={result.purchase_item_id}
+                                  type="button"
+                                  data-highlighted={idx === searchHighlightIndex ? "true" : "false"}
                                   onClick={() => selectMedicine(result, index)}
                                   className={`w-full text-left px-3 py-2 hover:bg-bg3 text-text text-xs border-b border-glass-border/30 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                 >

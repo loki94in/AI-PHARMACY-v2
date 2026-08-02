@@ -7,26 +7,33 @@ import { getReportCutoverDate, effectiveReportFromDate } from '../utils/reportCu
 
 const router = express.Router();
 
-async function resolveFromDate(requestedFrom: string): Promise<string> {
-  const db = await dbManager.getConnection();
-  const cutover = await getReportCutoverDate(db);
-  return effectiveReportFromDate(requestedFrom, cutover);
+async function resolveFromDate(requestedFrom: string, db?: any): Promise<string> {
+  let from = (requestedFrom && requestedFrom.trim()) ? requestedFrom.trim() : '1970-01-01';
+  if (db) {
+    try {
+      const cutover = await getReportCutoverDate(db);
+      return effectiveReportFromDate(from, cutover);
+    } catch {
+      // ignore cutover lookup error if table does not exist yet
+    }
+  }
+  return from;
 }
 
 // Fetch summary metrics for stats cards
 router.get('/', async (req, res) => {
   const { fromDate, toDate, type } = req.query;
-  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
-  const to = toDate ? String(toDate) : '9999-12-31';
   const reportType = type ? String(type) : 'sales';
 
   try {
     const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
     
     if (reportType === 'sales') {
       const salesRow = await db.get(
-        "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE date >= ? AND date <= ?",
-        [from + ' 00:00:00', to + ' 23:59:59']
+        "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) >= date(?) AND COALESCE(date(date), date(substr(date, 1, 10))) <= date(?)",
+        [from, to]
       );
       
       const marginRow = await db.get(`
@@ -36,8 +43,8 @@ router.get('/', async (req, res) => {
         FROM sale_items si
         JOIN sales_invoices sinv ON si.invoice_id = sinv.id
         JOIN inventory_master im ON si.inventory_id = im.id
-        WHERE sinv.date >= ? AND sinv.date <= ?
-      `, [from + ' 00:00:00', to + ' 23:59:59']);
+        WHERE COALESCE(date(sinv.date), date(substr(sinv.date, 1, 10))) >= date(?) AND COALESCE(date(sinv.date), date(substr(sinv.date, 1, 10))) <= date(?)
+      `, [from, to]);
 
       const revenue = marginRow.revenue || 0;
       const cost = marginRow.cost || 0;
@@ -55,16 +62,16 @@ router.get('/', async (req, res) => {
 
     if (reportType === 'purchases') {
       const purchasesRow = await db.get(
-        "SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(DISTINCT distributor_id) as suppliers FROM purchases WHERE date >= ? AND date <= ?",
-        [from + ' 00:00:00', to + ' 23:59:59']
+        "SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(DISTINCT distributor_id) as suppliers FROM purchases WHERE COALESCE(date(date), date(substr(date, 1, 10))) >= date(?) AND COALESCE(date(date), date(substr(date, 1, 10))) <= date(?)",
+        [from, to]
       );
 
       const itemsRow = await db.get(`
         SELECT IFNULL(SUM(quantity), 0) as qty
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
-        WHERE p.date >= ? AND p.date <= ?
-      `, [from + ' 00:00:00', to + ' 23:59:59']);
+        WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) >= date(?) AND COALESCE(date(p.date), date(substr(p.date, 1, 10))) <= date(?)
+      `, [from, to]);
 
       const total = purchasesRow.total || 0;
       const qty = itemsRow.qty || 0;
@@ -106,7 +113,7 @@ router.get('/', async (req, res) => {
                  IFNULL(SUM(quantity * cost_price), 0) as cost_val,
                  IFNULL(SUM(quantity * mrp), 0) as mrp_val
           FROM inventory_master
-          WHERE date(expiry_date) BETWEEN date(?) AND date(?) AND quantity > 0
+          WHERE COALESCE(date(expiry_date), date(substr(expiry_date, 1, 10))) BETWEEN date(?) AND date(?) AND quantity > 0
         `;
         params = [from, to];
       } else {
@@ -116,7 +123,7 @@ router.get('/', async (req, res) => {
                  IFNULL(SUM(quantity * cost_price), 0) as cost_val,
                  IFNULL(SUM(quantity * mrp), 0) as mrp_val
           FROM inventory_master
-          WHERE date(expiry_date) <= date('now', '+180 days') AND quantity > 0
+          WHERE COALESCE(date(expiry_date), date(substr(expiry_date, 1, 10))) <= date('now', '+365 days') AND quantity > 0
         `;
       }
 
@@ -146,21 +153,21 @@ router.get('/', async (req, res) => {
 // Fetch report raw data lists for the UI table
 router.get('/data', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
-  const to = toDate ? String(toDate) : '9999-12-31';
 
   try {
     const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
     let data: any[] = [];
 
     if (type === 'sales') {
       data = await db.all(
-        "SELECT invoice_no, total_amount, date FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC LIMIT 100",
+        "SELECT invoice_no, total_amount, date FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC LIMIT 500",
         [from, to]
       );
     } else if (type === 'purchases') {
       data = await db.all(
-        "SELECT p.invoice_no, p.total_amount, d.name as distributor, p.date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC LIMIT 100",
+        "SELECT p.invoice_no, p.total_amount, d.name as distributor, p.date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC LIMIT 500",
         [from, to]
       );
     } else if (type === 'inventory') {
@@ -168,7 +175,7 @@ router.get('/data', async (req, res) => {
         SELECT m.name as medicine_name, im.batch_no, im.quantity as stock, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value 
         FROM inventory_master im 
         JOIN medicines m ON im.medicine_id = m.id 
-        ORDER BY stock DESC LIMIT 100
+        ORDER BY stock DESC LIMIT 500
       `);
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
@@ -176,16 +183,16 @@ router.get('/data', async (req, res) => {
           SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-          ORDER BY im.expiry_date ASC LIMIT 100
+          WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
+          ORDER BY im.expiry_date ASC LIMIT 500
         `, [from, to]);
       } else {
         data = await db.all(`
           SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.cost_price, (im.quantity * im.cost_price) as value
           FROM inventory_master im 
           JOIN medicines m ON im.medicine_id = m.id 
-          WHERE date(im.expiry_date) <= date('now', '+180 days') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-          ORDER BY im.expiry_date ASC LIMIT 100
+          WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) <= date('now', '+365 days') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
+          ORDER BY im.expiry_date ASC LIMIT 500
         `);
       }
     }
@@ -200,11 +207,12 @@ router.get('/data', async (req, res) => {
 // PDF export endpoint
 router.get('/export-pdf', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
-  const to = toDate ? String(toDate) : '9999-12-31';
 
   try {
     const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
+
     let title = 'Pharmacy OS Report';
     let headers: string[] = [];
     let keys: string[] = [];
@@ -217,7 +225,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC";
+      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC";
       params = [from, to];
       alignMap = { invoice_no: 'left', date: 'center', total_amount: 'right' };
       colWidths = [180, 180, 152];
@@ -225,7 +233,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
+      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
       params = [from, to];
       alignMap = { invoice_no: 'left', distributor_name: 'left', date: 'center', total_amount: 'right' };
       colWidths = [120, 180, 112, 100];
@@ -239,11 +247,11 @@ router.get('/export-pdf', async (req, res) => {
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
-        title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        title = 'Expiry Warning Report (Next 365 Days)';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) <= date(\'now\', \'+365 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price', 'Expiry Date', 'Cost Value'];
@@ -269,11 +277,12 @@ router.get('/export-pdf', async (req, res) => {
 // Excel export endpoint
 router.get('/export-excel', async (req, res) => {
   const { type, fromDate, toDate } = req.query;
-  const from = await resolveFromDate(fromDate ? String(fromDate) : '1970-01-01');
-  const to = toDate ? String(toDate) : '9999-12-31';
 
   try {
     const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
+
     let title = 'Pharmacy OS Report';
     let headers: string[] = [];
     let keys: string[] = [];
@@ -284,13 +293,13 @@ router.get('/export-excel', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE date(date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY date DESC";
+      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC";
       params = [from, to];
     } else if (type === 'purchases') {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE date(p.date, 'localtime') BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
+      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
       params = [from, to];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';
@@ -300,11 +309,11 @@ router.get('/export-excel', async (req, res) => {
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [from, to];
       } else {
         title = 'Expiry Warning Report (Next 180 Days)';
-        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE date(im.expiry_date) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
         params = [];
       }
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];

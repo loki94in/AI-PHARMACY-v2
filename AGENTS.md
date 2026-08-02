@@ -206,6 +206,20 @@ To maximize response efficiency and prevent main context bloat, agents **SHOULD*
 
 ---
 
+## Bug Fix Rulebook (mandatory for defects)
+
+When the user reports a **bug**, **issue**, **regression**, or asks to fix broken behavior, agents **MUST** read before editing:
+
+1. **`AGENT_BUG_FIX_RULEBOOK.md`** (repository root) — **universal** workflow, guardrails, and checklist (any agent, any issue; portable to other projects)
+2. **Root `AGENTS.md`** (this file) — **this project’s** page ownership and architecture contracts
+3. **`SMALL_BUG_FIX_PLAN.md`** (repository root) — **this project’s** catalog of fixed and **open** issues (Section 4)
+
+Shortcut pointer: **`BUG_FIX_RULE_GUIDE.md`**. Always-on: **`.agents/rules/bug-fix.md`**.
+
+After fixing a bug in this repo, update `SMALL_BUG_FIX_PLAN.md` (move Open → Fixed) and run `node scripts/quick-update.mjs`.
+
+---
+
 ## Ponytail — Lazy Senior Dev Mode
 
 Ponytail is installed as an always-on ruleset at `.agents/rules/ponytail.md`.
