@@ -73,31 +73,66 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
     }
     const returnNo = `${prefix}${String(nextNum).padStart(4, '0')}`;
 
-    // Calculate total refund
-    let totalRefund = 0;
+    // Calculate total refund and CGST/SGST tax breakdown
+    let totalRefundGross = 0;
+    let totalCgstVal = 0;
+    let totalSgstVal = 0;
+    const processedReturnItems = [];
+
     for (const item of return_items) {
-      totalRefund += item.quantity * item.unit_price * (1 - (item.discount_per || 0) / 100);
+      if (item.quantity <= 0) continue;
+      const invInfo = await db.get(
+        `SELECT im.medicine_id, im.batch_no, m.cgst_per, m.sgst_per 
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id 
+         WHERE im.id = ?`,
+        [item.inventory_id]
+      );
+      if (!invInfo) {
+        throw new Error(`Inventory item not found for ID ${item.inventory_id}`);
+      }
+
+      const dPrice = Number(item.unit_price) * (1 - Number(item.discount_per || 0) / 100);
+      const lineGross = Number(item.quantity) * dPrice;
+      totalRefundGross += lineGross;
+
+      let cgstPer = Number(invInfo.cgst_per);
+      let sgstPer = Number(invInfo.sgst_per);
+      if (isNaN(cgstPer) || cgstPer === 0) cgstPer = 2.5;
+      if (isNaN(sgstPer) || sgstPer === 0) sgstPer = 2.5;
+
+      const gstRate = cgstPer + sgstPer;
+      const taxable = gstRate > 0 ? (lineGross / (1 + (gstRate / 100))) : lineGross;
+      const lineTax = lineGross - taxable;
+      const itemCgst = Number(((lineTax * cgstPer) / (gstRate || 1)).toFixed(2));
+      const itemSgst = Number(((lineTax * sgstPer) / (gstRate || 1)).toFixed(2));
+
+      totalCgstVal += itemCgst;
+      totalSgstVal += itemSgst;
+
+      processedReturnItems.push({
+        item,
+        invInfo,
+        itemCgst,
+        itemSgst,
+        lineGross
+      });
     }
-    // Assume 5% tax was applied
-    totalRefund = Math.round(totalRefund * 1.05);
+
+    const roundedCgst = Number(totalCgstVal.toFixed(2));
+    const roundedSgst = Number(totalSgstVal.toFixed(2));
+    const totalRefund = Math.round(totalRefundGross);
 
     // Insert return record
     const retRes = await db.run(
-      `INSERT INTO returns (return_no, original_invoice_id, type, total_amount, reason, return_sub_type) VALUES (?, ?, 'sale', ?, ?, 'good')`,
-      [returnNo, original_invoice_id, totalRefund, reason || 'Customer Return']
+      `INSERT INTO returns (return_no, original_invoice_id, type, total_amount, cgst_value, sgst_value, reason, return_sub_type) VALUES (?, ?, 'sale', ?, ?, ?, ?, 'good')`,
+      [returnNo, original_invoice_id, totalRefund, roundedCgst, roundedSgst, reason || 'Customer Return']
     );
     const returnId = retRes.lastID;
 
     // Process each item
-    for (const item of return_items) {
-      if (item.quantity <= 0) continue;
+    for (const prItem of processedReturnItems) {
+      const { item, invInfo, itemCgst, itemSgst, lineGross } = prItem;
 
-      // We need medicine_id and batch_no for return_items table
-      const invInfo = await db.get('SELECT medicine_id, batch_no FROM inventory_master WHERE id = ?', [item.inventory_id]);
-      if (!invInfo) {
-        throw new Error(`Inventory item not found for ID ${item.inventory_id}`);
-      }
-      
       // Get originally sold qty
       const saleItem = await db.get(
         'SELECT quantity FROM sale_items WHERE invoice_id = ? AND inventory_id = ?',
@@ -127,8 +162,8 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
       
       // Log in return_items
       await db.run(
-        `INSERT INTO return_items (return_id, medicine_id, batch_no, quantity, total_price) VALUES (?, ?, ?, ?, ?)`,
-        [returnId, invInfo.medicine_id, invInfo.batch_no, item.quantity, item.quantity * item.unit_price]
+        `INSERT INTO return_items (return_id, medicine_id, batch_no, quantity, total_price, cgst_value, sgst_value) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [returnId, invInfo.medicine_id, invInfo.batch_no, item.quantity, lineGross, itemCgst, itemSgst]
       );
 
       // Optional: Add to action_logs for reason

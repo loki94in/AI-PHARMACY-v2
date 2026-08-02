@@ -22,6 +22,7 @@ export interface NonMovingItem {
   totalValue: number;
   costPrice?: number | null;
   totalCostValue?: number;
+  expiryDate?: string | null;
 }
 
 export interface NonMovingReport {
@@ -43,44 +44,52 @@ export class NonMovingReportService {
       cutoffDate.setDate(cutoffDate.getDate() - periodDays);
       const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Get items with active stock (> 0) and NO sales or ledger movements in the period
+      // Get items with active stock (> 0) and NO sales or ledger movements in the period using high-performance CTEs
       const rows = await db.all(`
+        WITH active_sales AS (
+          SELECT sit.inventory_id
+          FROM sale_items sit
+          JOIN sales_invoices si ON sit.invoice_id = si.id
+          WHERE COALESCE(date(si.business_date), date(si.date), date(substr(si.date, 1, 10))) >= date(?)
+          GROUP BY sit.inventory_id
+        ),
+        active_ledger AS (
+          SELECT sl.medicine_id
+          FROM stock_ledger sl
+          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10))) >= date(?)
+          GROUP BY sl.medicine_id
+        ),
+        latest_sales AS (
+          SELECT sit.inventory_id, MAX(COALESCE(si.date, si.business_date)) as max_sale_date
+          FROM sale_items sit
+          JOIN sales_invoices si ON sit.invoice_id = si.id
+          GROUP BY sit.inventory_id
+        ),
+        latest_ledger AS (
+          SELECT sl.medicine_id, MAX(sl.business_date) as max_ledger_date
+          FROM stock_ledger sl
+          GROUP BY sl.medicine_id
+        )
         SELECT
           im.id,
           im.medicine_id,
           m.name as medicine_name,
           im.batch_no,
           im.quantity,
-          -- Get the most recent date between POS sales and stock ledger
-          COALESCE(
-            (SELECT MAX(si.date) 
-             FROM sale_items sit 
-             JOIN sales_invoices si ON sit.invoice_id = si.id 
-             WHERE sit.inventory_id = im.id),
-            (SELECT MAX(sl.business_date)
-             FROM stock_ledger sl
-             WHERE sl.medicine_id = im.medicine_id)
-          ) as last_transaction_date,
+          im.expiry_date,
+          COALESCE(ls.max_sale_date, ll.max_ledger_date) as last_transaction_date,
           im.mrp,
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
+        LEFT JOIN active_sales sa ON im.id = sa.inventory_id
+        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id
+        LEFT JOIN latest_sales ls ON im.id = ls.inventory_id
+        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id
         WHERE ${INVENTORY_ACTIVE_WHERE}
-          -- Exclude any items with sales in POS within cutoff period
-          AND NOT EXISTS (
-            SELECT 1 
-            FROM sale_items sit
-            JOIN sales_invoices si ON sit.invoice_id = si.id
-            WHERE sit.inventory_id = im.id
-              AND date(si.date) >= date(?)
-          )
-          -- Exclude any items with stock ledger movements within cutoff period
-          AND NOT EXISTS (
-            SELECT 1
-            FROM stock_ledger sl
-            WHERE sl.medicine_id = im.medicine_id
-              AND date(sl.business_date) >= date(?)
-          )
+          AND im.quantity > 0
+          AND sa.inventory_id IS NULL
+          AND sl.medicine_id IS NULL
       `, [cutoffDateString, cutoffDateString]);
 
       // Process results to add calculated fields
@@ -109,6 +118,7 @@ export class NonMovingReportService {
           medicineName: row.medicine_name,
           batchNo: row.batch_no || null,
           quantity: row.quantity,
+          expiryDate: row.expiry_date || null,
           lastTransactionDate: lastTransactionDate || null,
           daysSinceLastTransaction: daysSinceLastTransaction,
           mrp: row.mrp || null,

@@ -86,6 +86,84 @@ const generateInvoiceNo = async (db: Database) => {
   return `${prefix}${padded}`;
 };
 
+interface GstItemBreakdown {
+  item: any;
+  cgst_value: number;
+  sgst_value: number;
+}
+
+const calculateSalesGstAndTotals = async (
+  db: Database,
+  items: any[],
+  discount: number
+) => {
+  let subtotal = 0;
+  let totalCgst = 0;
+  let totalSgst = 0;
+  const itemTaxBreakdowns: GstItemBreakdown[] = [];
+
+  for (const item of items) {
+    const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0, inventory_id } = item;
+    const q = Number(quantity);
+    const l = Number(loose_qty);
+    const pSize = Number(pack_size || 10);
+    const d = Number(discount_per || item.discountPer || 0);
+    const uPrice = Number(unit_price);
+    const dPrice = uPrice * (1 - d / 100);
+    const lineGross = (q * dPrice) + (l * (dPrice / pSize));
+    subtotal += lineGross;
+
+    let cgstPer = Number(item.cgst_per !== undefined ? item.cgst_per : (item.cgst !== undefined ? item.cgst : NaN));
+    let sgstPer = Number(item.sgst_per !== undefined ? item.sgst_per : (item.sgst !== undefined ? item.sgst : NaN));
+
+    if ((isNaN(cgstPer) || isNaN(sgstPer) || (cgstPer === 0 && sgstPer === 0)) && inventory_id) {
+      const medTax = await db.get(
+        `SELECT m.cgst_per, m.sgst_per FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [inventory_id]
+      );
+      if (medTax) {
+        if (isNaN(cgstPer) || cgstPer === 0) cgstPer = Number(medTax.cgst_per) || 0;
+        if (isNaN(sgstPer) || sgstPer === 0) sgstPer = Number(medTax.sgst_per) || 0;
+      }
+    }
+
+    if (isNaN(cgstPer) || cgstPer === 0) cgstPer = 2.5;
+    if (isNaN(sgstPer) || sgstPer === 0) sgstPer = 2.5;
+
+    const gstRate = cgstPer + sgstPer;
+    const taxable = gstRate > 0 ? (lineGross / (1 + (gstRate / 100))) : lineGross;
+    const lineTax = lineGross - taxable;
+    const cgst_value = Number(((lineTax * cgstPer) / (gstRate || 1)).toFixed(2));
+    const sgst_value = Number(((lineTax * sgstPer) / (gstRate || 1)).toFixed(2));
+
+    totalCgst += cgst_value;
+    totalSgst += sgst_value;
+
+    itemTaxBreakdowns.push({
+      item,
+      cgst_value,
+      sgst_value
+    });
+  }
+
+  const roundedCgst = Number(totalCgst.toFixed(2));
+  const roundedSgst = Number(totalSgst.toFixed(2));
+  const total = Math.round(subtotal - Number(discount));
+  const tax = Number((roundedCgst + roundedSgst).toFixed(2));
+  const roff = Number((total - (subtotal - Number(discount))).toFixed(2));
+
+  return {
+    subtotal,
+    total,
+    tax,
+    roff,
+    totalCgst: roundedCgst,
+    totalSgst: roundedSgst,
+    itemTaxBreakdowns
+  };
+};
+
+
 // Get next sequential invoice number
 router.get('/next-invoice', async (req, res) => {
   let db;
@@ -189,22 +267,9 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Compute subtotal, tax, and total strictly checking values to prevent null/NaN
-    let subtotal = 0;
-    for (const item of items) {
-      const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0 } = item;
-      const q = Number(quantity);
-      const l = Number(loose_qty);
-      const pSize = Number(pack_size || 10);
-      const d = Number(discount_per);
-      const uPrice = Number(unit_price);
-      const dPrice = uPrice * (1 - d / 100);
-      subtotal += (q * dPrice) + (l * (dPrice / pSize));
-    }
-
-    const taxRate = 0.05; // 5% tax
-    const total = Math.round(subtotal - Number(discount));
-    const tax = Number((total * taxRate / (1 + taxRate)).toFixed(2));
+    // Compute subtotal, CGST, SGST, tax, roff, and total using accurate item GST rates
+    const gstCalc = await calculateSalesGstAndTotals(db, items, Number(discount));
+    const { subtotal, total, tax, roff, totalCgst, totalSgst, itemTaxBreakdowns } = gstCalc;
 
     if (isNaN(subtotal) || isNaN(tax) || isNaN(total)) {
       throw new Error('Calculated totals resulted in NaN value.');
@@ -224,8 +289,8 @@ router.post('/', async (req, res) => {
     }
 
     const result = await db.run(
-      'INSERT INTO sales_invoices (invoice_no, customer_id, total_amount, tax_amount, payment_medium, payment_status, date, discount, subtotal, doctor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_no, customerId, total, tax, paymentMedium, paymentStatus, invoiceDateValue, Number(discount), subtotal, resolvedDoctorId]
+      'INSERT INTO sales_invoices (invoice_no, customer_id, total_amount, tax_amount, cgst_value, sgst_value, igst_value, payment_medium, payment_status, date, discount, subtotal, doctor_id, roff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoice_no, customerId, total, tax, totalCgst, totalSgst, 0, paymentMedium, paymentStatus, invoiceDateValue, Number(discount), subtotal, resolvedDoctorId, roff]
     );
     const invoiceId = result.lastID;
     if (!invoiceId) {
@@ -297,9 +362,13 @@ router.post('/', async (req, res) => {
         throw new Error(`Insufficient stock for "${currentStock.db_medicine_name || medicine_name || 'Medicine'}". Available: ${currentStock.quantity} strips & ${currentStock.loose_quantity} loose. Requested: ${soldQty} strips & ${soldLoose} loose.`);
       }
 
+      const taxBreakdown = itemTaxBreakdowns.find(tb => tb.item === item);
+      const itemCgst = taxBreakdown ? taxBreakdown.cgst_value : 0;
+      const itemSgst = taxBreakdown ? taxBreakdown.sgst_value : 0;
+
       await db.run(
-        'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)',
-        [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(item.discount_per || item.discountPer || 0)]
+        'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per, cgst_value, sgst_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(item.discount_per || item.discountPer || 0), itemCgst, itemSgst]
       );
 
       // Decrement stock in inventory_master, auto-converting a strip to loose if the loose sale exceeds current loose stock.
@@ -1737,8 +1806,10 @@ router.put('/:id', async (req, res) => {
       // Delete old items
       await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
 
-      // Compute new totals
-      let subtotal = 0;
+      // Compute new totals and GST breakdown
+      const gstCalc = await calculateSalesGstAndTotals(db, items, Number(discount || 0));
+      const { subtotal, total, tax, roff, totalCgst, totalSgst, itemTaxBreakdowns } = gstCalc;
+
       for (const item of items) {
         const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, discount_per = 0 } = item;
 
@@ -1771,28 +1842,21 @@ router.put('/:id', async (req, res) => {
           }
         }
 
-        await db.run('INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)', [id, inventory_id, quantity, unit_price, loose_qty, discount_per]);
+        const taxBreakdown = itemTaxBreakdowns.find(tb => tb.item === item);
+        const itemCgst = taxBreakdown ? taxBreakdown.cgst_value : 0;
+        const itemSgst = taxBreakdown ? taxBreakdown.sgst_value : 0;
+
+        await db.run('INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per, cgst_value, sgst_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [id, inventory_id, quantity, unit_price, loose_qty, discount_per, itemCgst, itemSgst]);
         const newStock = applyStockDelta(
           { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
           -Number(quantity), -Number(loose_qty), pSize
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
-
-        const q = Number(quantity);
-        const l = Number(loose_qty);
-        const d = Number(discount_per);
-        const uPrice = Number(unit_price);
-        const dPrice = uPrice * (1 - d / 100);
-        subtotal += (q * dPrice) + (l * (dPrice / pSize));
       }
 
-      const taxRate = 0.05;
-      const total = Math.round(subtotal - discount);
-      const tax = Number((total * taxRate / (1 + taxRate)).toFixed(2));
-
       await db.run(
-        'UPDATE sales_invoices SET customer_id = ?, total_amount = ?, tax_amount = ?, payment_medium = COALESCE(?, payment_medium), payment_status = COALESCE(?, payment_status), discount = ?, subtotal = ?, doctor_id = ? WHERE id = ?',
-        [customerId, total, tax, paymentMedium || null, paymentStatus || null, Number(discount), subtotal, doctor_id || null, id]
+        'UPDATE sales_invoices SET customer_id = ?, total_amount = ?, tax_amount = ?, cgst_value = ?, sgst_value = ?, payment_medium = COALESCE(?, payment_medium), payment_status = COALESCE(?, payment_status), discount = ?, subtotal = ?, doctor_id = ?, roff = ? WHERE id = ?',
+        [customerId, total, tax, totalCgst, totalSgst, paymentMedium || null, paymentStatus || null, Number(discount || 0), subtotal, doctor_id || null, roff, id]
       );
     } else {
       // Just update customer/discount

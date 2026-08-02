@@ -1,7 +1,7 @@
 import express from 'express';
 import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import { dbManager } from '../database/connection.js';
-import { exportToExcel, exportToPdf } from '../utils/reportExporter.js';
+import { exportToExcel, exportToPdf, exportToCsv } from '../utils/reportExporter.js';
 import { nonMovingReportService } from '../services/nonMovingReportService.js';
 import { getReportCutoverDate, effectiveReportFromDate } from '../utils/reportCutover.js';
 
@@ -239,11 +239,11 @@ router.get('/export-pdf', async (req, res) => {
       colWidths = [120, 180, 112, 100];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';
-      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price', 'MRP', 'Valuation (Cost)'];
-      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'mrp', 'value'];
-      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
-      alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', cost_price: 'right', mrp: 'right', value: 'right' };
-      colWidths = [150, 70, 60, 60, 60, 112];
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price', 'MRP', 'Valuation (Cost)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'expiry_date', 'cost_price', 'mrp', 'value'];
+      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.expiry_date, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(im.is_active, 1) = 1 ORDER BY medicine_name ASC';
+      alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', expiry_date: 'center', cost_price: 'right', mrp: 'right', value: 'right' };
+      colWidths = [130, 60, 50, 70, 50, 50, 102];
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
@@ -258,6 +258,28 @@ router.get('/export-pdf', async (req, res) => {
       keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
       alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', cost_price: 'right', expiry_date: 'center', value: 'right' };
       colWidths = [150, 70, 60, 60, 80, 92];
+    } else if (type === 'nonMoving') {
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price', 'Hold Value (Cost)', 'Hold Value (MRP)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      alignMap = { medicineName: 'left', batchNo: 'left', quantity: 'right', expiryDate: 'center', costPrice: 'right', totalCostValue: 'right', totalValue: 'right', dormantDaysLabel: 'center' };
+      colWidths = [120, 50, 45, 65, 50, 60, 60, 62];
+      
+      const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
+      const rows = nonMovingItems.map(item => ({
+        ...item,
+        batchNo: item.batchNo || 'N/A',
+        expiryDate: item.expiryDate || 'N/A',
+        costPrice: (item.costPrice || 0).toFixed(2),
+        totalCostValue: (item.totalCostValue || 0).toFixed(2),
+        totalValue: (item.totalValue || 0).toFixed(2),
+        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+      }));
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.pdf`);
+      return exportToPdf(res, title, headers, keys, rows, alignMap, colWidths);
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }
@@ -303,9 +325,9 @@ router.get('/export-excel', async (req, res) => {
       params = [from, to];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';
-      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'MRP (Rs.)', 'Valuation Cost (Rs.)'];
-      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'mrp', 'value'];
-      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id ORDER BY medicine_name ASC';
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'MRP (Rs.)', 'Valuation Cost (Rs.)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'expiry_date', 'cost_price', 'mrp', 'value'];
+      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.expiry_date, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(im.is_active, 1) = 1 ORDER BY medicine_name ASC';
     } else if (type === 'expiry') {
       if (fromDate || toDate) {
         title = `Expiry Warning Report (${from} to ${to})`;
@@ -318,6 +340,27 @@ router.get('/export-excel', async (req, res) => {
       }
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
       keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
+    } else if (type === 'nonMoving') {
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      
+      const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
+      const rows = nonMovingItems.map(item => ({
+        ...item,
+        batchNo: item.batchNo || 'N/A',
+        expiryDate: item.expiryDate || 'N/A',
+        costPrice: Number(item.costPrice || 0).toFixed(2),
+        totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
+        totalValue: Number(item.totalValue || 0).toFixed(2),
+        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+      }));
+
+      const excelBuffer = exportToExcel(title, headers, keys, rows);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.xlsx`);
+      return res.send(excelBuffer);
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }
@@ -331,6 +374,87 @@ router.get('/export-excel', async (req, res) => {
   } catch (err: any) {
     console.error('Excel export error:', err);
     res.status(500).json({ error: 'Failed to export Excel sheet' });
+  }
+});
+
+// CSV export endpoint
+router.get('/export-csv', async (req, res) => {
+  const { type, fromDate, toDate } = req.query;
+
+  try {
+    const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
+
+    let title = 'Pharmacy OS Report';
+    let headers: string[] = [];
+    let keys: string[] = [];
+    let query = '';
+    let params: any[] = [];
+
+    if (type === 'sales') {
+      title = 'Sales History Report';
+      headers = ['Invoice No', 'Date', 'Amount (Rs.)'];
+      keys = ['invoice_no', 'date', 'total_amount'];
+      query = `SELECT invoice_no, COALESCE(date, business_date) as date, total_amount FROM sales_invoices WHERE ${SALES_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY id DESC`;
+      params = [from, to];
+    } else if (type === 'purchases') {
+      title = 'Purchase History Report';
+      headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount (Rs.)'];
+      keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
+      query = `SELECT p.invoice_no, d.name as distributor_name, COALESCE(p.date, p.business_date) as date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE ${PURCHASES_P_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY p.id DESC`;
+      params = [from, to];
+    } else if (type === 'inventory') {
+      title = 'Current Inventory Status Report';
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'MRP (Rs.)', 'Valuation Cost (Rs.)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'expiry_date', 'cost_price', 'mrp', 'value'];
+      query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.expiry_date, im.cost_price, im.mrp, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(im.is_active, 1) = 1 ORDER BY medicine_name ASC';
+    } else if (type === 'expiry') {
+      if (fromDate || toDate) {
+        title = `Expiry Warning Report (${from} to ${to})`;
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) BETWEEN date(?) AND date(?) AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        params = [from, to];
+      } else {
+        title = 'Expiry Warning Report (Next 180 Days)';
+        query = 'SELECT m.name as medicine_name, im.batch_no, im.quantity, im.cost_price, im.expiry_date, (im.quantity * im.cost_price) as value FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE COALESCE(date(im.expiry_date), date(substr(im.expiry_date, 1, 10))) <= date(\'now\', \'+180 days\') AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0 ORDER BY im.expiry_date ASC';
+        params = [];
+      }
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
+      keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
+    } else if (type === 'nonMoving') {
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
+      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      
+      const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
+      const rows = nonMovingItems.map(item => ({
+        ...item,
+        batchNo: item.batchNo || 'N/A',
+        expiryDate: item.expiryDate || 'N/A',
+        costPrice: Number(item.costPrice || 0).toFixed(2),
+        totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
+        totalValue: Number(item.totalValue || 0).toFixed(2),
+        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+      }));
+
+      const csvContent = exportToCsv(headers, keys, rows);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.csv`);
+      return res.send(csvContent);
+    } else {
+      return res.status(400).json({ error: 'Invalid report type' });
+    }
+
+    const rows = await db.all(query, params);
+    const csvContent = exportToCsv(headers, keys, rows);
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${Date.now()}.csv`);
+    res.send(csvContent);
+  } catch (err: any) {
+    console.error('CSV export error:', err);
+    res.status(500).json({ error: 'Failed to export CSV file' });
   }
 });
 
@@ -498,6 +622,122 @@ router.post('/send-monthly-scheduled', async (req, res) => {
   } catch (err: any) {
     console.error('Error triggering scheduled monthly report send:', err);
     res.status(500).json({ success: false, message: err.message || 'Failed to send report' });
+  }
+});
+
+// GSTR-1 B2C Tax Filing Summary Endpoint
+router.get('/gstr-1', async (req, res) => {
+  const { fromDate, toDate } = req.query;
+  try {
+    const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
+
+    const summaryRow = await db.get(`
+      SELECT 
+        COUNT(id) as invoice_count,
+        IFNULL(SUM(total_amount), 0) as gross_sales,
+        IFNULL(SUM(subtotal), 0) as total_subtotal,
+        IFNULL(SUM(discount), 0) as total_discount,
+        IFNULL(SUM(cgst_value), 0) as total_cgst,
+        IFNULL(SUM(sgst_value), 0) as total_sgst,
+        IFNULL(SUM(igst_value), 0) as total_igst,
+        IFNULL(SUM(tax_amount), 0) as total_tax,
+        IFNULL(SUM(roff), 0) as total_roff
+      FROM sales_invoices
+      WHERE ${SALES_DATE_EXPR} >= date(?) AND ${SALES_DATE_EXPR} <= date(?)
+    `, [from, to]);
+
+    const invoices = await db.all(`
+      SELECT 
+        si.id, si.invoice_no, ${SALES_INV_DATE_EXPR} as date,
+        si.total_amount, si.subtotal, si.discount,
+        si.cgst_value, si.sgst_value, si.igst_value, si.tax_amount, si.roff,
+        c.name as customer_name
+      FROM sales_invoices si
+      LEFT JOIN customers c ON si.customer_id = c.id
+      WHERE ${SALES_INV_DATE_EXPR} >= date(?) AND ${SALES_INV_DATE_EXPR} <= date(?)
+      ORDER BY si.id DESC
+      LIMIT 1000
+    `, [from, to]);
+
+    const taxableAmount = Math.max(0, (summaryRow.total_subtotal || 0) - (summaryRow.total_discount || 0));
+
+    res.json({
+      period: { from, to },
+      summary: {
+        invoiceCount: summaryRow.invoice_count || 0,
+        grossSales: summaryRow.gross_sales || 0,
+        subtotal: summaryRow.total_subtotal || 0,
+        discount: summaryRow.total_discount || 0,
+        taxableAmount: taxableAmount,
+        cgst: summaryRow.total_cgst || 0,
+        sgst: summaryRow.total_sgst || 0,
+        igst: summaryRow.total_igst || 0,
+        totalTax: summaryRow.total_tax || 0,
+        roundOff: summaryRow.total_roff || 0
+      },
+      invoices
+    });
+  } catch (err: any) {
+    console.error('Error generating GSTR-1 summary:', err);
+    res.status(500).json({ error: 'Failed to generate GSTR-1 summary' });
+  }
+});
+
+// HSN-wise Sales Tax Summary Endpoint
+router.get('/hsn-summary', async (req, res) => {
+  const { fromDate, toDate } = req.query;
+  try {
+    const db = await dbManager.getConnection();
+    const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
+    const to = toDate ? String(toDate) : '9999-12-31';
+
+    const hsnRows = await db.all(`
+      SELECT 
+        COALESCE(NULLIF(TRIM(m.hsn_code), ''), 'UNSPECIFIED') as hsn_code,
+        m.name as medicine_name,
+        COALESCE(m.cgst_per, 2.5) + COALESCE(m.sgst_per, 2.5) as gst_rate,
+        SUM(si.quantity) as total_quantity,
+        SUM(si.quantity * si.unit_price * (1 - COALESCE(si.discount_per, 0) / 100)) as gross_amount,
+        SUM(COALESCE(si.cgst_value, 0)) as total_cgst,
+        SUM(COALESCE(si.sgst_value, 0)) as total_sgst
+      FROM sale_items si
+      JOIN sales_invoices sinv ON si.invoice_id = sinv.id
+      JOIN inventory_master im ON si.inventory_id = im.id
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE ${SALES_INV_DATE_EXPR} >= date(?) AND ${SALES_INV_DATE_EXPR} <= date(?)
+      GROUP BY COALESCE(NULLIF(TRIM(m.hsn_code), ''), 'UNSPECIFIED'), m.name
+      ORDER BY gross_amount DESC
+    `, [from, to]);
+
+    const formattedRows = hsnRows.map((r: any) => {
+      const gross = r.gross_amount || 0;
+      const cgst = r.total_cgst || 0;
+      const sgst = r.total_sgst || 0;
+      const totalTax = cgst + sgst;
+      const taxable = Math.max(0, gross - totalTax);
+      return {
+        hsnCode: r.hsn_code,
+        medicineName: r.medicine_name,
+        gstRate: r.gst_rate,
+        quantity: r.total_quantity || 0,
+        grossAmount: Number(gross.toFixed(2)),
+        taxableAmount: Number(taxable.toFixed(2)),
+        cgst: Number(cgst.toFixed(2)),
+        sgst: Number(sgst.toFixed(2)),
+        totalTax: Number(totalTax.toFixed(2))
+      };
+    });
+
+    res.json({
+      period: { from, to },
+      totalItemsCount: formattedRows.length,
+      hsnSummary: formattedRows
+    });
+  } catch (err: any) {
+    console.error('Error generating HSN summary report:', err);
+    res.status(500).json({ error: 'Failed to generate HSN summary report' });
   }
 });
 

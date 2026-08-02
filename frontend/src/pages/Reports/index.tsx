@@ -22,8 +22,11 @@ import {
   Undo2,
   Percent,
   Users,
-  Send
+  Send,
+  FileSpreadsheet,
+  X
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString } from '../../utils/date';
@@ -33,6 +36,7 @@ const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
 const cachedNonMovingMap: Record<number, any> = {};
 
 const Reports = () => {
+  const queryClient = useQueryClient();
   const [fromDate, setFromDate] = useState(getNDaysAgoString(30));
   const [toDate, setToDate] = useState(getTodayString());
   const [manualToDate, setManualToDate] = useState(false);
@@ -77,6 +81,7 @@ const Reports = () => {
   // Non-moving report local settings
   const [nonMovingDays, setNonMovingDays] = useState(90);
   const [localNonMovingDays, setLocalNonMovingDays] = useState(90);
+  const [nonMovingSearchQuery, setNonMovingSearchQuery] = useState('');
 
   // Product trace local query state
   const [traceQuery, setTraceQuery] = useState('');
@@ -88,6 +93,49 @@ const Reports = () => {
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [sendingSamples, setSendingSamples] = useState(false);
 
+  // Complete Report Export Modal State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'csv'>('pdf');
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleDownloadExport = async () => {
+    setIsExporting(true);
+    try {
+      let blob: Blob;
+      if (activeTab === 'nonMoving') {
+        if (exportFormat === 'pdf') {
+          blob = await api.exportReportsPDF({ type: 'nonMoving', days: nonMovingDays });
+        } else {
+          blob = await api.exportReportsCSV({ type: 'nonMoving', days: nonMovingDays });
+        }
+      } else if (activeTab === 'trace') {
+        alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
+        setIsExporting(false);
+        return;
+      } else {
+        if (exportFormat === 'pdf') {
+          blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
+        } else {
+          blob = await api.exportReportsCSV({ type: activeTab, fromDate, toDate });
+        }
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report_${activeTab}_${Date.now()}.${exportFormat === 'pdf' ? 'pdf' : 'csv'}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setShowExportModal(false);
+    } catch (err) {
+      console.error(`Error exporting ${exportFormat}:`, err);
+      alert(`Failed to export ${exportFormat.toUpperCase()} report.`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleSendToWhatsapp = async (overrideFormat?: string) => {
     setSendingWhatsapp(true);
     try {
@@ -98,32 +146,64 @@ const Reports = () => {
         deliveryFormat: overrideFormat || 'combined'
       });
       if (res.data?.success) {
-        alert(`Report successfully sent to Owner WhatsApp! (${res.data.recipientPhone || ''})`);
+        alert('Report sent successfully to WhatsApp!');
       } else {
-        alert(res.data?.message || 'Failed to send report to WhatsApp');
+        alert(res.data?.message || 'Failed to send report');
       }
     } catch (err: any) {
-      console.error('Error sending report to WhatsApp:', err);
-      alert(err?.response?.data?.message || 'Failed to send report to WhatsApp');
+      alert(err.response?.data?.message || 'Error sending report via WhatsApp');
     } finally {
       setSendingWhatsapp(false);
     }
   };
 
-  const handleSendAllStyles = async () => {
+  const handleSendAllTemplateSamples = async () => {
     setSendingSamples(true);
     try {
       const res = await apiClient.post('/reports/send-all-template-samples', {});
       if (res.data?.success) {
-        alert(res.data.message || 'All 3 PDF Template Styles sent to Owner WhatsApp!');
+        alert('All 3 PDF Template Samples (Classic, Corporate, Executive) queued & sent to WhatsApp!');
       } else {
-        alert(res.data?.message || 'Failed to send sample PDFs');
+        alert(res.data?.message || 'Failed to send PDF samples');
       }
     } catch (err: any) {
-      console.error('Error sending sample PDFs:', err);
-      alert(err?.response?.data?.message || 'Failed to send sample PDFs');
+      alert(err.response?.data?.message || 'Error sending PDF samples via WhatsApp');
     } finally {
       setSendingSamples(false);
+    }
+  };
+
+  // Automated PDF / Excel Exporter
+  const handleExport = async (format: 'pdf' | 'excel') => {
+    try {
+      let blob;
+      if (activeTab === 'nonMoving') {
+        if (format === 'pdf') {
+          blob = await api.exportReportsPDF({ type: 'nonMoving', days: nonMovingDays });
+        } else {
+          blob = await api.exportReportsExcel({ type: 'nonMoving', days: nonMovingDays });
+        }
+      } else if (activeTab === 'trace') {
+        alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
+        return;
+      } else {
+        if (format === 'pdf') {
+          blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
+        } else {
+          blob = await api.exportReportsExcel({ type: activeTab, fromDate, toDate });
+        }
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report_${activeTab}_${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error(`Error exporting ${format}:`, err);
+      alert(`Failed to export ${format} report.`);
     }
   };
 
@@ -225,50 +305,38 @@ const Reports = () => {
     }
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (activeTab === 'nonMoving') {
+      delete cachedNonMovingMap[localNonMovingDays];
+      queryClient.removeQueries({ queryKey: ['reports', 'nonMoving', localNonMovingDays] });
+      queryClient.invalidateQueries({ queryKey: ['reports', 'nonMoving', localNonMovingDays] });
       setNonMovingDays(localNonMovingDays);
       refetchNonMoving();
     } else if (activeTab === 'trace') {
       handleTraceSearch();
     } else {
+      delete cachedReportsMap[cacheKeyStr];
+      queryClient.removeQueries({ queryKey: ['reports', activeTab, fromDate, toDate] });
+      queryClient.invalidateQueries({ queryKey: ['reports', activeTab, fromDate, toDate] });
       refetch();
     }
   };
 
-  const handleExport = async (format: 'pdf' | 'excel') => {
-    try {
-      let blob;
-      if (activeTab === 'nonMoving') {
-        alert('Exporting custom non-moving inventory logs...');
-        return;
-      }
-      if (activeTab === 'trace') {
-        alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
-        return;
-      }
 
-      if (format === 'pdf') {
-        blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
-      } else {
-        blob = await api.exportReportsExcel({ type: activeTab, fromDate, toDate });
-      }
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `report_${activeTab}_${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error(`Error exporting ${format}:`, err);
-      alert(`Failed to export ${format} report.`);
-    }
-  };
 
   const stats = reportData?.summary ?? {};
   const records = reportData?.records ?? [];
+
+  const filteredNonMovingItems = (nonMovingData?.items ?? []).filter((item: any) => {
+    if (!nonMovingSearchQuery.trim()) return true;
+    const q = nonMovingSearchQuery.toLowerCase().trim();
+    return (item.medicineName && item.medicineName.toLowerCase().includes(q)) ||
+           (item.batchNo && item.batchNo.toLowerCase().includes(q));
+  });
 
   // Calculate dynamic stats based on active tab
   const getStatsCards = () => {
@@ -619,16 +687,28 @@ const Reports = () => {
 
           {/* Controls for Non-Moving dead stock filter */}
           {activeTab === 'nonMoving' && (
-            <div className="flex items-center gap-2.5 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
-              <span>Show Inactive Stock ({'>='} Days)</span>
-              <input
-                type="number"
-                min="1"
-                max="3650"
-                className="w-16 bg-bg border border-glass-border rounded-lg text-text text-xs focus:outline-none px-2 py-0.5 font-mono font-bold text-center"
-                value={localNonMovingDays}
-                onChange={(e) => setLocalNonMovingDays(Math.max(1, parseInt(e.target.value) || 1))}
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="text"
+                  placeholder="Filter medicine or batch..."
+                  className="pl-9 pr-3 py-1 bg-bg3/60 border border-glass-border rounded-xl text-text text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 w-52 font-medium"
+                  value={nonMovingSearchQuery}
+                  onChange={(e) => setNonMovingSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
+                <span>Inactive ({'>='} Days)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  className="w-16 bg-bg border border-glass-border rounded-lg text-text text-xs focus:outline-none px-2 py-0.5 font-mono font-bold text-center"
+                  value={localNonMovingDays}
+                  onChange={(e) => setLocalNonMovingDays(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+              </div>
             </div>
           )}
 
@@ -649,6 +729,7 @@ const Reports = () => {
           )}
 
           <button
+            type="button"
             onClick={handleGenerate}
             className="bg-primary hover:bg-primary/95 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition-all active:scale-95 shadow-md shadow-primary/25 cursor-pointer shrink-0 h-9"
             title="Generate Report Data"
@@ -658,6 +739,7 @@ const Reports = () => {
           </button>
 
           <button
+            type="button"
             onClick={() => handleSendToWhatsapp('combined')}
             disabled={sendingWhatsapp}
             className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
@@ -668,16 +750,18 @@ const Reports = () => {
           </button>
 
           <button
-            onClick={handleDownloadPdfReport}
-            className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
-            title="Download Full PDF Document Report"
+            type="button"
+            onClick={() => setShowExportModal(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md shadow-purple-600/25 cursor-pointer shrink-0 h-9"
+            title="Export Complete Report (PDF / Excel Format)"
           >
             <Download size={13} />
-            <span>Download PDF</span>
+            <span>Export / Download Report</span>
           </button>
 
           <button
-            onClick={handleSendAllStyles}
+            type="button"
+            onClick={handleSendAllTemplateSamples}
             disabled={sendingSamples}
             className="bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
             title="Send all 3 PDF Template Styles to Owner WhatsApp"
@@ -1095,6 +1179,7 @@ const Reports = () => {
                       <th className="p-3.5 border-b border-border/50 pl-5">Medicine Name</th>
                       <th className="p-3.5 border-b border-border/50">Batch</th>
                       <th className="p-3.5 border-b border-border/50">Quantity</th>
+                      <th className="p-3.5 border-b border-border/50">Expiry Date</th>
                       <th className="p-3.5 border-b border-border/50">Unit Cost (₹)</th>
                       <th className="p-3.5 border-b border-border/50">Hold Value (Cost)</th>
                       <th className="p-3.5 border-b border-border/50">Hold Value (MRP)</th>
@@ -1104,25 +1189,30 @@ const Reports = () => {
                   <tbody>
                     {loadingNonMoving ? (
                       <tr>
-                        <td colSpan={7} className="p-12 text-center text-xs text-muted">
+                        <td colSpan={8} className="p-12 text-center text-xs text-muted">
                           <Loader2 className="animate-spin mx-auto mb-2 text-primary" size={20} />
                           <span className="font-bold">Calculating dormant items...</span>
                         </td>
                       </tr>
-                    ) : !nonMovingData || !nonMovingData.items || nonMovingData.items.length === 0 ? (
+                    ) : filteredNonMovingItems.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-16 text-center text-xs text-muted">
+                        <td colSpan={8} className="p-16 text-center text-xs text-muted">
                           <FileCheck2 className="mx-auto mb-3 opacity-30 text-green" size={28} />
-                          <p className="font-bold">No dormant items found</p>
-                          <p className="text-[10px] mt-0.5">All stock items have transaction activity in the last {nonMovingDays} days.</p>
+                          <p className="font-bold">No matching dormant items found</p>
+                          <p className="text-[10px] mt-0.5">
+                            {nonMovingSearchQuery.trim()
+                              ? `No inactive stock matched "${nonMovingSearchQuery}".`
+                              : `All stock items have transaction activity in the last ${nonMovingDays} days.`}
+                          </p>
                         </td>
                       </tr>
                     ) : (
-                      nonMovingData.items.map((row: any, idx: number) => (
+                      filteredNonMovingItems.map((row: any, idx: number) => (
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicineName || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batchNo || 'N/A'}</td>
                           <td className="p-3.5 font-mono text-text">{row.quantity ?? 0}</td>
+                          <td className="p-3.5 font-mono font-bold text-amber-400">{row.expiryDate || 'N/A'}</td>
                           <td className="p-3.5 font-mono text-text">₹{(row.costPrice || 0).toFixed(2)}</td>
                           <td className="p-3.5 font-mono text-text">₹{(row.totalCostValue || 0).toFixed(2)}</td>
                           <td className="p-3.5 font-mono font-bold text-text">₹{(row.totalValue || 0).toFixed(2)}</td>
@@ -1249,6 +1339,127 @@ const Reports = () => {
         </div>
 
       </div>
+
+      {/* EXPORT COMPLETE REPORT MODAL DIALOG */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-glass-border/40 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <Download size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-text">Export Complete Report</h3>
+                  <p className="text-[10px] text-muted font-medium">Select desired file format for full dataset download</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="text-muted hover:text-text p-1.5 rounded-lg hover:bg-bg3/60 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Active Context Details */}
+            <div className="bg-bg3/40 border border-glass-border/30 rounded-xl p-3.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted font-mono">Report Context</span>
+                <span className="text-[11px] font-bold text-primary capitalize">{activeTab} Report</span>
+              </div>
+              <p className="text-xs text-text font-semibold">
+                {activeTab === 'nonMoving'
+                  ? `Non-Moving Inventory (${nonMovingDays}+ Days Inactive)`
+                  : activeTab === 'trace'
+                  ? `Product Trace Ledger Audit`
+                  : `${fromDate} to ${toDate}`}
+              </p>
+              <div className="flex items-center gap-1.5 text-[10px] text-muted pt-1 border-t border-glass-border/20 mt-1">
+                <Info size={12} className="text-purple-400 shrink-0" />
+                <span>Exports all matching database records without page truncation.</span>
+              </div>
+            </div>
+
+            {/* File Format Selection Cards */}
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider block">Choose File Format</label>
+              
+              <div className="grid grid-cols-2 gap-3">
+                {/* PDF Option */}
+                <button
+                  type="button"
+                  onClick={() => setExportFormat('pdf')}
+                  className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    exportFormat === 'pdf'
+                      ? 'bg-purple-500/10 border-purple-500 text-purple-300 ring-1 ring-purple-500/50 shadow-md'
+                      : 'bg-bg3/30 border-glass-border text-muted hover:bg-bg3/60 hover:text-text'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <FileText size={22} className={exportFormat === 'pdf' ? 'text-purple-400' : 'text-muted'} />
+                    {exportFormat === 'pdf' && <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-text">PDF Document</h4>
+                    <p className="text-[10px] text-muted mt-0.5">Multi-page itemized report (.pdf)</p>
+                  </div>
+                </button>
+
+                {/* CSV Option */}
+                <button
+                  type="button"
+                  onClick={() => setExportFormat('csv')}
+                  className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    exportFormat === 'csv'
+                      ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/50 shadow-md'
+                      : 'bg-bg3/30 border-glass-border text-muted hover:bg-bg3/60 hover:text-text'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <FileSpreadsheet size={22} className={exportFormat === 'csv' ? 'text-emerald-400' : 'text-muted'} />
+                    {exportFormat === 'csv' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-text">CSV Spreadsheet</h4>
+                    <p className="text-[10px] text-muted mt-0.5">Full data rows (.csv)</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Dialog Footer Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-glass-border/40 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3/60 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadExport}
+                disabled={isExporting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:scale-95 transition-all shadow-md shadow-purple-600/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isExporting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} />
+                    <span>Download {exportFormat.toUpperCase()} File</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

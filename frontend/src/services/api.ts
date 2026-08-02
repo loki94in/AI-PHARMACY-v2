@@ -776,8 +776,9 @@ export const api = {
   
   getReportsSummary: (params: { type?: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports', { params }).then(res => res.data),
   getReportsData: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/data', { params }).then(res => res.data),
-  exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
-  exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/export-excel', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-excel', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsCSV: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
   getNonMovingReportData: (params: { days: number }) => apiClient.get<{ success: boolean; periodDays: number; count: number; items: any[] }>('/reports/non-moving/data', { params }).then(res => res.data),
   getProductTrace: (params: { q: string }) => apiClient.get<{ purchases: any[]; sales: any[] }>('/reports/product-trace', { params }).then(res => res.data),
 
