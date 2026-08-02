@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Shield, Key, CheckCircle, XCircle, Clock } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, clearAuthTokenCache, ensureAuthToken } from '../../services/api';
 
 interface LicenseStatus {
   status: 'active' | 'inactive' | 'trial';
@@ -78,9 +78,13 @@ const License = () => {
     setActivating(true);
     setActivateMsg(null);
     api.activateLicense(trimmed)
-      .then(() => {
+      .then(async () => {
         setActivateMsg({ type: 'success', text: 'License activated successfully!' });
         setActivateKey('');
+        // The server now has a fresh license_session_token — drop the cached
+        // legacy/stale token so subsequent requests re-bootstrap and pick it up.
+        clearAuthTokenCache();
+        await ensureAuthToken();
         fetchLicense();
       })
       .catch((err: Error) => {

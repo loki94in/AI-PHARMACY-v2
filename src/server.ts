@@ -22,6 +22,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = config.dbPath;
 
+// Flipped to true once ensureSchema() finishes below. Gates every /api route
+// (including the public bootstrap-token endpoint) so the first requests after
+// exe launch can't hit a not-yet-created schema and randomly 401/500 during
+// the boot window.
+let schemaReady = false;
+
 // Startup check disabled permanently
 
 /**
@@ -153,6 +159,23 @@ app.use('/api/wa-business/webhook', lazyRoute(() => import('./routes/whatsappBus
 // Public health check endpoint for mobile connection testing
 app.get('/api/health', (req, res) => {
   res.json({ success: true, status: 'ok', time: new Date().toISOString() });
+});
+
+// Distinct from /api/health: this reflects DB schema readiness, not just
+// process liveness. The frontend axios interceptor already retries 503s with
+// backoff (see frontend/src/services/api.ts), so gating on this needs no
+// separate frontend polling loop.
+app.get('/api/health/ready', (req, res) => {
+  if (schemaReady) return res.json({ success: true, ready: true });
+  res.status(503).json({ success: false, ready: false, retryAfter: 1 });
+});
+
+// Block every other /api route — including the public bootstrap-token
+// endpoint — until the schema is ready. Responds 503 (not 401), which the
+// frontend already retries with backoff instead of surfacing as an auth error.
+app.use('/api', (req, res, next) => {
+  if (schemaReady || req.path === '/health' || req.path === '/health/ready') return next();
+  res.status(503).json({ error: 'Server is initializing', retryAfter: 1 });
 });
 
 // Local SPA bootstrap: issue session token without embedding defaults in the client bundle
@@ -362,7 +385,9 @@ server.on('error', (err: any) => {
     try {
       console.log('[Boot] Initializing database schema and index checks...');
       await ensureSchema(DB_PATH);
-      
+      schemaReady = true;
+      console.log('[Boot] Schema ready — API requests unblocked.');
+
       const db = await dbManager.getConnection();
       
       // Initialize and rebuild compact inventory cache

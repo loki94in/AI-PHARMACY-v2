@@ -23,8 +23,7 @@ export async function ensureAuthToken(): Promise<string | null> {
   }
   if (cachedBootstrapToken) return cachedBootstrapToken;
   if (!bootstrapTokenPromise) {
-    bootstrapTokenPromise = fetch(`${API_URL}/auth/bootstrap-token`)
-      .then(async (res) => (res.ok ? res.json() : null))
+    bootstrapTokenPromise = fetchBootstrapTokenWithRetry()
       .then((data) => {
         cachedBootstrapToken = data?.token?.trim() || null;
         if (cachedBootstrapToken) {
@@ -42,6 +41,31 @@ export async function ensureAuthToken(): Promise<string | null> {
       });
   }
   return bootstrapTokenPromise;
+}
+
+// Retries with backoff so a transient failure during the ~1-60s server boot
+// window (schema still initializing — see /api/health/ready) doesn't leave
+// the client permanently tokenless. Bypasses apiClient/axios deliberately:
+// this call happens before any token exists, so it can't go through the
+// interceptor that attaches one.
+const BOOTSTRAP_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
+
+async function fetchBootstrapTokenWithRetry(): Promise<{ token?: string } | null> {
+  for (let attempt = 0; attempt <= BOOTSTRAP_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const res = await fetch(`${API_URL}/auth/bootstrap-token`);
+      if (res.ok) return res.json();
+      // 503 = server still initializing (schema not ready yet) — worth retrying.
+      // Any other non-OK status is not transient; stop retrying.
+      if (res.status !== 503) return null;
+    } catch {
+      // Network error — worth retrying.
+    }
+    const delay = BOOTSTRAP_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  return null;
 }
 
 export function clearAuthTokenCache(): void {
@@ -638,7 +662,7 @@ export const api = {
   
   // License
   getLicenseStatus: () => apiClient.get('/license/status').then(res => res.data),
-  activateLicense: (key: string) => apiClient.post('/license/activate', { key }).then(res => res.data),
+  activateLicense: (key: string) => apiClient.post('/license/activate', { licenseKey: key }).then(res => res.data),
 
   // WhatsApp Custom UI
   getWhatsappStatus: () => apiClient.get('/messaging/qr').then(res => res.data),
