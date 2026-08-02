@@ -246,6 +246,37 @@ export async function loadApiSubstances({ force }: { force?: boolean } = {}): Pr
 
 const BUNDLED_SEED = path.join(DATA_DIR, 'medicine_reference_seed.json');
 
+const DEFAULT_SEED_ROWS = [
+  { name: 'PARACETAMOL 650 MG TABLET', composition1: 'PARACETAMOL', manufacturer: 'MICRO LABS' },
+  { name: 'DOLO 650 TABLET', composition1: 'PARACETAMOL', manufacturer: 'MICRO LABS' },
+  { name: 'CALPOL 500 TABLET', composition1: 'PARACETAMOL', manufacturer: 'GLAXOSMITHKLINE' },
+  { name: 'CROCIN ADVANCE TABLET', composition1: 'PARACETAMOL', manufacturer: 'GLAXOSMITHKLINE' },
+  { name: 'AUGMENTIN 625 DUO TABLET', composition1: 'AMOXICILLIN', composition2: 'CLAVULANIC ACID', manufacturer: 'GLAXOSMITHKLINE' },
+  { name: 'AZITHRAL 500 TABLET', composition1: 'AZITHROMYCIN', manufacturer: 'ALEMBIC' },
+  { name: 'PAN 40 TABLET', composition1: 'PANTOPRAZOLE', manufacturer: 'ALKEM' },
+  { name: 'PAN D TABLET', composition1: 'PANTOPRAZOLE', composition2: 'DOMPERIDONE', manufacturer: 'ALKEM' },
+  { name: 'PANTOCID 40 TABLET', composition1: 'PANTOPRAZOLE', manufacturer: 'SUN PHARMA' },
+  { name: 'GLYCOMET 500 TABLET', composition1: 'METFORMIN', manufacturer: 'USV' },
+  { name: 'CITRIZINE 10 MG TABLET', composition1: 'CETIRIZINE', manufacturer: 'CIPLA' },
+  { name: 'ALERID 10 MG TABLET', composition1: 'CETIRIZINE', manufacturer: 'CIPLA' },
+  { name: 'TELMA 40 TABLET', composition1: 'TELMISARTAN', manufacturer: 'GLENMARK' },
+  { name: 'TELMA H TABLET', composition1: 'TELMISARTAN', composition2: 'HYDROCHLOROTHIAZIDE', manufacturer: 'GLENMARK' },
+  { name: 'ATORVA 10 TABLET', composition1: 'ATORVASTATIN', manufacturer: 'ZYDUS CADILA' },
+  { name: 'AMLONG 5 TABLET', composition1: 'AMLODIPINE', manufacturer: 'ARISTO' },
+  { name: 'MONTICOPE TABLET', composition1: 'LEVOCETIRIZINE', composition2: 'MONTELUKAST', manufacturer: 'MANKIND' },
+  { name: 'MONTEK LC TABLET', composition1: 'LEVOCETIRIZINE', composition2: 'MONTELUKAST', manufacturer: 'SUN PHARMA' },
+  { name: 'COMBIFLAM TABLET', composition1: 'IBUPROFEN', composition2: 'PARACETAMOL', manufacturer: 'SANOFI' },
+  { name: 'ZERODOL SP TABLET', composition1: 'ACECLOFENAC', composition2: 'PARACETAMOL', manufacturer: 'IPCA' },
+  { name: 'ZERODOL P TABLET', composition1: 'ACECLOFENAC', composition2: 'PARACETAMOL', manufacturer: 'IPCA' },
+  { name: 'CIPLOX 500 TABLET', composition1: 'CIPROFLOXACIN', manufacturer: 'CIPLA' },
+  { name: 'OFLOX 200 TABLET', composition1: 'OFLOXACIN', manufacturer: 'CIPLA' },
+  { name: 'TAXIM O 200 TABLET', composition1: 'CEFIXIME', manufacturer: 'ALKEM' },
+  { name: 'DIGENE TABLET', composition1: 'MAGNESIUM HYDROXIDE', composition2: 'ALUMINIUM HYDROXIDE', manufacturer: 'ABBOTT' },
+  { name: 'GELUSIL MPS TABLET', composition1: 'ALUMINIUM HYDROXIDE', composition2: 'DIMETHICONE', manufacturer: 'PFIZER' },
+  { name: 'ORSL ORAL REHYDRATION SALTS', composition1: 'SODIUM CHLORIDE', composition2: 'DEXTROSE', manufacturer: 'J&J' },
+  { name: 'ELECTRAL POWDER', composition1: 'SODIUM CHLORIDE', composition2: 'POTASSIUM CHLORIDE', manufacturer: 'FDC' }
+];
+
 export async function seedBundledReference(force = false): Promise<{ loaded: number }> {
   const db = await dbManager.getConnection();
   try {
@@ -253,13 +284,22 @@ export async function seedBundledReference(force = false): Promise<{ loaded: num
       const count = await db.get('SELECT COUNT(*) as c FROM medicine_reference');
       if (count && count.c > 0) return { loaded: 0 };
     }
-    if (!fs.existsSync(BUNDLED_SEED)) {
-      console.warn('[Seed] Bundled reference seed not found at:', BUNDLED_SEED);
-      return { loaded: 0 };
-    }
-    const rows = JSON.parse(fs.readFileSync(BUNDLED_SEED, 'utf8')) as Array<{
+    let rows: Array<{
       name: string; composition1: string; composition2?: string; manufacturer?: string;
-    }>;
+    }> = [];
+
+    if (fs.existsSync(BUNDLED_SEED)) {
+      try {
+        rows = JSON.parse(fs.readFileSync(BUNDLED_SEED, 'utf8'));
+      } catch (err) {
+        console.warn('[Seed] Failed to parse seed JSON file, using fallback array:', err);
+        rows = DEFAULT_SEED_ROWS;
+      }
+    } else {
+      console.log('[Seed] Bundled reference seed file absent, using embedded reference fallback rows.');
+      rows = DEFAULT_SEED_ROWS;
+    }
+
     let loaded = 0;
     await db.run('BEGIN TRANSACTION');
     try {

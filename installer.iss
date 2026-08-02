@@ -91,6 +91,9 @@ Source: "packaging\portable.env"; DestDir: "{app}"; DestName: ".env"; Flags: onl
 ; Optional seed database (fresh install only)
 Source: "data\app.db"; DestDir: "{app}\data"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 
+; Bundled reference medicine seed JSON
+Source: "data\medicine_reference_seed.json"; DestDir: "{app}\data"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; Optional reference medicine CSV (large — skip compression when present)
 Source: "data\reference_medicines.csv"; DestDir: "{app}\data"; Flags: ignoreversion nocompression skipifsourcedoesntexist
 

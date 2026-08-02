@@ -27,6 +27,13 @@ export async function ensureAuthToken(): Promise<string | null> {
       .then(async (res) => (res.ok ? res.json() : null))
       .then((data) => {
         cachedBootstrapToken = data?.token?.trim() || null;
+        if (cachedBootstrapToken) {
+          try {
+            localStorage.setItem('session_token', cachedBootstrapToken);
+          } catch {
+            // localStorage unavailable
+          }
+        }
         return cachedBootstrapToken;
       })
       .catch(() => null)
@@ -35,6 +42,17 @@ export async function ensureAuthToken(): Promise<string | null> {
       });
   }
   return bootstrapTokenPromise;
+}
+
+export function clearAuthTokenCache(): void {
+  cachedBootstrapToken = null;
+  bootstrapTokenPromise = null;
+  try {
+    localStorage.removeItem('session_token');
+    localStorage.removeItem('api_key');
+  } catch {
+    // localStorage unavailable
+  }
 }
 
 // Interceptor to attach the session token if available.
@@ -83,6 +101,7 @@ export const objectToCamelCase = (obj: any): any => {
 declare module 'axios' {
   export interface AxiosRequestConfig {
     standardizeData?: boolean;
+    _authRetry?: boolean;
   }
 }
 
@@ -97,6 +116,22 @@ apiClient.interceptors.response.use(
   },
   async (error) => {
     const config = error.config;
+    
+    // If 401 Unauthorized, clear stale cached token and retry once with fresh bootstrap token
+    if (error.response?.status === 401 && config && !config._authRetry) {
+      config._authRetry = true;
+      console.warn('[API] 401 Unauthorized. Clearing stale token cache and re-bootstrapping auth token...');
+      clearAuthTokenCache();
+      try {
+        const newToken = await ensureAuthToken();
+        if (newToken) {
+          config.headers['x-session-token'] = newToken;
+          return apiClient(config);
+        }
+      } catch (retryErr) {
+        console.error('[API] Auth re-bootstrap failed:', retryErr);
+      }
+    }
     
     // If 503 Service Initializing, retry up to 5 times
     if (error.response?.status === 503) {

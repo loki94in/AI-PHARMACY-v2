@@ -65,7 +65,7 @@ import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { ConnectedDevicesFooterBar } from './ConnectedDevicesFooterBar';
-import { api, apiClient, isCompactInventoryCacheReady } from '../services/api';
+import { api, apiClient, isCompactInventoryCacheReady, setCompactInventoryCache } from '../services/api';
 import { useOnClickOutside } from '../hooks/useOnClickOutside';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
@@ -1711,10 +1711,17 @@ export const Layout = ({
         await api.getCompactInventory();
         if (!cancelled) {
           console.log('[Layout] Compact inventory cache loaded.');
-          setCompactCacheLoaded(true);
         }
       } catch (err) {
-        if (!cancelled) console.warn('[Layout] Failed to load compact inventory:', err);
+        if (!cancelled) {
+          console.warn('[Layout] Failed to load compact inventory:', err);
+          if (!isCompactInventoryCacheReady()) {
+            setCompactInventoryCache([]);
+          }
+        }
+      } finally {
+        // ALWAYS mark cache loaded so POS search bar unlocks even if 401 or DB empty
+        if (!cancelled) setCompactCacheLoaded(true);
       }
     })();
     return () => { cancelled = true; };

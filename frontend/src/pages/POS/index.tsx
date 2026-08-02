@@ -1215,7 +1215,14 @@ const POS = () => {
     };
     window.addEventListener('inventory-cache-ready', handler);
     window.addEventListener('compact-inventory-ready', handler);
+
+    // Fallback: unlock inventory index within 1.5s even on cold boot delays
+    const fallbackTimer = setTimeout(() => {
+      setInventoryIndexReady(true);
+    }, 1500);
+
     return () => {
+      clearTimeout(fallbackTimer);
       window.removeEventListener('inventory-cache-ready', handler);
       window.removeEventListener('compact-inventory-ready', handler);
     };
