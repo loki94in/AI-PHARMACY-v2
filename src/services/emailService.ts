@@ -16,11 +16,12 @@ import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
 import { getEmailRetentionLimit } from './storeSettingsService.js';
+import { config, getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const getDbPath = () => process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const getUploadsDir = () => process.env.UPLOADS_DIR || path.resolve(__dirname, '..', '..', 'uploads');
+const getDbPath = () => config.dbPath;
+const getUploadsDir = () => process.env.UPLOADS_DIR || path.resolve(getAppDataDir(), 'uploads');
 
 function getJaccardSimilarity(arr1: string[], arr2: string[]): number {
   const set1 = new Set(arr1.map(s => s.toLowerCase().trim()));
@@ -1534,7 +1535,7 @@ export class EmailService {
         }
 
         // Save attachment to disk for manual review if needed
-        const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+        const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
         if (!fs.existsSync(uploadsDir)) {
           fs.mkdirSync(uploadsDir, { recursive: true });
         }
@@ -2642,7 +2643,7 @@ export class EmailService {
 
       console.log(`[Sync] Syncing attachments for latest ${latestUids.length} UIDs:`, latestUids);
 
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
@@ -2711,7 +2712,7 @@ export class EmailService {
       const uidsToDelete = emailsToDelete.map((e: any) => e.uid);
 
       let deletedCount = 0;
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
 
       for (const uid of uidsToDelete) {
         // Find attachments for this email
@@ -2954,7 +2955,7 @@ export class EmailService {
 
       console.log(`[Sync] Found ${newResults.length} new email(s) to download.`);
 
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
       for (const uid of limitedResults) {
@@ -3148,7 +3149,7 @@ export class EmailService {
       const parsed = await simpleParser(bodyPart.body);
       const attachments = parsed.attachments || [];
 
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
@@ -3196,7 +3197,7 @@ export class EmailService {
    */
   private getLocalAttachmentsForUid(uid: number): Array<{ filename: string; size: number; contentType: string }> {
     try {
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
       if (!fs.existsSync(uploadsDir)) return [];
 
       // Scan filesystem for files matching att-{uid}-* pattern

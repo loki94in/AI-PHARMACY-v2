@@ -5,10 +5,11 @@ import { dbManager } from '../database/connection.js';
 import csvParser from 'csv-parser';
 import { activityTracker } from '../utils/activityTracker.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
+const DATA_DIR = path.resolve(getAppDataDir(), 'data');
 const REFERENCE_CSV = path.join(DATA_DIR, 'reference_medicines.csv');
 
 /** Shared alias for the sqlite connection type returned by dbManager, used across this module. */

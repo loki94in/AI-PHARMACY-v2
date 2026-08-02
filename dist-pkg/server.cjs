@@ -320,6 +320,7 @@ var init_whatsappBusinessService = __esm({
     import_path2 = __toESM(require("path"), 1);
     import_fs2 = __toESM(require("fs"), 1);
     import_url2 = require("url");
+    init_config();
     __filename2 = (0, import_url2.fileURLToPath)(import_meta_url);
     __dirname2 = import_path2.default.dirname(__filename2);
     DB_PATH = process.env.DB_PATH || import_path2.default.resolve(__dirname2, "..", "..", "data", "app.db");
@@ -461,7 +462,7 @@ var init_whatsappBusinessService = __esm({
           return { success: false, error: "Missing credentials. Configure in Settings." };
         }
         const resolvedPath = import_path2.default.resolve(filePath);
-        const uploadsDir = import_path2.default.resolve(__dirname2, "..", "..", "uploads");
+        const uploadsDir = import_path2.default.resolve(getAppDataDir(), "uploads");
         if (!resolvedPath.startsWith(uploadsDir + import_path2.default.sep) && resolvedPath !== uploadsDir) {
           return { success: false, error: "File must be within the uploads directory." };
         }
@@ -1834,9 +1835,10 @@ var init_onnxOcrService = __esm({
     import_path4 = __toESM(require("path"), 1);
     import_url3 = require("url");
     import_jimp = require("jimp");
+    init_config();
     __filename3 = (0, import_url3.fileURLToPath)(import_meta_url);
     __dirname3 = import_path4.default.dirname(__filename3);
-    MODELS_DIR = import_path4.default.resolve(__dirname3, "..", "..", "..", "data", "models");
+    MODELS_DIR = import_path4.default.resolve(getAppDataDir(), "data", "models");
     OnnxOcrService = class {
       ocrService = null;
       isLoaded = false;
@@ -2416,9 +2418,10 @@ var init_googleSearchService = __esm({
     init_connection();
     init_eventService();
     init_aiCameraService();
+    init_config();
     __filename5 = (0, import_url5.fileURLToPath)(import_meta_url);
     __dirname5 = import_path6.default.dirname(__filename5);
-    SCREENSHOTS_DIR = import_path6.default.resolve(__dirname5, "..", "..", "data", "search_screenshots");
+    SCREENSHOTS_DIR = import_path6.default.resolve(getAppDataDir(), "data", "search_screenshots");
     if (!import_fs5.default.existsSync(SCREENSHOTS_DIR)) {
       import_fs5.default.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
     }
@@ -4430,9 +4433,10 @@ var init_imageArchiveService = __esm({
     import_adm_zip = __toESM(require("adm-zip"), 1);
     import_node_cron = __toESM(require("node-cron"), 1);
     import_jimp3 = require("jimp");
+    init_config();
     __filename8 = (0, import_url9.fileURLToPath)(import_meta_url);
     __dirname8 = import_path10.default.dirname(__filename8);
-    BASE_UPLOAD_DIR = import_path10.default.resolve(__dirname8, "..", "..", "uploads");
+    BASE_UPLOAD_DIR = import_path10.default.resolve(getAppDataDir(), "uploads");
     TEMP_DIR = import_path10.default.join(BASE_UPLOAD_DIR, "temp");
     IMPORTANT_DIR = import_path10.default.join(BASE_UPLOAD_DIR, "important");
     if (!import_fs8.default.existsSync(TEMP_DIR)) import_fs8.default.mkdirSync(TEMP_DIR, { recursive: true });
@@ -4992,6 +4996,7 @@ var init_telegramBot = __esm({
     init_imageArchiveService();
     init_notifications();
     init_dateExtractor();
+    init_config();
     __filename9 = (0, import_url10.fileURLToPath)(import_meta_url);
     __dirname9 = import_path11.default.dirname(__filename9);
     DB_PATH4 = process.env.DB_PATH || import_path11.default.resolve(__dirname9, "..", "data", "app.db");
@@ -5288,7 +5293,7 @@ Welcome back!`,
                 const imageBuffer = await response.arrayBuffer();
                 const buffer = Buffer.from(imageBuffer);
                 const tempFileName = `telegram_${Date.now()}_${msg.from?.id}.jpg`;
-                const tempFilePath = import_path11.default.join(__dirname9, "..", "uploads", "temp", tempFileName);
+                const tempFilePath = import_path11.default.join(getAppDataDir(), "uploads", "temp", tempFileName);
                 import_fs9.default.writeFileSync(tempFilePath, buffer);
                 await imageArchiveService.processAndRouteImage(tempFilePath);
                 const result = await aiCameraService.processImage(buffer);
@@ -7211,7 +7216,7 @@ async function shouldRouteToBusiness() {
   return false;
 }
 function cleanupProfileLocks() {
-  const sessionPath = import_path12.default.resolve(process.cwd(), ".wwebjs_auth", "session");
+  const sessionPath = import_path12.default.join(WWEBJS_AUTH_DIR, "session");
   try {
     if (process.platform === "win32") {
       const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*wwebjs_auth*session*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
@@ -7418,7 +7423,7 @@ async function initClient() {
       "--disable-gpu"
     ];
     const client = new Client({
-      authStrategy: new LocalAuth({ dataPath: import_path12.default.resolve(process.cwd(), ".wwebjs_auth") }),
+      authStrategy: new LocalAuth({ dataPath: WWEBJS_AUTH_DIR }),
       puppeteer: execPath ? { executablePath: execPath, headless: true, args: puppeteerArgs } : { headless: true, args: puppeteerArgs }
     });
     activeClient = client;
@@ -7631,7 +7636,7 @@ async function forceReconnect() {
     activeClient = null;
   }
   clientInstance = null;
-  const authPath = ".wwebjs_auth";
+  const authPath = WWEBJS_AUTH_DIR;
   try {
     if (import_fs10.default.existsSync(authPath)) {
       import_fs10.default.rmSync(authPath, { recursive: true, force: true });
@@ -8040,7 +8045,7 @@ async function getMessageMedia(chatId, messageId) {
     filename: matchedFile
   };
 }
-var import_whatsapp_web, import_fs10, import_path12, import_url11, import_child_process2, Client, LocalAuth, MessageMedia, __filename10, __dirname10, UPLOADS_DIR, clientInstance, activeClient, initializing, isSyncing, qrTimeout, lastSyncFailureAt, SYNC_RETRY_COOLDOWN_MS, currentQr, isReady, recentSendsCache;
+var import_whatsapp_web, import_fs10, import_path12, import_url11, import_child_process2, Client, LocalAuth, MessageMedia, __filename10, __dirname10, UPLOADS_DIR, WWEBJS_AUTH_DIR, clientInstance, activeClient, initializing, isSyncing, qrTimeout, lastSyncFailureAt, SYNC_RETRY_COOLDOWN_MS, currentQr, isReady, recentSendsCache;
 var init_whatsappClient = __esm({
   "src/whatsappClient.ts"() {
     "use strict";
@@ -8056,7 +8061,8 @@ var init_whatsappClient = __esm({
     ({ Client, LocalAuth, MessageMedia } = import_whatsapp_web.default);
     __filename10 = (0, import_url11.fileURLToPath)(import_meta_url);
     __dirname10 = import_path12.default.dirname(__filename10);
-    UPLOADS_DIR = import_path12.default.resolve(__dirname10, "..", "uploads");
+    UPLOADS_DIR = import_path12.default.resolve(getAppDataDir(), "uploads");
+    WWEBJS_AUTH_DIR = import_path12.default.resolve(getAppDataDir(), ".wwebjs_auth");
     process.on("unhandledRejection", (reason) => {
       const msg = reason?.message || String(reason);
       if (isPuppeteerDetachedError(msg)) {
@@ -10088,10 +10094,11 @@ var init_emailService = __esm({
     init_aiCameraService();
     init_emailSanitizer();
     init_storeSettingsService();
+    init_config();
     __filename11 = (0, import_url12.fileURLToPath)(import_meta_url);
     __dirname11 = import_path13.default.dirname(__filename11);
-    getDbPath = () => process.env.DB_PATH || import_path13.default.resolve(__dirname11, "..", "..", "data", "app.db");
-    getUploadsDir = () => process.env.UPLOADS_DIR || import_path13.default.resolve(__dirname11, "..", "..", "uploads");
+    getDbPath = () => config.dbPath;
+    getUploadsDir = () => process.env.UPLOADS_DIR || import_path13.default.resolve(getAppDataDir(), "uploads");
     EmailService = class {
       imapConfig;
       smtpTransporter = null;
@@ -10527,7 +10534,7 @@ ${itemsText}
               await this.processMedicineListAttachment(attachment);
               console.log("Medicine list attachment processed:", attachment.filename);
             }
-            const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+            const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
             if (!import_fs11.default.existsSync(uploadsDir)) {
               import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
             }
@@ -11458,7 +11465,7 @@ AI Pharmacy Team`
           const latestResults = results.slice(0, autodeleteLimit);
           const latestUids = latestResults.map((item) => item.attributes.uid);
           console.log(`[Sync] Syncing attachments for latest ${latestUids.length} UIDs:`, latestUids);
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
           if (!import_fs11.default.existsSync(uploadsDir)) {
             import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
           }
@@ -11515,7 +11522,7 @@ AI Pharmacy Team`
           const emailsToDelete = nonSavedEmails.slice(limit);
           const uidsToDelete = emailsToDelete.map((e) => e.uid);
           let deletedCount = 0;
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
           for (const uid of uidsToDelete) {
             const attachments = await db2.all(
               "SELECT local_path, filename FROM email_attachments WHERE uid = ?",
@@ -11703,7 +11710,7 @@ AI Pharmacy Team`
           const limitedResults = newResults.slice(0, 50);
           limitedResults.sort((a, b) => a - b);
           console.log(`[Sync] Found ${newResults.length} new email(s) to download.`);
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
           if (!import_fs11.default.existsSync(uploadsDir)) import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
           for (const uid of limitedResults) {
             try {
@@ -11865,7 +11872,7 @@ AI Pharmacy Team`
           if (!bodyPart) return this.getLocalAttachmentsForUid(uid);
           const parsed = await (0, import_mailparser.simpleParser)(bodyPart.body);
           const attachments = parsed.attachments || [];
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
           if (!import_fs11.default.existsSync(uploadsDir)) {
             import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
           }
@@ -11909,7 +11916,7 @@ AI Pharmacy Team`
        */
       getLocalAttachmentsForUid(uid) {
         try {
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(__dirname11, "..", "..", "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
           if (!import_fs11.default.existsSync(uploadsDir)) return [];
           const files = import_fs11.default.readdirSync(uploadsDir);
           const prefix = `att-${uid}-`;
@@ -14808,7 +14815,7 @@ async function rebuildAllExpiryCaches() {
       WHERE ${INVENTORY_ACTIVE_WHERE}
       ORDER BY im.expiry_date ASC
     `);
-    const cacheDir = import_path16.default.resolve(__dirname13, "..", "..", "data", "cache", "expiry");
+    const cacheDir = import_path16.default.resolve(getAppDataDir(), "data", "cache", "expiry");
     if (import_fs14.default.existsSync(cacheDir)) {
       const files = await import_fs14.default.promises.readdir(cacheDir);
       for (const file of files) {
@@ -14839,7 +14846,7 @@ async function rebuildAllExpiryCaches() {
 }
 async function patchExpiryCacheForInventoryItem(inventoryId) {
   try {
-    const cacheDir = import_path16.default.resolve(__dirname13, "..", "..", "data", "cache", "expiry");
+    const cacheDir = import_path16.default.resolve(getAppDataDir(), "data", "cache", "expiry");
     if (!import_fs14.default.existsSync(cacheDir)) return;
     const db2 = await dbManager.getConnection();
     const item = await db2.get(`
@@ -14914,6 +14921,7 @@ var init_expiryAlertService = __esm({
     import_path16 = __toESM(require("path"), 1);
     import_url14 = require("url");
     import_fs14 = __toESM(require("fs"), 1);
+    init_config();
     __filename13 = (0, import_url14.fileURLToPath)(import_meta_url);
     __dirname13 = import_path16.default.dirname(__filename13);
     DB_PATH6 = process.env.DB_PATH || import_path16.default.resolve(__dirname13, "..", "..", "data", "app.db");
@@ -22664,7 +22672,7 @@ var init_migration = __esm({
           { path: "D:\\redbook\\DGH_Backup", label: "DGH Backup Folder" },
           { path: "D:\\redbook", label: "RedBook Root" },
           { path: MIGRATION_DIR2, label: "Migration Sample Folder" },
-          { path: import_path23.default.resolve(__dirname19, "..", "..", "data", "archived_migrations"), label: "Archived Migrations" }
+          { path: import_path23.default.resolve(getAppDataDir(), "data", "archived_migrations"), label: "Archived Migrations" }
         ];
         const backups = [];
         const ALLOWED_BACKUP_EXT = /\.(zip|sql|gz|tgz|db)$/i;
@@ -22889,7 +22897,7 @@ var init_utilities = __esm({
         return res.status(400).json({ error: "Items array is required" });
       }
       try {
-        const uploadsDir = import_path24.default.resolve(__dirname20, "..", "..", "uploads");
+        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
         if (!import_fs21.default.existsSync(uploadsDir)) {
           import_fs21.default.mkdirSync(uploadsDir, { recursive: true });
         }
@@ -22935,7 +22943,7 @@ var init_utilities = __esm({
     router4.get("/barcode/:code", async (req, res) => {
       const { code } = req.params;
       try {
-        const uploadsDir = import_path24.default.resolve(__dirname20, "..", "..", "uploads");
+        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
         if (!import_fs21.default.existsSync(uploadsDir)) {
           import_fs21.default.mkdirSync(uploadsDir, { recursive: true });
         }
@@ -23044,7 +23052,7 @@ var init_utilities = __esm({
             lastUploadDate = lastArchive.date;
           }
         }
-        const BACKUP_DIR3 = import_path24.default.resolve(__dirname20, "..", "..", "backup");
+        const BACKUP_DIR3 = config.backupDir;
         const SNAPSHOTS_DIR2 = import_path24.default.join(BACKUP_DIR3, "snapshots");
         const ARCHIVES_DIR2 = import_path24.default.join(BACKUP_DIR3, "archives");
         let totalSize = 0;
@@ -23123,7 +23131,7 @@ var init_utilities = __esm({
     });
     router4.post("/backup/manual", async (req, res) => {
       try {
-        const BACKUP_DIR3 = import_path24.default.resolve(__dirname20, "..", "..", "backup");
+        const BACKUP_DIR3 = config.backupDir;
         const SNAPSHOTS_DIR2 = import_path24.default.join(BACKUP_DIR3, "snapshots");
         const ARCHIVES_DIR2 = import_path24.default.join(BACKUP_DIR3, "archives");
         const archiveName = `archive_manual_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}_${Date.now()}.zip`;
@@ -23364,10 +23372,10 @@ var init_utilities = __esm({
           } catch (_) {
           }
         }
-        const uploadsDir = import_path24.default.resolve(__dirname20, "..", "..", "uploads");
-        const rawDir = import_path24.default.resolve(__dirname20, "..", "..", "catalogue", "raw");
-        const migrationReportsDir = import_path24.default.resolve(__dirname20, "..", "..", "data", "migration_reports");
-        const auditImagesDir = import_path24.default.resolve(__dirname20, "..", "..", "data", "audit_images");
+        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
+        const rawDir = import_path24.default.resolve(getAppDataDir(), "catalogue", "raw");
+        const migrationReportsDir = import_path24.default.resolve(getAppDataDir(), "data", "migration_reports");
+        const auditImagesDir = import_path24.default.resolve(getAppDataDir(), "data", "audit_images");
         const clearDir = (dirPath, preserveFiles = []) => {
           if (!import_fs21.default.existsSync(dirPath)) return;
           const files = import_fs21.default.readdirSync(dirPath);
@@ -23397,9 +23405,9 @@ var init_utilities = __esm({
         clearDir(migrationReportsDir);
         clearDir(auditImagesDir);
         if (wipeAll) {
-          const backupDir = import_path24.default.resolve(__dirname20, "..", "..", "backup");
+          const backupDir = config.backupDir;
           clearDir(backupDir);
-          const dataDir = import_path24.default.resolve(__dirname20, "..", "..", "data");
+          const dataDir = import_path24.default.resolve(getAppDataDir(), "data");
           const stagingDbPath = import_path24.default.join(dataDir, "staging.db");
           if (import_fs21.default.existsSync(stagingDbPath)) {
             try {
@@ -23431,13 +23439,13 @@ var init_utilities = __esm({
             unlockStagingDb2();
           } catch (_) {
           }
-          const migrationSampelDir = import_path24.default.resolve(__dirname20, "..", "..", "MIGRATION SAMPEL");
+          const migrationSampelDir = import_path24.default.resolve(getAppDataDir(), "MIGRATION SAMPEL");
           clearDir(migrationSampelDir);
           const tempDirs = [
-            import_path24.default.resolve(__dirname20, "..", "..", "data", "temp_migration"),
-            import_path24.default.resolve(__dirname20, "..", "..", "data", "temp_ocr"),
-            import_path24.default.resolve(__dirname20, "..", "..", "data", "search_screenshots"),
-            import_path24.default.resolve(__dirname20, "..", "..", "data", "archived_migrations")
+            import_path24.default.resolve(getAppDataDir(), "data", "temp_migration"),
+            import_path24.default.resolve(getAppDataDir(), "data", "temp_ocr"),
+            import_path24.default.resolve(getAppDataDir(), "data", "search_screenshots"),
+            import_path24.default.resolve(getAppDataDir(), "data", "archived_migrations")
           ];
           for (const d of tempDirs) clearDir(d);
           const runtimeDataFiles = ["audit_queue.json", "ocr_corrections.json", "suggested_names.json"];
@@ -23454,11 +23462,11 @@ var init_utilities = __esm({
               }
             }
           }
-          const wwwebAuthDir = import_path24.default.resolve(__dirname20, "..", "..", ".wwebjs_auth");
-          const wwwebCacheDir = import_path24.default.resolve(__dirname20, "..", "..", ".wwebjs_cache");
+          const wwwebAuthDir = import_path24.default.resolve(getAppDataDir(), ".wwebjs_auth");
+          const wwwebCacheDir = import_path24.default.resolve(getAppDataDir(), ".wwebjs_cache");
           clearDir(wwwebAuthDir);
           clearDir(wwwebCacheDir);
-          const pharmarackProfilePath = import_path24.default.resolve(__dirname20, "..", "..", "data", "pharmarack_profile");
+          const pharmarackProfilePath = import_path24.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
           if (import_fs21.default.existsSync(pharmarackProfilePath)) {
             try {
               import_fs21.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
@@ -23466,7 +23474,7 @@ var init_utilities = __esm({
               console.warn("[Reset] Failed to delete pharmarack_profile:", err);
             }
           }
-          const cachePath = import_path24.default.resolve(__dirname20, "..", "..", "data", "cache");
+          const cachePath = import_path24.default.resolve(getAppDataDir(), "data", "cache");
           if (import_fs21.default.existsSync(cachePath)) {
             try {
               import_fs21.default.rmSync(cachePath, { recursive: true, force: true });
@@ -23498,7 +23506,7 @@ var init_utilities = __esm({
     });
     router4.post("/clear-cache", async (req, res) => {
       try {
-        const dataDir = import_path24.default.resolve(__dirname20, "..", "..", "data");
+        const dataDir = import_path24.default.resolve(getAppDataDir(), "data");
         const cachePath = import_path24.default.join(dataDir, "cache");
         if (import_fs21.default.existsSync(cachePath)) {
           try {
@@ -23658,10 +23666,11 @@ var init_email = __esm({
     import_url23 = require("url");
     init_emailService();
     init_eventService();
+    init_config();
     import_fs22 = __toESM(require("fs"), 1);
     __filename22 = (0, import_url23.fileURLToPath)(import_meta_url);
     __dirname22 = import_path26.default.dirname(__filename22);
-    getUploadsDir2 = () => process.env.UPLOADS_DIR || import_path26.default.resolve(__dirname22, "..", "..", "uploads");
+    getUploadsDir2 = () => process.env.UPLOADS_DIR || import_path26.default.resolve(getAppDataDir(), "uploads");
     router6 = import_express6.default.Router();
     router6.post("/", async (req, res) => {
       const { subject, from, body, attachments } = req.body;
@@ -24414,10 +24423,11 @@ var init_settings = __esm({
     init_connection();
     init_telegramBot();
     init_emailSanitizer();
+    init_config();
     __filename23 = (0, import_url24.fileURLToPath)(import_meta_url);
     __dirname23 = import_path27.default.dirname(__filename23);
     DB_PATH14 = process.env.DB_PATH || import_path27.default.resolve(__dirname23, "..", "..", "data", "app.db");
-    UPLOADS_DIR2 = import_path27.default.resolve(__dirname23, "..", "..", "uploads");
+    UPLOADS_DIR2 = import_path27.default.resolve(getAppDataDir(), "uploads");
     router8 = import_express8.default.Router();
     router8.get("/", async (_req, res) => {
       try {
@@ -25039,7 +25049,7 @@ async function killOrphanChromeProcesses(keyword = "pharmarack_profile") {
 }
 function cleanTempProfileFolders() {
   try {
-    const dataDir = import_path28.default.resolve(__dirname24, "..", "..", "data");
+    const dataDir = import_path28.default.resolve(getAppDataDir(), "data");
     if (!import_fs24.default.existsSync(dataDir)) return;
     const entries = import_fs24.default.readdirSync(dataDir);
     for (const entry of entries) {
@@ -25090,6 +25100,7 @@ var init_tokenRefreshScheduler = __esm({
     import_util = require("util");
     init_lazyPuppeteer();
     init_connection();
+    init_config();
     execAsync = (0, import_util.promisify)(import_child_process4.exec);
     __filename24 = (0, import_url25.fileURLToPath)(import_meta_url);
     __dirname24 = import_path28.default.dirname(__filename24);
@@ -25219,7 +25230,7 @@ var init_tokenRefreshScheduler = __esm({
           console.error("[TokenRefreshScheduler] Chrome path not found.");
           return null;
         }
-        const mainProfilePath = import_path28.default.resolve(__dirname24, "..", "..", "data", "pharmarack_profile");
+        const mainProfilePath = import_path28.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
         if (!import_fs24.default.existsSync(mainProfilePath)) {
           console.error("[TokenRefreshScheduler] Main profile folder does not exist.");
           return null;
@@ -25254,7 +25265,7 @@ var init_tokenRefreshScheduler = __esm({
           } catch (launchErr) {
             console.log("[TokenRefreshScheduler] Main profile is locked. Copying to temp profile...", launchErr.message);
             const randomSuffix = Math.floor(Math.random() * 1e6);
-            const tempProfilePath = import_path28.default.resolve(__dirname24, "..", "..", "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            const tempProfilePath = import_path28.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
             copyProfileFolder(mainProfilePath, tempProfilePath);
             cleanProfileLockFiles(tempProfilePath);
             browser = await puppeteer.launch({
@@ -25581,6 +25592,7 @@ var init_pharmarack = __esm({
     init_tokenRefreshScheduler();
     import_child_process5 = require("child_process");
     import_util2 = require("util");
+    init_config();
     execAsync2 = (0, import_util2.promisify)(import_child_process5.exec);
     __filename25 = (0, import_url26.fileURLToPath)(import_meta_url);
     __dirname25 = import_path29.default.dirname(__filename25);
@@ -25769,7 +25781,7 @@ var init_pharmarack = __esm({
       (async () => {
         let browser;
         let tempProfilePathToDelete = "";
-        const mainProfilePath = import_path29.default.resolve(__dirname25, "..", "..", "data", "pharmarack_profile");
+        const mainProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
         const puppeteer = await getPuppeteer();
         try {
           console.log("Killing any orphan Chrome processes holding locks on pharmarack_profile...");
@@ -25787,7 +25799,7 @@ var init_pharmarack = __esm({
           } catch (launchErr) {
             console.warn("Failed to launch Chrome with main profile, attempting temp profile fallback...", launchErr.message);
             const randomSuffix = Math.floor(Math.random() * 1e6);
-            const tempProfilePath = import_path29.default.resolve(__dirname25, "..", "..", "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            const tempProfilePath = import_path29.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
             copyProfileFolder2(mainProfilePath, tempProfilePath);
             cleanProfileLockFiles(tempProfilePath);
             browser = await puppeteer.launch({
@@ -26186,7 +26198,7 @@ var init_pharmarack = __esm({
           const chromePath = findChromePath3();
           if (chromePath) {
             console.log("[Pharmarack] Initiating browser UI automation fallback...");
-            const pharmarackProfilePath = import_path29.default.resolve(__dirname25, "..", "..", "data", "pharmarack_profile");
+            const pharmarackProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
             let browser;
             let tempProfilePathToDelete = "";
             const puppeteer = await getPuppeteer();
@@ -26214,7 +26226,7 @@ var init_pharmarack = __esm({
               } catch (launchErr) {
                 console.log("[Pharmarack Fallback] Main profile is locked. Copying to temp profile...", launchErr.message);
                 const randomSuffix = Math.floor(Math.random() * 1e6);
-                const tempProfilePath = import_path29.default.resolve(__dirname25, "..", "..", "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+                const tempProfilePath = import_path29.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
                 copyProfileFolder2(pharmarackProfilePath, tempProfilePath);
                 cleanProfileLockFiles(tempProfilePath);
                 browser = await puppeteer.launch({
@@ -26674,7 +26686,7 @@ var init_pharmarack = __esm({
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_password', '')");
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
-        const pharmarackProfilePath = import_path29.default.resolve(__dirname25, "..", "..", "data", "pharmarack_profile");
+        const pharmarackProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
         if (import_fs25.default.existsSync(pharmarackProfilePath)) {
           import_fs25.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
           console.log("Cleared Pharmarack Puppeteer profile directory.");
@@ -27344,10 +27356,11 @@ var init_archive = __esm({
     import_fs26 = __toESM(require("fs"), 1);
     import_url28 = require("url");
     import_adm_zip4 = __toESM(require("adm-zip"), 1);
+    init_config();
     __filename27 = (0, import_url28.fileURLToPath)(import_meta_url);
     __dirname27 = import_path31.default.dirname(__filename27);
     DB_PATH17 = process.env.DB_PATH || import_path31.default.resolve(__dirname27, "..", "..", "data", "app.db");
-    ARCHIVE_DIR = import_path31.default.resolve(__dirname27, "..", "..", "data", "archived_migrations");
+    ARCHIVE_DIR = import_path31.default.resolve(getAppDataDir(), "data", "archived_migrations");
     if (!import_fs26.default.existsSync(ARCHIVE_DIR)) {
       import_fs26.default.mkdirSync(ARCHIVE_DIR, { recursive: true });
     }
@@ -27888,6 +27901,7 @@ var init_messaging = __esm({
     import_fs28 = __toESM(require("fs"), 1);
     import_path33 = __toESM(require("path"), 1);
     init_lazyPuppeteer();
+    init_config();
     import_url30 = require("url");
     __filename29 = (0, import_url30.fileURLToPath)(import_meta_url);
     __dirname29 = import_path33.default.dirname(__filename29);
@@ -28236,7 +28250,7 @@ var init_messaging = __esm({
           id: row.id,
           hasMedia: !!row.has_media,
           downloadMedia: async () => {
-            const uploadsDir = import_path33.default.resolve(__dirname29, "..", "..", "uploads");
+            const uploadsDir = import_path33.default.resolve(getAppDataDir(), "uploads");
             if (import_fs28.default.existsSync(uploadsDir)) {
               const files = import_fs28.default.readdirSync(uploadsDir);
               const matched = files.find((f) => f.startsWith(messageId));
@@ -28980,9 +28994,10 @@ var init_compositionEnricher = __esm({
     init_connection();
     import_csv_parser4 = __toESM(require("csv-parser"), 1);
     init_activityTracker();
+    init_config();
     __filename30 = (0, import_url31.fileURLToPath)(import_meta_url);
     __dirname30 = import_path34.default.dirname(__filename30);
-    DATA_DIR = import_path34.default.resolve(__dirname30, "..", "..", "data");
+    DATA_DIR = import_path34.default.resolve(getAppDataDir(), "data");
     REFERENCE_CSV = import_path34.default.join(DATA_DIR, "reference_medicines.csv");
     DOSAGE_FORMS = [
       "TABLET",
@@ -29530,10 +29545,11 @@ var init_aiCamera = __esm({
     import_url32 = require("url");
     init_aiCameraService();
     init_productNameFilterService();
+    init_config();
     __filename31 = (0, import_url32.fileURLToPath)(import_meta_url);
     __dirname31 = import_path35.default.dirname(__filename31);
     DB_PATH19 = process.env.DB_PATH || import_path35.default.resolve(__dirname31, "..", "..", "data", "app.db");
-    AUDIT_QUEUE_PATH = import_path35.default.resolve(__dirname31, "..", "..", "data", "audit_queue.json");
+    AUDIT_QUEUE_PATH = import_path35.default.resolve(getAppDataDir(), "data", "audit_queue.json");
     router14 = import_express14.default.Router();
     router14.get("/audit/queue", async (req, res) => {
       try {
@@ -29672,6 +29688,7 @@ var init_pdfInvoiceService = __esm({
     import_path36 = __toESM(require("path"), 1);
     import_fs31 = __toESM(require("fs"), 1);
     import_url33 = require("url");
+    init_config();
     __filename32 = (0, import_url33.fileURLToPath)(import_meta_url);
     __dirname32 = import_path36.default.dirname(__filename32);
     DB_PATH20 = process.env.DB_PATH || import_path36.default.resolve(__dirname32, "..", "..", "data", "app.db");
@@ -29790,7 +29807,7 @@ var init_pdfInvoiceService = __esm({
             doc.fontSize(12).fillColor("#0f172a").font("Helvetica-Bold");
             doc.text("Grand Total:", 360, doc.y, { width: 100, align: "right" });
             doc.text(`\u20B9${total.toFixed(2)}`, 480, doc.y - 12, { width: 70, align: "right" });
-            const uploadsDir = import_path36.default.resolve(__dirname32, "..", "..", "uploads");
+            const uploadsDir = import_path36.default.resolve(getAppDataDir(), "uploads");
             const customStampPath = import_path36.default.join(uploadsDir, "custom_stamp.png");
             const customSigPath = import_path36.default.join(uploadsDir, "custom_signature.png");
             if (includeStampAndSig) {
@@ -29850,10 +29867,11 @@ var init_whatsappInvoiceService = __esm({
     import_url34 = require("url");
     init_pdfInvoiceService();
     init_whatsappClient();
+    init_config();
     __filename33 = (0, import_url34.fileURLToPath)(import_meta_url);
     __dirname33 = import_path37.default.dirname(__filename33);
     DB_PATH21 = process.env.DB_PATH || import_path37.default.resolve(__dirname33, "..", "..", "data", "app.db");
-    UPLOADS_DIR3 = import_path37.default.resolve(__dirname33, "..", "..", "uploads");
+    UPLOADS_DIR3 = import_path37.default.resolve(getAppDataDir(), "uploads");
     WhatsappInvoiceService = class {
       async sendInvoiceViaWhatsApp(invoiceId) {
         let db2;
@@ -34963,6 +34981,7 @@ var init_purchases = __esm({
     init_aiCameraService();
     init_productNameFilterService();
     init_emailService();
+    init_config();
     init_inventoryActive();
     init_inventoryCache();
     import_fs35 = __toESM(require("fs"), 1);
@@ -34978,7 +34997,7 @@ var init_purchases = __esm({
         if (!req.file) {
           return res.status(400).json({ error: "No file uploaded" });
         }
-        const uploadsDir = process.env.UPLOADS_DIR || import_path44.default.join(__dirname39, "..", "..", "uploads");
+        const uploadsDir = process.env.UPLOADS_DIR || import_path44.default.join(getAppDataDir(), "uploads");
         if (!import_fs35.default.existsSync(uploadsDir)) {
           import_fs35.default.mkdirSync(uploadsDir, { recursive: true });
         }
@@ -36885,6 +36904,7 @@ var init_returns = __esm({
     import_url41 = require("url");
     init_aiCameraService();
     init_inventoryCache();
+    init_config();
     __filename40 = (0, import_url41.fileURLToPath)(import_meta_url);
     __dirname40 = import_path45.default.dirname(__filename40);
     DB_PATH28 = process.env.DB_PATH || import_path45.default.resolve(__dirname40, "..", "..", "data", "app.db");
@@ -37030,7 +37050,7 @@ var init_returns = __esm({
         }
         pdfDoc = new import_pdfkit3.default();
         const filename = `financial-note-${Date.now()}.pdf`;
-        const outPath = import_path45.default.resolve(__dirname40, "..", "..", "uploads", filename);
+        const outPath = import_path45.default.resolve(getAppDataDir(), "uploads", filename);
         stream = import_fs36.default.createWriteStream(outPath);
         pdfDoc.pipe(stream);
         pdfDoc.fontSize(20).text(`${type.charAt(0).toUpperCase() + type.slice(1)} Note`, { align: "center" });
@@ -38737,6 +38757,7 @@ var init_expiry = __esm({
     import_url44 = require("url");
     import_fs37 = __toESM(require("fs"), 1);
     init_reportExporter();
+    init_config();
     __filename43 = (0, import_url44.fileURLToPath)(import_meta_url);
     __dirname43 = import_path48.default.dirname(__filename43);
     DB_PATH31 = process.env.DB_PATH || import_path48.default.resolve(__dirname43, "..", "..", "data", "app.db");
@@ -38748,7 +38769,7 @@ var init_expiry = __esm({
         const days = req.query.days ? parseInt(req.query.days, 10) : 90;
         date_to = getNDaysAheadString(days);
       }
-      const cacheDir = import_path48.default.resolve(__dirname43, "..", "..", "data", "cache", "expiry");
+      const cacheDir = import_path48.default.resolve(getAppDataDir(), "data", "cache", "expiry");
       try {
         const months = getMonthsInRange(date_from, date_to);
         const cacheDirExists = import_fs37.default.existsSync(cacheDir);
@@ -38808,7 +38829,7 @@ var init_expiry = __esm({
         date_to = getNDaysAheadString(days);
       }
       const format = req.query.format || "pdf";
-      const cacheDir = import_path48.default.resolve(__dirname43, "..", "..", "data", "cache", "expiry");
+      const cacheDir = import_path48.default.resolve(getAppDataDir(), "data", "cache", "expiry");
       let items = [];
       try {
         const months = getMonthsInRange(date_from, date_to);
@@ -39219,6 +39240,7 @@ var init_monthlyReportService = __esm({
     "use strict";
     init_connection();
     init_whatsappClient();
+    init_config();
     import_pdfkit5 = __toESM(require("pdfkit"), 1);
     import_xlsx3 = __toESM(require("xlsx"), 1);
     import_fs39 = __toESM(require("fs"), 1);
@@ -39226,7 +39248,7 @@ var init_monthlyReportService = __esm({
     import_url46 = require("url");
     __filename45 = (0, import_url46.fileURLToPath)(import_meta_url);
     __dirname45 = import_path50.default.dirname(__filename45);
-    TEMP_DIR3 = import_path50.default.resolve(__dirname45, "..", "..", "uploads", "temp");
+    TEMP_DIR3 = import_path50.default.resolve(getAppDataDir(), "uploads", "temp");
     MonthlyReportService = class {
       /**
        * Helper to compute date range for monthly, midmonth, quarterly, yearly, or custom date ranges.
@@ -40941,11 +40963,12 @@ var init_upload = __esm({
     import_multer3 = __toESM(require("multer"), 1);
     import_url48 = require("url");
     init_connection();
+    init_config();
     __filename47 = (0, import_url48.fileURLToPath)(import_meta_url);
     __dirname47 = import_path52.default.dirname(__filename47);
-    UPLOAD_DIR = import_path52.default.resolve(__dirname47, "..", "..", "uploads");
+    UPLOAD_DIR = import_path52.default.resolve(getAppDataDir(), "uploads");
     TEMP_DIR4 = import_path52.default.join(UPLOAD_DIR, "temp");
-    RAW_DIR = import_path52.default.resolve(__dirname47, "..", "..", "catalogue", "raw");
+    RAW_DIR = import_path52.default.resolve(getAppDataDir(), "catalogue", "raw");
     if (!import_fs40.default.existsSync(UPLOAD_DIR)) {
       import_fs40.default.mkdirSync(UPLOAD_DIR, { recursive: true });
     }
@@ -42052,9 +42075,10 @@ var init_enrichment = __esm({
     init_connection();
     init_compositionEnricher();
     init_onlineDataEnricher();
+    init_config();
     __filename48 = (0, import_url49.fileURLToPath)(import_meta_url);
     __dirname48 = import_path53.default.dirname(__filename48);
-    DATA_DIR2 = import_path53.default.resolve(__dirname48, "..", "..", "data");
+    DATA_DIR2 = import_path53.default.resolve(getAppDataDir(), "data");
     REFERENCE_CSV2 = import_path53.default.join(DATA_DIR2, "reference_medicines.csv");
     router35 = import_express35.default.Router();
     upload4 = (0, import_multer4.default)({ storage: import_multer4.default.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });

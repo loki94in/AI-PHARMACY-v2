@@ -4,11 +4,12 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pdfInvoiceService } from './pdfInvoiceService.js';
 import { sendMessage, isReady } from '../whatsappClient.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const UPLOADS_DIR = path.resolve(__dirname, '..', '..', 'uploads');
+const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
 
 export class WhatsappInvoiceService {
   async sendInvoiceViaWhatsApp(invoiceId: number): Promise<boolean> {

@@ -4,11 +4,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Jimp } from 'jimp';
+import { getAppDataDir } from '../config/index.js';
 
 // Resolve paths relative to THIS file, not CWD — fixes flake in Jest / different launch dirs
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const MODELS_DIR = path.resolve(__dirname, '..', '..', '..', 'data', 'models');
+const MODELS_DIR = path.resolve(getAppDataDir(), 'data', 'models');
 
 class OnnxOcrService {
   private ocrService: PaddleOcrService | null = null;

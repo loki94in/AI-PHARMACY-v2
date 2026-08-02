@@ -4,6 +4,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -180,7 +181,7 @@ export class WhatsAppBusinessService {
 
     // Validate the file exists and is within the expected directory
     const resolvedPath = path.resolve(filePath);
-    const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
     if (!resolvedPath.startsWith(uploadsDir + path.sep) && resolvedPath !== uploadsDir) {
       return { success: false, error: 'File must be within the uploads directory.' };
     }

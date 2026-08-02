@@ -3,6 +3,7 @@ import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -189,7 +190,7 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
       ORDER BY im.expiry_date ASC
     `);
 
-    const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+    const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
     
     // Delete all existing cache files — old files for empty months must not survive
     if (fs.existsSync(cacheDir)) {
@@ -239,7 +240,7 @@ let rebuildTimeout: NodeJS.Timeout | null = null;
  */
 export async function patchExpiryCacheForInventoryItem(inventoryId: number): Promise<void> {
   try {
-    const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+    const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
     if (!fs.existsSync(cacheDir)) return; // cache not initialised yet, skip
 
     const db = await dbManager.getConnection();

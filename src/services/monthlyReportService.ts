@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
 import { sendMessage, isReady, isPuppeteerDetachedError } from '../whatsappClient.js';
+import { getAppDataDir } from '../config/index.js';
 import PDFDocument from 'pdfkit';
 import XLSX from 'xlsx';
 import fs from 'fs';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const TEMP_DIR = path.resolve(__dirname, '..', '..', 'uploads', 'temp');
+const TEMP_DIR = path.resolve(getAppDataDir(), 'uploads', 'temp');
 
 export interface MonthlyReportData {
   periodType: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom';

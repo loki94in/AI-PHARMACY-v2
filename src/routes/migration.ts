@@ -971,7 +971,7 @@ router.get('/local-backups', async (_req, res) => {
       { path: 'D:\\redbook\\DGH_Backup', label: 'DGH Backup Folder' },
       { path: 'D:\\redbook', label: 'RedBook Root' },
       { path: MIGRATION_DIR, label: 'Migration Sample Folder' },
-      { path: path.resolve(__dirname, '..', '..', 'data', 'archived_migrations'), label: 'Archived Migrations' }
+      { path: path.resolve(getAppDataDir(), 'data', 'archived_migrations'), label: 'Archived Migrations' }
     ];
 
     const backups: Array<{

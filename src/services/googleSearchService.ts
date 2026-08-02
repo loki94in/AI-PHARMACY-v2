@@ -5,11 +5,12 @@ import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SCREENSHOTS_DIR = path.resolve(__dirname, '..', '..', 'data', 'search_screenshots');
+const SCREENSHOTS_DIR = path.resolve(getAppDataDir(), 'data', 'search_screenshots');
 if (!fs.existsSync(SCREENSHOTS_DIR)) {
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 }

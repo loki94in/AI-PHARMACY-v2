@@ -5,13 +5,14 @@ import fs from 'fs';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { dbManager } from '../database/connection.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const UPLOAD_DIR = path.resolve(__dirname, '..', '..', 'uploads');
+const UPLOAD_DIR = path.resolve(getAppDataDir(), 'uploads');
 const TEMP_DIR = path.join(UPLOAD_DIR, 'temp');
-const RAW_DIR = path.resolve(__dirname, '..', '..', 'catalogue', 'raw');
+const RAW_DIR = path.resolve(getAppDataDir(), 'catalogue', 'raw');
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });

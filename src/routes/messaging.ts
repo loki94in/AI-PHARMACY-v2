@@ -8,6 +8,7 @@ import { eventService } from '../services/eventService.js';
 import fs from 'fs';
 import path from 'path';
 import { getPuppeteer } from '../utils/lazyPuppeteer.js';
+import { getAppDataDir } from '../config/index.js';
 
 import { fileURLToPath } from 'url';
 
@@ -474,7 +475,7 @@ router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
       id: row.id,
       hasMedia: !!row.has_media,
       downloadMedia: async () => {
-        const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+        const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
         if (fs.existsSync(uploadsDir)) {
           const files = fs.readdirSync(uploadsDir);
           const matched = files.find(f => f.startsWith(messageId));

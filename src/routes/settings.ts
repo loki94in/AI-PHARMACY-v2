@@ -6,11 +6,12 @@ import { fileURLToPath } from 'url';
 import { dbManager } from '../database/connection.js';
 import { telegramBotService } from '../telegramBot.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const UPLOADS_DIR = path.resolve(__dirname, '..', '..', 'uploads');
+const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
 
 const router = express.Router();
 
