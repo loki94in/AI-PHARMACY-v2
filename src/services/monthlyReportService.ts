@@ -107,12 +107,16 @@ export class MonthlyReportService {
     const startDateTime = `${startDate} 00:00:00`;
     const endDateTime = `${endDate} 23:59:59`;
 
+    const salesDateExpr = "COALESCE(date(business_date), date(date), date(substr(date, 1, 10)))";
+    const salesInvDateExpr = "COALESCE(date(sinv.business_date), date(sinv.date), date(substr(sinv.date, 1, 10)))";
+    const purchasesDateExpr = "COALESCE(date(date), date(business_date), date(substr(date, 1, 10)))";
+
     // 1. Sales Summary
     const salesRow = await db.get(
       `SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(*) as cnt 
        FROM sales_invoices 
-       WHERE date >= ? AND date <= ?`,
-      [startDateTime, endDateTime]
+       WHERE ${salesDateExpr} >= date(?) AND ${salesDateExpr} <= date(?)`,
+      [startDate, endDate]
     );
 
     const totalSales = Number(salesRow?.total || 0);
@@ -122,8 +126,8 @@ export class MonthlyReportService {
     const purchaseRow = await db.get(
       `SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(*) as cnt 
        FROM purchases 
-       WHERE date >= ? AND date <= ?`,
-      [startDateTime, endDateTime]
+       WHERE ${purchasesDateExpr} >= date(?) AND ${purchasesDateExpr} <= date(?)`,
+      [startDate, endDate]
     );
 
     const totalPurchases = Number(purchaseRow?.total || 0);
@@ -135,8 +139,8 @@ export class MonthlyReportService {
        FROM sale_items si
        JOIN sales_invoices sinv ON si.invoice_id = sinv.id
        JOIN inventory_master im ON si.inventory_id = im.id
-       WHERE sinv.date >= ? AND sinv.date <= ?`,
-      [startDateTime, endDateTime]
+       WHERE ${salesInvDateExpr} >= date(?) AND ${salesInvDateExpr} <= date(?)`,
+      [startDate, endDate]
     );
 
     const costOfGoodsSold = Number(cogsRow?.cost || 0);
@@ -150,11 +154,11 @@ export class MonthlyReportService {
        JOIN sales_invoices sinv ON si.invoice_id = sinv.id
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
-       WHERE sinv.date >= ? AND sinv.date <= ?
+       WHERE ${salesInvDateExpr} >= date(?) AND ${salesInvDateExpr} <= date(?)
        GROUP BY m.id, m.name
        ORDER BY total_rev DESC
        LIMIT 5`,
-      [startDateTime, endDateTime]
+      [startDate, endDate]
     );
 
     const topMedicines = topMedsRows.map(r => ({

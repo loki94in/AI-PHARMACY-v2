@@ -9,16 +9,16 @@ const router = express.Router();
 
 async function resolveFromDate(requestedFrom: string, db?: any): Promise<string> {
   let from = (requestedFrom && requestedFrom.trim()) ? requestedFrom.trim() : '1970-01-01';
-  if (db) {
-    try {
-      const cutover = await getReportCutoverDate(db);
-      return effectiveReportFromDate(from, cutover);
-    } catch {
-      // ignore cutover lookup error if table does not exist yet
-    }
-  }
   return from;
 }
+
+// Helper SQL snippet for sales date resolution
+const SALES_DATE_EXPR = "COALESCE(date(business_date), date(date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10)))";
+const SALES_INV_DATE_EXPR = "COALESCE(date(sinv.business_date), date(sinv.date), date(substr(sinv.date, 1, 10)), date(substr(sinv.business_date, 1, 10)))";
+
+// Helper SQL snippet for purchases date resolution
+const PURCHASES_DATE_EXPR = "COALESCE(date(date), date(business_date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10)))";
+const PURCHASES_P_DATE_EXPR = "COALESCE(date(p.date), date(p.business_date), date(substr(p.date, 1, 10)), date(substr(p.business_date, 1, 10)))";
 
 // Fetch summary metrics for stats cards
 router.get('/', async (req, res) => {
@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
     
     if (reportType === 'sales') {
       const salesRow = await db.get(
-        "SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) >= date(?) AND COALESCE(date(date), date(substr(date, 1, 10))) <= date(?)",
+        `SELECT IFNULL(SUM(total_amount), 0) as total FROM sales_invoices WHERE ${SALES_DATE_EXPR} >= date(?) AND ${SALES_DATE_EXPR} <= date(?)`,
         [from, to]
       );
       
@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
         FROM sale_items si
         JOIN sales_invoices sinv ON si.invoice_id = sinv.id
         JOIN inventory_master im ON si.inventory_id = im.id
-        WHERE COALESCE(date(sinv.date), date(substr(sinv.date, 1, 10))) >= date(?) AND COALESCE(date(sinv.date), date(substr(sinv.date, 1, 10))) <= date(?)
+        WHERE ${SALES_INV_DATE_EXPR} >= date(?) AND ${SALES_INV_DATE_EXPR} <= date(?)
       `, [from, to]);
 
       const revenue = marginRow.revenue || 0;
@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
 
     if (reportType === 'purchases') {
       const purchasesRow = await db.get(
-        "SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(DISTINCT distributor_id) as suppliers FROM purchases WHERE COALESCE(date(date), date(substr(date, 1, 10))) >= date(?) AND COALESCE(date(date), date(substr(date, 1, 10))) <= date(?)",
+        `SELECT IFNULL(SUM(total_amount), 0) as total, COUNT(DISTINCT distributor_id) as suppliers FROM purchases WHERE ${PURCHASES_DATE_EXPR} >= date(?) AND ${PURCHASES_DATE_EXPR} <= date(?)`,
         [from, to]
       );
 
@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
         SELECT IFNULL(SUM(quantity), 0) as qty
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
-        WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) >= date(?) AND COALESCE(date(p.date), date(substr(p.date, 1, 10))) <= date(?)
+        WHERE ${PURCHASES_P_DATE_EXPR} >= date(?) AND ${PURCHASES_P_DATE_EXPR} <= date(?)
       `, [from, to]);
 
       const total = purchasesRow.total || 0;
@@ -162,12 +162,12 @@ router.get('/data', async (req, res) => {
 
     if (type === 'sales') {
       data = await db.all(
-        "SELECT invoice_no, total_amount, date FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC LIMIT 500",
+        `SELECT invoice_no, total_amount, COALESCE(date, business_date) as date FROM sales_invoices WHERE ${SALES_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY id DESC LIMIT 500`,
         [from, to]
       );
     } else if (type === 'purchases') {
       data = await db.all(
-        "SELECT p.invoice_no, p.total_amount, d.name as distributor, p.date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC LIMIT 500",
+        `SELECT p.invoice_no, p.total_amount, d.name as distributor, COALESCE(p.date, p.business_date) as date FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE ${PURCHASES_P_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY p.id DESC LIMIT 500`,
         [from, to]
       );
     } else if (type === 'inventory') {
@@ -225,7 +225,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC";
+      query = `SELECT invoice_no, COALESCE(date, business_date) as date, total_amount FROM sales_invoices WHERE ${SALES_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY id DESC`;
       params = [from, to];
       alignMap = { invoice_no: 'left', date: 'center', total_amount: 'right' };
       colWidths = [180, 180, 152];
@@ -233,7 +233,7 @@ router.get('/export-pdf', async (req, res) => {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
+      query = `SELECT p.invoice_no, d.name as distributor_name, COALESCE(p.date, p.business_date) as date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE ${PURCHASES_P_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY p.id DESC`;
       params = [from, to];
       alignMap = { invoice_no: 'left', distributor_name: 'left', date: 'center', total_amount: 'right' };
       colWidths = [120, 180, 112, 100];
@@ -293,13 +293,13 @@ router.get('/export-excel', async (req, res) => {
       title = 'Sales History Report';
       headers = ['Invoice No', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'date', 'total_amount'];
-      query = "SELECT invoice_no, date, total_amount FROM sales_invoices WHERE COALESCE(date(date), date(substr(date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY date DESC";
+      query = `SELECT invoice_no, COALESCE(date, business_date) as date, total_amount FROM sales_invoices WHERE ${SALES_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY id DESC`;
       params = [from, to];
     } else if (type === 'purchases') {
       title = 'Purchase History Report';
       headers = ['Invoice / Bill No', 'Distributor / Supplier', 'Date', 'Amount (Rs.)'];
       keys = ['invoice_no', 'distributor_name', 'date', 'total_amount'];
-      query = "SELECT p.invoice_no, d.name as distributor_name, p.date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE COALESCE(date(p.date), date(substr(p.date, 1, 10))) BETWEEN date(?) AND date(?) ORDER BY p.date DESC";
+      query = `SELECT p.invoice_no, d.name as distributor_name, COALESCE(p.date, p.business_date) as date, p.total_amount FROM purchases p LEFT JOIN distributors d ON p.distributor_id = d.id WHERE ${PURCHASES_P_DATE_EXPR} BETWEEN date(?) AND date(?) ORDER BY p.id DESC`;
       params = [from, to];
     } else if (type === 'inventory') {
       title = 'Current Inventory Status Report';

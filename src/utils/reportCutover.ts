@@ -11,8 +11,8 @@ export async function setReportCutoverDate(db: { run: Function }, date: string):
   await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [CUTOVER_KEY, date.slice(0, 10)]);
 }
 
-/** Use the later of the requested from-date and the migration cutover date. */
+/** Use the requested from-date. Cutover is only used if requestedFrom is empty. */
 export function effectiveReportFromDate(requestedFrom: string, cutover: string | null): string {
-  if (!cutover) return requestedFrom;
-  return requestedFrom > cutover ? requestedFrom : cutover;
+  if (requestedFrom && requestedFrom.trim()) return requestedFrom.trim();
+  return cutover || '1970-01-01';
 }

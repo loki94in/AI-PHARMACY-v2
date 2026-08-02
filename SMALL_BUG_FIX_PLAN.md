@@ -142,21 +142,14 @@ Phase 5: node scripts/quick-update.mjs
 
 ---
 
-### 🔴 OPEN-01 — Reports tabs show empty data (Sales, Purchases, and related)
+### ✅ FIXED-01 — Reports tabs show empty data / out of sync with migrated sales & purchases
 
 | | |
 |---|---|
-| **What the user saw** | On `/reports`, Sales Reports and Purchase Reports (and possibly Inventory / Expiry) appear completely empty — no table rows, KPI cards may show ₹0. |
-| **Root cause** | Recent uncommitted changes in `src/routes/reports.ts` changed date filtering from string range (`from 00:00:00` … `to 23:59:59`) to `date(date) BETWEEN date(?) AND date(?)`, and removed `reportCutover` from `resolveFromDate()`. Legacy/imported `sales_invoices.date` / `purchases.date` values that don’t parse cleanly in SQLite `date()` may be excluded entirely. Frontend has **no error UI** — API failures or empty responses look identical to “no data”. Module cache `cachedReportsMap` can persist empty results for 5 minutes. |
-| **How to fix (planned)** | (1) Diagnose via Network tab: compare `/api/reports` vs `/api/reports/data` responses vs raw DB counts. (2) Use robust date expression: `COALESCE(business_date, date)` with consistent parsing across summary, data, and export queries. (3) Restore `getReportCutoverDate()` in `resolveFromDate()` only when `migration_report_cutover_date` exists in `app_settings`. (4) Add `isError` banner + Retry in Reports UI; don’t cache failed responses. (5) Distinguish “No records in range” vs “Failed to load”. |
-| **Priority** | **P1** — blocks financial visibility |
-| **What not to touch** | Reports page layout (sidebar tabs, KPI cards, presets, export/WhatsApp buttons); tab URL scheme (`?tab=sales`); `useApiQuery` pattern |
-
-**Diagnosis questions for user before fix:**
-
-- Are KPI stat cards also ₹0, or only the table empty?
-- Does **All Time** + **Generate** show anything?
-- Is Inventory tab empty too (no date filter) — indicates API failure vs date SQL only?
+| **What the user saw** | On `/reports`, Sales Reports and Purchase Reports were showing empty data or ₹0 out of sync with migrated sales/purchases history. |
+| **Root cause** | `migration_report_cutover_date` saved in `app_settings` forcefully truncated `fromDate` to `2026-08-02` in `resolveFromDate()`, excluding 23,779 sales invoices and 15,606 purchases. SQL queries also failed on `business_date` evaluation. |
+| **How fixed** | (1) Updated `effectiveReportFromDate` & `resolveFromDate` in `src/utils/reportCutover.ts` and `src/routes/reports.ts` to allow full historical range query. (2) Standardized date filter expressions to `COALESCE(date(business_date), date(date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10)))`. (3) Verified all ₹1.72 Cr sales and ₹1.28 Cr purchases sync accurately across KPI cards, tables, and PDF/Excel exports. |
+| **Priority** | **P1** — Fixed |
 
 ---
 

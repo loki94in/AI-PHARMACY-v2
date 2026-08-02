@@ -64,7 +64,7 @@ const Reports = () => {
       setToDate(getTodayString());
       setManualToDate(false);
     } else if (preset === 'all') {
-      setFromDate('2020-01-01');
+      setFromDate('1970-01-01');
       setToDate(getTodayString());
       setManualToDate(false);
     } else if (preset === 'expiry365') {
