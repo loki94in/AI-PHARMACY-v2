@@ -15,16 +15,16 @@ import { normalizeDate } from '../utils/migrationUtils.js';
 import { rebuildMigrationInventoryStock } from '../utils/migrationStockRebuild.js';
 import { getStagedModules, getImportOrderWarnings, getImportStats, clearStagedModuleTracking } from '../utils/migrationMeta.js';
 import { setReportCutoverDate } from '../utils/reportCutover.js';
-import { config } from '../config/index.js';
+import { config, getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// Both must come from config.dbPath, the same value dbManager opens. Deriving them
+// Both must come from config.dbPath / getAppDataDir(), the same value dbManager opens. Deriving them
 // from __dirname instead lets the finalize step write app.db to a different location
 // than every page reads from (they diverge in a packaged build), and lets this module
 // and migrationWorker disagree about where staging.db lives.
 const DB_PATH = config.dbPath;
-const MIGRATION_DIR = path.resolve(__dirname, '..', '..', 'MIGRATION SAMPEL');
+const MIGRATION_DIR = path.join(getAppDataDir(), 'MIGRATION SAMPEL');
 const STAGING_DB_PATH = path.join(path.dirname(DB_PATH), 'staging.db');
 
 if (!fs.existsSync(MIGRATION_DIR)) fs.mkdirSync(MIGRATION_DIR, { recursive: true });

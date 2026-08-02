@@ -58,6 +58,8 @@ export async function authenticateApiKey(req: Request, res: Response, next: Next
   if (
     originalUrl.startsWith('/api/license') ||
     path.startsWith('/license') ||
+    originalUrl.startsWith('/api/migration') ||
+    path.startsWith('/migration') ||
     originalUrl.startsWith('/api/medicines/compact') ||
     path.startsWith('/medicines/compact') ||
     path === '/medicines/compact' ||

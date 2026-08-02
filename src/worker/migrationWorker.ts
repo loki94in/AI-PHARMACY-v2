@@ -18,7 +18,7 @@ import { recordStagedModule, saveImportStats } from '../utils/migrationMeta.js';
 import { validateStagingDatabaseFile } from '../utils/validateStagingDatabase.js';
 import { findOrCreateDistributor, resetDistributorLookupCache } from '../utils/migrationDistributorHelpers.js';
 import { formatInvoiceWithFY } from '../utils/migrationValidation.js';
-import { config } from '../config/index.js';
+import { config, getAppDataDir } from '../config/index.js';
 
 // PostgreSQL COPY parser
 import { parseCopyHeader, parseCopyDataRow, isCopyEndMarker, isPgDump } from './parsers/pgCopyParser.js';
@@ -83,9 +83,8 @@ import { processSalesLine } from './parsers/salesParser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const MIGRATION_DIR = path.join(PROJECT_ROOT, 'MIGRATION SAMPEL');
-const TEMP_DIR = path.join(PROJECT_ROOT, 'data', 'temp_migration');
+const MIGRATION_DIR = path.join(getAppDataDir(), 'MIGRATION SAMPEL');
+const TEMP_DIR = path.join(getAppDataDir(), 'data', 'temp_migration');
 // Same single source of truth as dbManager and the migration routes, so the worker
 // can never stage into (or swap over) a different app.db than the app reads from.
 const DB_PATH = config.dbPath;
@@ -356,7 +355,7 @@ async function processMigrationFile(
 
     Object.assign(migrationStatus, { active: true, progress: 0, message: 'Processing migration file...', file: basename, errorCount: 0 });
 
-    const archiveDir = path.join(PROJECT_ROOT, 'data', 'archived_migrations');
+    const archiveDir = path.join(getAppDataDir(), 'data', 'archived_migrations');
     if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
 
     // Step 0: Always recreate staging.db from scratch to avoid corrupt leftovers from failed retries
@@ -1139,7 +1138,7 @@ async function streamPgDump(
  * Generate migration summary report files.
  */
 async function generateMigrationReport(db: any, stats: any) {
-  const reportsDir = path.join(PROJECT_ROOT, 'data', 'migration_reports');
+  const reportsDir = path.join(getAppDataDir(), 'data', 'migration_reports');
   if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
 
   // Summary report
