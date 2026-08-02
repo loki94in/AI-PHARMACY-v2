@@ -173,8 +173,19 @@ app.get('/api/health/ready', (req, res) => {
 // Block every other /api route — including the public bootstrap-token
 // endpoint — until the schema is ready. Responds 503 (not 401), which the
 // frontend already retries with backoff instead of surfacing as an auth error.
+//
+// /migration is exempt: it must work on a fresh install before anything else
+// is ready (see the auth whitelist in middleware/auth.ts, which exempts it
+// for the same reason). Its DB-touching sub-routes already open the sqlite
+// file directly via dbManager and would simply 500 on a missing table during
+// the few-second schema-creation window — the same behavior they had before
+// this gate existed. Gating /migration here regressed it: multer's
+// disk-upload route needs no schema at all, but a slow first-ever schema
+// creation on a truly fresh %LOCALAPPDATA% install (no pre-existing DB, unlike
+// a dev machine reusing one) could outlast the frontend's 503 retry budget
+// and make file uploads fail outright.
 app.use('/api', (req, res, next) => {
-  if (schemaReady || req.path === '/health' || req.path === '/health/ready') return next();
+  if (schemaReady || req.path === '/health' || req.path === '/health/ready' || req.path.startsWith('/migration')) return next();
   res.status(503).json({ error: 'Server is initializing', retryAfter: 1 });
 });
 
