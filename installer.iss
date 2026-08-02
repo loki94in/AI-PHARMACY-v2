@@ -121,7 +121,7 @@ Root: HKCU; Subkey: "Software\AIPharmacyOS"; Flags: uninsdeletekey
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable (if needed)..."; Check: VCRedistNeedsInstall and VCRedistFilePresent; Flags: waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} server"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "Launch {#MyAppName} server"; Flags: nowait postinstall skipifsilent
 Filename: "http://localhost:{#MyAppPort}"; Description: "Open in browser (http://localhost:{#MyAppPort})"; Flags: shellexec postinstall skipifsilent unchecked
 
 [UninstallRun]

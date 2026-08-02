@@ -4,9 +4,6 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import fs from 'fs';
 
-// Load environment variables from .env file
-dotenvConfig();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -28,6 +25,19 @@ function isNodeSea(): boolean {
 
 /** True when running as a packaged single executable (pkg or Node SEA), not from source. */
 export const isPackagedApp = (): boolean => isPkg || isNodeSea();
+
+// Load environment variables from .env file. dotenv's default behaviour reads
+// `.env` from process.cwd(), which is only the app folder when launched with an
+// explicit "Start in" directory (e.g. the desktop shortcut). Launched from a
+// registry Run key, a taskbar pin, or `cmd /c start <path>` without a working
+// directory, cwd can be System32 or the user's home folder, so `.env` silently
+// fails to load and NODE_ENV/API_KEY/LICENSE_SERVER_URL stay unset. When
+// packaged, load explicitly from the executable's own directory instead.
+if (isPackagedApp()) {
+  dotenvConfig({ path: path.join(path.dirname(process.execPath), '.env') });
+} else {
+  dotenvConfig();
+}
 
 function migrateLegacyPackagedDataIfNeeded(oldRoot: string, newRoot: string): void {
   const oldData = path.join(oldRoot, 'data', 'app.db');

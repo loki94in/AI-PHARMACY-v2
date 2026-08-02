@@ -23,8 +23,7 @@ export async function ensureAuthToken(): Promise<string | null> {
   }
   if (cachedBootstrapToken) return cachedBootstrapToken;
   if (!bootstrapTokenPromise) {
-    bootstrapTokenPromise = fetch(`${API_URL}/auth/bootstrap-token`)
-      .then(async (res) => (res.ok ? res.json() : null))
+    bootstrapTokenPromise = fetchBootstrapTokenWithRetry()
       .then((data) => {
         cachedBootstrapToken = data?.token?.trim() || null;
         if (cachedBootstrapToken) {
@@ -42,6 +41,31 @@ export async function ensureAuthToken(): Promise<string | null> {
       });
   }
   return bootstrapTokenPromise;
+}
+
+// Retries with backoff so a transient failure during the ~1-60s server boot
+// window (schema still initializing — see /api/health/ready) doesn't leave
+// the client permanently tokenless. Bypasses apiClient/axios deliberately:
+// this call happens before any token exists, so it can't go through the
+// interceptor that attaches one.
+const BOOTSTRAP_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
+
+async function fetchBootstrapTokenWithRetry(): Promise<{ token?: string } | null> {
+  for (let attempt = 0; attempt <= BOOTSTRAP_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const res = await fetch(`${API_URL}/auth/bootstrap-token`);
+      if (res.ok) return res.json();
+      // 503 = server still initializing (schema not ready yet) — worth retrying.
+      // Any other non-OK status is not transient; stop retrying.
+      if (res.status !== 503) return null;
+    } catch {
+      // Network error — worth retrying.
+    }
+    const delay = BOOTSTRAP_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  return null;
 }
 
 export function clearAuthTokenCache(): void {
@@ -133,12 +157,17 @@ apiClient.interceptors.response.use(
       }
     }
     
-    // If 503 Service Initializing, retry up to 5 times
+    // If 503 Service Initializing, retry with backoff. A truly fresh install
+    // (no pre-existing DB, unlike a dev machine reusing one) can take longer
+    // than a few seconds to finish creating the schema on first-ever launch,
+    // so this budget is generous (up to ~34s) rather than a flat 5x1s.
     if (error.response?.status === 503) {
-      if (config && (!config._retryCount || config._retryCount < 5)) {
+      const maxRetries = 12;
+      if (config && (!config._retryCount || config._retryCount < maxRetries)) {
         config._retryCount = (config._retryCount || 0) + 1;
-        const delay = (error.response?.data?.retryAfter || 1) * 1000;
-        console.warn(`[API] Server is initializing. Retrying ${config.url} (Attempt ${config._retryCount}/5) in ${delay}ms...`);
+        const baseDelay = (error.response?.data?.retryAfter || 1) * 1000;
+        const delay = Math.min(baseDelay * config._retryCount, 5000);
+        console.warn(`[API] Server is initializing. Retrying ${config.url} (Attempt ${config._retryCount}/${maxRetries}) in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         return apiClient(config);
       }
@@ -638,7 +667,7 @@ export const api = {
   
   // License
   getLicenseStatus: () => apiClient.get('/license/status').then(res => res.data),
-  activateLicense: (key: string) => apiClient.post('/license/activate', { key }).then(res => res.data),
+  activateLicense: (key: string) => apiClient.post('/license/activate', { licenseKey: key }).then(res => res.data),
 
   // WhatsApp Custom UI
   getWhatsappStatus: () => apiClient.get('/messaging/qr').then(res => res.data),

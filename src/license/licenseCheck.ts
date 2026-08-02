@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { dbManager } from '../database/connection.js';
 import { deriveMachineFingerprint } from './machineId.js';
 import { readToken, TOKEN_KEYS } from './tokenStore.js';
+import { invalidateSessionTokenCache } from '../middleware/auth.js';
 
 // Set this to your deployed GAS Web App URL
 const GAS_URL = process.env.LICENSE_SERVER_URL ?? '';
@@ -123,4 +124,7 @@ export async function storeActivationResult(params: {
   await setSetting(db, 'license_revoked', 'false');
   await setSetting(db, 'license_session_token', params.sessionToken);
   await setSetting(db, 'license_key', params.licenseKey);
+  // authenticateApiKey caches the session token for 5 minutes — without this,
+  // requests using the freshly issued token would 401 until the cache expires.
+  invalidateSessionTokenCache();
 }
