@@ -5,11 +5,12 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { aiCameraService } from '../services/aiCameraService.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const AUDIT_QUEUE_PATH = path.resolve(__dirname, '..', '..', 'data', 'audit_queue.json');
+const AUDIT_QUEUE_PATH = path.resolve(getAppDataDir(), 'data', 'audit_queue.json');
 
 const router = express.Router();
 

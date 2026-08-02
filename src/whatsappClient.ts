@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { eventService } from './services/eventService.js';
 import { dbManager } from './database/connection.js';
-import { config as appConfig } from './config/index.js';
+import { config as appConfig, getAppDataDir } from './config/index.js';
 import { whatsappBusinessService } from './services/whatsappBusinessService.js';
 
 // whatsapp-web.js uses CommonJS default export, so Client is a value not a type.
@@ -15,7 +15,8 @@ type WAClient = InstanceType<typeof Client>;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const UPLOADS_DIR = path.resolve(__dirname, '..', 'uploads');
+const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
+const WWEBJS_AUTH_DIR = path.resolve(getAppDataDir(), '.wwebjs_auth');
 
 /** Helper to detect Puppeteer detached frame or destroyed context errors */
 export function isPuppeteerDetachedError(msg?: string): boolean {
@@ -113,7 +114,7 @@ export async function shouldRouteToBusiness(): Promise<boolean> {
 
 /** Kill stale Chrome/Edge processes and remove lock files holding the wwebjs session profile. */
 function cleanupProfileLocks() {
-  const sessionPath = path.resolve(process.cwd(), '.wwebjs_auth', 'session');
+  const sessionPath = path.join(WWEBJS_AUTH_DIR, 'session');
 
   try {
     if (process.platform === 'win32') {
@@ -341,7 +342,7 @@ export async function initClient(): Promise<WAClient> {
     ];
 
     const client = new Client({
-      authStrategy: new LocalAuth({ dataPath: path.resolve(process.cwd(), '.wwebjs_auth') }),
+      authStrategy: new LocalAuth({ dataPath: WWEBJS_AUTH_DIR }),
       puppeteer: execPath
         ? { executablePath: execPath, headless: true, args: puppeteerArgs }
         : { headless: true, args: puppeteerArgs }
@@ -587,7 +588,7 @@ export async function forceReconnect(): Promise<void> {
   }
   clientInstance = null;
 
-  const authPath = '.wwebjs_auth';
+  const authPath = WWEBJS_AUTH_DIR;
   try {
     if (fs.existsSync(authPath)) {
       fs.rmSync(authPath, { recursive: true, force: true });

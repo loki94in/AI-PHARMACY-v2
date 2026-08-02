@@ -5,11 +5,12 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
-const ARCHIVE_DIR = path.resolve(__dirname, '..', '..', 'data', 'archived_migrations');
+const ARCHIVE_DIR = path.resolve(getAppDataDir(), 'data', 'archived_migrations');
 
 if (!fs.existsSync(ARCHIVE_DIR)) {
   fs.mkdirSync(ARCHIVE_DIR, { recursive: true });

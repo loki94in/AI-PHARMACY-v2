@@ -6,6 +6,7 @@ import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'url';
 import { aiCameraService } from '../services/aiCameraService.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { getAppDataDir } from '../config/index.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -177,7 +178,7 @@ router.post('/financial-note', async (req, res) => {
 
     pdfDoc = new PDFDocument();
     const filename = `financial-note-${Date.now()}.pdf`;
-    const outPath = path.resolve(__dirname, '..', '..', 'uploads', filename);
+    const outPath = path.resolve(getAppDataDir(), 'uploads', filename);
     stream = fs.createWriteStream(outPath);
     pdfDoc.pipe(stream);
     pdfDoc.fontSize(20).text(`${type.charAt(0).toUpperCase() + type.slice(1)} Note`, { align: 'center' });

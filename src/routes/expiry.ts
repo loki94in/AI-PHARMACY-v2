@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { exportToPdf, exportToCsv } from '../utils/reportExporter.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,7 +78,7 @@ router.get('/', async (req, res) => {
     date_to = getNDaysAheadString(days);
   }
 
-  const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+  const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
 
   try {
     const months = getMonthsInRange(date_from, date_to);
@@ -153,7 +154,7 @@ router.get('/export', async (req, res) => {
   }
   const format = (req.query.format as string) || 'pdf';
 
-  const cacheDir = path.resolve(__dirname, '..', '..', 'data', 'cache', 'expiry');
+  const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
   let items: any[] = [];
 
   try {

@@ -3,7 +3,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { config } from '../config/index.js';
+import { config, getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -96,7 +96,7 @@ router.post('/barcode', async (req, res) => {
   }
 
   try {
-    const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
@@ -159,7 +159,7 @@ router.post('/barcode', async (req, res) => {
 router.get('/barcode/:code', async (req, res) => {
   const { code } = req.params;
   try {
-    const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
@@ -301,7 +301,7 @@ router.get('/backup/status', async (req, res) => {
     }
 
     // Calculate total size of snapshots and archives
-    const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
+    const BACKUP_DIR = config.backupDir;
     const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
     const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
     
@@ -391,7 +391,7 @@ router.delete('/backup/archive/:filename', async (req, res) => {
 // POST /api/utilities/backup/manual
 router.post('/backup/manual', async (req, res) => {
   try {
-    const BACKUP_DIR = path.resolve(__dirname, '..', '..', 'backup');
+    const BACKUP_DIR = config.backupDir;
     const SNAPSHOTS_DIR = path.join(BACKUP_DIR, 'snapshots');
     const ARCHIVES_DIR = path.join(BACKUP_DIR, 'archives');
 
@@ -688,10 +688,10 @@ router.post('/reset-data', async (req, res) => {
     }
 
     // 6. Clean up file directories on disk
-    const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
-    const rawDir = path.resolve(__dirname, '..', '..', 'catalogue', 'raw');
-    const migrationReportsDir = path.resolve(__dirname, '..', '..', 'data', 'migration_reports');
-    const auditImagesDir = path.resolve(__dirname, '..', '..', 'data', 'audit_images');
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+    const rawDir = path.resolve(getAppDataDir(), 'catalogue', 'raw');
+    const migrationReportsDir = path.resolve(getAppDataDir(), 'data', 'migration_reports');
+    const auditImagesDir = path.resolve(getAppDataDir(), 'data', 'audit_images');
 
     const clearDir = (dirPath: string, preserveFiles: string[] = []) => {
       if (!fs.existsSync(dirPath)) return;
@@ -723,11 +723,11 @@ router.post('/reset-data', async (req, res) => {
 
     if (wipeAll) {
       // Factory reset: also wipe all backup files, archives, snapshots
-      const backupDir = path.resolve(__dirname, '..', '..', 'backup');
+      const backupDir = config.backupDir;
       clearDir(backupDir); // clears all .db.gz files, archives/, snapshots/ subdirs
 
       // Wipe migration staging database (separate from app.db)
-      const dataDir = path.resolve(__dirname, '..', '..', 'data');
+      const dataDir = path.resolve(getAppDataDir(), 'data');
       const stagingDbPath = path.join(dataDir, 'staging.db');
       if (fs.existsSync(stagingDbPath)) {
         try {
@@ -758,15 +758,15 @@ router.post('/reset-data', async (req, res) => {
       } catch (_) {}
 
       // Wipe uploaded migration source files (zip, csv, xlsx etc.)
-      const migrationSampelDir = path.resolve(__dirname, '..', '..', 'MIGRATION SAMPEL');
+      const migrationSampelDir = path.resolve(getAppDataDir(), 'MIGRATION SAMPEL');
       clearDir(migrationSampelDir);
 
       // Wipe temp data directories
       const tempDirs = [
-        path.resolve(__dirname, '..', '..', 'data', 'temp_migration'),
-        path.resolve(__dirname, '..', '..', 'data', 'temp_ocr'),
-        path.resolve(__dirname, '..', '..', 'data', 'search_screenshots'),
-        path.resolve(__dirname, '..', '..', 'data', 'archived_migrations'),
+        path.resolve(getAppDataDir(), 'data', 'temp_migration'),
+        path.resolve(getAppDataDir(), 'data', 'temp_ocr'),
+        path.resolve(getAppDataDir(), 'data', 'search_screenshots'),
+        path.resolve(getAppDataDir(), 'data', 'archived_migrations'),
       ];
       for (const d of tempDirs) clearDir(d);
 
@@ -788,13 +788,13 @@ router.post('/reset-data', async (req, res) => {
       }
 
       // Wipe WhatsApp web.js auth/cache sessions (forces fresh auth on restart)
-      const wwwebAuthDir = path.resolve(__dirname, '..', '..', '.wwebjs_auth');
-      const wwwebCacheDir = path.resolve(__dirname, '..', '..', '.wwebjs_cache');
+      const wwwebAuthDir = path.resolve(getAppDataDir(), '.wwebjs_auth');
+      const wwwebCacheDir = path.resolve(getAppDataDir(), '.wwebjs_cache');
       clearDir(wwwebAuthDir);
       clearDir(wwwebCacheDir);
 
       // Wipe Pharmarack profile and temp cache directories
-      const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+      const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
       if (fs.existsSync(pharmarackProfilePath)) {
         try {
           fs.rmSync(pharmarackProfilePath, { recursive: true, force: true });
@@ -802,7 +802,7 @@ router.post('/reset-data', async (req, res) => {
           console.warn('[Reset] Failed to delete pharmarack_profile:', err);
         }
       }
-      const cachePath = path.resolve(__dirname, '..', '..', 'data', 'cache');
+      const cachePath = path.resolve(getAppDataDir(), 'data', 'cache');
       if (fs.existsSync(cachePath)) {
         try {
           fs.rmSync(cachePath, { recursive: true, force: true });
@@ -837,7 +837,7 @@ router.post('/reset-data', async (req, res) => {
 // POST /api/utilities/clear-cache
 router.post('/clear-cache', async (req, res) => {
   try {
-    const dataDir = path.resolve(__dirname, '..', '..', 'data');
+    const dataDir = path.resolve(getAppDataDir(), 'data');
     
     // 1. Wipe cache directory
     const cachePath = path.join(dataDir, 'cache');

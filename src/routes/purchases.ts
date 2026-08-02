@@ -13,6 +13,7 @@ import { productNameFilterService } from '../services/productNameFilterService.j
 import { emailService, isNonMedicineNoise, cleanMedicineName } from '../services/emailService.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
 import { activityTracker } from '../utils/activityTracker.js';
+import { getAppDataDir } from '../config/index.js';
 import { refreshInventoryActiveStatus, refreshInventoryActiveByBatch } from '../utils/inventoryActive.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import fs from 'fs';
@@ -561,7 +562,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+    const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }

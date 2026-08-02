@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
+import { getAppDataDir } from '../config/index.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -104,7 +105,7 @@ export async function killOrphanChromeProcesses(keyword: string = 'pharmarack_pr
 
 export function cleanTempProfileFolders() {
   try {
-    const dataDir = path.resolve(__dirname, '..', '..', 'data');
+    const dataDir = path.resolve(getAppDataDir(), 'data');
     if (!fs.existsSync(dataDir)) return;
     const entries = fs.readdirSync(dataDir);
     for (const entry of entries) {
@@ -299,7 +300,7 @@ export class TokenRefreshScheduler {
       return null;
     }
 
-    const mainProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+    const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
     if (!fs.existsSync(mainProfilePath)) {
       console.error('[TokenRefreshScheduler] Main profile folder does not exist.');
       return null;
@@ -336,7 +337,7 @@ export class TokenRefreshScheduler {
       } catch (launchErr: any) {
         console.log('[TokenRefreshScheduler] Main profile is locked. Copying to temp profile...', launchErr.message);
         const randomSuffix = Math.floor(Math.random() * 1000000);
-        const tempProfilePath = path.resolve(__dirname, '..', '..', 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+        const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
         copyProfileFolder(mainProfilePath, tempProfilePath);
         cleanProfileLockFiles(tempProfilePath);
         browser = await puppeteer.launch({

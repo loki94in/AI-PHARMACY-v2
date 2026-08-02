@@ -6,10 +6,11 @@ import multer from 'multer';
 import { dbManager } from '../database/connection.js';
 import { loadReferenceData, loadApiSubstances, getEnrichmentStatus, runEnrichment, getEnrichmentRunningState, requestEnrichmentStop, ensureEnrichmentColumns, backfillSuggestedCompositions, reclassifyNonPharmaProducts, DOSAGE_FORM_SET } from '../worker/compositionEnricher.js';
 import { onlineDataEnricher } from '../services/onlineDataEnricher.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
+const DATA_DIR = path.resolve(getAppDataDir(), 'data');
 const REFERENCE_CSV = path.join(DATA_DIR, 'reference_medicines.csv');
 
 const router = express.Router();

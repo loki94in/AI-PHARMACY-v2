@@ -9,6 +9,7 @@ import { searchCache } from '../services/searchCache.js';
 import { tokenRefreshScheduler, cleanProfileLockFiles, killOrphanChromeProcesses } from '../services/tokenRefreshScheduler.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { getAppDataDir } from '../config/index.js';
 
 const execAsync = promisify(exec);
 
@@ -389,7 +390,7 @@ router.post('/login-window', async (req, res) => {
   (async () => {
     let browser;
     let tempProfilePathToDelete = '';
-    const mainProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+    const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
     const puppeteer = await getPuppeteer();
 
     try {
@@ -409,7 +410,7 @@ router.post('/login-window', async (req, res) => {
       } catch (launchErr: any) {
         console.warn('Failed to launch Chrome with main profile, attempting temp profile fallback...', launchErr.message);
         const randomSuffix = Math.floor(Math.random() * 1000000);
-        const tempProfilePath = path.resolve(__dirname, '..', '..', 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+        const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
         copyProfileFolder(mainProfilePath, tempProfilePath);
         cleanProfileLockFiles(tempProfilePath);
         browser = await puppeteer.launch({
@@ -848,7 +849,7 @@ router.post('/cart/add', async (req, res) => {
       const chromePath = findChromePath();
       if (chromePath) {
         console.log('[Pharmarack] Initiating browser UI automation fallback...');
-        const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+        const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
         let browser;
         let tempProfilePathToDelete = '';
         const puppeteer = await getPuppeteer();
@@ -877,7 +878,7 @@ router.post('/cart/add', async (req, res) => {
           } catch (launchErr: any) {
             console.log('[Pharmarack Fallback] Main profile is locked. Copying to temp profile...', launchErr.message);
             const randomSuffix = Math.floor(Math.random() * 1000000);
-            const tempProfilePath = path.resolve(__dirname, '..', '..', 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
             copyProfileFolder(pharmarackProfilePath, tempProfilePath);
             cleanProfileLockFiles(tempProfilePath);
             browser = await puppeteer.launch({
@@ -1460,7 +1461,7 @@ router.post('/logout', async (req, res) => {
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
 
-    const pharmarackProfilePath = path.resolve(__dirname, '..', '..', 'data', 'pharmarack_profile');
+    const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
     if (fs.existsSync(pharmarackProfilePath)) {
       fs.rmSync(pharmarackProfilePath, { recursive: true, force: true });
       console.log('Cleared Pharmarack Puppeteer profile directory.');

@@ -11,6 +11,7 @@ import { aiCameraService } from './services/aiCameraService.js';
 import { imageArchiveService } from './services/imageArchiveService.js';
 import { notificationManager } from './utils/notifications.js';
 import { extractDateFromText } from './utils/dateExtractor.js';
+import { getAppDataDir } from './config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -403,7 +404,7 @@ class TelegramBotService {
 
                 // Save to temp folder for archiving/cleanup
                 const tempFileName = `telegram_${Date.now()}_${msg.from?.id}.jpg`;
-                const tempFilePath = path.join(__dirname, '..', 'uploads', 'temp', tempFileName);
+                const tempFilePath = path.join(getAppDataDir(), 'uploads', 'temp', tempFileName);
                 fs.writeFileSync(tempFilePath, buffer);
 
                 // Route through AI archiving service

@@ -3,6 +3,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -167,7 +168,7 @@ export class PdfInvoiceService {
         doc.text(`₹${total.toFixed(2)}`, 480, doc.y - 12, { width: 70, align: 'right' });
 
         // Check if custom stamp/signature files exist (only draw if includeStampAndSig is true)
-        const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
+        const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
         const customStampPath = path.join(uploadsDir, 'custom_stamp.png');
         const customSigPath = path.join(uploadsDir, 'custom_signature.png');
 
