@@ -293,10 +293,19 @@ const POS = () => {
       if (editSale.payment_medium) setPaymentMedium(editSale.payment_medium);
 
       if (Array.isArray(editSale.items) && editSale.items.length > 0) {
-        const cartItems = editSale.items.map((it: any) => {
-          const itemQty = it.quantity !== undefined && it.quantity !== null ? Number(it.quantity) : 1;
+        const cartItems = editSale.items.map((it: any, idx: number) => {
+          // Use the bill's actual stored quantity (strips) and loose_qty.
+          // Fallback to 0, never to 1, so edit mode always shows the exact sold qty.
+          const itemQty = it.quantity !== undefined && it.quantity !== null 
+            ? Number(it.quantity) 
+            : (it.qty !== undefined && it.qty !== null ? Number(it.qty) : 0);
+          const itemLooseQty = it.loose_qty !== undefined && it.loose_qty !== null
+            ? Number(it.loose_qty)
+            : (it.looseQty !== undefined && it.looseQty !== null ? Number(it.looseQty) : 0);
+          const packSize = Number(it.pack_size || it.packSize || 10);
+          const unitPrice = Number(it.unit_price || it.rate || it.mrp || 100);
           return {
-            id: it.inventory_id || it.id,
+            id: it.inventory_id || it.id || `edit_item_${idx}_${Date.now()}`,
             inventory_id: it.inventory_id,
             medicine_id: it.medicine_id,
             name: it.medicine_name || it.name || 'Medicine',
@@ -305,12 +314,18 @@ const POS = () => {
             mrp: it.item_mrp || it.mrp || 100,
             qty: itemQty,
             quantity: itemQty,
-            unitPrice: Number(it.unit_price || it.rate || it.mrp || 100),
-            looseQty: Number(it.loose_qty || 0),
-            discount: Number(it.discount_per || 0),
-            packSize: Number(it.pack_size || 10),
+            unitPrice: unitPrice,
+            looseQty: itemLooseQty,
+            discount: Number(it.discount_per !== undefined ? it.discount_per : (it.discount || 0)),
+            packSize: packSize,
+            availableStock: 99999,
+            availableLooseStock: 99999,
+            isEmptyRow: false
           };
         });
+        // Increment generation BEFORE setCart so any stale queueMicrotask from
+        // a previous addToCart (which captured an old medicine_id) will be skipped.
+        cartGenerationRef.current += 1;
         setCart(cartItems);
       }
       toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS for Editing`, 'info');
@@ -391,7 +406,10 @@ const POS = () => {
                 });
               }
             }
-            if (cartItems.length > 0) setCart(cartItems);
+            if (cartItems.length > 0) {
+              cartGenerationRef.current += 1;
+              setCart(cartItems);
+            }
           } else if (prefill.medicineId) {
             // Single-medicine path (e.g. Refills panel "Sell Now")
             const response = await api.getQuickEditMedicine(Number(prefill.medicineId));
@@ -596,7 +614,7 @@ const POS = () => {
         batch: '',
         expiry: '',
         mrp: 0,
-        qty: 1,
+        qty: 0,
         looseQty: 0,
         discount: 0,
         packSize: 10,
@@ -618,7 +636,7 @@ const POS = () => {
             batch: '',
             expiry: '',
             mrp: 0,
-            qty: 1,
+            qty: 0,
             looseQty: 0,
             discount: 0,
             packSize: 10,
@@ -835,6 +853,9 @@ const POS = () => {
   const productSearchRef = useRef<HTMLDivElement>(null);
   const activeRowRef = useRef<HTMLDivElement>(null);
   const skipEmptyRowAutofocusRef = useRef(false);
+  // ponytail: generation counter to invalidate stale queueMicrotask closures from addToCart
+  // when the cart is replaced wholesale (edit-bill load, tab switch, clear).
+  const cartGenerationRef = useRef(0);
   const patientSuggestionsRef = useRef<HTMLDivElement>(null);
   const doctorSuggestionsRef = useRef<HTMLDivElement>(null);
   const patientSectionRef = useRef<HTMLDivElement>(null);
@@ -938,7 +959,7 @@ const POS = () => {
   // Fetch customer suggestions for patient autocomplete (P2)
   useEffect(() => {
     if (justSelectedPatientRef.current) {
-      justSelectedPatientRef.current = false;
+      setPatientSuggestions([]);
       setShowPatientSuggestions(false);
       return;
     }
@@ -949,13 +970,17 @@ const POS = () => {
       return;
     }
 
+    const currentQuery = patientName.trim();
     const delayDebounce = setTimeout(() => {
-      api.getPatients({ q: patientName.trim(), limit: 8 })
+      api.getPatients({ q: currentQuery, limit: 8 })
         .then((data: any[]) => {
           if (Array.isArray(data)) {
-            setPatientSuggestions(data);
-            const isFocused = document.activeElement && document.activeElement.getAttribute('aria-label') === 'Patient Name';
-            if (isFocused && selectedCustomerIdRef.current === null && !justSelectedPatientRef.current) {
+            const isFocused = document.activeElement && (
+              document.activeElement.getAttribute('aria-label') === 'Patient Name' ||
+              document.activeElement.id === 'patient-name-input'
+            );
+            if (isFocused && selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientName.trim() === currentQuery) {
+              setPatientSuggestions(data);
               setShowPatientSuggestions(data.length > 0);
             }
           }
@@ -1247,8 +1272,8 @@ const POS = () => {
     const packSize = medicineItems[0].packSize || 10;
 
     for (const item of medicineItems) {
-      let itemQty = item.qty || 0;
-      let itemLoose = item.looseQty || 0;
+      let itemQty = item.qty ?? item.quantity ?? 0;
+      let itemLoose = item.looseQty ?? item.loose_qty ?? 0;
       if (item.id === targetItemId) {
         if (updatedFields.qty !== undefined) itemQty = updatedFields.qty;
         if (updatedFields.looseQty !== undefined) itemLoose = updatedFields.looseQty;
@@ -1281,13 +1306,32 @@ const POS = () => {
       .filter(item => !item.isExpired);
 
     if (activeBatches.length === 0) {
-      toastEvent.trigger("This medicine is completely out of stock or expired", "error");
-      return prevCart.map(item => {
-        if (item.id === targetItemId) {
-          return { ...item, qty: 0, looseQty: 0 };
-        }
-        return item;
-      }).filter(item => item.id === targetItemId || item.medicine_id !== medicineId);
+      if (editingInvoiceId || medicineItems.some(i => i.batch || i.name)) {
+        const refItem = medicineItems[0];
+        const refQty = refItem.qty ?? refItem.quantity ?? 0;
+        const refLoose = refItem.looseQty ?? refItem.loose_qty ?? 0;
+        activeBatches.push({
+          inventory_id: refItem.inventory_id || refItem.id,
+          medicine_id: medicineId,
+          batch_no: refItem.batch || 'AUTO',
+          expiry_date: refItem.expiry || '12/28',
+          stock_qty: Math.max(999, refQty + 10),
+          loose_quantity: Math.max(999, refLoose + 10),
+          mrp: refItem.mrp || 100,
+          cost_price: refItem.costPrice || ((refItem.mrp || 100) * 0.7),
+          unit_price: refItem.unitPrice || refItem.mrp || 100,
+          pack_size: refItem.packSize || 10,
+          isExpired: false
+        });
+      } else {
+        toastEvent.trigger("This medicine is completely out of stock or expired", "error");
+        return prevCart.map(item => {
+          if (item.id === targetItemId) {
+            return { ...item, qty: 0, looseQty: 0 };
+          }
+          return item;
+        }).filter(item => item.id === targetItemId || item.medicine_id !== medicineId);
+      }
     }
 
     // Sort batches by FEFO (First Expiry, First Out):
@@ -1326,7 +1370,7 @@ const POS = () => {
     }
 
     // 5. If requested exceeds available stock, alert the user and cap the allocations
-    if (totalRequestedTablets > totalAvailableTablets) {
+    if (!editingInvoiceId && totalRequestedTablets > totalAvailableTablets) {
       toastEvent.trigger(`Only ${totalAvailableTablets} units available in stock. Capped to maximum.`, "info");
       
       remainingTablets = totalAvailableTablets;
@@ -1360,6 +1404,7 @@ const POS = () => {
         batch: alloc.batch.batch_no,
         expiry: alloc.batch.expiry_date,
         qty: alloc.qty,
+        quantity: alloc.qty,
         looseQty: alloc.looseQty,
         mrp: alloc.batch.mrp,
         costPrice: alloc.batch.cost_price || (alloc.batch.mrp * 0.7),
@@ -1435,13 +1480,9 @@ const POS = () => {
 
     updateCart(prevCart => {
       const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
-      let incQty = 1;
-      if (med.recommendedQty !== undefined) {
-        incQty = med.recommendedQty;
-      } else if (med.last_qty !== undefined && med.last_qty !== null) {
-        incQty = Number(med.last_qty) || 1;
-      }
-      const incLooseQty = med.recommendedLooseQty || 0;
+      // ponytail: POS sell cart always adds 1 strip — recommended/default qty is Live Cart only
+      const incQty = 1;
+      const incLooseQty = 0;
       
       if (existingIndex !== -1) {
         const existingItem = cleanPrev[existingIndex];
@@ -1477,7 +1518,11 @@ const POS = () => {
       };
       
       const nextCart = [...cleanPrev, newItem];
+      // Capture generation at schedule time; skip if the cart was replaced wholesale
+      // (e.g. edit-bill load) between scheduling and execution.
+      const scheduledGeneration = cartGenerationRef.current;
       queueMicrotask(() => {
+        if (cartGenerationRef.current !== scheduledGeneration) return;
         updateCart(currCart => rebalanceCartMedicine(currCart, newItem.medicine_id, newItem.id, { qty: incQty, looseQty: incLooseQty }));
       });
       return nextCart;
@@ -1507,7 +1552,7 @@ const POS = () => {
     }, 120);
   };
 
-  const addMedicineById = async (medicineId: number, lastQty?: number, lastLooseQty?: number) => {
+  const addMedicineById = async (medicineId: number) => {
     const compactInventory = getCompactInventoryCache();
     const batches = compactInventory.filter(item => item.medicine_id === medicineId);
     if (batches.length > 0) {
@@ -1518,12 +1563,7 @@ const POS = () => {
         alternatives: []
       })));
       if (grouped.length > 0) {
-        const item = {
-          ...grouped[0],
-          recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1,
-          recommendedLooseQty: lastLooseQty !== undefined && lastLooseQty !== null ? lastLooseQty : 0
-        };
-        fetchDetailsAndAddToCart(item);
+        fetchDetailsAndAddToCart(grouped[0]);
         return;
       }
     }
@@ -1540,9 +1580,7 @@ const POS = () => {
         costPrice: details.mrp ? details.mrp * 0.7 : 0,
         salts: details.api_reference || 'Generic',
         packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10,
-        quantity: 0,
-        recommendedQty: lastQty !== undefined && lastQty !== null ? lastQty : 1,
-        recommendedLooseQty: lastLooseQty !== undefined && lastLooseQty !== null ? lastLooseQty : 0
+        quantity: 0
       });
     } catch (err) {
       console.error('Failed to add medicine by ID:', err);
@@ -1564,8 +1602,6 @@ const POS = () => {
       batch_quantity: item.batch_quantity,
       loose_quantity: item.loose_quantity,
       alternatives: item.alternatives || [],
-      recommendedQty: item.recommendedQty,
-      recommendedLooseQty: item.recommendedLooseQty,
     };
 
     addToCart(basePayload);
@@ -1666,6 +1702,7 @@ const POS = () => {
     } else {
       updateCart(prev => prev.map((item, idx) => {
         if (idx !== index) return item;
+        const defaultQty = item.isEmptyRow ? 1 : (item.qty ?? 0);
         return {
           ...item,
           id: med.inventory_id,
@@ -1677,6 +1714,8 @@ const POS = () => {
           costPrice: med.cost_price,
           salts: med.salts || med.hsn_code || 'Generic',
           packSize: med.pack_size || 10,
+          qty: defaultQty,
+          quantity: defaultQty,
           availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
           availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
           isEmptyRow: false
@@ -2169,8 +2208,12 @@ const POS = () => {
       id: it.inventory_id || it.id || (1000 + idx),
       medicine_id: it.medicine_id || 0,
       name: it.name || it.medicine_name || 'Unknown',
-      qty: it.quantity || it.qty || 1,
-      looseQty: it.loose_quantity || it.loose_qty || 0,
+      qty: it.quantity !== undefined && it.quantity !== null 
+        ? Number(it.quantity) 
+        : (it.qty !== undefined && it.qty !== null ? Number(it.qty) : 1),
+      looseQty: it.loose_quantity !== undefined && it.loose_quantity !== null
+        ? Number(it.loose_quantity)
+        : (it.loose_qty !== undefined && it.loose_qty !== null ? Number(it.loose_qty) : (it.looseQty || 0)),
       unit_price: it.unit_price || it.rate || it.mrp || 0,
       mrp: it.mrp || 0,
       costPrice: it.cost_price || 0,
@@ -2325,6 +2368,7 @@ const POS = () => {
                               updatePatientName(c.name);
                               setPatientPhone(c.phone || '');
                               setSelectedCustomerId(c.id);
+                              setPatientSuggestions([]);
                               setShowPatientSuggestions(false);
                               setPatientHighlightIndex(-1);
                             }}
@@ -2697,7 +2741,9 @@ const POS = () => {
                             const isSameMed = c.medicine_id === item.medicine_id || 
                               (c.name || c.medicine_name || '').toLowerCase().trim() === (item.medicine_name || '').toLowerCase().trim();
                             if (isSameMed && !c.isEmptyRow) {
-                              return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
+                              const cQty = c.qty ?? c.quantity ?? 0;
+                              const cLoose = c.looseQty ?? c.loose_qty ?? 0;
+                              return sum + (cQty * packSize) + cLoose;
                             }
                             return sum;
                           }, 0);
@@ -2895,7 +2941,7 @@ const POS = () => {
                         <button
                           key={`doc_sug_${med.id}`}
                           type="button"
-                          onClick={() => addMedicineById(med.id, reqQty, reqLooseQty)}
+                          onClick={() => addMedicineById(med.id)}
                           className="flex items-center gap-1.5 bg-bg2 border border-border/60 hover:border-primary/60 hover:bg-primary/10 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
                         >
                           <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
@@ -2915,7 +2961,7 @@ const POS = () => {
                         <button
                           key={`doc_combo_${med.id}`}
                           type="button"
-                          onClick={() => addMedicineById(med.id, reqQty, reqLooseQty)}
+                          onClick={() => addMedicineById(med.id)}
                           className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/30 hover:border-purple-500/60 hover:bg-purple-500/20 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
                         >
                           <span className="text-xs font-semibold text-purple-300 transition-all">
@@ -3196,7 +3242,9 @@ const POS = () => {
                                               const isSameMed = c.medicine_id === med.medicine_id || 
                                                 (c.name || c.medicine_name || '').toLowerCase().trim() === (med.medicine_name || '').toLowerCase().trim();
                                               if (isSameMed && !c.isEmptyRow) {
-                                                return sum + (Number(c.qty || c.quantity || 0) * packSize) + Number(c.looseQty || 0);
+                                                const cQty = c.qty ?? c.quantity ?? 0;
+                                                const cLoose = c.looseQty ?? c.loose_qty ?? 0;
+                                                return sum + (cQty * packSize) + cLoose;
                                               }
                                               return sum;
                                             }, 0);
@@ -3322,7 +3370,7 @@ const POS = () => {
                                     id={`row-qty-input-${cart.indexOf(item)}`}
                                     type="number" 
                                     className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-text focus:outline-none"
-                                    value={item.qty === 0 || item.qty === undefined || item.qty === null ? '' : item.qty}
+                                    value={item.qty !== undefined && item.qty !== null ? item.qty : ''}
                                     onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                                     min="0"
                                     placeholder="0"
@@ -3357,7 +3405,7 @@ const POS = () => {
                                     id={`row-loose-input-${cart.indexOf(item)}`}
                                     type="number" 
                                     className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-amber-500 focus:outline-none"
-                                    value={item.looseQty === 0 || item.looseQty === undefined || item.looseQty === null ? '' : item.looseQty}
+                                    value={item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : ''}
                                     onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                                     min="0"
                                     placeholder="0"
@@ -3400,13 +3448,13 @@ const POS = () => {
                               
                               const totalCartQty = cart.reduce((sum, c) => {
                                 if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
-                                  return sum + (c.qty || 0);
+                                  return sum + (c.qty ?? c.quantity ?? 0);
                                 }
                                 return sum;
                               }, 0);
                               const totalCartLoose = cart.reduce((sum, c) => {
                                 if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
-                                  return sum + (c.looseQty || 0);
+                                  return sum + (c.looseQty ?? c.loose_qty ?? 0);
                                 }
                                 return sum;
                               }, 0);

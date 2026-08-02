@@ -212,6 +212,28 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 
 ---
 
+### ✅ P1-04 — POS vs Live Cart default quantity mixup
+
+| | |
+|---|---|
+| **Issue** | POS Sell page was adding recommended/historical default qty (e.g. 2–10 strips) when user clicked quick-add chips; Live Cart Add modal only transferred items to search instead of directly adding with order/refill/recommended qty. |
+| **Cause** | `addToCart()` in POS consumed `recommendedQty` / `last_qty` from sales-history API; Live Cart pending-panel "Add" buttons called `handleTransferToSearch()` (2-step flow) instead of `api.addPharmarackCart()`. |
+| **Fix applied** | POS `addToCart` always adds **1 strip** (recommended qty shown as hint only). Live Cart Add modal `handleDirectLiveCartAdd()` one-clicks to Pharmarack cart with correct default qty (order qty, refill `quantity_needed`, auto-refill `recommended_qty`); falls back to search on enrichment failure. Button labels unified to "Add to Live Cart". |
+| **Files** | `frontend/src/pages/POS/index.tsx`, `frontend/src/components/LiveCartAddModal.tsx` |
+
+---
+
+### ✅ P0-03 — POS Edit Sell Bill automatically increments item quantity by +1
+
+| | |
+|---|---|
+| **Issue** | When user clicks "Edit Invoice" on a sell bill (e.g. bill with 0 strips and 4 loose units), the POS loaded the bill showing 1 strip and 4 loose units instead of the actual 0 strips. |
+| **Cause** | 1. When POS was already mounted with cart items from a prior session and the user navigated to POS with `editSale` router state, a pending `queueMicrotask` scheduled by a prior `addToCart()` executed after the cart swap and called `rebalanceCartMedicine` with default `incQty=1`, bumping the newly loaded edit items from `qty=0` to `qty=1`.<br/>2. JavaScript falsy `0` evaluation: `Number(c.qty || c.quantity || 0)` evaluated `0 || c.quantity` to `c.quantity` (or 1) whenever `qty` was 0 (0 strips sold), automatically coercing 0 strips into 1 strip during cart unit reductions and batch allocations. |
+| **Fix applied** | 1. Added `cartGenerationRef` to `POS/index.tsx` incremented on direct `setCart` updates.<br/>2. Replaced falsy `||` expressions with nullish coalescing operator `c.qty ?? c.quantity ?? 0` across `POS/index.tsx` and ensured `rebalanceCartMedicine` updates both `qty` and `quantity` properties synchronously when rebalancing batches. |
+| **Files** | `frontend/src/pages/POS/index.tsx`, `SMALL_BUG_FIX_PLAN.md` |
+
+---
+
 ### ✅ P0-01 — Investigation purchase bill correction dropped GST and discount
 
 | | |
@@ -580,6 +602,8 @@ Priority: **P0** = data loss · **P1** = daily workflow · **P2** = UX · **P3**
 | 2026-08-02 | **`BUG_FIX_RULE_GUIDE.md`** created; wired into `AGENTS.md`, `.cursorrules`, `.agents/rules/bug-fix.md` |
 | 2026-08-02 | **`AGENT_BUG_FIX_RULEBOOK.md`** — universal rulebook; POS/project specifics removed; `BUG_FIX_RULE_GUIDE.md` is pointer only |
 | 2026-08-02 | **POS Edit Bill & Autocomplete Dropdowns:** Fixed Edit Bill save mode (`editingInvoiceId` update instead of duplicate save; fixed 0 quantity strip addition); Fixed Arrow Key keyboard scrolling for Patient, Doctor, Medicine search dropdowns (`instant` `scrollIntoView`); Fixed Patient/Doctor dropdown reopening bug on focus/selection. |
+| 2026-08-02 | **POS vs Live Cart qty separation:** POS always adds 1 strip; Live Cart Add direct-add with default qty for orders/refills/auto-refill. |
+| 2026-08-02 | **Dropdown Reappearing Bug Fix (Rulebook Workflow):** Fixed Patient suggestions dropdown race condition in `POS/index.tsx` (stale async `getPatients` response reopening list); Added explicit `setShowMfgSuggestions(false)` and `setShowMrkSuggestions(false)` on item selection in `Purchases/index.tsx` and `Database/index.tsx`. |
 
 ---
 

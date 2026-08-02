@@ -2894,7 +2894,10 @@ const Purchases: React.FC = () => {
                           <button
                             key={idx}
                             type="button"
-                            onClick={() => setNewMedicine(prev => ({ ...prev, manufacturer: mfgName }))}
+                            onClick={() => {
+                              setNewMedicine(prev => ({ ...prev, manufacturer: mfgName }));
+                              setShowMfgSuggestions(false);
+                            }}
                             className="w-full text-left px-3 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 flex items-center justify-between text-xs"
                           >
                             <span className="truncate pr-2 font-medium">{mfgName}</span>

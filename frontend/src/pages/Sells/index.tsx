@@ -825,8 +825,8 @@ const Sells = () => {
                             <td className="p-3 border-b border-glass-border/50">
                               <input
                                 type="number"
-                                value={item.quantity}
-                                onChange={e => updateItemQty(idx, parseInt(e.target.value) || 0)}
+                                value={item.quantity !== undefined && item.quantity !== null ? item.quantity : 0}
+                                onChange={e => updateItemQty(idx, e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10)))}
                                 className="w-16 px-2 py-1 bg-black/20 border border-glass-border rounded text-sm text-text text-center focus:outline-none focus:border-primary/50"
                                 min={0}
                               />
@@ -834,8 +834,8 @@ const Sells = () => {
                             <td className="p-3 border-b border-glass-border/50">
                               <input
                                 type="number"
-                                value={looseQty}
-                                onChange={e => updateItemLooseQty(idx, parseInt(e.target.value) || 0)}
+                                value={looseQty !== undefined && looseQty !== null ? looseQty : 0}
+                                onChange={e => updateItemLooseQty(idx, e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10)))}
                                 className="w-16 px-2 py-1 bg-amber/10 border border-amber/30 rounded text-sm text-amber text-center focus:outline-none focus:border-amber/50"
                                 min={0}
                                 max={packSize - 1}
