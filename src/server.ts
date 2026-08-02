@@ -370,13 +370,20 @@ const server = app.listen(PORT, async () => {
   if (isPackagedApp() || process.env.AUTO_OPEN_BROWSER === 'true') {
     setTimeout(() => {
       console.log(`[Boot] Launching default browser at ${serverUrl}...`);
-      if (process.platform === 'win32') {
-        spawn('cmd', ['/c', 'start', serverUrl], { detached: true, stdio: 'ignore' }).unref();
-      } else if (process.platform === 'darwin') {
-        spawn('open', [serverUrl], { detached: true, stdio: 'ignore' }).unref();
-      } else {
-        spawn('xdg-open', [serverUrl], { detached: true, stdio: 'ignore' }).unref();
-      }
+      const openerArgs: [string, string[]] = process.platform === 'win32'
+        ? ['cmd', ['/c', 'start', serverUrl]]
+        : process.platform === 'darwin'
+        ? ['open', [serverUrl]]
+        : ['xdg-open', [serverUrl]];
+      // A failed browser launch (missing opener binary, locked-down PATH, etc.)
+      // must never take down the API server — without this handler, the
+      // ChildProcess's unhandled 'error' event becomes an uncaught exception
+      // and processGuardian exits the whole process.
+      spawn(openerArgs[0], openerArgs[1], { detached: true, stdio: 'ignore' })
+        .on('error', (err) => {
+          console.warn(`[Boot] Failed to auto-launch browser (non-fatal): ${err.message}`);
+        })
+        .unref();
     }, 1000);
   }
 });
