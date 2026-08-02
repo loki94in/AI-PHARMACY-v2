@@ -45119,13 +45119,10 @@ var init_server = __esm({
       if (isPackagedApp() || process.env.AUTO_OPEN_BROWSER === "true") {
         setTimeout(() => {
           console.log(`[Boot] Launching default browser at ${serverUrl}...`);
-          if (process.platform === "win32") {
-            (0, import_child_process8.spawn)("cmd", ["/c", "start", serverUrl], { detached: true, stdio: "ignore" }).unref();
-          } else if (process.platform === "darwin") {
-            (0, import_child_process8.spawn)("open", [serverUrl], { detached: true, stdio: "ignore" }).unref();
-          } else {
-            (0, import_child_process8.spawn)("xdg-open", [serverUrl], { detached: true, stdio: "ignore" }).unref();
-          }
+          const openerArgs = process.platform === "win32" ? ["cmd", ["/c", "start", serverUrl]] : process.platform === "darwin" ? ["open", [serverUrl]] : ["xdg-open", [serverUrl]];
+          (0, import_child_process8.spawn)(openerArgs[0], openerArgs[1], { detached: true, stdio: "ignore" }).on("error", (err) => {
+            console.warn(`[Boot] Failed to auto-launch browser (non-fatal): ${err.message}`);
+          }).unref();
         }, 1e3);
       }
     });
