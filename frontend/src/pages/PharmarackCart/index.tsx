@@ -1575,16 +1575,25 @@ export default function PharmarackCart() {
     setPriceHistoryCache(prevCache => {
       const namesToFetch = uniqueNames.filter(name => !prevCache[name]);
       if (namesToFetch.length > 0) {
-        Promise.all(
-          namesToFetch.map(async (name) => {
+        // Firing one request per unique cart item at once can burst into 15-20+ parallel
+        // calls; each is a potentially expensive fuzzy-match lookup on the backend, and
+        // piling them up on Node's single thread stalls the whole app, not just this page.
+        // Throttle to a small concurrency window instead of Promise.all-ing everything.
+        const CONCURRENCY = 4;
+        const results: Array<{ name: string; data: any[] }> = [];
+        let nextIndex = 0;
+        const worker = async () => {
+          while (nextIndex < namesToFetch.length) {
+            const name = namesToFetch[nextIndex++];
             try {
               const res = await api.getMedicinePriceHistory(name);
-              return { name, data: res?.data || [] };
+              results.push({ name, data: res?.data || [] });
             } catch (e) {
-              return { name, data: [] };
+              results.push({ name, data: [] });
             }
-          })
-        ).then(results => {
+          }
+        };
+        Promise.all(Array.from({ length: Math.min(CONCURRENCY, namesToFetch.length) }, worker)).then(() => {
           setPriceHistoryCache(current => {
             const next = { ...current };
             results.forEach(r => {

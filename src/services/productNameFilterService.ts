@@ -219,6 +219,13 @@ export class ProductNameFilterService {
   private readonly DEFAULT_TIMEOUT = 5000; // 5 seconds
   private corrections: Map<string, { correctName: string; count: number }> = new Map();
   private readonly correctionsPath: string;
+  // Caches full filterProductNames() results for repeat lookups of the same name.
+  // The full-array fuzzy fallback scans all medicine names (O(n) Levenshtein/phonetic/n-gram
+  // per candidate) and can take 15-20+ seconds once the catalog grows into the hundreds of
+  // thousands; callers like Pharmarack Cart's price-history prefetch look up the same product
+  // names repeatedly, so caching turns every repeat lookup into an instant hit.
+  private readonly filterCache: Map<string, FilterResult> = new Map();
+  private readonly FILTER_CACHE_MAX = 2000;
 
   constructor(dbPath: string = './data/app.db') {
     this.dbPath = dbPath;
@@ -335,6 +342,9 @@ export class ProductNameFilterService {
     // Save to file periodically (we could batch this, but for simplicity saving each time)
     this.saveCorrections();
 
+    // A new correction can change the outcome of future lookups — drop stale cached results.
+    this.filterCache.clear();
+
     // Save to SQLite database asynchronously
     dbManager.getConnection()
       .then(async (db) => {
@@ -384,6 +394,17 @@ export class ProductNameFilterService {
     }
 
     const normalizedOcr = ocrText.toLowerCase().trim();
+
+    // Cache key covers every input that can change the result. Internet-fallback lookups are
+    // skipped (not cached) — that path is rare, opt-in, and time-sensitive by nature.
+    const cacheKey = !enableInternetFallback
+      ? `${normalizedOcr}|${dosageForm || ''}|${mrp || ''}|${minConfidenceThreshold}`
+      : null;
+    if (cacheKey && this.filterCache.has(cacheKey)) {
+      const cached = this.filterCache.get(cacheKey)!;
+      return { ...cached, processingTimeMs: Date.now() - startTime };
+    }
+
     const scoredMatches: Array<{ name: string; score: number }> = [];
 
     // First check if we have learned corrections (exact or token/substring match) for this OCR text
@@ -523,7 +544,7 @@ export class ProductNameFilterService {
       averageConfidence = minConfidenceThreshold * 100;
     }
 
-    return {
+    const result: FilterResult = {
       matches: allMatches,
       sources: {
         local: localMatches.length > 0,
@@ -537,6 +558,17 @@ export class ProductNameFilterService {
       scoredMatches,
       topScore: scoredMatches.length > 0 ? scoredMatches[0].score : 0
     };
+
+    if (cacheKey) {
+      if (this.filterCache.size >= this.FILTER_CACHE_MAX) {
+        // Map preserves insertion order — drop the oldest entry to bound memory.
+        const oldestKey = this.filterCache.keys().next().value;
+        if (oldestKey !== undefined) this.filterCache.delete(oldestKey);
+      }
+      this.filterCache.set(cacheKey, result);
+    }
+
+    return result;
   }
 
   private async queryInternetApi(
