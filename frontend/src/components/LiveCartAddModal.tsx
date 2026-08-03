@@ -1039,31 +1039,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const delayDebounce = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        // Fetch local database medicines instantly
-        const localData = await api.searchMedicine(cleanQuery).catch(() => []);
-        const localList: SuggestionMedicine[] = (Array.isArray(localData) ? localData : []).map((med: any) => ({
-          medicine_name: med.name || med.medicine_name,
-          shortName: med.name || med.medicine_name,
-          fullName: med.name || med.medicine_name,
-          mrp: med.mrp,
-          isPharmarack: false,
-          packaging: med.packaging || med.pack,
-          company: med.company || med.manufacturer
-        }));
-
-        // Render local items right away if found
-        if (localList.length > 0) {
-          setSuggestions(localList);
-          setShowSuggestions(true);
-        }
-
-        // Fetch Pharmarack live search in parallel
+        // Search Pharmarack catalog only (no local inventory cross-check)
         const prData = await api.searchPharmarack(cleanQuery).catch((err: any) => {
           const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
         });
 
-        const mergedList: SuggestionMedicine[] = [...localList];
+        const mergedList: SuggestionMedicine[] = [];
 
         if (prData && !(prData as any).isError && Array.isArray(prData) && prData.length > 0) {
           prData.forEach((item: any) => {
@@ -1087,14 +1069,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             });
           });
         } else if (prData && (prData as any).isError) {
-          if (localList.length === 0) {
-            mergedList.push({
-              medicine_name: `⚠️ ${(prData as any).message}`,
-              isPharmarack: true,
-              isErrorMessage: true
-            });
-          }
-        } else if (localList.length === 0) {
+          mergedList.push({
+            medicine_name: `⚠️ ${(prData as any).message}`,
+            isPharmarack: true,
+            isErrorMessage: true
+          });
+        } else {
           mergedList.push({
             medicine_name: `No distributor matches found for "${cleanQuery}"`,
             isPharmarack: true,
@@ -1106,7 +1086,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         setShowSuggestions(mergedList.length > 0);
         setActiveSuggestionIndex(-1);
       } catch (err) {
-        console.error('Error searching catalog:', err);
+        console.error('Error searching Pharmarack catalog:', err);
       } finally {
         setSearchLoading(false);
       }
