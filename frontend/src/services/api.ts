@@ -450,8 +450,9 @@ export const api = {
   createManualPurchase: (data: PurchasePayload) => apiClient.post('/purchases/manual', data).then(res => res.data),
   getDistributors: () => apiClient.get('/distributors').then(res => res.data),
   getPendingReturns: (distributorId: number) => apiClient.get(`/distributors/${distributorId}/pending-returns`).then(res => res.data),
-  getLastPurchase: (name: string, distributorId?: number) => {
+  getLastPurchase: (name: string, medicineId?: number, distributorId?: number) => {
     const params: any = { name };
+    if (medicineId) params.medicine_id = medicineId;
     if (distributorId) params.distributor_id = distributorId;
     return apiClient.get('/purchases/last-purchase', { params }).then(res => res.data);
   },

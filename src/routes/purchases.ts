@@ -1372,22 +1372,39 @@ router.get('/last-purchase', async (req, res) => {
   let db;
   try {
     const name = req.query.name as string;
+    // medicine_id allows skipping the expensive name LIKE scan entirely
+    const medicineIdParam = req.query.medicine_id as string;
     const distributorId = req.query.distributor_id as string;
-    if (!name) {
-      return res.status(400).json({ error: 'Medicine name query is required' });
+    if (!name && !medicineIdParam) {
+      return res.status(400).json({ error: 'Medicine name or id is required' });
     }
     db = await dbManager.getConnection();
 
-    // Find medicine by name (fuzzy)
-    const medicines = await db.all(
-      'SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 5',
-      [`%${name}%`]
-    );
-    if (medicines.length === 0) {
-            return res.json({ found: false });
+    let medicineIds: number[];
+
+    if (medicineIdParam) {
+      // Fast path: use the id we already know — no LIKE scan needed
+      medicineIds = [parseInt(medicineIdParam, 10)];
+    } else {
+      // Fallback: prefix-first name search (uses idx_medicines_name index range scan)
+      const prefixRows = await db.all(
+        'SELECT id FROM medicines WHERE name LIKE ? LIMIT 5',
+        [`${name}%`]
+      );
+      medicineIds = prefixRows.map((m: any) => m.id);
+      if (medicineIds.length === 0) {
+        // Secondary: infix scan only when prefix yields nothing
+        const infixRows = await db.all(
+          'SELECT id FROM medicines WHERE name LIKE ? LIMIT 5',
+          [`%${name}%`]
+        );
+        medicineIds = infixRows.map((m: any) => m.id);
+      }
+      if (medicineIds.length === 0) {
+        return res.json({ found: false });
+      }
     }
 
-    const medicineIds = medicines.map((m: any) => m.id);
     const placeholders = medicineIds.map(() => '?').join(',');
 
     let query = `
@@ -1410,7 +1427,7 @@ router.get('/last-purchase', async (req, res) => {
     query += ' ORDER BY p.date DESC LIMIT 1';
 
     const lastPurchase = await db.get(query, params);
-    
+
     if (!lastPurchase) {
       return res.json({ found: false });
     }
@@ -1422,6 +1439,7 @@ router.get('/last-purchase', async (req, res) => {
       batch_no: lastPurchase.batch_no,
       expiry_date: lastPurchase.expiry_date,
       cost_price: lastPurchase.cost_price,
+      rate: lastPurchase.cost_price,
       mrp: lastPurchase.mrp,
       cgst_per: lastPurchase.cgst_per,
       sgst_per: lastPurchase.sgst_per,

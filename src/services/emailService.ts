@@ -3072,10 +3072,14 @@ export class EmailService {
         }
       }
 
-      // Trigger background auto-delete cleanups for database and files
-      this.syncAndCleanAttachments().catch(err => {
-        console.error('[Sync] Background email cleanup failed:', err);
-      });
+      // Trigger background auto-delete cleanups for database and files.
+      // Delay by 5 s to ensure the delta-sync IMAP connection fully closes
+      // before opening a second connection (avoids ConnectionTimeoutError).
+      setTimeout(() => {
+        this.syncAndCleanAttachments().catch(err => {
+          console.error('[Sync] Background email cleanup failed:', err);
+        });
+      }, 5000);
 
       console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
       try {

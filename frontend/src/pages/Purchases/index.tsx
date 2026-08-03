@@ -1083,7 +1083,7 @@ const Purchases: React.FC = () => {
     }
   };
 
-  const selectMedicine = async (medicine: Medicine, index: number) => {
+  const selectMedicine = (medicine: Medicine, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
@@ -1102,36 +1102,42 @@ const Purchases: React.FC = () => {
     item.loose_qty = (medicine as any).loose_qty || 0;
     item.scheme_paid = medicine.scheme_paid;
     item.scheme_free = medicine.scheme_free;
-
-    // PU4: Run alias creation and last purchase lookup in parallel
-    const aliasPromise = (item.original_name && item.original_name !== medicine.name)
-      ? api.createMedicineAlias(item.original_name, medicine.id).catch(e => console.error('Failed to create alias:', e))
-      : Promise.resolve();
-
-    const lastPurchasePromise = api.getLastPurchase(medicine.name, selectedDistributor || undefined)
-      .catch(e => {
-        console.log('No last purchase found for this medicine');
-        return null;
-      });
-
-    const [, response] = await Promise.all([aliasPromise, lastPurchasePromise]);
-    
-    if (response && response.found) {
-      const lastPurchase = response;
-      item.batch_no = lastPurchase.batch_no || '';
-      item.expiry_date = formatExpiryToMMYY(lastPurchase.expiry_date || '');
-      item.rate = lastPurchase.rate || medicine.rate;
-      item.mrp = lastPurchase.mrp || medicine.mrp;
-      item.cgst_per = (lastPurchase.cgst_per !== undefined && lastPurchase.cgst_per !== 0) ? lastPurchase.cgst_per : item.cgst_per;
-      item.sgst_per = (lastPurchase.sgst_per !== undefined && lastPurchase.sgst_per !== 0) ? lastPurchase.sgst_per : item.sgst_per;
-    }
-
     item.amount = calculateItemAmount(item);
 
+    // Apply immediately so the UI feels instant
     setItems(newItems);
     setSearchResults([]);
     setActiveSearchIndex(null);
     setSearchHighlightIndex(-1);
+
+    // Alias creation: fire-and-forget in background
+    if (item.original_name && item.original_name !== medicine.name) {
+      api.createMedicineAlias(item.original_name, medicine.id).catch(e => console.error('Failed to create alias:', e));
+    }
+
+    // Last purchase lookup: runs in background, patches the row when it arrives
+    api.getLastPurchase(medicine.name, medicine.id, selectedDistributor || undefined)
+      .then(response => {
+        if (response && response.found) {
+          setItems(prev => {
+            const updated = [...prev];
+            const target = updated[index];
+            // Guard: bail if the row was changed since we fired the request
+            if (!target || target.medicine_id !== medicine.id) return prev;
+            target.batch_no = response.batch_no || '';
+            target.expiry_date = formatExpiryToMMYY(response.expiry_date || '');
+            target.rate = response.rate || response.cost_price || medicine.rate;
+            target.mrp = response.mrp || medicine.mrp;
+            target.cgst_per = (response.cgst_per !== undefined && response.cgst_per !== 0) ? response.cgst_per : target.cgst_per;
+            target.sgst_per = (response.sgst_per !== undefined && response.sgst_per !== 0) ? response.sgst_per : target.sgst_per;
+            target.amount = calculateItemAmount(target);
+            return updated;
+          });
+        }
+      })
+      .catch(() => {
+        // No last purchase found — no-op, fields already set from catalog
+      });
   };
 
   const calculateItemAmount = (item: BillItem): number => {
