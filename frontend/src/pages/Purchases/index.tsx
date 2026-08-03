@@ -2002,14 +2002,15 @@ const Purchases: React.FC = () => {
                     }
                   }}
                   onFocus={() => setShowDistributorDropdown(true)}
+                  onClick={() => setShowDistributorDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDistributorDropdown(false), 200)}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3/80 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-sky"
                   placeholder="Type to search distributor..."
                 />
                 {showDistributorDropdown && (
-                  <div className="absolute z-dropdown w-full mt-1 bg-[#18181b]/95 backdrop-blur border border-glass-border rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl">
-                    <div className="px-3 py-1.5 bg-bg2 border-b border-glass-border/40 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Distributor List</span>
+                  <div className="absolute z-dropdown w-full mt-1 bg-bg2/95 backdrop-blur border border-glass-border rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl">
+                    <div className="px-3 py-1.5 bg-bg3 border-b border-glass-border/40 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Distributor List ({filteredDistributors.length})</span>
                       <button
                         type="button"
                         onMouseDown={(e) => {
@@ -2045,11 +2046,11 @@ const Purchases: React.FC = () => {
                               setDistributorSearch(distName);
                               setShowDistributorDropdown(false);
                             }}
-                            className="w-full text-left px-4 py-2 hover:bg-white/10 text-text text-sm flex items-center justify-between"
+                            className="w-full text-left px-4 py-2 hover:bg-bg3 text-text text-sm flex items-center justify-between transition-colors border-b border-glass-border/20 last:border-0"
                           >
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="font-semibold truncate">{distName}</span>
-                              {dist.phone && <span className="text-gray-400 text-xs truncate">({dist.phone})</span>}
+                              <span className="font-semibold truncate text-text">{distName}</span>
+                              {dist.phone && <span className="text-muted text-xs truncate">({dist.phone})</span>}
                             </div>
                             {isMapped && (
                               <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">

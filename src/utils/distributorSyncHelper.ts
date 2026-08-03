@@ -53,46 +53,107 @@ export async function syncDistributorPhoneAcrossTables(db: any, params: SyncDist
 
   // 1. Update or Insert into 'distributors' table
   if (existingDist) {
-    await db.run(
-      `UPDATE distributors 
-       SET name = CASE WHEN ? != '' THEN ? ELSE name END,
-           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-           contact = CASE WHEN ? != '' THEN ? ELSE contact END,
-           email = CASE WHEN ? != '' THEN ? ELSE email END,
-           address = CASE WHEN ? != '' THEN ? ELSE address END,
-           gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
-           state_code = CASE WHEN ? != '' THEN ? ELSE state_code END,
-           preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END
-       WHERE id = ?`,
-      [
-        distName, distName,
-        cleanPhone, cleanPhone,
-        cleanPhone, cleanPhone,
-        cleanEmail, cleanEmail,
-        params.address || '', params.address || '',
-        params.gstin || '', params.gstin || '',
-        params.state_code || '', params.state_code || '',
-        params.preferred_file_format || '', params.preferred_file_format || '',
-        existingDist.id
-      ]
-    );
+    let nameToUpdate = distName;
+    if (distName && distName.toLowerCase().trim() !== (existingDist.name || '').toLowerCase().trim()) {
+      const duplicate = await db.get(
+        'SELECT id FROM distributors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND id != ?',
+        [distName, existingDist.id]
+      );
+      if (duplicate) {
+        // Name collides with another distributor record — preserve target distributor's name to prevent UNIQUE constraint failure
+        nameToUpdate = existingDist.name;
+      }
+    }
+
+    try {
+      await db.run(
+        `UPDATE distributors 
+         SET name = CASE WHEN ? != '' THEN ? ELSE name END,
+             phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+             contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+             email = CASE WHEN ? != '' THEN ? ELSE email END,
+             address = CASE WHEN ? != '' THEN ? ELSE address END,
+             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+             state_code = CASE WHEN ? != '' THEN ? ELSE state_code END,
+             preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END
+         WHERE id = ?`,
+        [
+          nameToUpdate, nameToUpdate,
+          cleanPhone, cleanPhone,
+          cleanPhone, cleanPhone,
+          cleanEmail, cleanEmail,
+          params.address || '', params.address || '',
+          params.gstin || '', params.gstin || '',
+          params.state_code || '', params.state_code || '',
+          params.preferred_file_format || '', params.preferred_file_format || '',
+          existingDist.id
+        ]
+      );
+    } catch (updateErr: any) {
+      if (updateErr?.message?.includes('UNIQUE') || updateErr?.code === 'SQLITE_CONSTRAINT') {
+        await db.run(
+          `UPDATE distributors 
+           SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+               contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+               email = CASE WHEN ? != '' THEN ? ELSE email END,
+               address = CASE WHEN ? != '' THEN ? ELSE address END,
+               gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+               state_code = CASE WHEN ? != '' THEN ? ELSE state_code END,
+               preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END
+           WHERE id = ?`,
+          [
+            cleanPhone, cleanPhone,
+            cleanPhone, cleanPhone,
+            cleanEmail, cleanEmail,
+            params.address || '', params.address || '',
+            params.gstin || '', params.gstin || '',
+            params.state_code || '', params.state_code || '',
+            params.preferred_file_format || '', params.preferred_file_format || '',
+            existingDist.id
+          ]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
     targetId = existingDist.id;
   } else if (distName) {
-    const result = await db.run(
-      `INSERT INTO distributors (name, phone, contact, email, address, gstin, state_code, preferred_file_format)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        distName,
-        cleanPhone,
-        cleanPhone,
-        cleanEmail,
-        params.address || '',
-        params.gstin || '',
-        params.state_code || '',
-        params.preferred_file_format || ''
-      ]
-    );
-    targetId = result.lastID || 0;
+    try {
+      const result = await db.run(
+        `INSERT INTO distributors (name, phone, contact, email, address, gstin, state_code, preferred_file_format)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          distName,
+          cleanPhone,
+          cleanPhone,
+          cleanEmail,
+          params.address || '',
+          params.gstin || '',
+          params.state_code || '',
+          params.preferred_file_format || ''
+        ]
+      );
+      targetId = result.lastID || 0;
+    } catch (insertErr: any) {
+      if (insertErr?.message?.includes('UNIQUE') || insertErr?.code === 'SQLITE_CONSTRAINT') {
+        const matched = await db.get('SELECT id FROM distributors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [distName]);
+        if (matched) {
+          targetId = matched.id;
+          await db.run(
+            `UPDATE distributors 
+             SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                 contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+                 email = CASE WHEN ? != '' THEN ? ELSE email END
+             WHERE id = ?`,
+            [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, matched.id]
+          );
+        } else {
+          throw insertErr;
+        }
+      } else {
+        throw insertErr;
+      }
+    }
   }
 
   if (!targetId) {
