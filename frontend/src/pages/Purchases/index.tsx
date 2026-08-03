@@ -94,31 +94,71 @@ const getMergedCatalog = (): Medicine[] => {
   if (compact.length === 0) return cachedMasterCatalog;
   const map = new Map<number, Medicine>();
   for (const m of cachedMasterCatalog) {
-    if (m && m.id) map.set(m.id, m);
+    if (m && m.id) map.set(m.id, { ...m });
   }
   for (const item of compact) {
     const medId = item.medicine_id || item.id;
-    if (medId && !map.has(medId)) {
-      map.set(medId, {
-        id: medId,
-        name: item.name,
-        generic_name: item.salts || '',
-        manufacturer: item.manufacturer || '',
-        pack_unit: item.packaging || '',
-        strength: '',
-        mrp: item.mrp || 0,
-        rate: item.unit_price || item.cost_price || 0,
-        scheme_paid: 0,
-        scheme_free: 0,
-        cgst_per: 0,
-        sgst_per: 0,
-        hsn_code: '',
-        stock_qty: item.stock_qty,
-        loose_qty: item.loose_quantity
-      });
+    if (medId) {
+      const existing = map.get(medId);
+      if (existing) {
+        existing.stock_qty = item.stock_qty !== undefined ? item.stock_qty : existing.stock_qty;
+        existing.loose_qty = item.loose_quantity !== undefined ? item.loose_quantity : existing.loose_qty;
+      } else {
+        map.set(medId, {
+          id: medId,
+          name: item.name,
+          generic_name: item.salts || '',
+          manufacturer: item.manufacturer || '',
+          pack_unit: item.packaging || '',
+          strength: '',
+          mrp: item.mrp || 0,
+          rate: item.unit_price || item.cost_price || 0,
+          scheme_paid: 0,
+          scheme_free: 0,
+          cgst_per: 0,
+          sgst_per: 0,
+          hsn_code: '',
+          stock_qty: item.stock_qty,
+          loose_qty: item.loose_quantity
+        });
+      }
     }
   }
   return Array.from(map.values());
+};
+
+const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: number; found: boolean } | null => {
+  if (!item) return null;
+  const compact = getCompactInventoryCache();
+  if (item.medicine_id) {
+    const matched = compact.find((c: any) => (c.medicine_id || c.id) === item.medicine_id);
+    if (matched) {
+      return {
+        stock_qty: typeof matched.stock_qty === 'number' ? matched.stock_qty : 0,
+        loose_qty: typeof matched.loose_quantity === 'number' ? matched.loose_quantity : (typeof matched.loose_qty === 'number' ? matched.loose_qty : 0),
+        found: true
+      };
+    }
+  }
+  if (item.medicine_name && item.medicine_name.trim()) {
+    const term = item.medicine_name.trim().toLowerCase();
+    const matched = compact.find((c: any) => c.name && c.name.trim().toLowerCase() === term);
+    if (matched) {
+      return {
+        stock_qty: typeof matched.stock_qty === 'number' ? matched.stock_qty : 0,
+        loose_qty: typeof matched.loose_quantity === 'number' ? matched.loose_quantity : (typeof matched.loose_qty === 'number' ? matched.loose_qty : 0),
+        found: true
+      };
+    }
+  }
+  if (item.stock_qty !== undefined && item.medicine_id) {
+    return {
+      stock_qty: typeof item.stock_qty === 'number' ? item.stock_qty : 0,
+      loose_qty: typeof item.loose_qty === 'number' ? item.loose_qty : 0,
+      found: true
+    };
+  }
+  return null;
 };
 
 const filterLocalCatalog = (query: string, catalog?: Medicine[]): Medicine[] => {
@@ -1055,7 +1095,17 @@ const Purchases: React.FC = () => {
               cachedMasterCatalog.push(item);
             }
           }
-          setSearchResults(response);
+          const compact = getCompactInventoryCache();
+          const compactMap = new Map(compact.map((ci: any) => [(ci.medicine_id || ci.id), ci]));
+          const enrichedResponse = response.map((med: any) => {
+            const cItem = compactMap.get(med.id);
+            return {
+              ...med,
+              stock_qty: cItem ? cItem.stock_qty : (med.stock_qty !== undefined ? med.stock_qty : 0),
+              loose_qty: cItem ? cItem.loose_quantity : (med.loose_qty !== undefined ? med.loose_qty : 0)
+            };
+          });
+          setSearchResults(enrichedResponse);
           setSearchHighlightIndex(-1);
         }
       } catch (error) {
@@ -2260,20 +2310,20 @@ const Purchases: React.FC = () => {
                         <Plus size={14} />
                       </button>
                     </th>
-                    {hasOriginalName && <th className="pb-3 text-xs uppercase tracking-wider text-left pl-2">Original Bill Name</th>}
-                    <th className="pb-3 text-xs uppercase tracking-wider text-left">Medicine Name</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-left">Batch</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Exp</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-right">Rate</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-right">MRP</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Qty</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center">Free</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input SGST">SGST%</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center" title="Input CGST">CGST%</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-center">CD %</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-right">CD ₹</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-right" title="Additional Discount in Rupees">Add. Disc. (₹)</th>
-                    <th className="pb-3 text-xs uppercase tracking-wider text-right pr-2">Amount</th>
+                    {hasOriginalName && <th className="pb-3 text-xs uppercase tracking-wider text-left pl-2 whitespace-nowrap">Original Bill Name</th>}
+                    <th className="pb-3 text-xs uppercase tracking-wider text-left w-full pr-2">Medicine Name</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-left whitespace-nowrap px-1">Batch</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1">Exp</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right whitespace-nowrap px-1">Rate</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right whitespace-nowrap px-1">MRP</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1">Qty</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1">Free</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1" title="Input SGST">SGST%</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1" title="Input CGST">CGST%</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-center whitespace-nowrap px-1" title="Cash Discount Percentage">CD %</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right whitespace-nowrap px-1" title="Cash Discount Rupees">CD ₹</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right whitespace-nowrap px-1" title="Additional Discount in Rupees">Add Disc</th>
+                    <th className="pb-3 text-xs uppercase tracking-wider text-right pr-2 whitespace-nowrap pl-2">Amount</th>
                     <th className="pb-3"></th>
                   </tr>
                 </thead>
@@ -2342,15 +2392,6 @@ const Purchases: React.FC = () => {
                               className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
                               placeholder="Search medicine..."
                             />
-                            {item.medicine_name && (
-                              <button
-                                onClick={() => fetchPriceHistory(item.medicine_name)}
-                                className="bg-yellow-600 hover:bg-yellow-700 text-white w-7 h-7 rounded text-sm flex-shrink-0"
-                                title="View price history from all distributors"
-                              >
-                                📊
-                              </button>
-                            )}
                             <button
                               onClick={() => handleOpenEnrichment(item)}
                               disabled={!item.medicine_id}
@@ -2363,26 +2404,38 @@ const Purchases: React.FC = () => {
                             >
                               <BookOpen size={14} />
                             </button>
-                            <button
-                              onClick={() => {
-                                setActiveMedicineIndex(index);
-                                setShowMedicineModal(true);
-                              }}
-                              className="bg-green-600 hover:bg-green-700 text-white w-7 h-7 rounded text-sm font-bold flex-shrink-0"
-                              title="Add new medicine"
-                            >
-                              +
-                            </button>
                           </div>
-                          {item.medicine_id ? (
-                            <div className="text-[10px] text-green-400 font-semibold block mt-0.5">
-                              📦 In Stock: {item.stock_qty || 0} packs {item.loose_qty ? `(${item.loose_qty} loose)` : ''}
-                            </div>
-                          ) : item.medicine_name && item.medicine_name.trim().length > 0 ? (
-                            <div className="text-[10px] text-yellow-400 font-semibold block mt-0.5">
-                              ✨ New Medicine (Will create catalog record)
-                            </div>
-                          ) : null}
+                          {(() => {
+                            const live = getLiveStockForItem(item);
+                            if (live && live.found) {
+                              const stockVal = live.stock_qty || 0;
+                              const looseVal = live.loose_qty || 0;
+                              const isZero = stockVal <= 0 && looseVal <= 0;
+                              const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
+                              return (
+                                <div className={`text-[11px] font-semibold block mt-0.5 ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                  {digitText}
+                                </div>
+                              );
+                            } else if (item.medicine_id) {
+                              const stockVal = Number(item.stock_qty) || 0;
+                              const looseVal = Number(item.loose_qty) || 0;
+                              const isZero = stockVal <= 0 && looseVal <= 0;
+                              const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
+                              return (
+                                <div className={`text-[11px] font-semibold block mt-0.5 ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                  {digitText}
+                                </div>
+                              );
+                            } else if (item.medicine_name && item.medicine_name.trim().length > 0) {
+                              return (
+                                <div className="text-[10px] text-yellow-400 font-medium block mt-0.5">
+                                  ✨ New Medicine
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           {activeSearchIndex === index && searchResults.length > 0 && (
                             <div ref={searchResultsRef} className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                               {item.original_name && (
@@ -2403,8 +2456,14 @@ const Purchases: React.FC = () => {
                                       <div className="font-medium truncate flex flex-wrap items-center gap-1.5">
                                         <span>{medicine.name}</span>
                                         {(medicine as any).stock_qty !== undefined ? (
-                                          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-green-500/10 text-green-400 border border-green-500/20">
-                                            📦 {(medicine as any).stock_qty} packs {(medicine as any).loose_qty ? `(${(medicine as any).loose_qty} loose)` : ''}
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${
+                                            ((medicine as any).stock_qty || 0) > 0 || ((medicine as any).loose_qty || 0) > 0
+                                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
+                                              : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30'
+                                          }`}>
+                                            {((medicine as any).stock_qty || 0) <= 0 && ((medicine as any).loose_qty || 0) <= 0
+                                              ? '- 0'
+                                              : `Stock: ${(medicine as any).stock_qty || 0}${(medicine as any).loose_qty ? ` + ${(medicine as any).loose_qty}` : ''}`}
                                           </span>
                                         ) : null}
                                         {(medicine as any).pharmarack_rate && (medicine as any).pharmarack_rate < (medicine.mrp || 99999) && (
@@ -2448,46 +2507,46 @@ const Purchases: React.FC = () => {
                       <p className="text-yellow-400 text-xs mt-1">{schemeMatchStatus[item.id]}</p>
                     )}
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="text"
                       value={item.batch_no}
                       onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
+                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="text"
                       placeholder="MM/YY"
                       value={item.expiry_date}
                       onChange={(e) => updateItem(index, 'expiry_date', e.target.value)}
                       onBlur={(e) => updateItem(index, 'expiry_date', formatExpiryToMMYY(e.target.value))}
-                      className="w-full bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm font-mono text-center"
+                      className="w-[68px] bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm font-mono text-center"
                     />
                   </td>
-                  <td className="py-3 relative group/btn">
-                    <div className="flex items-center bg-white/10 border border-white/20 rounded px-1.5 py-1 w-full min-w-[80px] focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
-                      {mrpVal > 0 && (
-                        <div className="flex-shrink-0 select-none mr-1">
-                          {(() => {
-                            const marginPercent = ((mrpVal - rateVal) / mrpVal) * 100;
-                            return (
-                              <span className={`text-[9px] font-bold px-0.5 py-0.2 rounded border inline-block leading-none ${
-                                marginPercent > 20 
-                                  ? 'bg-green-500/10 text-green-400 border-green-500/20' 
-                                  : marginPercent > 10 
-                                    ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                                    : marginPercent > 0 
-                                      ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-                                      : 'bg-red-500/10 text-red-400 border-red-500/20'
-                              }`}>
-                                {marginPercent.toFixed(1)}%
-                              </span>
-                            );
-                          })()}
-                        </div>
-                      )}
+                  <td className="py-3 px-1 relative group/btn">
+                    {mrpVal > 0 && (
+                      <div className="absolute -top-1.5 right-1 z-10 select-none pointer-events-none">
+                        {(() => {
+                          const marginPercent = ((mrpVal - rateVal) / mrpVal) * 100;
+                          return (
+                            <span className={`text-[9px] font-bold px-1 py-0.2 rounded border inline-block leading-none shadow-sm ${
+                              marginPercent > 20 
+                                ? 'bg-green-950/90 text-green-400 border-green-500/30' 
+                                : marginPercent > 10 
+                                  ? 'bg-blue-950/90 text-blue-400 border-blue-500/30'
+                                  : marginPercent > 0 
+                                    ? 'bg-yellow-950/90 text-yellow-400 border-yellow-500/30'
+                                    : 'bg-red-950/90 text-red-400 border-red-500/30'
+                            }`}>
+                              {marginPercent.toFixed(1)}%
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    <div className="flex items-center bg-white/10 border border-white/20 rounded px-1.5 py-1 w-20 max-w-[80px] focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
                       <input
                         type="number"
                         value={item.rate}
@@ -2503,12 +2562,12 @@ const Purchases: React.FC = () => {
                       </div>
                     )}
                   </td>
-                  <td className="py-3 relative group/btn">
+                  <td className="py-3 px-1 relative group/btn">
                     <input
                       type="number"
                       value={item.mrp}
                       onChange={(e) => updateItem(index, 'mrp', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right"
+                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right"
                     />
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
@@ -2519,60 +2578,60 @@ const Purchases: React.FC = () => {
                     )}
                   </td>
 
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.qty}
                       onChange={(e) => updateItem(index, 'qty', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-16 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.free_qty}
                       onChange={(e) => updateItem(index, 'free_qty', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.sgst_per}
                       onChange={(e) => updateItem(index, 'sgst_per', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.cgst_per}
                       onChange={(e) => updateItem(index, 'cgst_per', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.cd_per}
                       onChange={(e) => updateItem(index, 'cd_per', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.cd_rs}
                       onChange={(e) => updateItem(index, 'cd_rs', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right"
+                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right"
                     />
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 px-1">
                     <input
                       type="number"
                       value={item.additional_discount}
                       onChange={(e) => updateItem(index, 'additional_discount', e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right"
+                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right"
                       placeholder="0"
                     />
                   </td>
