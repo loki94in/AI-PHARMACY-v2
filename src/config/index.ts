@@ -7,12 +7,9 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const isPkg = typeof (process as any).pkg !== 'undefined';
-
-// Node SEA (Single Executable Application) has no process.pkg equivalent to
-// check synchronously; use the official node:sea API instead. Guarded because
-// node:sea doesn't exist on older Node versions and isn't present at all in
-// dev mode.
+// Node SEA (Single Executable Application) detection via the official node:sea
+// API. Guarded because node:sea doesn't exist on older Node versions and isn't
+// present at all in dev mode.
 function isNodeSea(): boolean {
   try {
     const req = createRequire(import.meta.url);
@@ -23,8 +20,8 @@ function isNodeSea(): boolean {
   }
 }
 
-/** True when running as a packaged single executable (pkg or Node SEA), not from source. */
-export const isPackagedApp = (): boolean => isPkg || isNodeSea();
+/** True when running as a packaged single executable (Node SEA), not from source. */
+export const isPackagedApp = (): boolean => isNodeSea();
 
 // Load environment variables from .env file. dotenv's default behaviour reads
 // `.env` from process.cwd(), which is only the app folder when launched with an

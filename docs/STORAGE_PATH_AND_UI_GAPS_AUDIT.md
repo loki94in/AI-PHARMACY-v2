@@ -13,7 +13,7 @@
 |---|------|----------|-------|----------------------|
 | 1 | EXE storage location | 🔴 Critical | Live database is installed and written **inside `C:\Program Files\...`** | Writes can silently fail or get redirected to a hidden per-user shadow copy depending on the Windows account running the app |
 | 2 | EXE storage location | 🔴 Critical | `getAppDataDir()` path-resolution logic has changed **three times** in this project's history with no "check the old location too" migration step | Data saved under an older build's path resolution becomes invisible to a newer build — looks exactly like "migration failed" / "data disappeared" |
-| 3 | EXE packaging | 🟠 High | Auto-open-browser check still tests `process.pkg`, a flag the project's *current* packaging method (Node SEA) never sets | Double-clicking the installed app does nothing visible — no window, no browser — looks like the app didn't start |
+| 3 | EXE packaging | ✅ **Resolved** | ~~Auto-open-browser check still tests `process.pkg`~~ — now uses `isPackagedApp()`; the `process.pkg` global itself has since been removed entirely from `src/config/index.ts` | (fixed — see 1.3/1.4 below) |
 | 4 | Investigation page | 🔴 Critical (data loss) | Saving a corrected purchase bill silently strips GST% and cash-discount fields | Every purchase bill "corrected" through this screen permanently loses its tax breakdown |
 | 5 | Learning page | 🟠 High | "Intelligent Suggestions" stats and WhatsApp/Telegram "ACTIVE" status are hardcoded / non-live | Dashboard-like numbers never change; a service can show "ACTIVE" while actually disconnected |
 | 6 | PharmarackCart | 🟡 Medium | Two different "missing phone" checks disagree; a promised auto-retry countdown never renders | A distributor can be simultaneously "fine" and "flagged" depending which tab you're on |
@@ -54,7 +54,9 @@
 
 **Fix direction (not applied):** Before treating a `getAppDataDir()`-resolved DB as "fresh" (i.e. the file doesn't exist yet), check one or two well-known previous candidate locations (e.g. relative to `process.cwd()`, or the SEA executable's directory computed the old way) and offer to import/copy from there if found, similar in spirit to the existing corrupt-DB self-healing already in `runSelfHealing()` (`src/database/connection.ts:218-330`).
 
-### 1.3 Auto-open-browser never fires in the shipped exe
+### 1.3 Auto-open-browser never fires in the shipped exe — ✅ RESOLVED
+
+> Fixed since this audit was written. `src/server.ts` now checks `isPackagedApp() || process.env.AUTO_OPEN_BROWSER === 'true'`, and the `process.pkg` global has been removed entirely from `src/config/index.ts` — `isPackagedApp()` is Node-SEA-only now. Left below for historical context.
 
 **Where:** `src/server.ts:312` — `if ((process as any).pkg || process.env.AUTO_OPEN_BROWSER === 'true') { ...open browser... }`.
 
@@ -64,7 +66,9 @@
 
 **Fix direction (not applied):** Either set `AUTO_OPEN_BROWSER=true` in `.env.example` (simplest — the check already supports it), or replace the `process.pkg` half of the condition with the same `isPackagedApp()` helper already exported from `src/config/index.ts`.
 
-### 1.4 Other stale `process.pkg` checks (lower risk, verified not currently harmful)
+### 1.4 Other stale `process.pkg` checks (lower risk, verified not currently harmful) — ✅ RESOLVED
+
+> Fixed since this audit was written. Both `src/database/connection.ts` and `src/process/processGuardian.ts` now call the shared `isPackagedApp()` helper instead of checking `process.pkg` directly, and `process.pkg` no longer exists anywhere in `src/`. Left below for historical context.
 
 **Where:** `src/database/connection.ts:105` and `src/process/processGuardian.ts:45` both compute `isProductionOrPkg = NODE_ENV === 'production' || typeof process.pkg !== 'undefined'`, gating (respectively) the background DB integrity self-check/auto-restore, and the crash-log-to-DB + clean-exit-on-uncaught-exception safety net.
 

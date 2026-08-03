@@ -27,7 +27,7 @@
 | Database | SQLite (better-sqlite3) |
 | Frontend | React + Vite + Tailwind CSS |
 | OCR | Tesseract.js + SciSpaCy (Python) |
-| Packaging | pkg (Node.js → Windows exe) |
+| Packaging | esbuild bundle + Node SEA (Single Executable Application) |
 | Installer | Inno Setup 6 |
 
 ---
@@ -88,13 +88,11 @@ SCISPACY_ENABLED=true
 ## Building the Windows Installer
 
 ```powershell
-# 1. Compile TypeScript
-npm run build
+# 1. Build the frontend, compile TypeScript, bundle with esbuild, and produce
+#    the single-file exe via Node SEA (Single Executable Application)
+npm run build:exe
 
-# 2. Bundle into a single exe (requires pkg)
-npx pkg . --targets node18-win-x64 --output dist\PharmacyOS.exe
-
-# 3. Compile the Inno Setup installer
+# 2. Compile the Inno Setup installer
 #    Requires: https://jrsoftware.org/isinfo.php
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 ```
