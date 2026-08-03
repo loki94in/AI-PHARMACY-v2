@@ -116,6 +116,8 @@ router.post('/login-window', async (req, res) => {
 
       const [page] = await browser.pages();
       await page.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded' });
+      const launchTime = Date.now();
+      const MIN_WINDOW_MS = 120_000; // Keep Chrome login window open for at least 2 minutes (120s)
 
       // Poll for login confirmation or user closure (up to 6 minutes / 360 seconds max waiting for QR scan)
       for (let i = 0; i < 360; i++) {
@@ -175,11 +177,18 @@ router.post('/login-window', async (req, res) => {
         if (loginState.isLoggedIn) {
           console.log(`[WhatsApp] Login detected! Chats count: ${loginState.chatsCount}, downloading: ${loginState.isDownloadingChats}`);
 
-          // Wait for chats to finish loading into screen if downloading
+          // Wait for chats to finish loading into screen if downloading (up to 60 seconds)
           let readyWaitAttempts = 0;
-          while ((loginState.isDownloadingChats || loginState.chatsCount === 0) && readyWaitAttempts < 15) {
+          while ((loginState.isDownloadingChats || loginState.chatsCount === 0) && readyWaitAttempts < 60) {
             await new Promise(resolve => setTimeout(resolve, 1000));
             readyWaitAttempts++;
+
+            const isUserClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
+            if (isUserClosed) {
+              console.log('[WhatsApp] Login window closed by user during chat download.');
+              break;
+            }
+
             const updateState = await page.evaluate(() => {
               const paneSide = document.querySelector('#pane-side');
               let chatsCount = 0;
@@ -200,7 +209,7 @@ router.post('/login-window', async (req, res) => {
             }
           }
 
-          console.log('[WhatsApp] Login complete & all chats loaded on screen. Saving session & auto-closing login window...');
+          // Save preference to database
           try {
             const db = await dbManager.getConnection();
             await db.run(
@@ -209,8 +218,26 @@ router.post('/login-window', async (req, res) => {
           } catch (e) {
             console.warn('[WhatsApp] Could not set whatsapp_preferred_system setting:', e);
           }
-          // Give 4 seconds for session cookies and IndexedDB to persist to disk before closing Chrome
-          await new Promise(resolve => setTimeout(resolve, 4000));
+
+          // Enforce 2-minute (120s) minimum window duration before auto-closing, checking if user closed window manually
+          const elapsedMs = Date.now() - launchTime;
+          if (elapsedMs < MIN_WINDOW_MS) {
+            const remainingMs = MIN_WINDOW_MS - elapsedMs;
+            console.log(`[WhatsApp] Login complete & chats loaded. Holding window open for remaining ${Math.round(remainingMs / 1000)}s of minimum 2-minute duration...`);
+            for (let waitSec = 0; waitSec < Math.ceil(remainingMs / 1000); waitSec++) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              const isUserClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
+              if (isUserClosed) {
+                console.log('[WhatsApp] Login window closed manually by user during wait window.');
+                break;
+              }
+            }
+          } else {
+            // Give 4 seconds for session cookies and IndexedDB to persist to disk
+            await new Promise(resolve => setTimeout(resolve, 4000));
+          }
+
+          console.log('[WhatsApp] Auto-closing login window after 2+ minute window completion.');
           break;
         }
       }

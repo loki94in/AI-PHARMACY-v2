@@ -99,6 +99,10 @@ const Learning: React.FC = () => {
     if (tabParam) {
       setActiveTab(normalizeTab(tabParam));
     }
+    const idParam = searchParams.get('id') || searchParams.get('distributor_id');
+    if (idParam && !isNaN(Number(idParam))) {
+      setSelectedProfileId(Number(idParam));
+    }
   }, [searchParams]);
 
   const handleTabChange = (tabId: string) => {
@@ -1486,15 +1490,17 @@ const Learning: React.FC = () => {
                                   ...selectedProfile.distributor,
                                   email: cleanDistEmail
                                 };
-                                await apiClient.put(`/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
+                                const res = await apiClient.put(`/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
+                                const savedDist = res.data?.data || updatedDistributor;
                                 setSelectedProfile({
                                   ...selectedProfile,
-                                  distributor: updatedDistributor
+                                  distributor: savedDist
                                 });
                                 window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
                                 window.dispatchEvent(new CustomEvent('contacts-updated'));
                                 toastEvent.trigger('Distributor profile updated', 'success');
                                 queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+                                queryClient.invalidateQueries({ queryKey: ['distributors'] });
                               } catch (err) {
                                 console.error(err);
                                 toastEvent.trigger('Failed to update details', 'error');

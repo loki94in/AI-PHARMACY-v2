@@ -909,6 +909,7 @@ export const api = {
   // Registered Mobile Devices API
   getRegisteredDevices: () => apiClient.get<{ success: boolean; devices: any[] }>('/settings/registered-devices').then(res => res.data),
   renameDevice: (token: string, deviceName: string) => apiClient.put<{ success: boolean; message: string }>('/settings/registered-devices/rename', { token, device_name: deviceName }).then(res => res.data),
+  getWhatsAppStatus: () => apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string }>('/messaging/qr').then(res => res.data),
 
   // Sales Reorder Suggestions API
   getSalesReorderSuggestions: () => apiClient.get<{ success: boolean; count: number; items: any[] }>('/sales/reorder-suggestions').then(res => res.data),

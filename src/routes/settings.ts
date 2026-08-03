@@ -7,6 +7,7 @@ import { dbManager } from '../database/connection.js';
 import { telegramBotService } from '../telegramBot.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
 import { getAppDataDir } from '../config/index.js';
+import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -379,46 +380,19 @@ router.put('/distributors/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
-  
-  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
-  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
-  const cleanEmail = extractCleanEmail(email);
 
   try {
     const db = await dbManager.getConnection();
-    await db.run(
-      `UPDATE distributors SET 
-        name = ?, 
-        phone = CASE WHEN ? != '' THEN ? ELSE phone END, 
-        contact = CASE WHEN ? != '' THEN ? ELSE contact END,
-        email = CASE WHEN ? != '' THEN ? ELSE email END, 
-        address = CASE WHEN ? != '' THEN ? ELSE address END, 
-        state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
-       WHERE id = ?`,
-      [name, cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', id]
-    );
+    const updated = await syncDistributorPhoneAcrossTables(db, {
+      id: Number(id),
+      name,
+      phone,
+      email,
+      address,
+      state_code
+    });
 
-    // Auto link learning profile
-    try {
-      await db.run(
-        'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
-        [id]
-      );
-    } catch (_) {}
-
-    const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });
-
-    // Also sync pharmarack_distributors table if present and phone is valid
-    if (cleanPhone) {
-      try {
-        await db.run(
-          "UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?",
-          [cleanPhone, `%${name.toLowerCase().trim()}%`]
-        );
-      } catch (_) {}
-    }
-
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Failed to update distributor:', error);

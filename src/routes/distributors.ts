@@ -1,7 +1,7 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { reconcileCreditNote } from '../services/creditNoteService.js';
-import { extractCleanEmail } from '../utils/emailSanitizer.js';
+import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
 
 const router = express.Router();
 
@@ -20,49 +20,33 @@ router.get('/', getDistributorsHandler);
 
 // Create or update distributor details
 const postDistributorsHandler = async (req: express.Request, res: express.Response) => {
-  const { name, phone, email, address, gstin } = req.body;
-  if (!name) {
+  const { name, store_name, phone, contact, email, address, gstin, state_code, preferred_file_format } = req.body;
+  const distName = (name || store_name || '').trim();
+  if (!distName) {
     return res.status(400).json({ error: 'Distributor name is required' });
   }
-  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
-  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
-  const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
-    const existing = await db.get('SELECT id FROM distributors WHERE name = ? OR name LIKE ?', [name, `%${name}%`]);
-    let targetId: number;
-    if (existing) {
-      targetId = existing.id;
-      await db.run(
-        `UPDATE distributors 
-         SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-             contact = CASE WHEN ? != '' THEN ? ELSE contact END,
-             email = CASE WHEN ? != '' THEN ? ELSE email END,
-             address = CASE WHEN ? != '' THEN ? ELSE address END,
-             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END
-         WHERE id = ?`,
-        [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', gstin || '', gstin || '', existing.id]
-      );
-    } else {
-      const result = await db.run(
-        `INSERT INTO distributors (name, phone, contact, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, cleanPhone, cleanPhone, cleanEmail, address || '', gstin || '']
-      );
-      targetId = result.lastID || 0;
-    }
+    const savedDistributor = await syncDistributorPhoneAcrossTables(db, {
+      name: distName,
+      phone,
+      contact,
+      email,
+      address,
+      gstin,
+      state_code,
+      preferred_file_format
+    });
 
-    // Auto register learning profile for local AI learning integration
-    try {
-      await db.run(
-        'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
-        [targetId]
-      );
-    } catch (_) {}
-
-    res.json({ success: true, message: existing ? 'Distributor updated' : 'Distributor created', id: targetId });
+    res.json({
+      success: true,
+      message: 'Distributor saved successfully',
+      id: savedDistributor.id,
+      data: savedDistributor
+    });
   } catch (error: any) {
     console.error('Failed to create/update distributor:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 };
 
@@ -72,46 +56,30 @@ router.post('/', postDistributorsHandler);
 // Update distributor details including preferred email invoice format
 const putDistributorHandler = async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
-  const { name, phone, email, preferred_file_format, gstin, address } = req.body;
-  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
-  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
-  const cleanEmail = extractCleanEmail(email);
+  const { name, store_name, phone, contact, email, preferred_file_format, gstin, address, state_code } = req.body;
   try {
     const db = await dbManager.getConnection();
-    await db.run(
-      `UPDATE distributors 
-       SET name = CASE WHEN ? != '' THEN ? ELSE name END,
-           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-           contact = CASE WHEN ? != '' THEN ? ELSE contact END,
-           email = CASE WHEN ? != '' THEN ? ELSE email END,
-           preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END,
-           gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
-           address = CASE WHEN ? != '' THEN ? ELSE address END
-       WHERE id = ?`,
-      [
-        name || '', name || '',
-        cleanPhone, cleanPhone,
-        cleanPhone, cleanPhone,
-        cleanEmail, cleanEmail,
-        preferred_file_format || '', preferred_file_format || '',
-        gstin || '', gstin || '',
-        address || '', address || '',
-        id
-      ]
-    );
+    const savedDistributor = await syncDistributorPhoneAcrossTables(db, {
+      id: Number(id),
+      name: name || store_name,
+      phone,
+      contact,
+      email,
+      address,
+      gstin,
+      state_code,
+      preferred_file_format
+    });
 
-    // Auto register learning profile for local AI learning integration
-    try {
-      await db.run(
-        'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
-        [id]
-      );
-    } catch (_) {}
-
-    res.json({ success: true, message: 'Distributor details updated successfully', id: Number(id) });
-  } catch (error) {
+    res.json({
+      success: true,
+      message: 'Distributor details updated successfully',
+      id: Number(id),
+      data: savedDistributor
+    });
+  } catch (error: any) {
     console.error('Failed to update distributor:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 };
 

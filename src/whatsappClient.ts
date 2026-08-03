@@ -350,20 +350,12 @@ export async function initClient(): Promise<WAClient> {
     activeClient = client;
 
     client.on('qr', (qr: string) => {
-      console.log('WhatsApp QR code received');
+      console.log('[WhatsApp] QR code received (standing by for scan)...');
       currentQr = qr;
       isReady = false;
-
-      if (qrTimeout) clearTimeout(qrTimeout);
-      qrTimeout = setTimeout(() => {
-        if (!isReady) {
-          console.log('QR Code expired (30s). Destroying client to prevent leak. Standing by.');
-          client.destroy().catch(err => console.error('Error destroying WA client:', err));
-        }
-      }, 30000);
     });
 
-    client.on('ready', () => {
+    client.on('ready', async () => {
       console.log('WhatsApp Client is ready!');
       if (qrTimeout) clearTimeout(qrTimeout);
       clientInstance = client;
@@ -372,6 +364,42 @@ export async function initClient(): Promise<WAClient> {
       isReady = true;
       currentQr = null;
       resolve(client);
+
+      // Extract and save connected phone number to app_settings persistently
+      try {
+        const infoNumber = (client as any)?.info?.wid?.user || (client as any)?.info?.wid?._serialized?.split('@')[0];
+        if (infoNumber) {
+          const cleanPhone = String(infoNumber).replace(/\D/g, '');
+          console.log(`[WhatsApp Persist] Connected phone number detected: ${cleanPhone}`);
+          const db = await dbManager.getConnection();
+
+          await db.run(
+            `INSERT INTO app_settings (key, value) VALUES ('whatsapp_connected_number', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            [cleanPhone]
+          );
+
+          const existingOwner = await db.get("SELECT value FROM app_settings WHERE key = 'owner_whatsapp_number'");
+          if (!existingOwner || !existingOwner.value || !existingOwner.value.trim()) {
+            await db.run(
+              `INSERT INTO app_settings (key, value) VALUES ('owner_whatsapp_number', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+              [cleanPhone]
+            );
+          }
+
+          const existingShopPhone = await db.get("SELECT value FROM app_settings WHERE key = 'shop_phone'");
+          if (!existingShopPhone || !existingShopPhone.value || !existingShopPhone.value.trim()) {
+            await db.run(
+              `INSERT INTO app_settings (key, value) VALUES ('shop_phone', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+              [cleanPhone]
+            );
+          }
+        }
+      } catch (saveErr) {
+        console.warn('[WhatsApp Persist] Failed to save connected phone number to app_settings:', saveErr);
+      }
 
       // Drain queued messages first (independent of chat sync)
       drainSendQueue().catch(err => {

@@ -250,6 +250,7 @@ app.use('/api', lazyRoute(() => import('./routes/upload.js')));
 app.use('/api', lazyRoute(() => import('./routes/catalog.js')));
 app.use('/api', lazyRoute(() => import('./routes/medicines.js')));
 app.use('/api', lazyRoute(() => import('./routes/enrichment.js')));
+app.use('/api/contacts', lazyRoute(() => import('./routes/contacts.js')));
 app.use('/api', lazyRoute(() => import('./routes/distributors.js')));
 app.use('/api', lazyRoute(() => import('./routes/notifications.js')));
 app.use('/api/whatsapp/queue', lazyRoute(() => import('./routes/whatsappQueue.js')));

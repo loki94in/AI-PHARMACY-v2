@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw } from 'lucide-react';
+import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -440,18 +440,34 @@ const Purchases: React.FC = () => {
   
   // Mapped distributors filter & state
   const [mappedDistributorIds, setMappedDistributorIds] = useState<Set<number>>(new Set());
-  const [onlyMappedFilter, setOnlyMappedFilter] = useState(true);
+  const [onlyMappedFilter, setOnlyMappedFilter] = useState(false);
 
   useEffect(() => {
-    api.getPharmarackDistributorMappings()
-      .then(res => {
-        if (res && Array.isArray(res.mappings)) {
-          const ids = new Set(res.mappings.map(m => m.distributor_id).filter(Boolean));
-          setMappedDistributorIds(ids as Set<number>);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    const fetchMappings = () => {
+      api.getPharmarackDistributorMappings()
+        .then(res => {
+          if (res && Array.isArray(res.mappings)) {
+            const ids = new Set(res.mappings.map(m => m.distributor_id).filter(Boolean));
+            setMappedDistributorIds(ids as Set<number>);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchMappings();
+
+    const handleDistributorUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ['distributors'] });
+      fetchMappings();
+    };
+
+    window.addEventListener('phone-numbers-updated', handleDistributorUpdate);
+    window.addEventListener('contacts-updated', handleDistributorUpdate);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handleDistributorUpdate);
+      window.removeEventListener('contacts-updated', handleDistributorUpdate);
+    };
+  }, [queryClient]);
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
@@ -1848,7 +1864,16 @@ const Purchases: React.FC = () => {
   const totals = calculateTotals();
 
   const filteredDistributors = useMemo(() => {
-    const term = distributorSearch.toLowerCase().trim();
+    let term = distributorSearch.toLowerCase().trim();
+
+    if (selectedDistributor) {
+      const currentSelectedObj = distributors.find(d => d.id === selectedDistributor);
+      const currentName = (currentSelectedObj?.name || currentSelectedObj?.distributor_name || '').toLowerCase().trim();
+      if (term && currentName && term === currentName) {
+        term = '';
+      }
+    }
+
     let list = distributors;
     
     // Sort mapped distributors first
@@ -1870,7 +1895,7 @@ const Purchases: React.FC = () => {
       const distName = d.name || d.distributor_name || '';
       return distName.toLowerCase().includes(term);
     });
-  }, [distributors, distributorSearch, onlyMappedFilter, mappedDistributorIds]);
+  }, [distributors, distributorSearch, selectedDistributor, onlyMappedFilter, mappedDistributorIds]);
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500 min-h-0">
@@ -2752,20 +2777,35 @@ const Purchases: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowDistributorModal(false)}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveDistributor}
-                disabled={savingDistributor || !newDistributor.name}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                {savingDistributor ? 'Saving...' : editDistributorId ? 'Save Changes' : 'Add Distributor'}
-              </button>
+            <div className="flex items-center justify-between gap-3 mt-6">
+              {editDistributorId ? (
+                <a
+                  href={`/learning?tab=distributor_layouts&id=${editDistributorId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-xs font-bold text-sky hover:bg-sky-500/20 transition-all"
+                  title="Open full distributor profile & OCR rules in AI Learning page"
+                >
+                  <ExternalLink size={13} />
+                  <span>Open in AI Learning</span>
+                </a>
+              ) : <div />}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowDistributorModal(false)}
+                  className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveDistributor}
+                  disabled={savingDistributor || !newDistributor.name}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-50"
+                >
+                  {savingDistributor ? 'Saving...' : editDistributorId ? 'Save Changes' : 'Add Distributor'}
+                </button>
+              </div>
             </div>
           </div>
         </div>,

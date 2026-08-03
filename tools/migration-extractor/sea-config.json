@@ -1,0 +1,5 @@
+{
+  "main": "dist-pkg/extractor.cjs",
+  "output": "dist-pkg/sea-prep.blob",
+  "disableExperimentalSEAWarning": true
+}

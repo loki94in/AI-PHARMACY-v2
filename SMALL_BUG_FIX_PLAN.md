@@ -68,6 +68,7 @@ Use this as the **historical record and guardrail doc** — not an active backlo
 | Notification stubs | Documented / cleaned in `notificationService.ts` | PR #8 |
 | Shortage reminders | `special_orders` table only | Pre-existing |
 | Credit notes API | Mounted at `/api/credit-notes` | Pre-existing |
+| Distributor phone number persistence & multi-table sync | Centralized `syncDistributorPhoneAcrossTables` in `distributorSyncHelper.ts`, returned `data: updatedDistributor` payload from `PUT /distributors/:id`, updated `GET /pharmarack/distributor-mappings` join & fallback SQL | `distributorSyncHelper.ts`, `distributors.ts`, `pharmarack.ts`, `contacts.ts`, `settings.ts` |
 
 ---
 

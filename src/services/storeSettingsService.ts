@@ -57,15 +57,17 @@ export async function getStorePhone(dbInstance?: any): Promise<string> {
     const db = dbInstance || (await dbManager.getConnection());
     const row = await db.get(
       `SELECT value FROM app_settings 
-       WHERE key IN ('shop_phone', 'store_phone', 'pharmacy_phone', 'phone', 'contact_number', 'phone_number') 
+       WHERE key IN ('shop_phone', 'store_phone', 'pharmacy_phone', 'phone', 'contact_number', 'phone_number', 'owner_whatsapp_number', 'whatsapp_connected_number') 
          AND value IS NOT NULL 
          AND TRIM(value) != '' 
        ORDER BY CASE key 
          WHEN 'shop_phone' THEN 1 
          WHEN 'store_phone' THEN 2 
-         WHEN 'pharmacy_phone' THEN 3 
-         WHEN 'phone' THEN 4
-         ELSE 5 END 
+         WHEN 'owner_whatsapp_number' THEN 3
+         WHEN 'whatsapp_connected_number' THEN 4
+         WHEN 'pharmacy_phone' THEN 5 
+         WHEN 'phone' THEN 6
+         ELSE 7 END 
        LIMIT 1`
     );
 

@@ -3261,30 +3261,43 @@ export default function PharmarackCart() {
             </div>
 
             {/* Modal Actions */}
-            <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingDistributor(null);
-                  setIsSavingContact(false);
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all"
+            <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex items-center justify-between gap-2">
+              <a
+                href={`/learning?tab=distributor_layouts${editingDistributor?.storeId ? `&id=${editingDistributor.storeId}` : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-[11px] font-bold text-sky hover:bg-sky-500/20 transition-all"
+                title="Open full distributor profile & OCR rules in AI Learning page"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveDistributorContact}
-                disabled={isSavingContact}
-                className="premium-btn bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50 transition-all shadow-md active:scale-95"
-              >
-                {isSavingContact ? (
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Check size={14} />
-                )}
-                <span>Save Contact</span>
-              </button>
+                <ExternalLink size={12} />
+                <span>Open in AI Learning</span>
+              </a>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingDistributor(null);
+                    setIsSavingContact(false);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDistributorContact}
+                  disabled={isSavingContact}
+                  className="premium-btn bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50 transition-all shadow-md active:scale-95"
+                >
+                  {isSavingContact ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Check size={14} />
+                  )}
+                  <span>Save Contact</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

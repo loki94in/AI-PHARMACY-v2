@@ -10,6 +10,7 @@ import { tokenRefreshScheduler, cleanProfileLockFiles, killOrphanChromeProcesses
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getAppDataDir } from '../config/index.js';
+import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
 
 const execAsync = promisify(exec);
 
@@ -262,7 +263,7 @@ router.get('/distributors', async (req, res) => {
         COALESCE(d.gstin, '') as partyCode,
         p.distributor_id as profileId
       FROM distributors d
-      INNER JOIN distributor_learning_profiles p ON d.id = p.distributor_id
+      LEFT JOIN distributor_learning_profiles p ON d.id = p.distributor_id
       ORDER BY d.name ASC
     `);
 
@@ -307,9 +308,26 @@ router.get('/distributor-mappings', async (_req, res) => {
       )
     `);
     const rows = await db.all(`
-      SELECT m.store_name, m.distributor_id, m.phone, d.name as distributor_name, COALESCE(d.phone, d.contact, m.phone) as distributor_phone
+      SELECT 
+        m.store_name, 
+        COALESCE(m.distributor_id, d.id) as distributor_id, 
+        COALESCE(d.phone, d.contact, m.phone) as phone, 
+        COALESCE(d.name, m.store_name) as distributor_name, 
+        COALESCE(d.phone, d.contact, m.phone) as distributor_phone
       FROM pharmarack_distributor_mappings m
-      LEFT JOIN distributors d ON m.distributor_id = d.id
+      LEFT JOIN distributors d ON (m.distributor_id = d.id OR LOWER(TRIM(m.store_name)) = LOWER(TRIM(d.name)))
+      UNION
+      SELECT 
+        d.name as store_name, 
+        d.id as distributor_id, 
+        COALESCE(d.phone, d.contact) as phone, 
+        d.name as distributor_name, 
+        COALESCE(d.phone, d.contact) as distributor_phone
+      FROM distributors d
+      WHERE ((d.phone IS NOT NULL AND d.phone != '') OR (d.contact IS NOT NULL AND d.contact != ''))
+        AND LOWER(TRIM(d.name)) NOT IN (
+          SELECT LOWER(TRIM(store_name)) FROM pharmarack_distributor_mappings WHERE store_name IS NOT NULL
+        )
     `);
     res.json({ success: true, mappings: rows || [] });
   } catch (error: any) {
@@ -326,27 +344,16 @@ router.post('/distributor-mappings', async (req, res) => {
   }
   try {
     const db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
-        store_name TEXT PRIMARY KEY,
-        distributor_id INTEGER,
-        phone TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    await db.run(
-      `INSERT INTO pharmarack_distributor_mappings (store_name, distributor_id, phone, updated_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(store_name) DO UPDATE SET
-         distributor_id = EXCLUDED.distributor_id,
-         phone = EXCLUDED.phone,
-         updated_at = CURRENT_TIMESTAMP`,
-      [store_name.trim(), distributor_id || null, phone || '']
-    );
+    await syncDistributorPhoneAcrossTables(db, {
+      id: distributor_id ? Number(distributor_id) : undefined,
+      store_name,
+      phone
+    });
+
     res.json({ success: true, message: 'Store mapping saved successfully' });
   } catch (error: any) {
     console.error('Failed to save distributor mapping:', error);
-    res.status(500).json({ error: 'Failed to save distributor mapping' });
+    res.status(500).json({ error: 'Failed to save distributor mapping: ' + error.message });
   }
 });
 
