@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Search, 
@@ -106,12 +106,23 @@ interface SelectedDetails {
 
 const InvestigationCenter = () => {
   const queryClient = useQueryClient();
-  // Column-header inline filters
+  // Column-header inline filters (immediate UI state)
   const [colFilterMedicine, setColFilterMedicine] = useState('');
   const [colFilterBatch, setColFilterBatch] = useState('');
   const [colFilterInvoice, setColFilterInvoice] = useState('');
   const [colFilterParty, setColFilterParty] = useState('');
   const [colFilterType, setColFilterType] = useState('All');
+
+  // Debounced server-side filter values (400ms delay to avoid per-keystroke fetches)
+  const [debouncedMedicine, setDebouncedMedicine] = useState('');
+  const [debouncedBatch, setDebouncedBatch] = useState('');
+  const [debouncedInvoice, setDebouncedInvoice] = useState('');
+  const [debouncedParty, setDebouncedParty] = useState('');
+
+  useEffect(() => { const t = setTimeout(() => setDebouncedMedicine(colFilterMedicine), 400); return () => clearTimeout(t); }, [colFilterMedicine]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedBatch(colFilterBatch), 400); return () => clearTimeout(t); }, [colFilterBatch]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedInvoice(colFilterInvoice), 400); return () => clearTimeout(t); }, [colFilterInvoice]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedParty(colFilterParty), 400); return () => clearTimeout(t); }, [colFilterParty]);
 
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'investigation-date-range',
@@ -222,26 +233,7 @@ const InvestigationCenter = () => {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Client-side filtering logic
-  const clientFilterFn = useCallback((tx: any) => {
-    if (colFilterMedicine) {
-      const medName = (tx.medicine_name || '').toLowerCase();
-      if (!medName.includes(colFilterMedicine.toLowerCase())) return false;
-    }
-    if (colFilterBatch) {
-      const batch = (tx.batch_no || '').toLowerCase();
-      if (!batch.includes(colFilterBatch.toLowerCase())) return false;
-    }
-    if (colFilterInvoice) {
-      const ref = (tx.reference || '').toLowerCase();
-      if (!ref.includes(colFilterInvoice.toLowerCase())) return false;
-    }
-    if (colFilterParty) {
-      const partyVal = (tx.party || '').toLowerCase();
-      if (!partyVal.includes(colFilterParty.toLowerCase())) return false;
-    }
-    return true;
-  }, [colFilterMedicine, colFilterBatch, colFilterInvoice, colFilterParty]);
+  // No client-side filtering needed — all filters are now handled server-side
 
   // Infinite Scroll setup
   const {
@@ -261,8 +253,12 @@ const InvestigationCenter = () => {
       dateFrom: dateRangeHelper.dateRange.from,
       dateTo: dateRangeHelper.dateRange.to,
       type: colFilterType,
+      // Text filters: debounced so server only refetches 400ms after typing stops
+      medicineName: debouncedMedicine,
+      batchNo: debouncedBatch,
+      reference: debouncedInvoice,
+      party: debouncedParty,
     },
-    clientFilterFn,
     fetchPage: async (pageParam, filters) => {
       const cleanFilters: any = {
         page: pageParam,
@@ -271,6 +267,11 @@ const InvestigationCenter = () => {
       if (filters.dateFrom) cleanFilters.dateFrom = filters.dateFrom;
       if (filters.dateTo) cleanFilters.dateTo = filters.dateTo;
       if (filters.type && filters.type !== 'All') cleanFilters.type = filters.type;
+      // Pass text filters to the backend (backend already has the SQL WHERE clauses)
+      if (filters.medicineName) cleanFilters.medicineName = filters.medicineName;
+      if (filters.batchNo) cleanFilters.batchNo = filters.batchNo;
+      if (filters.reference) cleanFilters.reference = filters.reference;
+      if (filters.party) cleanFilters.party = filters.party;
       
       const response = await api.getInvestigationTimeline(cleanFilters);
       return {

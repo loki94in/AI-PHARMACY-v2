@@ -2,6 +2,7 @@ import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { reconcileCreditNote } from '../services/creditNoteService.js';
 import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
+import { eventService } from '../services/eventService.js';
 
 const router = express.Router();
 
@@ -44,6 +45,7 @@ const postDistributorsHandler = async (req: express.Request, res: express.Respon
       id: savedDistributor.id,
       data: savedDistributor
     });
+    eventService.broadcast('distributors_updated', { action: 'create', id: savedDistributor.id });
   } catch (error: any) {
     console.error('Failed to create/update distributor:', error);
     res.status(500).json({ error: 'Internal server error: ' + error.message });
@@ -77,6 +79,7 @@ const putDistributorHandler = async (req: express.Request, res: express.Response
       id: Number(id),
       data: savedDistributor
     });
+    eventService.broadcast('distributors_updated', { action: 'update', id: Number(id) });
   } catch (error: any) {
     console.error('Failed to update distributor:', error);
     res.status(500).json({ error: 'Internal server error: ' + error.message });
@@ -95,6 +98,7 @@ const deleteDistributorHandler = async (req: express.Request, res: express.Respo
     try {
       await db.run('DELETE FROM distributor_learning_profiles WHERE distributor_id = ?', [id]);
     } catch (_) {}
+    eventService.broadcast('distributors_updated', { action: 'delete', id: Number(id) });
     res.json({ success: true, message: 'Distributor deleted successfully' });
   } catch (error) {
     console.error('Failed to delete distributor:', error);

@@ -137,13 +137,21 @@ const Learning: React.FC = () => {
       cachedProfiles = list;
       return list;
     },
-    { 
-      staleTime: 300000, 
-      refetchOnWindowFocus: false
+    {
+      // 30 s staleTime: keeps the list fresh without hammering the server
+      staleTime: 30000,
+      // Re-validate when the user returns to this tab from another page
+      refetchOnWindowFocus: true,
     }
   );
 
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  // Pre-seed selectedProfileId from the warm module cache so the profile-detail
+  // query fires in parallel with the profiles-list query (eliminates the waterfall).
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(() => {
+    const idParam = searchParams.get('id') || searchParams.get('distributor_id');
+    if (idParam) return parseInt(idParam, 10);
+    return cachedProfiles[0]?.distributor_id ?? null;
+  });
 
   // Settings Query with module caching
   const { data: serverSettings = cachedServerSettings, isLoading: loadingSettings } = useApiQuery<any>(
@@ -379,6 +387,44 @@ const Learning: React.FC = () => {
       });
     }
   }, [serverProfileDetail, selectedProfileId]);
+
+  // Live sync: invalidate profiles + profile detail whenever distributors change
+  // (via POST /distributors, PUT /distributors/:id, DELETE /distributors/:id)
+  useEffect(() => {
+    const baseUrl = (import.meta as any).env?.VITE_API_URL || window.location.origin;
+    const cleanBase = baseUrl.replace(/\/$/, '');
+    const sseUrl = cleanBase.startsWith('http') ? `${cleanBase}/api/notifications/stream` : '/api/notifications/stream';
+
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      es = new EventSource(sseUrl);
+      es.onmessage = (event) => {
+        try {
+          const { type } = JSON.parse(event.data);
+          if (type === 'distributors_updated') {
+            queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+            if (selectedProfileId) {
+              queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
+            }
+          }
+        } catch (_) {}
+      };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        retryTimer = setTimeout(connect, 5000);
+      };
+    };
+
+    connect();
+    return () => {
+      es?.close();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient]);
 
   const checkPrHealth = async () => {
     setCheckingPrHealth(true);
