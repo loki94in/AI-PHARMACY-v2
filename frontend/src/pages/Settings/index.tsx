@@ -987,6 +987,7 @@ const Settings = () => {
       try {
         localStorage.clear();
         sessionStorage.clear();
+        queryClient.clear();
       } catch (storageErr) {
         console.warn('Failed to clear browser storage:', storageErr);
       }

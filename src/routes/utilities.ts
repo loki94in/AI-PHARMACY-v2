@@ -627,15 +627,19 @@ router.post('/reset-data', async (req, res) => {
     const { ensureSchema } = await import('../database.js');
     await ensureSchema(getDbPath());
 
-    // 3a. Deliberately NOT auto-seeding the reference medicine catalogue here.
-    // reference_medicines.csv holds ~200k generic rows with mrp 0 and guessed tax
-    // rates. Injecting them into a freshly reset database means the next real
-    // import (migration or restore) lands on top of 200k placeholder entries and
-    // the app then reports prices and duplicates that came from the seed rather
-    // than from the pharmacy's own records. Seeding stays an explicit user action
-    // via POST /api/medicines/seed-master.
+    // 3a. Clear SQLite sequence counter so primary key IDs start cleanly from 1
+    try {
+      const freshDb = await dbManager.getConnection();
+      await freshDb.run('DELETE FROM sqlite_sequence');
+    } catch (_) {}
 
-    // 3b. Compact the DB file to reclaim space from dropped tables
+    // 3b. Invalidate in-memory inventory cache
+    try {
+      const { inventoryCache } = await import('../services/inventoryCache.js');
+      inventoryCache.invalidate();
+    } catch (_) {}
+
+    // 3c. Compact the DB file to reclaim space from dropped tables
     try {
       const freshDb = await dbManager.getConnection();
       await freshDb.run('VACUUM');
@@ -689,6 +693,11 @@ router.post('/reset-data', async (req, res) => {
 
     // 6. Clean up file directories on disk
     const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+    const attachmentsDir = path.resolve(getAppDataDir(), 'attachments');
+    const reportsDir = path.resolve(getAppDataDir(), 'reports');
+    const dataUploadsDir = path.resolve(getAppDataDir(), 'data', 'uploads');
+    const dataAttachmentsDir = path.resolve(getAppDataDir(), 'data', 'attachments');
+    const dataReportsDir = path.resolve(getAppDataDir(), 'data', 'reports');
     const rawDir = path.resolve(getAppDataDir(), 'catalogue', 'raw');
     const migrationReportsDir = path.resolve(getAppDataDir(), 'data', 'migration_reports');
     const auditImagesDir = path.resolve(getAppDataDir(), 'data', 'audit_images');
@@ -717,6 +726,11 @@ router.post('/reset-data', async (req, res) => {
     };
 
     clearDir(uploadsDir, wipeAll ? [] : ['custom_stamp.png', 'custom_signature.png']);
+    clearDir(attachmentsDir);
+    clearDir(reportsDir);
+    clearDir(dataUploadsDir, wipeAll ? [] : ['custom_stamp.png', 'custom_signature.png']);
+    clearDir(dataAttachmentsDir);
+    clearDir(dataReportsDir);
     clearDir(rawDir);
     clearDir(migrationReportsDir);
     clearDir(auditImagesDir);

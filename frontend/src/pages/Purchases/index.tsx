@@ -14,6 +14,7 @@ import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEd
 import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { getLocalDateString, getTodayString, getNDaysAgoString } from '../../utils/date';
+import { toastEvent } from '../../services/events';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -844,6 +845,8 @@ const Purchases: React.FC = () => {
   const [filterMaxAmount, setFilterMaxAmount] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const savingStartedAtRef = useRef<number>(0);
+  const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
@@ -1555,7 +1558,15 @@ const Purchases: React.FC = () => {
   };
 
   const savePurchase = async () => {
-    if (saving) return;
+    // If already saving but stuck >5s, force-reset and allow retry
+    if (saving) {
+      if (Date.now() - savingStartedAtRef.current > 5000) {
+        setSaving(false);
+        if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
+      } else {
+        return;
+      }
+    }
 
     let distIdToSave = selectedDistributor;
     let distNameToSave = distributorSearch;
@@ -1604,7 +1615,11 @@ const Purchases: React.FC = () => {
     }
 
     setSaving(true);
-    toastEvent.trigger('Saving purchase bill & updating inventory stock...', 'info', '/purchases');
+    savingStartedAtRef.current = Date.now();
+    // Safety net: auto-reset after 35s no matter what
+    if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
+    savingTimeoutRef.current = setTimeout(() => { setSaving(false); }, 35000);
+    toastEvent.trigger('Saving purchase bill & updating inventory stock...', 'info');
     try {
       const payload = {
         distributor_id: distIdToSave,
@@ -1642,14 +1657,26 @@ const Purchases: React.FC = () => {
         }),
       };
 
+      // Hard client-side ceiling on top of the API-level timeout: guarantees the
+      // Save button can never get stuck on "Saving..." forever even if something
+      // upstream of the network call itself stalls (e.g. an auth/token step).
+      const withHardTimeout = <T,>(p: Promise<T>): Promise<T> => {
+        return Promise.race([
+          p,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('Save timed out after 40s. Please check your connection and try again.')), 40000)
+          ),
+        ]);
+      };
+
       let response;
       if (editPurchaseId) {
-        response = await api.updatePurchase(editPurchaseId, {
+        response = await withHardTimeout(api.updatePurchase(editPurchaseId, {
           ...payload,
           distributor: distNameToSave
-        });
+        }));
       } else {
-        response = await api.createManualPurchase(payload);
+        response = await withHardTimeout(api.createManualPurchase(payload));
       }
 
       const savedInvoiceNo = response?.app_invoice_no || finalInvoiceNo || invoiceNo;
@@ -1660,7 +1687,7 @@ const Purchases: React.FC = () => {
       })));
       setShowBarcodeModal(true);
 
-      toastEvent.trigger(`Purchase bill ${savedInvoiceNo} saved successfully! Inventory stock updated.`, 'success', '/purchases');
+      toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully! Inventory stock updated.`, 'success');
       if (typeof (window as any).refreshStagedCounts === 'function') {
         (window as any).refreshStagedCounts(true);
       }
@@ -1693,6 +1720,7 @@ const Purchases: React.FC = () => {
       alert(errMsg);
     } finally {
       setSaving(false);
+      if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
     }
   };
 
@@ -2735,10 +2763,12 @@ const Purchases: React.FC = () => {
           </div>
           <button
             onClick={handleSave}
-            disabled={saving}
-            className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 disabled:opacity-50 transition-all"
+            className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
+            title={saving ? 'Click again to retry if stuck' : 'Save Purchase Bill (Ctrl+S)'}
           >
-            {saving ? '⏳ Saving...' : '💾 Save Purchase'}
+            {saving
+              ? <><RefreshCw size={16} className="animate-spin" /> Saving...</>
+              : <><CheckCircle size={16} /> Save Purchase</>}
           </button>
         </div>
       </div>

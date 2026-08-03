@@ -53,13 +53,25 @@ const BOOTSTRAP_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
 async function fetchBootstrapTokenWithRetry(): Promise<{ token?: string } | null> {
   for (let attempt = 0; attempt <= BOOTSTRAP_RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const res = await fetch(`${API_URL}/auth/bootstrap-token`);
+      // A stalled connection here (no server response, no error) would otherwise
+      // hang forever with no AbortController — and since this runs inside the
+      // apiClient request interceptor, every API call (save, load, everything)
+      // would freeze along with it. Bound each attempt so the retry loop always
+      // keeps moving.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      let res: Response;
+      try {
+        res = await fetch(`${API_URL}/auth/bootstrap-token`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (res.ok) return res.json();
       // 503 = server still initializing (schema not ready yet) — worth retrying.
       // Any other non-OK status is not transient; stop retrying.
       if (res.status !== 503) return null;
     } catch {
-      // Network error — worth retrying.
+      // Network error or abort timeout — worth retrying.
     }
     const delay = BOOTSTRAP_RETRY_DELAYS_MS[attempt];
     if (delay === undefined) break;
