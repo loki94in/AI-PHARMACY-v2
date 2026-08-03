@@ -160,28 +160,8 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
         )}
       </div>
 
-      {/* Right: Connectivity indicator & WhatsApp Online Status */}
+      {/* Right: Connectivity indicator */}
       <div className="flex items-center gap-2.5 shrink-0">
-        <a
-          href="/crm?tab=whatsapp"
-          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px] font-semibold transition-all shrink-0 ${
-            waReady === true
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-          }`}
-          title={waReady === true ? 'WhatsApp Business / Web Online' : 'WhatsApp Offline — Click to Connect / Scan QR'}
-        >
-          <MessageCircle size={11} className={waReady === true ? 'text-emerald-400' : 'text-amber-400'} />
-          <span>{waReady === true ? 'WhatsApp: Online' : 'WhatsApp: Offline (Scan QR)'}</span>
-          <span
-            className={`inline-block w-1.5 h-1.5 rounded-full ${
-              waReady === true ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-            }`}
-          />
-        </a>
-
-        <div className="h-3 w-[1px] bg-glass-border shrink-0" />
-
         <button
           onClick={onOpenConnectModal}
           className="flex items-center gap-1 text-[11px] text-muted hover:text-white transition-colors"

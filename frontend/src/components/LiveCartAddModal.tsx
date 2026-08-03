@@ -224,13 +224,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   };
 
   // Directly add to Pharmarack Live Cart with the supplied default qty.
-  // Falls back to search transfer when backend enrichment cannot resolve the product.
+  // Falls back to onFallback() when backend enrichment cannot resolve the product.
+  // onFallback opens the distributor picker for the item instead of the medicine search box.
   const handleDirectLiveCartAdd = async (
     medName: string,
     targetQty: number = 1,
     srcOrderId?: number,
     srcRefillId?: number,
-    loadingKey?: string
+    loadingKey?: string,
+    onFallback?: () => void
   ) => {
     if (!medName.trim()) return;
     const qtyToAdd = Math.max(1, Number(targetQty) || 1);
@@ -264,12 +266,23 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         return;
       }
 
-      handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
-      toastEvent.trigger(res?.error || `Opened search for "${medName}" — pick a distributor`, 'info');
+      // Backend could not auto-resolve the product — open distributor picker instead of search box
+      if (onFallback) {
+        onFallback();
+        toastEvent.trigger(res?.error || `Pick a distributor for "${medName}"`, 'info');
+      } else {
+        handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
+        toastEvent.trigger(res?.error || `Opened search for "${medName}" — pick a distributor`, 'info');
+      }
     } catch (err: any) {
-      console.warn('Direct live cart add failed, opening search:', err);
-      handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
-      toastEvent.trigger(`Opening Live Cart search for "${medName}"...`, 'info');
+      console.warn('Direct live cart add failed, opening distributor picker:', err);
+      if (onFallback) {
+        onFallback();
+        toastEvent.trigger(`Pick a distributor for "${medName}"`, 'info');
+      } else {
+        handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
+        toastEvent.trigger(`Opening Live Cart search for "${medName}"...`, 'info');
+      }
     } finally {
       if (loadingKey) setDirectAddingKey(null);
     }
@@ -1337,10 +1350,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 </span>
               </div>
               <div className="flex gap-1 text-[8px] font-bold uppercase flex-wrap">
-                <span className="px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{autoRefillItems.length} Auto</span>
+                <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{autoRefillItems.length} Auto</span>
                 <span className="px-1 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">{pendingOrders.length} Ord</span>
-                <span className="px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{pendingRefills.length} Refill</span>
-                <span className="px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">{reconOrders.length} Recon</span>
+                <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{pendingRefills.length} Refill</span>
+                <span className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">{reconOrders.length} Recon</span>
               </div>
             </div>
 
@@ -1429,15 +1442,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         <tr
                           key={`order-${order.id}`}
                           className={`transition-colors cursor-pointer ${
-                            inCart ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                            inCart ? 'bg-blue-500/5' : 'hover:bg-bg3/40'
                           }`}
-                          onClick={() => !inCart && handleDirectLiveCartAdd(order.product, order.qty, order.id, undefined, `order-${order.id}`)}
+                          onClick={() => !inCart && handleDirectLiveCartAdd(order.product, order.qty, order.id, undefined, `order-${order.id}`, () => handleSearchDistributorsForOrder(order))}
                         >
                           <td className="py-2.5 px-1">
                             <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Ord</span>
                           </td>
                           <td className="py-2.5 px-1 min-w-0">
-                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-text'}`} title={order.product}>
+                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-blue-400' : 'text-text'}`} title={order.product}>
                               {order.product}
                             </div>
                             <div className="text-[11px] text-muted truncate max-w-[140px]">{order.requester}</div>
@@ -1446,7 +1459,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           <td className="py-2.5 px-1 text-right">
                             {inCart ? (
                               <div className="flex flex-col items-end gap-0.5">
-                                <span className="text-[9px] font-bold text-emerald-400" title={`Fuzzy match score: ${matchScore}%`}>
+                                <span className="text-[9px] font-bold text-blue-400" title={`Fuzzy match score: ${matchScore}%`}>
                                   ✓ {matchScore}%
                                 </span>
                                 {order.status === 'Pending' && (
@@ -1456,7 +1469,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                       e.stopPropagation();
                                       handleConfirmOrdered();
                                     }}
-                                    className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded transition-all shrink-0 cursor-pointer"
+                                    className="text-[9px] font-bold bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded transition-all shrink-0 cursor-pointer"
                                     title="Click to confirm order placed"
                                   >
                                     Confirm
@@ -1468,7 +1481,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleDirectLiveCartAdd(order.product, order.qty, order.id, undefined, `order-${order.id}`);
+                                  handleDirectLiveCartAdd(order.product, order.qty, order.id, undefined, `order-${order.id}`, () => handleSearchDistributorsForOrder(order));
                                 }}
                                 disabled={directAddingKey === `order-${order.id}`}
                                 className="text-[10px] font-bold text-red hover:text-red/80 transition-colors bg-red-500/10 hover:bg-red-500/20 px-2 py-1 rounded border border-red-500/30 cursor-pointer disabled:opacity-50"
@@ -1490,15 +1503,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         <tr
                           key={`refill-${refill.id}`}
                           className={`transition-colors cursor-pointer ${
-                            inCart ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                            inCart ? 'bg-blue-500/5' : 'hover:bg-bg3/40'
                           }`}
-                          onClick={() => !inCart && handleDirectLiveCartAdd(refill.medicine_name || '', refillQty, undefined, refill.id, `refill-${refill.id}`)}
+                          onClick={() => !inCart && handleDirectLiveCartAdd(refill.medicine_name || '', refillQty, undefined, refill.id, `refill-${refill.id}`, () => handleSearchDistributorsForRefill(refill))}
                         >
                           <td className="py-2.5 px-1">
-                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Refill</span>
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Refill</span>
                           </td>
                           <td className="py-2.5 px-1 min-w-0">
-                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-emerald-400' : 'text-amber-300'}`} title={refill.medicine_name}>
+                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-blue-400' : 'text-blue-300'}`} title={refill.medicine_name}>
                               {refill.medicine_name}
                             </div>
                             <div className="text-[11px] text-muted truncate max-w-[140px]">Patient: {refill.patient_name}</div>
@@ -1506,16 +1519,16 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{refillQty}</td>
                           <td className="py-2.5 px-1 text-right">
                             {inCart ? (
-                              <span className="text-[9px] font-bold text-emerald-400">✓ Added</span>
+                              <span className="text-[9px] font-bold text-blue-400">✓ Added</span>
                             ) : (
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleDirectLiveCartAdd(refill.medicine_name || '', refillQty, undefined, refill.id, `refill-${refill.id}`);
+                                  handleDirectLiveCartAdd(refill.medicine_name || '', refillQty, undefined, refill.id, `refill-${refill.id}`, () => handleSearchDistributorsForRefill(refill));
                                 }}
                                 disabled={directAddingKey === `refill-${refill.id}`}
-                                className="text-[10px] font-bold text-amber-400 hover:text-amber-300 transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded border border-amber-500/30 cursor-pointer disabled:opacity-50"
+                                className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded border border-blue-500/30 cursor-pointer disabled:opacity-50"
                                 title={`Add ${refillQty} unit(s) directly to Pharmarack Live Cart`}
                               >
                                 {directAddingKey === `refill-${refill.id}` ? '...' : 'Add'}
@@ -1540,20 +1553,20 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           <tr
                             key={`recon-${recon.email_uid || reconIdx}-${medIdx}`}
                             className={`transition-colors cursor-pointer border-l-4 ${reconDistColor.border} ${
-                              isAdded ? 'bg-emerald-500/5' : 'hover:bg-bg3/40'
+                              isAdded ? 'bg-blue-500/5' : 'hover:bg-bg3/40'
                             } ${getReconAgeStyle(recon.date)}`}
-                            onClick={() => !isAdded && handleDirectLiveCartAdd(medName, 1, undefined, undefined, `recon-${recon.email_uid}-${medIdx}`)}
+                            onClick={() => !isAdded && handleDirectLiveCartAdd(medName, 1, undefined, undefined, `recon-${recon.email_uid}-${medIdx}`, () => handleReconMedicineSelect(recon, medName))}
                           >
                             <td className="py-2.5 px-1">
                               <div className="flex flex-col gap-0.5 items-start">
-                                <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Recon</span>
+                                <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Recon</span>
                                 {recon.status === 'Bounced' && (
-                                  <span className="text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Bounced</span>
+                                  <span className="text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-red-500/10 text-red border border-red-500/20">Bounced</span>
                                 )}
                               </div>
                             </td>
                             <td className="py-2.5 px-1 min-w-0">
-                              <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-emerald-400' : 'text-purple-300'}`} title={medName}>
+                              <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-blue-400' : 'text-blue-300'}`} title={medName}>
                                 {medName}
                               </div>
                               {recon.extracted_distributor ? (
@@ -1561,22 +1574,22 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                   {recon.extracted_distributor}
                                 </span>
                               ) : (
-                                <div className="text-[11px] text-purple-400/80 font-medium truncate max-w-[140px]">{recon.subject || 'Email Order'}</div>
+                                <div className="text-[11px] text-blue-400/80 font-medium truncate max-w-[140px]">{recon.subject || 'Email Order'}</div>
                               )}
                             </td>
                             <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">1</td>
                             <td className="py-2.5 px-1 text-right">
                               {isAdded ? (
-                                <span className="text-[9px] font-bold text-emerald-400">✓ Added</span>
+                                <span className="text-[9px] font-bold text-blue-400">✓ Added</span>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleDirectLiveCartAdd(medName, 1, undefined, undefined, `recon-${recon.email_uid}-${medIdx}`);
+                                    handleDirectLiveCartAdd(medName, 1, undefined, undefined, `recon-${recon.email_uid}-${medIdx}`, () => handleReconMedicineSelect(recon, medName));
                                   }}
                                   disabled={directAddingKey === `recon-${recon.email_uid}-${medIdx}`}
-                                  className="text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors bg-purple-500/10 hover:bg-purple-500/20 px-2 py-1 rounded border border-purple-500/30 cursor-pointer disabled:opacity-50"
+                                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded border border-blue-500/30 cursor-pointer disabled:opacity-50"
                                   title="Add directly to Pharmarack Live Cart"
                                 >
                                   {directAddingKey === `recon-${recon.email_uid}-${medIdx}` ? '...' : 'Add'}
@@ -1594,13 +1607,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                         <tr
                           key={`auto-refill-${item.medicine_id}`}
                           className="transition-colors hover:bg-bg3/40 cursor-pointer"
-                          onClick={() => handleDirectLiveCartAdd(item.medicine_name, item.recommended_qty, undefined, undefined, `auto-${item.medicine_id}`)}
+                          onClick={() => handleDirectLiveCartAdd(item.medicine_name, item.recommended_qty, undefined, undefined, `auto-${item.medicine_id}`, () => handleSearchDistributorsForAutoRefill(item))}
                         >
                           <td className="py-2.5 px-1">
-                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Auto</span>
+                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Auto</span>
                           </td>
                           <td className="py-2.5 px-1 min-w-0">
-                            <div className="text-sm font-bold truncate max-w-[140px] text-emerald-400" title={item.medicine_name}>
+                            <div className="text-sm font-bold truncate max-w-[140px] text-blue-400" title={item.medicine_name}>
                               {item.medicine_name}
                             </div>
                             <div className="text-[11px] text-muted font-mono truncate max-w-[140px]">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
@@ -1611,10 +1624,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDirectLiveCartAdd(item.medicine_name, item.recommended_qty, undefined, undefined, `auto-${item.medicine_id}`);
+                                handleDirectLiveCartAdd(item.medicine_name, item.recommended_qty, undefined, undefined, `auto-${item.medicine_id}`, () => handleSearchDistributorsForAutoRefill(item));
                               }}
                               disabled={directAddingKey === `auto-${item.medicine_id}`}
-                              className="text-[9.5px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30 cursor-pointer disabled:opacity-50"
+                              className="text-[9.5px] font-bold text-blue-400 hover:text-blue-300 transition-colors bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded border border-blue-500/30 cursor-pointer disabled:opacity-50"
                               title={`Add ${item.recommended_qty} unit(s) directly to Pharmarack Live Cart`}
                             >
                               {directAddingKey === `auto-${item.medicine_id}` ? '...' : 'Add'}

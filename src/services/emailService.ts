@@ -2833,15 +2833,18 @@ export class EmailService {
 
     try {
       const db = await dbManager.getConnection();
-      const userRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
+      const userRow = await db.get("SELECT value FROM app_settings WHERE key IN ('gmail_user', 'email_user', 'store_email') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
       if (userRow && userRow.value) user = userRow.value.trim();
 
       const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
       if (authMethodRow && authMethodRow.value) authMethod = authMethodRow.value.trim();
       else authMethod = 'password';
 
-      const passRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
+      const passRow = await db.get("SELECT value FROM app_settings WHERE key IN ('gmail_pass', 'email_pass', 'gmail_password', 'email_password') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
       if (passRow && passRow.value) password = passRow.value.trim();
+
+      if (!user) user = (process.env.GMAIL_USER || process.env.IMAP_USER || '').trim();
+      if (!password) password = (process.env.GMAIL_PASS || process.env.IMAP_PASS || '').trim();
 
       // Gmail shows app passwords as "abcd efgh ijkl mnop"; users paste them with
       // spaces, which IMAP rejects. Strip whitespace when that leaves a 16-letter key.

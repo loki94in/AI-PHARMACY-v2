@@ -3056,7 +3056,7 @@ const POS = () => {
               </div>
               
               <div className="flex items-center gap-2 ml-auto">
-                {specialOrdersControl.mode === 'manual' && !specialOrdersControl.loaded && (
+                {specialOrdersControl.mode === 'manual' && !specialOrdersControl.loaded && specialOrders.length > 0 && (
                   <button
                     type="button"
                     onClick={() => specialOrdersControl.requestLoad()}

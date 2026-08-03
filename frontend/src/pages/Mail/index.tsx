@@ -151,8 +151,8 @@ const Mail = () => {
   const [loadingPreview, setLoadingPreview] = useState<boolean>(false);
   const syncInProgress = useRef(false);
 
-  // Check backend IMAP configuration status
-  useEffect(() => {
+  // Check backend IMAP configuration status dynamically
+  const checkImapStatus = useCallback(() => {
     api.getEmailStatus()
       .then((res: any) => {
         if (res && typeof res.isConfigured === 'boolean') {
@@ -163,6 +163,29 @@ const Mail = () => {
         setIsImapConfigured(false);
       });
   }, []);
+
+  useEffect(() => {
+    checkImapStatus();
+    const handleSettingsUpdate = () => checkImapStatus();
+
+    window.addEventListener('settings-updated', handleSettingsUpdate);
+    window.addEventListener('email-config-updated', handleSettingsUpdate);
+    window.addEventListener('focus', handleSettingsUpdate);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkImapStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('settings-updated', handleSettingsUpdate);
+      window.removeEventListener('email-config-updated', handleSettingsUpdate);
+      window.removeEventListener('focus', handleSettingsUpdate);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [checkImapStatus]);
 
   // Asynchronously fetch attachment text preview for PDF, CSV, Excel, and TXT files
   useEffect(() => {
@@ -257,6 +280,7 @@ const Mail = () => {
   // Trigger a background IMAP delta sync
   const triggerSync = useCallback(async () => {
     if (syncInProgress.current || isOffline) return;
+    checkImapStatus();
     syncInProgress.current = true;
     setSyncing(true);
     try {
@@ -324,6 +348,7 @@ const Mail = () => {
   }, [triggerSync, silentRefreshLocal, imapSyncControl.shouldFetch, inboxRefreshControl.shouldFetch, pageActive]);
 
   const handleManualRefresh = () => {
+    checkImapStatus();
     loadLocalInbox();
     triggerSync();
   };
@@ -525,6 +550,12 @@ const Mail = () => {
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-primary" />
           Saved &amp; Processed (bill created)
+        </div>
+        <div className="flex items-center gap-1.5 ml-2 border-l border-glass-border/30 pl-3">
+          <span className={`h-2 w-2 rounded-full ${isImapConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+          <span className={`font-bold ${isImapConfigured ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {isImapConfigured ? 'Gmail Scanner: Connected ⚡' : 'Gmail Scanner: Not Configured'}
+          </span>
         </div>
         <div className="ml-auto text-muted font-mono">
           {emails.length} email{emails.length !== 1 ? 's' : ''} stored locally

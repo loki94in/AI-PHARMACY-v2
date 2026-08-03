@@ -256,6 +256,17 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const lastToastedQueryRef = useRef('');
   const isSelectingRef = useRef(false);
 
+  // Find the minimum effective rate among all suggestions to identify the best rate option
+  const minEffectiveRate = React.useMemo(() => {
+    let min = Infinity;
+    suggestions.forEach(item => {
+      if (item.isErrorMessage || !item.rate) return;
+      const eff = getEffectiveRate(item.rate, item.scheme, qty);
+      if (eff < min) min = eff;
+    });
+    return min;
+  }, [suggestions, qty]);
+
   // Autofocus on mount
   useEffect(() => {
     setTimeout(() => {
@@ -707,88 +718,88 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-96 overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-glass-border/30 py-2">
-                      {suggestions.map((med, index) => {
-                        const isPr = med.isPharmarack;
-                        return (
-                          <li
-                            key={index}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              selectSuggestion(med);
-                            }}
-                            className={`px-5 py-3 text-sm cursor-pointer flex justify-between items-center transition-all ${
-                              med.isErrorMessage
-                                ? 'bg-red-500/10 text-red border-l-2 border-red cursor-default'
-                                : index === activeSuggestionIndex 
-                                ? 'bg-primary/20 text-text font-semibold border-l-2 border-primary' 
-                                : 'text-muted hover:text-text hover:bg-bg3'
-                            }`}
-                          >
-                            <div className="flex-1 min-w-0 pr-2">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-semibold text-text truncate text-sm">{med.medicine_name}</span>
-                                {isPr && !med.isErrorMessage && (
-                                  <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-semibold uppercase">
-                                    Pharmarack
-                                  </span>
-                                )}
-                                {isPr && med.stock !== undefined && !med.isErrorMessage && (
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${getStockStyle(med.stock)}`}>
-                                    {med.stock} Stock
-                                  </span>
-                                )}
-                                {isPr && med.scheme && !med.isErrorMessage && (
-                                  <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded font-bold uppercase">
-                                    Scheme: {med.scheme}
-                                  </span>
-                                )}
-                              </div>
-                              {isPr ? (
-                                !med.isErrorMessage && (
-                                  <span className="text-xs text-muted block truncate mt-1">
-                                    {med.distributor ? (
-                                      <>
-                                        <span className={med.mapped ? 'text-text' : 'text-purple-400 font-semibold'}>
-                                          {med.distributor}
-                                        </span>
-                                        <span> ({med.mapped ? 'Mapped' : 'Non-mapped'})</span>
-                                      </>
-                                    ) : (
-                                      'No Distributor'
-                                    )}
-                                    {med.packaging ? ` • ${med.packaging}` : ''}
-                                  </span>
-                                )
-                              ) : (
-                                <span className="text-xs text-muted block truncate mt-1">
-                                  Company: <span className="text-text font-semibold">{med.company || (med as any).manufacturer || 'Generic'}</span>
+                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
+                      {suggestions.map((med, index) => (
+                        <li
+                          key={index}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectSuggestion(med);
+                          }}
+                          className={`px-3.5 py-2 text-xs cursor-pointer flex justify-between items-center transition-all ${
+                            med.isErrorMessage
+                              ? 'bg-red-500/10 text-red border-l-2 border-red cursor-default'
+                              : index === activeSuggestionIndex
+                              ? 'bg-primary/20 text-text font-semibold border-l-2 border-primary'
+                              : 'text-muted hover:text-text hover:bg-bg3/60'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0 pr-2">
+                            {/* Line 1: Product name + scheme badge + Best Rate badge */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-text truncate text-sm">{med.medicine_name}</span>
+                              {med.scheme && !med.isErrorMessage && (
+                                <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
+                                  {med.scheme}
+                                </span>
+                              )}
+                              {med.rate !== undefined && med.rate !== null && !med.isErrorMessage && getEffectiveRate(med.rate, med.scheme, qty) === minEffectiveRate && (
+                                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
+                                  <Sparkles size={8} className="text-emerald-400 animate-pulse" /> Best Rate
                                 </span>
                               )}
                             </div>
-                            <div className="text-right flex-shrink-0 flex flex-col justify-center items-end">
-                              {isPr ? (
-                                !med.isErrorMessage && (
-                                  <div className="text-xs font-mono font-bold text-text flex flex-col items-end">
-                                    {med.rate !== undefined && med.rate !== null ? (
-                                      <span className="text-emerald-400">PTR: ₹{med.rate}</span>
-                                    ) : null}
-                                    {med.mrp !== undefined && med.mrp !== null ? (
-                                      <span className="text-muted text-[10px]">MRP: ₹{med.mrp}</span>
-                                    ) : null}
-                                  </div>
-                                )
-                              ) : (
-                                med.mrp !== undefined && (
-                                  <span className="text-xs font-mono font-bold text-green">
-                                    MRP: ₹{Math.round(med.mrp)}
+
+                            {/* Line 2: Distributor name + company */}
+                            {!med.isErrorMessage && (
+                              <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs">
+                                <span className={`font-semibold ${ med.isPharmarack ? (med.mapped ? 'text-sky-400' : 'text-purple-400') : 'text-muted' }`}>
+                                  {med.isPharmarack ? (med.distributor || 'No Distributor') : 'Local Inventory'}
+                                </span>
+                                {(med.company || (med as any).manufacturer) && (
+                                  <span className="text-[10px] text-muted/70 font-semibold uppercase tracking-wider">
+                                    {med.company || (med as any).manufacturer}
                                   </span>
-                                )
-                              )}
-                            </div>
-                          </li>
-                        );
-                      })}
+                                )}
+                              </div>
+                            )}
+
+                            {/* Line 3: PTR, MRP, packaging & stock pill */}
+                            {!med.isErrorMessage && (
+                              <div className="flex items-center gap-2.5 text-[11px] mt-0.5 flex-wrap">
+                                {med.isPharmarack ? (
+                                  <>
+                                    {med.rate !== undefined && med.rate !== null && (
+                                      <span className="font-bold text-emerald-400 font-mono">PTR: ₹{med.rate}</span>
+                                    )}
+                                    {med.mrp !== undefined && med.mrp !== null && (
+                                      <span className="text-muted font-mono">MRP: ₹{med.mrp}</span>
+                                    )}
+                                    {med.packaging && (
+                                      <span className="text-muted font-mono font-semibold">{med.packaging}</span>
+                                    )}
+                                    {med.stock !== undefined && (
+                                      <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-[10px] flex items-center gap-1 ${
+                                        (med.stock.toLowerCase() === 'high' || parseInt(med.stock) >= 15)
+                                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                          : (med.stock.toLowerCase() === 'low' || parseInt(med.stock) > 0)
+                                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                          : 'bg-red-500/10 text-red border border-red-500/20'
+                                      }`}>
+                                        📦 {med.stock}
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  med.mrp !== undefined && (
+                                    <span className="font-bold text-green font-mono">MRP: ₹{Math.round(med.mrp)}</span>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </li>
+                      ))}
                     </ul>
                   )}
 
