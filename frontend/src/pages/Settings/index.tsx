@@ -559,11 +559,11 @@ const Settings = () => {
     if (serverSettings) {
       setSettings(prev => ({
         ...prev,
-        pharmacyName: serverSettings.shop_name || '',
-        address: serverSettings.shop_address || '',
-        phone: serverSettings.shop_phone || '',
+        pharmacyName: serverSettings.shop_name || serverSettings.pharmacy_name || serverSettings.store_name || serverSettings.medical_name || '',
+        address: serverSettings.shop_address || serverSettings.address || serverSettings.store_address || '',
+        phone: serverSettings.shop_phone || serverSettings.phone || serverSettings.store_phone || serverSettings.whatsapp_number || serverSettings.owner_whatsapp_number || '',
         gstin: serverSettings.gstin || '',
-        drugLicense: serverSettings.shop_licence || '',
+        drugLicense: serverSettings.shop_licence || serverSettings.drug_license || '',
         email: serverSettings.email || '',
         gmailUser: serverSettings.gmail_user || '',
         gmailPass: serverSettings.gmail_pass || '',
@@ -663,11 +663,17 @@ const Settings = () => {
     const payload = {
       shop_name: pharmacyName,
       store_name: pharmacyName,
+      pharmacy_name: pharmacyName,
       medical_name: pharmacyName,
       shop_address: address,
+      address: address,
       shop_phone: phone,
+      phone: phone,
+      store_phone: phone,
+      whatsapp_number: phone,
       gstin: gstin,
       shop_licence: drugLicense,
+      drug_license: drugLicense,
       email: email,
 
       google_search_daily_limit: googleSearchDailyLimit.toString(),
@@ -708,12 +714,12 @@ const Settings = () => {
     try {
       await apiClient.post('/settings/save', payload);
       updateSettingsCache(queryClient, payload as Record<string, string>);
-      if (ownerWhatsappNumber) {
+      if (ownerWhatsappNumber || phone) {
         try {
           await api.saveContact({
             name: pharmacyName || 'Pharmacy Owner',
             type: 'owner',
-            phone: ownerWhatsappNumber,
+            phone: ownerWhatsappNumber || phone,
             email: email || undefined,
             address: address || undefined,
             gstin: gstin || undefined
@@ -721,6 +727,8 @@ const Settings = () => {
         } catch (_) {}
       }
       await broadcastContactDataChanged(queryClient);
+      window.dispatchEvent(new CustomEvent('settings-updated'));
+      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       toastEvent.trigger('Settings saved successfully', 'success');
     } catch (error) {
       console.error('Failed to save settings', error);

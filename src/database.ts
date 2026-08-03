@@ -840,6 +840,15 @@ export async function ensureSchema(dbPath: string) {
       }
     }
 
+    // Purge email strings incorrectly written into phone/contact columns
+    await db.run(`
+      UPDATE distributors SET
+        phone = CASE WHEN phone LIKE '%@%' OR phone LIKE '%<%' OR phone LIKE '%.com%' THEN '' ELSE phone END,
+        contact = CASE WHEN contact LIKE '%@%' OR contact LIKE '%<%' OR contact LIKE '%.com%' THEN '' ELSE contact END
+      WHERE (phone LIKE '%@%' OR phone LIKE '%<%' OR phone LIKE '%.com%')
+         OR (contact LIKE '%@%' OR contact LIKE '%<%' OR contact LIKE '%.com%')
+    `);
+
     // Synchronize distributors contact and phone columns
     await db.run("UPDATE distributors SET phone = contact WHERE (phone IS NULL OR phone = '') AND contact IS NOT NULL AND contact != ''");
     await db.run("UPDATE distributors SET contact = phone WHERE (contact IS NULL OR contact = '') AND phone IS NOT NULL AND phone != ''");

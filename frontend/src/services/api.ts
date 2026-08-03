@@ -550,7 +550,7 @@ export const api = {
   getDoctorCombinations: (id: number, medicineId: number) =>
     apiClient.get(`/crm/doctors/${id}/combinations/${medicineId}`).then(r => r.data),
   
-  // Email / Mail Parser
+  getEmailStatus: () => apiClient.get('/email/status').then(res => res.data),
   getEmailInbox: (limit: number = 50) => apiClient.get('/email/inbox', { params: { limit } }).then(res => res.data),
   getEmailAttachments: () => apiClient.get('/email/attachments').then(res => res.data),
   getEmailAttachmentsById: (emailId: number) => apiClient.get(`/email/${emailId}/attachments`).then(res => res.data),

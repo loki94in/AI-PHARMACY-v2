@@ -24,6 +24,8 @@ const postDistributorsHandler = async (req: express.Request, res: express.Respon
   if (!name) {
     return res.status(400).json({ error: 'Distributor name is required' });
   }
+  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
+  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
   const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
@@ -33,18 +35,18 @@ const postDistributorsHandler = async (req: express.Request, res: express.Respon
       targetId = existing.id;
       await db.run(
         `UPDATE distributors 
-         SET phone = COALESCE(?, phone),
-             contact = COALESCE(?, contact, phone),
-             email = COALESCE(?, email),
-             address = COALESCE(?, address),
-             gstin = COALESCE(?, gstin)
+         SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+             contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+             email = CASE WHEN ? != '' THEN ? ELSE email END,
+             address = CASE WHEN ? != '' THEN ? ELSE address END,
+             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END
          WHERE id = ?`,
-        [phone, phone, cleanEmail, address, gstin, existing.id]
+        [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', gstin || '', gstin || '', existing.id]
       );
     } else {
       const result = await db.run(
         `INSERT INTO distributors (name, phone, contact, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, phone, phone, cleanEmail, address, gstin]
+        [name, cleanPhone, cleanPhone, cleanEmail, address || '', gstin || '']
       );
       targetId = result.lastID || 0;
     }
@@ -71,20 +73,31 @@ router.post('/', postDistributorsHandler);
 const putDistributorHandler = async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   const { name, phone, email, preferred_file_format, gstin, address } = req.body;
+  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
+  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
   const cleanEmail = extractCleanEmail(email);
   try {
     const db = await dbManager.getConnection();
     await db.run(
       `UPDATE distributors 
-       SET name = COALESCE(?, name),
-           phone = COALESCE(?, phone),
-           contact = COALESCE(?, contact, phone),
-           email = COALESCE(?, email),
-           preferred_file_format = COALESCE(?, preferred_file_format),
-           gstin = COALESCE(?, gstin),
-           address = COALESCE(?, address)
+       SET name = CASE WHEN ? != '' THEN ? ELSE name END,
+           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+           contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+           email = CASE WHEN ? != '' THEN ? ELSE email END,
+           preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END,
+           gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+           address = CASE WHEN ? != '' THEN ? ELSE address END
        WHERE id = ?`,
-      [name, phone, phone, cleanEmail, preferred_file_format, gstin, address, id]
+      [
+        name || '', name || '',
+        cleanPhone, cleanPhone,
+        cleanPhone, cleanPhone,
+        cleanEmail, cleanEmail,
+        preferred_file_format || '', preferred_file_format || '',
+        gstin || '', gstin || '',
+        address || '', address || '',
+        id
+      ]
     );
 
     // Auto register learning profile for local AI learning integration

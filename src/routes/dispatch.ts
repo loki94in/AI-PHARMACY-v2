@@ -128,14 +128,42 @@ router.post('/delivery-boys', async (req, res) => {
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Delivery boy name is required' });
   const rawDigits = whatsapp_number ? String(whatsapp_number).replace(/\D/g, '') : '';
   const cleanPhone = rawDigits ? rawDigits : null;
+  const cleanName = String(name).trim();
+
   try {
     const db = await dbManager.getConnection();
-    const result = await db.run(
-      'INSERT INTO delivery_boys (name, whatsapp_number, telegram_chat_id, is_active) VALUES (?, ?, ?, ?)',
-      [String(name).trim(), cleanPhone, telegram_chat_id || null, is_active !== undefined ? is_active : 1]
+    
+    // Upsert: check if record already exists by name or phone
+    const existing = await db.get(
+      'SELECT id FROM delivery_boys WHERE LOWER(name) = LOWER(?) OR (whatsapp_number IS NOT NULL AND whatsapp_number != "" AND whatsapp_number = ?)',
+      [cleanName, cleanPhone]
     );
-    const newBoy = await db.get('SELECT * FROM delivery_boys WHERE id = ?', result.lastID);
-    res.status(201).json(newBoy);
+
+    let targetId: number;
+    if (existing) {
+      targetId = existing.id;
+      await db.run(
+        'UPDATE delivery_boys SET name = ?, whatsapp_number = COALESCE(?, whatsapp_number), is_active = 1 WHERE id = ?',
+        [cleanName, cleanPhone, existing.id]
+      );
+    } else {
+      const result = await db.run(
+        'INSERT INTO delivery_boys (name, whatsapp_number, telegram_chat_id, is_active) VALUES (?, ?, ?, ?)',
+        [cleanName, cleanPhone, telegram_chat_id || null, is_active !== undefined ? is_active : 1]
+      );
+      targetId = result.lastID || 0;
+    }
+
+    const savedBoy = await db.get('SELECT * FROM delivery_boys WHERE id = ?', targetId);
+
+    if (cleanPhone) {
+      try {
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_phone', ?)", [cleanPhone]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_whatsapp', ?)", [cleanPhone]);
+      } catch (_) {}
+    }
+
+    res.status(201).json(savedBoy);
   } catch (error: any) {
     console.error('Add delivery boy error:', error);
     res.status(500).json({ error: error?.message || 'Failed to add delivery boy' });
@@ -163,6 +191,14 @@ router.put('/delivery-boys/:id', async (req, res) => {
       ]
     );
     const updated = await db.get('SELECT * FROM delivery_boys WHERE id = ?', id);
+
+    if (cleanPhone) {
+      try {
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_phone', ?)", [cleanPhone]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_whatsapp', ?)", [cleanPhone]);
+      } catch (_) {}
+    }
+
     res.json(updated);
   } catch (error: any) {
     console.error('Update delivery boy error:', error);

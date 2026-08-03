@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, Suspense, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { PageActiveProvider } from './PageActiveContext';
 import { PageErrorBoundary } from './PageErrorBoundary';
@@ -11,6 +11,7 @@ export interface KeepAliveRoute {
 interface Props {
   routes: KeepAliveRoute[];
   notFoundElement: ReactNode;
+  fallback?: ReactNode;
 }
 
 /**
@@ -19,7 +20,7 @@ interface Props {
  * open modals survive navigation; hidden pages stay mounted so React Query's cache
  * invalidation keeps refreshing them in the background.
  */
-export function KeepAliveOutlet({ routes, notFoundElement }: Props) {
+export function KeepAliveOutlet({ routes, notFoundElement, fallback }: Props) {
   const location = useLocation();
   const matched = routes.find(r => r.path === location.pathname);
   const currentPath = matched ? matched.path : null;
@@ -46,7 +47,9 @@ export function KeepAliveOutlet({ routes, notFoundElement }: Props) {
           <div key={path} style={{ display: isActive ? 'flex' : 'none' }} className="h-full w-full flex-1 flex flex-col min-h-0">
             <PageActiveProvider value={isActive}>
               <PageErrorBoundary pagePath={path}>
-                {route.element}
+                <Suspense fallback={fallback || null}>
+                  {route.element}
+                </Suspense>
               </PageErrorBoundary>
             </PageActiveProvider>
           </div>

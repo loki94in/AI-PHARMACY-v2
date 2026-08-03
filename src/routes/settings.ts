@@ -68,7 +68,24 @@ router.post('/', async (req, res) => {
     const db = await dbManager.getConnection();
     const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
     await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
-    res.json({ success: true, message: 'Setting saved' });
+
+    // Synchronize store name alias keys
+    const nameKeys = ['shop_name', 'pharmacy_name', 'store_name', 'medical_name'];
+    if (nameKeys.includes(key) && saveValue) {
+      for (const nk of nameKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [nk, saveValue]);
+      }
+    }
+
+    // Synchronize store phone alias keys
+    const phoneKeys = ['shop_phone', 'pharmacy_phone', 'store_phone', 'phone'];
+    if (phoneKeys.includes(key) && saveValue) {
+      for (const pk of phoneKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [pk, saveValue]);
+      }
+    }
+
+    res.json({ success: true, key, value: saveValue });
   } catch (error) {
     console.error('Settings save error:', error);
     res.status(500).json({ error: 'Failed to save setting' });
@@ -98,6 +115,30 @@ router.post('/save', async (req, res) => {
       await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [k, v ?? '']);
     }
 
+    // Synchronize store name aliases if any store name key was provided
+    const pharmacyNameVal = payload['shop_name'] || payload['pharmacy_name'] || payload['store_name'] || payload['medical_name'];
+    if (pharmacyNameVal) {
+      const val = String(pharmacyNameVal).trim();
+      if (val) {
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_name', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_name', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_name', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('medical_name', ?)", [val]);
+      }
+    }
+
+    // Synchronize store phone aliases if any store phone key was provided
+    const pharmacyPhoneVal = payload['shop_phone'] || payload['phone'] || payload['store_phone'] || payload['pharmacy_phone'];
+    if (pharmacyPhoneVal) {
+      const val = String(pharmacyPhoneVal).trim();
+      if (val) {
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_phone', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_phone', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_phone', ?)", [val]);
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('phone', ?)", [val]);
+      }
+    }
+
     if (payload['email_retention_limit'] !== undefined) {
       try {
         const { emailService } = await import('../services/emailService.js');
@@ -111,11 +152,10 @@ router.post('/save', async (req, res) => {
     // Sync delivery boys to single DB source location (delivery_boys table)
     const boy1Name = payload['delivery_boy_name'] || payload['delivery_boy_1_name'];
     const boy1Phone = payload['delivery_boy_whatsapp'] || payload['delivery_boy_phone'];
-    if (boy1Phone !== undefined) {
+    if (boy1Phone !== undefined && String(boy1Phone).trim() !== '') {
       const nameToUse = String(boy1Name || '').trim() || 'Delivery Staff 1';
       const phoneStr = String(boy1Phone || '').trim();
 
-      // Find first existing Delivery Staff 1 record
       const existing1 = await db.get(
         "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 1%' OR id = 1 ORDER BY id ASC LIMIT 1",
         [nameToUse]
@@ -133,18 +173,15 @@ router.post('/save', async (req, res) => {
             [nameToUse, phoneStr]
           );
         }
-      } else if (existing1) {
-        await db.run('UPDATE delivery_boys SET is_active = 0 WHERE id = ?', [existing1.id]);
       }
     }
 
     const boy2Name = payload['delivery_boy_name_2'] || payload['delivery_boy_2_name'];
     const boy2Phone = payload['delivery_boy_whatsapp_2'];
-    if (boy2Phone !== undefined) {
+    if (boy2Phone !== undefined && String(boy2Phone).trim() !== '') {
       const nameToUse = String(boy2Name || '').trim() || 'Delivery Staff 2';
       const phoneStr = String(boy2Phone || '').trim();
 
-      // Find first existing Delivery Staff 2 record
       const existing2 = await db.get(
         "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 2%' OR id = 2 ORDER BY id ASC LIMIT 1",
         [nameToUse]
@@ -162,8 +199,6 @@ router.post('/save', async (req, res) => {
             [nameToUse, phoneStr]
           );
         }
-      } else if (existing2) {
-        await db.run('UPDATE delivery_boys SET is_active = 0 WHERE id = ?', [existing2.id]);
       }
     }
 
@@ -301,7 +336,8 @@ router.post('/distributors', async (req, res) => {
       const ids = existing.map(e => e.id);
       targetId = ids[0];
       const placeholders = ids.map(() => '?').join(',');
-      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+      const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
+      const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
       await db.run(
         `UPDATE distributors SET 
           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
@@ -313,7 +349,8 @@ router.post('/distributors', async (req, res) => {
         [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', ...ids]
       );
     } else {
-      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+      const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
+      const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
       const result = await db.run(
         `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
         [cleanName, cleanPhone, cleanPhone, cleanEmail, address || '', state_code || '']
@@ -342,20 +379,23 @@ router.put('/distributors/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phone, email, address, state_code } = req.body;
   if (!name) return res.status(400).json({ error: 'Distributor name is required' });
-  const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+  
+  const rawPhone = (phone && typeof phone === 'string' && !phone.includes('@') && !phone.includes('<')) ? phone.trim() : (typeof phone === 'number' ? String(phone) : '');
+  const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, '') : '';
   const cleanEmail = extractCleanEmail(email);
+
   try {
     const db = await dbManager.getConnection();
     await db.run(
       `UPDATE distributors SET 
         name = ?, 
-        phone = ?, 
-        contact = ?,
+        phone = CASE WHEN ? != '' THEN ? ELSE phone END, 
+        contact = CASE WHEN ? != '' THEN ? ELSE contact END,
         email = CASE WHEN ? != '' THEN ? ELSE email END, 
         address = CASE WHEN ? != '' THEN ? ELSE address END, 
         state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
        WHERE id = ?`,
-      [name, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', id]
+      [name, cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', id]
     );
 
     // Auto link learning profile
@@ -369,13 +409,15 @@ router.put('/distributors/:id', async (req, res) => {
     const updated = await db.get('SELECT * FROM distributors WHERE id = ?', [id]);
     if (!updated) return res.status(404).json({ error: 'Distributor not found' });
 
-    // Also sync pharmarack_distributors table if present
-    try {
-      await db.run(
-        "UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?",
-        [cleanPhone, `%${name.toLowerCase().trim()}%`]
-      );
-    } catch (_) {}
+    // Also sync pharmarack_distributors table if present and phone is valid
+    if (cleanPhone) {
+      try {
+        await db.run(
+          "UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?",
+          [cleanPhone, `%${name.toLowerCase().trim()}%`]
+        );
+      } catch (_) {}
+    }
 
     res.json({ success: true, data: updated });
   } catch (error) {

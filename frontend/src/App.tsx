@@ -137,32 +137,31 @@ function App() {
     <BrowserRouter>
       <Suspense fallback={<PageLoader />}>
         <Layout theme={theme} setTheme={setTheme}>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Navigate to="/pos" replace />} />
-              <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
-              <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
-              <Route path="/orders" element={<Navigate to="/crm?tab=special_orders" replace />} />
-              <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
-              <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />
-              <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
-              <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
-              <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
-              <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />
-              <Route path="*" element={
-                <KeepAliveOutlet
-                  routes={pageRoutes}
-                  notFoundElement={
-                    <div className="flex flex-col items-center justify-center h-full text-muted">
-                      <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>
-                      <p>This module is currently being migrated to React.</p>
-                    </div>
-                  }
-                />
-              } />
-            </Routes>
-          </Suspense>
+          <Routes>
+            <Route path="/" element={<Navigate to="/pos" replace />} />
+            <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
+            <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
+            <Route path="/orders" element={<Navigate to="/crm?tab=special_orders" replace />} />
+            <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
+            <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />
+            <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
+            <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
+            <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
+            <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />
+            <Route path="*" element={
+              <KeepAliveOutlet
+                routes={pageRoutes}
+                fallback={<PageLoader />}
+                notFoundElement={
+                  <div className="flex flex-col items-center justify-center h-full text-muted">
+                    <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>
+                    <p>This module is currently being migrated to React.</p>
+                  </div>
+                }
+              />
+            } />
+          </Routes>
         </Layout>
       </Suspense>
       <Agentation key={theme} />

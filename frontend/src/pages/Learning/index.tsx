@@ -2078,7 +2078,8 @@ const Learning: React.FC = () => {
                     </div>
 
                     {settingsData.automation_enabled === 'true' && (() => {
-                      const isGmailConfigured = settingsData.gmail_auth_method === 'oauth2'
+                      const authMethod = settingsData.gmail_auth_method || 'password';
+                      const isGmailConfigured = authMethod === 'oauth2'
                         ? !!settingsData.gmail_oauth_refresh_token
                         : (!!settingsData.gmail_user && !!settingsData.gmail_pass);
 
@@ -2124,7 +2125,7 @@ const Learning: React.FC = () => {
                                       type="radio"
                                       name="gmailAuthMethod"
                                       value="password"
-                                      checked={settingsData.gmail_auth_method === 'password'}
+                                      checked={settingsData.gmail_auth_method !== 'oauth2'}
                                       onChange={() => setSettingsData({ ...settingsData, gmail_auth_method: 'password' })}
                                       className="mr-1.5 accent-sky"
                                     />

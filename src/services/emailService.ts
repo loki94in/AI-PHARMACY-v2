@@ -2810,13 +2810,25 @@ export class EmailService {
     }
   }
 
+  public async getImapStatus(): Promise<{ isConfigured: boolean; user?: string }> {
+    try {
+      const { imapConfig, isConfigured } = await this.buildImapConfig();
+      return {
+        isConfigured,
+        user: imapConfig?.user || '',
+      };
+    } catch {
+      return { isConfigured: false };
+    }
+  }
+
   /**
    * Helper to build IMAP config object (avoids code duplication).
    */
   private async buildImapConfig(): Promise<{ imapConfig: any; isConfigured: boolean }> {
     let user = this.imapConfig.user ? this.imapConfig.user.trim() : '';
     let password = '';
-    let authMethod = 'oauth2';
+    let authMethod = 'password';
     let xoauth2: string | undefined = undefined;
 
     try {
@@ -2826,6 +2838,7 @@ export class EmailService {
 
       const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
       if (authMethodRow && authMethodRow.value) authMethod = authMethodRow.value.trim();
+      else authMethod = 'password';
 
       const passRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
       if (passRow && passRow.value) password = passRow.value.trim();

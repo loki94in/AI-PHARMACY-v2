@@ -470,7 +470,7 @@ export default function PharmarackCart() {
       if (res.data) {
         const s = res.data;
         setStoreInfo({
-          name: s.pharmacy_name || s.shop_name || s.store_name || s.name || '',
+          name: s.pharmacy_name || s.shop_name || s.store_name || s.medical_name || s.name || '',
           phone: s.phone || s.shop_phone || s.store_phone || s.whatsapp_number || s.owner_whatsapp_number || '',
           address: s.address || s.shop_address || s.store_address || '',
           email: s.email || '',
@@ -1129,27 +1129,27 @@ export default function PharmarackCart() {
     try {
       await apiClient.post('/dispatch/delivery-boys', {
         name: quickBoyName.trim(),
-        whatsapp_number: quickBoyPhone.trim(),
+        whatsapp_number: cleanPhone,
         is_active: 1
       });
       try {
         await api.saveContact({
           name: quickBoyName.trim(),
           type: 'distributor_delivery',
-          phone: quickBoyPhone.trim()
+          phone: cleanPhone
         });
       } catch (_) {}
       toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
-      await broadcastContactDataChanged();
-      await loadContactData();
       setShowMissingBoyModal(false);
       const distTarget = pendingTargetDistributor;
       setQuickBoyName('');
       setQuickBoyPhone('');
+      await broadcastContactDataChanged();
+      await loadContactData();
 
       if (distTarget === 'ALL') {
         handleSendAllWhatsAppOrders(true);
-      } else if (distTarget) {
+      } else if (distTarget && typeof distTarget === 'object') {
         handleSendWhatsAppOrder(distTarget, true);
       }
     } catch (err: any) {

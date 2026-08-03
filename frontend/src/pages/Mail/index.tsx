@@ -146,9 +146,23 @@ const Mail = () => {
   const [processing, setProcessing] = useState(false);
   const [processResult, setProcessResult] = useState<any>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [isImapConfigured, setIsImapConfigured] = useState<boolean>(true);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [loadingPreview, setLoadingPreview] = useState<boolean>(false);
   const syncInProgress = useRef(false);
+
+  // Check backend IMAP configuration status
+  useEffect(() => {
+    api.getEmailStatus()
+      .then((res: any) => {
+        if (res && typeof res.isConfigured === 'boolean') {
+          setIsImapConfigured(res.isConfigured);
+        }
+      })
+      .catch(() => {
+        setIsImapConfigured(false);
+      });
+  }, []);
 
   // Asynchronously fetch attachment text preview for PDF, CSV, Excel, and TXT files
   useEffect(() => {
@@ -685,8 +699,11 @@ const Mail = () => {
             )}
 
             {/* Connectivity indicator */}
-            {isOffline ? (
-              <div className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-amber/10 border border-amber/30 text-[10px] text-amber font-bold select-none shadow-lg backdrop-blur-sm">
+            {isOffline || !isImapConfigured ? (
+              <div 
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-amber/10 border border-amber/30 text-[10px] text-amber font-bold select-none shadow-lg backdrop-blur-sm"
+                title={!isImapConfigured ? "IMAP email credentials not configured in settings" : "Offline"}
+              >
                 <CloudOff size={12} />
                 <span>OFFLINE</span>
               </div>

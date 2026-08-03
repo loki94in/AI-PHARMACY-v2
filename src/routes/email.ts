@@ -80,6 +80,16 @@ router.get('/inbox', async (req, res) => {
   }
 });
 
+// GET /api/email/status — check IMAP configuration status
+router.get('/status', async (_req, res) => {
+  try {
+    const status = await emailService.getImapStatus();
+    res.json(status);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check email status' });
+  }
+});
+
 // POST /api/email/:id/seen
 router.post('/:id/seen', async (req, res) => {
   const emailId = req.params.id;
