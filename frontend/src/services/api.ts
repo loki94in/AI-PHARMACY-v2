@@ -437,7 +437,7 @@ export const api = {
   getEarliestPurchaseDate: () => apiClient.get<{ earliest: string | null }>('/purchases/earliest-date').then(res => res.data),
   getPurchaseItems: () => apiClient.get('/purchases/items/all').then(res => res.data),
   getPurchase: (id: number) => apiClient.get(`/purchases/${id}`).then(res => res.data),
-  updatePurchase: (id: number, data: Partial<PurchasePayload>) => apiClient.put(`/purchases/${id}/full`, data).then(res => res.data),
+  updatePurchase: (id: number, data: Partial<PurchasePayload>) => apiClient.put(`/purchases/${id}/full`, data, { timeout: 30000 }).then(res => res.data),
   deletePurchase: (id: number) => apiClient.delete(`/purchases/${id}`).then(res => res.data),
   createPurchase: (data: PurchasePayload) => apiClient.post('/purchases', data).then(res => res.data),
 
@@ -447,7 +447,7 @@ export const api = {
   getCustomerReturnsHistory: (params?: { page?: number; limit?: number; start?: string; end?: string; search?: string }) => apiClient.get('/customer-returns/history', { params }).then(res => res.data),
   
   // Returns (Supplier)
-  createManualPurchase: (data: PurchasePayload) => apiClient.post('/purchases/manual', data).then(res => res.data),
+  createManualPurchase: (data: PurchasePayload) => apiClient.post('/purchases/manual', data, { timeout: 30000 }).then(res => res.data),
   getDistributors: () => apiClient.get('/distributors').then(res => res.data),
   getPendingReturns: (distributorId: number) => apiClient.get(`/distributors/${distributorId}/pending-returns`).then(res => res.data),
   getLastPurchase: (name: string, medicineId?: number, distributorId?: number) => {

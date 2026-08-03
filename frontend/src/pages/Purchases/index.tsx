@@ -844,6 +844,7 @@ const Purchases: React.FC = () => {
   const [filterMaxAmount, setFilterMaxAmount] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
@@ -1554,27 +1555,40 @@ const Purchases: React.FC = () => {
   };
 
   const savePurchase = async () => {
+    if (saving) return;
+
     let distIdToSave = selectedDistributor;
     let distNameToSave = distributorSearch;
 
-    if (!distIdToSave && distNameToSave && distNameToSave.trim()) {
+    if (distIdToSave) {
+      const matched = distributors.find(d => d.id === distIdToSave);
+      if (matched) {
+        distNameToSave = matched.name || matched.distributor_name || distNameToSave;
+      }
+    } else if (distNameToSave && distNameToSave.trim()) {
       const matched = distributors.find(d => {
         const name = d.name || d.distributor_name || '';
         return name.trim().toLowerCase() === distNameToSave.trim().toLowerCase();
       });
       if (matched) {
         distIdToSave = matched.id;
+        distNameToSave = matched.name || matched.distributor_name || distNameToSave;
+      } else {
+        distIdToSave = null;
+        distNameToSave = distNameToSave.trim();
       }
     }
 
     if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
-      alert('Please select or enter a distributor name.');
+      toastEvent.trigger('Please select or type a valid distributor.', 'error', '/purchases');
+      alert('Please select or type a valid distributor.');
       return;
     }
 
-    if (!invoiceNo) {
-      alert('Please fill in the invoice number');
-      return;
+    let finalInvoiceNo = (invoiceNo || '').trim();
+    if (!finalInvoiceNo) {
+      finalInvoiceNo = `INV-${Date.now().toString().slice(-6)}`;
+      setInvoiceNo(finalInvoiceNo);
     }
 
     const validItems = items.filter(item => {
@@ -1582,8 +1596,10 @@ const Purchases: React.FC = () => {
       const qty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       return (item.medicine_id || name.trim().length > 0) && qty > 0;
     });
+
     if (validItems.length === 0) {
-      alert('Please add at least one medicine with a quantity greater than 0.');
+      toastEvent.trigger('Please add at least one medicine item with a quantity greater than 0.', 'error', '/purchases');
+      alert('Please add at least one medicine item with a quantity greater than 0.');
       return;
     }
 
@@ -1593,7 +1609,7 @@ const Purchases: React.FC = () => {
       const payload = {
         distributor_id: distIdToSave,
         distributor: distNameToSave,
-        invoice_no: invoiceNo,
+        invoice_no: finalInvoiceNo,
         date: invoiceDate || getTodayString(),
         cd_per: parseFloat(globalCdPer as any) || 0,
         extra_credit: parseFloat(cnAmount as any) || 0,
@@ -1630,13 +1646,13 @@ const Purchases: React.FC = () => {
       if (editPurchaseId) {
         response = await api.updatePurchase(editPurchaseId, {
           ...payload,
-          distributor: distributorSearch
+          distributor: distNameToSave
         });
       } else {
         response = await api.createManualPurchase(payload);
       }
 
-      const savedInvoiceNo = response?.app_invoice_no || invoiceNo;
+      const savedInvoiceNo = response?.app_invoice_no || finalInvoiceNo || invoiceNo;
       setLastSavedInvoiceNo(savedInvoiceNo);
       setLastSavedItems(validItems.map(item => ({
         name: item.medicine_name,
@@ -2344,19 +2360,21 @@ const Purchases: React.FC = () => {
                     const sgstAmount = taxableAmount * sgstPerVal / 100;
                     const rowAmount = taxableAmount + cgstAmount + sgstAmount;
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-white/10">
-                      <td className="py-3 text-gray-300">{index + 1}</td>
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-white/10 align-top">
+                      <td className="py-2.5 text-gray-300">
+                        <div className="h-8 flex items-center">{index + 1}</div>
+                      </td>
                       {hasOriginalName && (
-                        <td className="py-3 pr-2">
+                        <td className="py-2.5 pr-2">
                           <span 
-                            className="text-xs font-mono text-muted select-all block max-w-[200px] truncate" 
+                            className="text-xs font-mono text-muted select-all block max-w-[200px] truncate h-8 flex items-center" 
                             title={item.original_name || 'No original name'}
                           >
                             {item.original_name || '-'}
                           </span>
                         </td>
                       )}
-                      <td className="py-3">
+                      <td className="py-2.5">
                         <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative group/search">
                           <div className="flex gap-1">
                             <input
@@ -2389,13 +2407,13 @@ const Purchases: React.FC = () => {
                                   setSearchHighlightIndex(-1);
                                 }
                               }}
-                              className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm"
+                              className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm h-8"
                               placeholder="Search medicine..."
                             />
                             <button
                               onClick={() => handleOpenEnrichment(item)}
                               disabled={!item.medicine_id}
-                              className={`w-7 h-7 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all ${
+                              className={`w-8 h-8 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all ${
                                 item.medicine_id 
                                   ? 'bg-purple-500/20 hover:bg-purple-500/40 border-purple-500/30 text-purple-400' 
                                   : 'bg-white/5 border-glass-border text-muted cursor-not-allowed opacity-50'
@@ -2507,25 +2525,25 @@ const Purchases: React.FC = () => {
                       <p className="text-yellow-400 text-xs mt-1">{schemeMatchStatus[item.id]}</p>
                     )}
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="text"
                       value={item.batch_no}
                       onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
-                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm"
+                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="text"
                       placeholder="MM/YY"
                       value={item.expiry_date}
                       onChange={(e) => updateItem(index, 'expiry_date', e.target.value)}
                       onBlur={(e) => updateItem(index, 'expiry_date', formatExpiryToMMYY(e.target.value))}
-                      className="w-[68px] bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm font-mono text-center"
+                      className="w-[68px] bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm font-mono text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1 relative group/btn">
+                  <td className="py-2.5 px-1 relative group/btn">
                     {mrpVal > 0 && (
                       <div className="absolute -top-1.5 right-1 z-10 select-none pointer-events-none">
                         {(() => {
@@ -2546,7 +2564,7 @@ const Purchases: React.FC = () => {
                         })()}
                       </div>
                     )}
-                    <div className="flex items-center bg-white/10 border border-white/20 rounded px-1.5 py-1 w-20 max-w-[80px] focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
+                    <div className="flex items-center bg-white/10 border border-white/20 rounded px-1.5 py-1 w-20 max-w-[80px] h-8 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
                       <input
                         type="number"
                         value={item.rate}
@@ -2562,84 +2580,90 @@ const Purchases: React.FC = () => {
                       </div>
                     )}
                   </td>
-                  <td className="py-3 px-1 relative group/btn">
+                  <td
+                    className="py-2.5 px-1 relative group/btn"
+                    onMouseEnter={() => setHoveredPriceRow(item.id)}
+                    onMouseLeave={() => setHoveredPriceRow(null)}
+                  >
                     <input
                       type="number"
                       value={item.mrp}
                       onChange={(e) => updateItem(index, 'mrp', e.target.value)}
-                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right"
+                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right h-8"
                     />
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
                         <div className="bg-gray-900 border border-purple-500 rounded-lg p-2 shadow-xl">
-                          <HoverPriceIntelTable medicineName={item.medicine_name} />
+                          {hoveredPriceRow === item.id && (
+                            <HoverPriceIntelTable medicineName={item.medicine_name} />
+                          )}
                         </div>
                       </div>
                     )}
                   </td>
 
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.qty}
                       onChange={(e) => updateItem(index, 'qty', e.target.value)}
-                      className="w-16 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-16 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.free_qty}
                       onChange={(e) => updateItem(index, 'free_qty', e.target.value)}
-                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.sgst_per}
                       onChange={(e) => updateItem(index, 'sgst_per', e.target.value)}
-                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.cgst_per}
                       onChange={(e) => updateItem(index, 'cgst_per', e.target.value)}
-                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.cd_per}
                       onChange={(e) => updateItem(index, 'cd_per', e.target.value)}
-                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center"
+                      className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.cd_rs}
                       onChange={(e) => updateItem(index, 'cd_rs', e.target.value)}
-                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right"
+                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right h-8"
                     />
                   </td>
-                  <td className="py-3 px-1">
+                  <td className="py-2.5 px-1">
                     <input
                       type="number"
                       value={item.additional_discount}
                       onChange={(e) => updateItem(index, 'additional_discount', e.target.value)}
-                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right"
+                      className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right h-8"
                       placeholder="0"
                     />
                   </td>
-                  <td className="py-3 text-white font-medium text-right pr-2">
-                    ₹{rowAmount.toFixed(2)}
+                  <td className="py-2.5 text-white font-medium text-right pr-2">
+                    <div className="h-8 flex items-center justify-end">₹{rowAmount.toFixed(2)}</div>
                   </td>
-                  <td className="py-3">
-                    <div className="flex items-center gap-1.5">
+                  <td className="py-2.5">
+                    <div className="flex items-center gap-1.5 h-8">
                       <button
                         onClick={() => {
                           if (item.medicine_id) setUniversalEditMedicineId(item.medicine_id);

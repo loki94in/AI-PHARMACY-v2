@@ -667,7 +667,7 @@ router.get('/', async (req, res) => {
         FROM purchases p
         LEFT JOIN distributors d ON p.distributor_id = d.id
         ${filterQuery}
-        ORDER BY p.date DESC
+        ORDER BY p.id DESC
         LIMIT ? OFFSET ?
       `, [...params, limit, offset]);
 
@@ -688,7 +688,7 @@ router.get('/', async (req, res) => {
         FROM purchases p 
         LEFT JOIN distributors d ON p.distributor_id = d.id 
         ${filterQuery}
-        ORDER BY p.date DESC 
+        ORDER BY p.id DESC 
         LIMIT ?
       `, [...params, limit]);
       res.json(purchases);
@@ -814,7 +814,10 @@ router.post('/manual', async (req, res) => {
     }
     const appInvoiceNo = `P-${nextSeq.toString().padStart(3, '0')}`;
 
-    const purchaseDate = date && date.trim() ? date.trim() : new Date().toISOString().slice(0, 10);
+    const nowLocal = new Date();
+    const localTimeStr = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}:${String(nowLocal.getSeconds()).padStart(2, '0')}`;
+    const rawDateStr = date && date.trim() ? date.trim() : `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const purchaseDate = rawDateStr.includes(':') ? rawDateStr : `${rawDateStr} ${localTimeStr}`;
 
     // 2. Insert into purchases
     const purchRes = await db.run(

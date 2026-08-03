@@ -467,8 +467,9 @@ export class ProductNameFilterService {
       console.warn('[Filter] FTS5 query failed, using full-array fallback:', (ftsErr as any).message);
     }
 
-    // Full-array fuzzy matching fallback (skip if FTS5 already found enough results)
-    if (!fts5Used || scoredMatches.length < 3) {
+    // Full-array fuzzy matching fallback (skip if FTS5 already found a confident result —
+    // the O(n) scan over ~286k names is expensive, so only pay for it when FTS5 has nothing)
+    if (!fts5Used || scoredMatches.length < 1) {
       for (const medicineName of this.medicineNames) {
         const similarityScore = enhancedSimilarity(normalizedOcr, medicineName.toLowerCase());
         if (similarityScore >= minConfidenceThreshold) {

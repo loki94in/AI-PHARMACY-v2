@@ -562,10 +562,7 @@ const PurchaseHistory = () => {
                             {tx.invoice_no || '-'}
                           </td>
                           <td className="w-48 shrink-0 px-6 py-4 text-muted whitespace-nowrap">
-                            {formatDisplayDate(tx.date)}
-                            <div className="text-xs text-muted/60 mt-0.5">
-                              {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </div>
+                            {formatDisplayDate(tx.date, true)}
                           </td>
                           <td className="w-28 shrink-0 text-right px-6 py-4 text-muted font-medium">
                             {tx.total_qty || 0}

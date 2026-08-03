@@ -621,6 +621,36 @@ const DeviceIcon = ({ os, size = 16, className = "" }: { os: string; size?: numb
 };
 
 // ──────────────────────────────────────────────
+// Live Header Clock
+// ──────────────────────────────────────────────
+const LiveHeaderClock = () => {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  const dateStr = now.toLocaleDateString([], { weekday: 'short', day: '2-digit', month: 'short' });
+
+  return (
+    <div 
+      className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-glass-border bg-glass-bg text-text shadow-sm hover:border-primary/30 transition-all cursor-default select-none shrink-0"
+      title={`Live System Clock (${now.toLocaleString()})`}
+    >
+      <Clock size={13} className="text-sky-400 animate-pulse shrink-0" />
+      <div className="flex items-center gap-1.5 font-mono text-xs">
+        <span className="font-bold text-text tracking-wide">{timeStr}</span>
+        <span className="text-[10px] text-muted/80 font-sans uppercase tracking-wider font-semibold border-l border-glass-border pl-1.5">
+          {dateStr}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// ──────────────────────────────────────────────
 // Topbar
 // ──────────────────────────────────────────────
 const Topbar = ({
@@ -1098,6 +1128,9 @@ const Topbar = ({
               )}
             </div>
           )}
+
+          {/* Live System Clock */}
+          <LiveHeaderClock />
 
           {/* Quick Order Shortcut Button */}
           <button

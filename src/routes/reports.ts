@@ -259,22 +259,23 @@ router.get('/export-pdf', async (req, res) => {
       alignMap = { medicine_name: 'left', batch_no: 'left', quantity: 'right', cost_price: 'right', expiry_date: 'center', value: 'right' };
       colWidths = [150, 70, 60, 60, 80, 92];
     } else if (type === 'nonMoving') {
-      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
       title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price', 'Hold Value (Cost)', 'Hold Value (MRP)', 'Dormant Period'];
-      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
-      alignMap = { medicineName: 'left', batchNo: 'left', quantity: 'right', expiryDate: 'center', costPrice: 'right', totalCostValue: 'right', totalValue: 'right', dormantDaysLabel: 'center' };
-      colWidths = [120, 50, 45, 65, 50, 60, 60, 62];
+      headers = ['Medicine Name', 'Batch No', 'Purchase Date', 'Stock Qty', 'Expiry Date', 'Cost Price', 'Hold Value (Cost)', 'Hold Value (MRP)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'purchaseDate', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      alignMap = { medicineName: 'left', batchNo: 'left', purchaseDate: 'center', quantity: 'right', expiryDate: 'center', costPrice: 'right', totalCostValue: 'right', totalValue: 'right', dormantDaysLabel: 'center' };
+      colWidths = [110, 45, 55, 40, 60, 50, 55, 55, 52];
       
       const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
       const rows = nonMovingItems.map(item => ({
         ...item,
         batchNo: item.batchNo || 'N/A',
+        purchaseDate: item.purchaseDate || 'N/A',
         expiryDate: item.expiryDate || 'N/A',
         costPrice: (item.costPrice || 0).toFixed(2),
         totalCostValue: (item.totalCostValue || 0).toFixed(2),
         totalValue: (item.totalValue || 0).toFixed(2),
-        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+        dormantDaysLabel: `${item.daysSinceLastTransaction} days`
       }));
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -341,20 +342,21 @@ router.get('/export-excel', async (req, res) => {
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
       keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
     } else if (type === 'nonMoving') {
-      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
       title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
-      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      headers = ['Medicine Name', 'Batch No', 'Purchase Date', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'purchaseDate', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
       
       const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
       const rows = nonMovingItems.map(item => ({
         ...item,
         batchNo: item.batchNo || 'N/A',
+        purchaseDate: item.purchaseDate || 'N/A',
         expiryDate: item.expiryDate || 'N/A',
         costPrice: Number(item.costPrice || 0).toFixed(2),
         totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
         totalValue: Number(item.totalValue || 0).toFixed(2),
-        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+        dormantDaysLabel: `${item.daysSinceLastTransaction} days`
       }));
 
       const excelBuffer = exportToExcel(title, headers, keys, rows);
@@ -422,20 +424,21 @@ router.get('/export-csv', async (req, res) => {
       headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Cost Price (Rs.)', 'Expiry Date', 'Cost Value (Rs.)'];
       keys = ['medicine_name', 'batch_no', 'quantity', 'cost_price', 'expiry_date', 'value'];
     } else if (type === 'nonMoving') {
-      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+      const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
       title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-      headers = ['Medicine Name', 'Batch No', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
-      keys = ['medicineName', 'batchNo', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
+      headers = ['Medicine Name', 'Batch No', 'Purchase Date', 'Stock Qty', 'Expiry Date', 'Cost Price (Rs.)', 'Hold Value Cost (Rs.)', 'Hold Value MRP (Rs.)', 'Dormant Period'];
+      keys = ['medicineName', 'batchNo', 'purchaseDate', 'quantity', 'expiryDate', 'costPrice', 'totalCostValue', 'totalValue', 'dormantDaysLabel'];
       
       const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
       const rows = nonMovingItems.map(item => ({
         ...item,
         batchNo: item.batchNo || 'N/A',
+        purchaseDate: item.purchaseDate || 'N/A',
         expiryDate: item.expiryDate || 'N/A',
         costPrice: Number(item.costPrice || 0).toFixed(2),
         totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
         totalValue: Number(item.totalValue || 0).toFixed(2),
-        dormantDaysLabel: item.daysSinceLastTransaction === 999 ? 'Never Sold' : `${item.daysSinceLastTransaction} days`
+        dormantDaysLabel: `${item.daysSinceLastTransaction} days`
       }));
 
       const csvContent = exportToCsv(headers, keys, rows);
@@ -462,7 +465,7 @@ router.get('/export-csv', async (req, res) => {
 router.get('/non-moving', async (req, res) => {
   try {
     const { days } = req.query;
-    const periodDays = days ? parseInt(days as string) : 90;
+    const periodDays = days ? parseInt(days as string) : 200;
 
     const report = await nonMovingReportService.generateNonMovingReport(periodDays);
     await nonMovingReportService.saveReportToFile(report);
@@ -488,7 +491,7 @@ router.get('/non-moving', async (req, res) => {
 router.get('/non-moving/data', async (req, res) => {
   try {
     const { days } = req.query;
-    const periodDays = days ? parseInt(days as string) : 90;
+    const periodDays = days ? parseInt(days as string) : 200;
 
     const items = await nonMovingReportService.getNonMovingItems(periodDays);
 

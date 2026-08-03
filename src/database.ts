@@ -635,6 +635,7 @@ export async function ensureSchema(dbPath: string) {
     ['inventory_master', 'legacy_batch_id', 'ALTER TABLE inventory_master ADD COLUMN legacy_batch_id TEXT'],
     ['inventory_master', 'loose_quantity', 'ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0'],
     ['inventory_master', 'is_active', 'ALTER TABLE inventory_master ADD COLUMN is_active INTEGER DEFAULT 1'],
+    ['inventory_master', 'created_at', 'ALTER TABLE inventory_master ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP'],
     ['medicines', 'max_stock_level', 'ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL'],
     ['medicines', 'mrp', 'ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0'],
     ['medicines', 'hsn_code', 'ALTER TABLE medicines ADD COLUMN hsn_code TEXT'],

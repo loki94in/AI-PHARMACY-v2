@@ -79,8 +79,8 @@ const Reports = () => {
   };
   
   // Non-moving report local settings
-  const [nonMovingDays, setNonMovingDays] = useState(90);
-  const [localNonMovingDays, setLocalNonMovingDays] = useState(90);
+  const [nonMovingDays, setNonMovingDays] = useState(200);
+  const [localNonMovingDays, setLocalNonMovingDays] = useState(200);
   const [nonMovingSearchQuery, setNonMovingSearchQuery] = useState('');
 
   // Product trace local query state
@@ -1178,6 +1178,7 @@ const Reports = () => {
                     <tr className="text-muted/80 text-[10px] font-black uppercase tracking-wider">
                       <th className="p-3.5 border-b border-border/50 pl-5">Medicine Name</th>
                       <th className="p-3.5 border-b border-border/50">Batch</th>
+                      <th className="p-3.5 border-b border-border/50">Purchase Date</th>
                       <th className="p-3.5 border-b border-border/50">Quantity</th>
                       <th className="p-3.5 border-b border-border/50">Expiry Date</th>
                       <th className="p-3.5 border-b border-border/50">Unit Cost (₹)</th>
@@ -1189,14 +1190,14 @@ const Reports = () => {
                   <tbody>
                     {loadingNonMoving ? (
                       <tr>
-                        <td colSpan={8} className="p-12 text-center text-xs text-muted">
+                        <td colSpan={9} className="p-12 text-center text-xs text-muted">
                           <Loader2 className="animate-spin mx-auto mb-2 text-primary" size={20} />
                           <span className="font-bold">Calculating dormant items...</span>
                         </td>
                       </tr>
                     ) : filteredNonMovingItems.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-16 text-center text-xs text-muted">
+                        <td colSpan={9} className="p-16 text-center text-xs text-muted">
                           <FileCheck2 className="mx-auto mb-3 opacity-30 text-green" size={28} />
                           <p className="font-bold">No matching dormant items found</p>
                           <p className="text-[10px] mt-0.5">
@@ -1211,19 +1212,14 @@ const Reports = () => {
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicineName || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batchNo || 'N/A'}</td>
+                          <td className="p-3.5 font-mono text-muted/90">{row.purchaseDate || '—'}</td>
                           <td className="p-3.5 font-mono text-text">{row.quantity ?? 0}</td>
                           <td className="p-3.5 font-mono font-bold text-amber-400">{row.expiryDate || 'N/A'}</td>
                           <td className="p-3.5 font-mono text-text">₹{(row.costPrice || 0).toFixed(2)}</td>
                           <td className="p-3.5 font-mono text-text">₹{(row.totalCostValue || 0).toFixed(2)}</td>
                           <td className="p-3.5 font-mono font-bold text-text">₹{(row.totalValue || 0).toFixed(2)}</td>
                           <td className="p-3.5 text-right pr-5 font-mono font-black text-amber-500">
-                            {row.daysSinceLastTransaction === 999 ? (
-                              <span className="text-[9px] bg-red/10 border border-red/20 text-red px-1.5 py-0.5 rounded-lg uppercase tracking-wider font-black">
-                                Never Sold
-                              </span>
-                            ) : (
-                              `${row.daysSinceLastTransaction} days`
-                            )}
+                            {row.daysSinceLastTransaction} days
                           </td>
                         </tr>
                       ))

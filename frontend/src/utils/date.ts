@@ -25,23 +25,60 @@ export const getNDaysAgoString = (n: number): string => {
 };
 
 /**
- * Formats any date string, timestamp, or Date object into DD/MM/YYYY format.
- * If includeTime is true, appends the time formatted as hh:mm AM/PM.
+ * Safely parses any date string, timestamp, or Date object directly into PC local time (IST).
+ * Guarantees zero UTC timezone shift for ISO YYYY-MM-DD or YYYY-MM-DD HH:mm:ss strings.
+ */
+export const parseLocalDate = (dateVal: string | number | Date | null | undefined): Date | null => {
+  if (!dateVal) return null;
+  if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? null : dateVal;
+  
+  if (typeof dateVal === 'number') {
+    const d = new Date(dateVal);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const str = String(dateVal).trim();
+  if (!str) return null;
+
+  // Parse YYYY-MM-DD or YYYY-MM-DD HH:mm:ss explicitly into local PC time (avoids UTC 00:00 -> 05:30 AM IST shift)
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const hours = isoMatch[4] ? parseInt(isoMatch[4], 10) : 0;
+    const minutes = isoMatch[5] ? parseInt(isoMatch[5], 10) : 0;
+    const seconds = isoMatch[6] ? parseInt(isoMatch[6], 10) : 0;
+
+    const localDate = new Date(year, month, day, hours, minutes, seconds);
+    return isNaN(localDate.getTime()) ? null : localDate;
+  }
+
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Formats any date string, timestamp, or Date object into DD/MM/YYYY format using PC local time.
+ * If includeTime is true and time exists, appends time formatted as hh:mm AM/PM.
  */
 export const formatDisplayDate = (
   dateVal: string | number | Date | null | undefined,
   includeTime = false
 ): string => {
   if (!dateVal) return '';
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return String(dateVal);
+  const d = parseLocalDate(dateVal);
+  if (!d) return String(dateVal);
 
   const pad = (num: number) => String(num).padStart(2, '0');
   const day = pad(d.getDate());
   const month = pad(d.getMonth() + 1);
   const year = d.getFullYear();
 
-  if (!includeTime) {
+  const str = String(dateVal).trim();
+  const hasTime = str.includes(':') || (dateVal instanceof Date && (d.getHours() > 0 || d.getMinutes() > 0 || d.getSeconds() > 0));
+
+  if (!includeTime || !hasTime) {
     return `${day}/${month}/${year}`;
   }
 

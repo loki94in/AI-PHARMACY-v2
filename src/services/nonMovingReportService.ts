@@ -16,6 +16,7 @@ export interface NonMovingItem {
   medicineName: string;
   batchNo: string | null;
   quantity: number;
+  purchaseDate: string | null;
   lastTransactionDate: string | null;
   daysSinceLastTransaction: number;
   mrp: number | null;
@@ -35,16 +36,17 @@ export interface NonMovingReport {
 
 export class NonMovingReportService {
   /**
-   * Get non-moving inventory items (no transactions in specified period)
+   * Get non-moving inventory items (no sales or ledger transactions in specified period, default 200 days).
+   * Isolates each inventory record by medicine, batch_no, and purchase/inward date.
    */
-  async getNonMovingItems(periodDays: number = 90): Promise<NonMovingItem[]> {
+  async getNonMovingItems(periodDays: number = 200): Promise<NonMovingItem[]> {
     return await dbManager.transaction(async (db) => {
       // Calculate the cutoff date
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - periodDays);
       const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Get items with active stock (> 0) and NO sales or ledger movements in the period using high-performance CTEs
+      // CTEs isolate activity per inventory item (im.id) and per batch (medicine_id + batch_no)
       const rows = await db.all(`
         WITH active_sales AS (
           SELECT sit.inventory_id
@@ -54,10 +56,11 @@ export class NonMovingReportService {
           GROUP BY sit.inventory_id
         ),
         active_ledger AS (
-          SELECT sl.medicine_id
+          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key
           FROM stock_ledger sl
-          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10))) >= date(?)
-          GROUP BY sl.medicine_id
+          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10)), date(sl.created_at)) >= date(?)
+            AND sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
+          GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
         ),
         latest_sales AS (
           SELECT sit.inventory_id, MAX(COALESCE(si.date, si.business_date)) as max_sale_date
@@ -66,9 +69,19 @@ export class NonMovingReportService {
           GROUP BY sit.inventory_id
         ),
         latest_ledger AS (
-          SELECT sl.medicine_id, MAX(sl.business_date) as max_ledger_date
+          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key, MAX(COALESCE(sl.business_date, sl.created_at)) as max_ledger_date
           FROM stock_ledger sl
-          GROUP BY sl.medicine_id
+          WHERE sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
+          GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
+        ),
+        batch_purchases AS (
+          SELECT
+            pi.medicine_id,
+            LOWER(TRIM(COALESCE(pi.batch_no, ''))) as batch_key,
+            MIN(p.date) as min_purchase_date
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          GROUP BY pi.medicine_id, LOWER(TRIM(COALESCE(pi.batch_no, '')))
         )
         SELECT
           im.id,
@@ -77,15 +90,17 @@ export class NonMovingReportService {
           im.batch_no,
           im.quantity,
           im.expiry_date,
+          bp.min_purchase_date as purchase_date,
           COALESCE(ls.max_sale_date, ll.max_ledger_date) as last_transaction_date,
           im.mrp,
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         LEFT JOIN active_sales sa ON im.id = sa.inventory_id
-        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id
+        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = sl.batch_key
         LEFT JOIN latest_sales ls ON im.id = ls.inventory_id
-        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id
+        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = ll.batch_key
+        LEFT JOIN batch_purchases bp ON im.medicine_id = bp.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = bp.batch_key
         WHERE ${INVENTORY_ACTIVE_WHERE}
           AND im.quantity > 0
           AND sa.inventory_id IS NULL
@@ -97,16 +112,26 @@ export class NonMovingReportService {
       const now = new Date();
 
       for (const row of rows) {
-        let daysSinceLastTransaction = null;
-        let lastTransactionDate = row.last_transaction_date;
+        let daysSinceLastTransaction = 0;
+        const lastTransactionDate = row.last_transaction_date;
+        const purchaseDate = row.purchase_date;
 
-        if (lastTransactionDate) {
-          const lastDate = new Date(lastTransactionDate);
-          const timeDiff = now.getTime() - lastDate.getTime();
-          daysSinceLastTransaction = Math.ceil(timeDiff / (1000 * 3600 * 24));
-        } else {
-          // No transactions ever - consider as days since inventory creation or a large number
-          daysSinceLastTransaction = 999; // Indicates never moved
+        // Baseline date for inactivity calculation:
+        // Use last sale/ledger date if available; otherwise use the batch purchase / inward date
+        const baselineDateStr = lastTransactionDate || purchaseDate;
+
+        if (baselineDateStr) {
+          const baseDate = new Date(baselineDateStr);
+          if (!isNaN(baseDate.getTime())) {
+            const timeDiff = now.getTime() - baseDate.getTime();
+            daysSinceLastTransaction = Math.max(0, Math.ceil(timeDiff / (1000 * 3600 * 24)));
+          }
+        }
+
+        // Only include items whose inactivity period (since last sale or since purchase date) is >= periodDays
+        // This prevents recently purchased batches (< periodDays old) from being falsely marked as non-moving
+        if (baselineDateStr && daysSinceLastTransaction < periodDays) {
+          continue;
         }
 
         const totalValue = row.quantity * (row.mrp || 0);
@@ -119,6 +144,7 @@ export class NonMovingReportService {
           batchNo: row.batch_no || null,
           quantity: row.quantity,
           expiryDate: row.expiry_date || null,
+          purchaseDate: purchaseDate || null,
           lastTransactionDate: lastTransactionDate || null,
           daysSinceLastTransaction: daysSinceLastTransaction,
           mrp: row.mrp || null,
@@ -128,7 +154,7 @@ export class NonMovingReportService {
         });
       }
 
-      // Sort by days since last transaction descending (oldest first)
+      // Sort by days since last transaction descending (oldest inactive stock first)
       nonMovingItems.sort((a, b) =>
         (b.daysSinceLastTransaction || 0) - (a.daysSinceLastTransaction || 0)
       );
@@ -140,7 +166,7 @@ export class NonMovingReportService {
   /**
    * Generate a comprehensive non-moving inventory report
    */
-  async generateNonMovingReport(periodDays: number = 90): Promise<NonMovingReport> {
+  async generateNonMovingReport(periodDays: number = 200): Promise<NonMovingReport> {
     const items = await this.getNonMovingItems(periodDays);
 
     const totalValue = items.reduce((sum, item) => sum + item.totalValue, 0);
@@ -194,7 +220,7 @@ export class NonMovingReportService {
 
 Top 5 oldest non-moving items:
 ${report.items.slice(0, 5).map((item, index) =>
-  `${index + 1}. ${item.medicineName} (Batch: ${item.batchNo || 'N/A'}) - ${item.quantity} units - ${item.daysSinceLastTransaction || 'Never'} days`
+  `${index + 1}. ${item.medicineName} (Batch: ${item.batchNo || 'N/A'}, Purchased: ${item.purchaseDate || 'N/A'}) - ${item.quantity} units - ${item.daysSinceLastTransaction} days inactive`
 ).join('\n')}
 
 For full report, check the data/reports directory.
@@ -202,12 +228,6 @@ For full report, check the data/reports directory.
 
       // Send to Telegram (admins/managers)
       await telegramBotService.sendDefaultNotification(message);
-
-      // Could also send to specific WhatsApp numbers if configured
-      // const managerNumbers = process.env.MANAGER_WHATSAPP_NUMBERS?.split(',') || [];
-      // for (const number of managerNumbers) {
-      //   await sendMessage(number.trim(), undefined, message);
-      // }
 
       console.log('Non-moving report notification sent via Telegram');
     } catch (error) {
@@ -222,8 +242,8 @@ For full report, check the data/reports directory.
     try {
       console.log('Generating monthly non-moving inventory report...');
 
-      // Generate report for last 90 days (configurable)
-      const report = await this.generateNonMovingReport(90);
+      // Generate report for last 200 days
+      const report = await this.generateNonMovingReport(200);
 
       // Save to file
       await this.saveReportToFile(report);
