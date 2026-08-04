@@ -37,8 +37,8 @@ router.post('/add', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run(
-      'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-      ['COMPLIANCE_ENTRY', `Date: ${date} | Product: ${product} | Patient: ${patient_id} | Doctor: ${doctor_id} | Lic: ${license_no} | Qty: ${qty} | Bill: ${bill_no}`]
+      'INSERT INTO compliance_logs (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [date, product, patient_id, doctor_id, license_no, qty, bill_no, 'general']
     );
         res.json({ success: true, message: 'Compliance entry added' });
   } catch (err) {
@@ -49,18 +49,18 @@ router.post('/add', async (req, res) => {
 
 // New route for Schedule H1 dispensing events
 router.post('/add-schedule-h1', async (req, res) => {
-  const { drug_name, patient_name, doctor_name } = req.body;
+  const { drug_name, patient_name, doctor_name, date, license_no, qty, bill_no } = req.body;
   if (!drug_name || !patient_name || !doctor_name) {
     return res.status(400).json({ error: 'Missing required fields: drug_name, patient_name, doctor_name' });
   }
   try {
     const db = await dbManager.getConnection();
+    // Use provided date or default to today
+    const finalDate = date || new Date().toISOString().split('T')[0];
     // Insert a record indicating a Schedule H1 dispensing event occurred
-    // We'll map the fields to the action_logs table: drug_name -> product, patient_name -> patient_id, doctor_name -> doctor_id
-    // For license_no, qty, bill_no we'll use placeholder values to indicate Schedule H1 dispensing
     await db.run(
-      'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-      ['SCHEDULE_H1_DISPENSE', `Drug: ${drug_name} | Patient: ${patient_name} | Doctor: ${doctor_name} | Schedule: H1`]
+      'INSERT INTO compliance_logs (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [finalDate, drug_name, patient_name, doctor_name, license_no || null, qty || null, bill_no || null, 'H1']
     );
         res.json({ success: true, message: 'Schedule H1 dispensing event logged' });
   } catch (err) {
