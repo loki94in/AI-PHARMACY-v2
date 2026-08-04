@@ -184,6 +184,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [selectedCompany, setSelectedCompany] = useState('');
   const [selectedPackaging, setSelectedPackaging] = useState('');
   const [selectedMedicineName, setSelectedMedicineName] = useState('');
+  const [lastAddedDistributor, setLastAddedDistributor] = useState<string>(() => localStorage.getItem('pharmarack_last_added_distributor') || '');
 
   // Active Source Order/Refill Context
   const [activeSourceOrderId, setActiveSourceOrderId] = useState<number | undefined>(sourceOrderId);
@@ -938,9 +939,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const summary = await api.getPharmarackLiveCartSummary();
       if (summary && summary.success) {
-        if (summary.cart?.distributors) {
+        if (summary.cart?.distributors && summary.cart.distributors.length > 0) {
           cachedCartDistributors = summary.cart.distributors;
           setCartDistributors(summary.cart.distributors);
+        } else {
+          await fetchCart(true);
         }
         if (Array.isArray(summary.orders)) {
           cachedPendingOrders = summary.orders;
@@ -950,9 +953,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           cachedAutoRefillItems = summary.autoRefills;
           setAutoRefillItems(summary.autoRefills);
         }
+      } else {
+        await fetchCart(true);
       }
     } catch (err: any) {
-      console.warn('Live cart summary fetch error:', err);
+      console.warn('Live cart summary fetch error, falling back to fetchCart:', err);
+      await fetchCart(true);
     } finally {
       setCartLoading(false);
     }
@@ -1086,6 +1092,19 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               company: item.company
             });
           });
+
+          // Sort suggestions placing last added medicine distributor on top of the list
+          const lastDist = (lastAddedDistributor || localStorage.getItem('pharmarack_last_added_distributor') || '').toLowerCase().trim();
+          if (lastDist && mergedList.length > 1) {
+            mergedList.sort((a, b) => {
+              if (a.isErrorMessage || b.isErrorMessage) return 0;
+              const aMatch = (a.distributor || '').toLowerCase().includes(lastDist);
+              const bMatch = (b.distributor || '').toLowerCase().includes(lastDist);
+              if (aMatch && !bMatch) return -1;
+              if (!aMatch && bMatch) return 1;
+              return 0;
+            });
+          }
         } else if (prData && (prData as any).isError) {
           mergedList.push({
             medicine_name: `⚠️ ${(prData as any).message}`,
@@ -1108,10 +1127,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       } finally {
         setSearchLoading(false);
       }
-    }, 200);
+    }, 120);
 
     return () => clearTimeout(delayDebounce);
-  }, [product]);
+  }, [product, lastAddedDistributor]);
 
   const handleProductChange = (val: string) => {
     setProduct(val);
@@ -1249,6 +1268,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
       toastEvent.trigger(`Added "${productNameToUse}" directly to live Pharmarack cart!`, 'success');
 
+      if (distributorToUse) {
+        localStorage.setItem('pharmarack_last_added_distributor', distributorToUse);
+        setLastAddedDistributor(distributorToUse);
+      }
+
       // Automatically update source order status if opened from pending requests or refills
       if (activeSourceOrderId) {
         try {
@@ -1303,9 +1327,23 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   };
 
-  const totalProducts = cartDistributors.reduce((s, d) => s + d.items.length, 0);
-  const totalQty = cartDistributors.reduce((s, d) => s + d.items.reduce((q, i) => q + i.qty, 0), 0);
-  const totalAmount = cartDistributors.reduce((s, d) => s + d.items.reduce((a, i) => a + i.amount, 0), 0);
+  const sortedCartDistributors = React.useMemo(() => {
+    if (!cartDistributors || cartDistributors.length === 0) return [];
+    const lastDist = (lastAddedDistributor || localStorage.getItem('pharmarack_last_added_distributor') || '').toLowerCase().trim();
+    if (!lastDist) return cartDistributors;
+
+    return [...cartDistributors].sort((a, b) => {
+      const aMatch = (a.storeName || '').toLowerCase().includes(lastDist);
+      const bMatch = (b.storeName || '').toLowerCase().includes(lastDist);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+      return 0;
+    });
+  }, [cartDistributors, lastAddedDistributor]);
+
+  const totalProducts = sortedCartDistributors.reduce((s, d) => s + d.items.length, 0);
+  const totalQty = sortedCartDistributors.reduce((s, d) => s + d.items.reduce((q, i) => q + i.qty, 0), 0);
+  const totalAmount = sortedCartDistributors.reduce((s, d) => s + d.items.reduce((a, i) => a + i.amount, 0), 0);
 
   if (!isOpen) return null;
 
@@ -1987,7 +2025,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto pr-1 py-3 space-y-3 scrollbar-thin">
-              {cartLoading && cartDistributors.length === 0 ? (
+              {cartLoading && sortedCartDistributors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-8">
                   <Loader2 size={24} className="animate-spin text-emerald-400" />
                   <span className="text-xs text-muted font-mono">Loading cart...</span>
@@ -1997,20 +2035,33 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   <p className="font-semibold">Failed to load cart</p>
                   <p className="text-[10px] opacity-70 mt-1">{cartError}</p>
                 </div>
-              ) : cartDistributors.length === 0 ? (
+              ) : sortedCartDistributors.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-8 text-center text-muted">
-                  <ShoppingCart size={28} className="opacity-20 mb-2" />
-                  <p className="text-xs font-bold">Cart is empty</p>
-                  <p className="text-[11px] max-w-[180px] mx-auto mt-0.5">Add items using the search form on the left.</p>
+                  <ShoppingCart size={32} className="opacity-25 mb-2 text-emerald-400" />
+                  <p className="text-xs font-bold text-text">Cart Preview is Empty</p>
+                  <p className="text-[11px] max-w-[200px] mx-auto mt-1 leading-relaxed text-muted">
+                    Search for a medicine on the left and select a distributor to add items to your Pharmarack cart.
+                  </p>
                 </div>
               ) : (
-                cartDistributors.map((dist) => (
-                  <div key={dist.storeId} className="bg-bg3/30 border border-glass-border/30 rounded-xl overflow-hidden p-2.5 space-y-2 hover:border-glass-border/60 transition-all">
+                sortedCartDistributors.map((dist, distIdx) => (
+                  <div key={dist.storeId} className={`bg-bg3/30 border rounded-xl overflow-hidden p-2.5 space-y-2 transition-all ${
+                    distIdx === 0 && lastAddedDistributor && dist.storeName.toLowerCase().includes(lastAddedDistributor.toLowerCase())
+                      ? 'border-emerald-500/40 shadow-sm bg-emerald-500/5'
+                      : 'border-glass-border/30 hover:border-glass-border/60'
+                  }`}>
                     {/* Distributor Header */}
                     <div className="flex items-center justify-between border-b border-glass-border/20 pb-1.5">
-                      <span className="text-[11px] font-bold text-sky uppercase tracking-wide truncate max-w-[160px]" title={dist.storeName}>
-                        {dist.storeName}
-                      </span>
+                      <div className="flex items-center gap-1.5 truncate max-w-[170px]">
+                        <span className="text-[11px] font-bold text-sky uppercase tracking-wide truncate" title={dist.storeName}>
+                          {dist.storeName}
+                        </span>
+                        {distIdx === 0 && lastAddedDistributor && dist.storeName.toLowerCase().includes(lastAddedDistributor.toLowerCase()) && (
+                          <span className="text-[8px] font-extrabold uppercase px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                            Recent
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[9px] font-bold text-muted bg-bg3/50 px-1.5 py-0.5 rounded-full border border-glass-border/20">
                         {dist.items.length} item{dist.items.length !== 1 ? 's' : ''}
                       </span>

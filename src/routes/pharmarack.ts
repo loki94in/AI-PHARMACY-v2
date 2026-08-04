@@ -1287,54 +1287,134 @@ router.get('/cart', async (req, res) => {
 
     const cartData: any = await response.json().catch(() => null);
 
-    const rawList = Array.isArray(cartData?.IList) 
-      ? cartData.IList 
-      : Array.isArray(cartData?.ilist) 
-      ? cartData.ilist
-      : Array.isArray(cartData?.data) 
-      ? cartData.data 
-      : Array.isArray(cartData?.Data)
-      ? cartData.Data
-      : (cartData?.data && Array.isArray(cartData.data.Stores))
-      ? cartData.data.Stores
-      : (cartData?.Data && Array.isArray(cartData.Data.Stores))
-      ? cartData.Data.Stores
-      : (cartData?.data && Array.isArray(cartData.data.stores))
-      ? cartData.data.stores
-      : Array.isArray(cartData?.items) 
-      ? cartData.items 
-      : Array.isArray(cartData?.Items)
-      ? cartData.Items
-      : Array.isArray(cartData)
-      ? cartData
-      : [];
+    let rawList: any[] = [];
+    if (cartData) {
+      if (Array.isArray(cartData)) {
+        rawList = cartData;
+      } else {
+        const targetObj = cartData.data || cartData.Data || cartData;
+        if (Array.isArray(targetObj)) {
+          rawList = targetObj;
+        } else if (typeof targetObj === 'object') {
+          const keysToTry = [
+            'IList', 'ilist', 'StoreWiseCartDetails', 'storeWiseCartDetails',
+            'CartDetails', 'cartDetails', 'Stores', 'stores', 'StoreList', 'storeList',
+            'CartList', 'cartList', 'Items', 'items', 'Products', 'products'
+          ];
+          for (const k of keysToTry) {
+            if (Array.isArray(targetObj[k])) {
+              rawList = targetObj[k];
+              break;
+            }
+          }
+          if (rawList.length === 0 && typeof cartData === 'object') {
+            for (const k of keysToTry) {
+              if (Array.isArray(cartData[k])) {
+                rawList = cartData[k];
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
 
-    // Parse rawList → lineItems structure (grouped by distributor)
-    const distributors = rawList.map((store: any) => ({
-      storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
-      storeName: store.StoreName || store.storeName || store.Name || store.name || 'Unknown Distributor',
-      lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || 0,
-      deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d: any) => ({
-        name: d.SalesmanName || d.name || d.Salesman || '', code: d.SalesmanCode || d.code || ''
-      })),
-      items: (store.lineItems || store.items || store.LineItems || store.Products || store.products || []).map((item: any) => ({
-        productId: item.ProductId || item.productId || item.Id || item.id,
-        storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
-        productCode: item.ProductCode || item.productCode || '',
-        productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
-        company: item.Company || item.company || '',
-        packaging: item.Packing || item.packaging || item.CasePacking || '',
-        qty: item.Quantity || item.qty || item.quantity || 1,
-        ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
-        mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
-        scheme: item.Scheme || item.scheme || '',
-        stock: item.Stock ?? item.stock ?? null,
-        amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
-        cartSource: item.CartSource || item.cartSource || '',
-        isChecked: item.IsProductChecked === 1 || item.isChecked === true,
-        createdDate: item.CreatedDate || item.createdDate || '',
-      }))
-    }));
+    let distributors: any[] = [];
+
+    if (rawList.length > 0) {
+      const firstEntry = rawList[0];
+      const hasNestedItems = Boolean(
+        (firstEntry.lineItems && Array.isArray(firstEntry.lineItems)) ||
+        (firstEntry.LineItems && Array.isArray(firstEntry.LineItems)) ||
+        (firstEntry.items && Array.isArray(firstEntry.items)) ||
+        (firstEntry.Items && Array.isArray(firstEntry.Items)) ||
+        (firstEntry.products && Array.isArray(firstEntry.products)) ||
+        (firstEntry.Products && Array.isArray(firstEntry.Products)) ||
+        (firstEntry.ProductList && Array.isArray(firstEntry.ProductList)) ||
+        (firstEntry.productList && Array.isArray(firstEntry.productList)) ||
+        (firstEntry.CartItemList && Array.isArray(firstEntry.CartItemList)) ||
+        (firstEntry.cartItemList && Array.isArray(firstEntry.cartItemList))
+      );
+
+      if (hasNestedItems) {
+        distributors = rawList.map((store: any) => {
+          const rawItems = store.lineItems || store.LineItems || store.items || store.Items ||
+                           store.products || store.Products || store.ProductList || store.productList ||
+                           store.CartItemList || store.cartItemList || [];
+
+          return {
+            storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
+            storeName: store.StoreName || store.storeName || store.Name || store.name || 'Unknown Distributor',
+            lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || store.TotalAmount || 0,
+            deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d: any) => ({
+              name: d.SalesmanName || d.name || d.Salesman || '', code: d.SalesmanCode || d.code || ''
+            })),
+            items: rawItems.map((item: any) => ({
+              productId: item.ProductId || item.productId || item.Id || item.id,
+              storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
+              productCode: item.ProductCode || item.productCode || '',
+              productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
+              company: item.Company || item.company || '',
+              packaging: item.Packing || item.packaging || item.CasePacking || '',
+              qty: item.Quantity || item.qty || item.quantity || 1,
+              ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
+              mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
+              scheme: item.Scheme || item.scheme || '',
+              stock: item.Stock ?? item.stock ?? null,
+              amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
+              cartSource: item.CartSource || item.cartSource || '',
+              isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+              createdDate: item.CreatedDate || item.createdDate || '',
+            }))
+          };
+        });
+      } else {
+        // Flat array of product items -> Group by StoreId / StoreName
+        const storeMap = new Map<string, any>();
+        for (const item of rawList) {
+          const storeId = item.StoreId || item.storeId || item.Id || item.id || 0;
+          const storeName = item.StoreName || item.storeName || item.Name || item.name || 'Unknown Distributor';
+          const storeKey = `${storeId}_${storeName}`;
+
+          if (!storeMap.has(storeKey)) {
+            storeMap.set(storeKey, {
+              storeId,
+              storeName,
+              lineTotal: 0,
+              deliveryPersons: (item.DeliveryPersonList || item.deliveryPersons || []).map((d: any) => ({
+                name: d.SalesmanName || d.name || '', code: d.SalesmanCode || d.code || ''
+              })),
+              items: []
+            });
+          }
+
+          const storeObj = storeMap.get(storeKey)!;
+          const itemQty = item.Quantity || item.qty || item.quantity || 1;
+          const itemPtr = item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0;
+          const itemAmt = item.ProductWiseAmount || item.amount || item.LineTotal || (itemPtr * itemQty);
+
+          storeObj.lineTotal += itemAmt;
+          storeObj.items.push({
+            productId: item.ProductId || item.productId || item.Id || item.id,
+            storeId,
+            productCode: item.ProductCode || item.productCode || '',
+            productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
+            company: item.Company || item.company || '',
+            packaging: item.Packing || item.packaging || item.CasePacking || '',
+            qty: itemQty,
+            ptr: itemPtr,
+            mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
+            scheme: item.Scheme || item.scheme || '',
+            stock: item.Stock ?? item.stock ?? null,
+            amount: itemAmt,
+            cartSource: item.CartSource || item.cartSource || '',
+            isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+            createdDate: item.CreatedDate || item.createdDate || '',
+          });
+        }
+        distributors = Array.from(storeMap.values());
+      }
+    }
 
     const totalItems = distributors.reduce((s: number, d: any) => s + d.items.length, 0);
 
@@ -1391,6 +1471,168 @@ router.get('/cart', async (req, res) => {
   } catch (err: any) {
     console.error('Pharmarack cart fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/pharmarack/live-cart-summary
+router.get('/live-cart-summary', async (req, res) => {
+  try {
+    const settings = await getPharmarackSettings();
+    const token = settings['pharmarack_session_token'] || '';
+
+    let cartDistributors: any[] = [];
+    if (token) {
+      try {
+        const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
+          method: 'GET',
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (response.ok) {
+          const cartData: any = await response.json().catch(() => null);
+          let rawList: any[] = [];
+          if (cartData) {
+            if (Array.isArray(cartData)) {
+              rawList = cartData;
+            } else {
+              const targetObj = cartData.data || cartData.Data || cartData;
+              if (Array.isArray(targetObj)) {
+                rawList = targetObj;
+              } else if (typeof targetObj === 'object') {
+                const keysToTry = [
+                  'IList', 'ilist', 'StoreWiseCartDetails', 'storeWiseCartDetails',
+                  'CartDetails', 'cartDetails', 'Stores', 'stores', 'StoreList', 'storeList',
+                  'CartList', 'cartList', 'Items', 'items', 'Products', 'products'
+                ];
+                for (const k of keysToTry) {
+                  if (Array.isArray(targetObj[k])) {
+                    rawList = targetObj[k];
+                    break;
+                  }
+                }
+                if (rawList.length === 0 && typeof cartData === 'object') {
+                  for (const k of keysToTry) {
+                    if (Array.isArray(cartData[k])) {
+                      rawList = cartData[k];
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (rawList.length > 0) {
+            const firstEntry = rawList[0];
+            const hasNestedItems = Boolean(
+              (firstEntry.lineItems && Array.isArray(firstEntry.lineItems)) ||
+              (firstEntry.LineItems && Array.isArray(firstEntry.LineItems)) ||
+              (firstEntry.items && Array.isArray(firstEntry.items)) ||
+              (firstEntry.Items && Array.isArray(firstEntry.Items)) ||
+              (firstEntry.products && Array.isArray(firstEntry.products)) ||
+              (firstEntry.Products && Array.isArray(firstEntry.Products)) ||
+              (firstEntry.ProductList && Array.isArray(firstEntry.ProductList)) ||
+              (firstEntry.productList && Array.isArray(firstEntry.productList)) ||
+              (firstEntry.CartItemList && Array.isArray(firstEntry.CartItemList)) ||
+              (firstEntry.cartItemList && Array.isArray(firstEntry.cartItemList))
+            );
+
+            if (hasNestedItems) {
+              cartDistributors = rawList.map((store: any) => {
+                const rawItems = store.lineItems || store.LineItems || store.items || store.Items ||
+                                 store.products || store.Products || store.ProductList || store.productList ||
+                                 store.CartItemList || store.cartItemList || [];
+
+                return {
+                  storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
+                  storeName: store.StoreName || store.storeName || store.Name || store.name || 'Unknown Distributor',
+                  lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || store.TotalAmount || 0,
+                  deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d: any) => ({
+                    name: d.SalesmanName || d.name || d.Salesman || '', code: d.SalesmanCode || d.code || ''
+                  })),
+                  items: rawItems.map((item: any) => ({
+                    productId: item.ProductId || item.productId || item.Id || item.id,
+                    storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
+                    productCode: item.ProductCode || item.productCode || '',
+                    productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
+                    company: item.Company || item.company || '',
+                    packaging: item.Packing || item.packaging || item.CasePacking || '',
+                    qty: item.Quantity || item.qty || item.quantity || 1,
+                    ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
+                    mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
+                    scheme: item.Scheme || item.scheme || '',
+                    stock: item.Stock ?? item.stock ?? null,
+                    amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
+                    cartSource: item.CartSource || item.cartSource || '',
+                    isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                    createdDate: item.CreatedDate || item.createdDate || '',
+                  }))
+                };
+              });
+            } else {
+              const storeMap = new Map<string, any>();
+              for (const item of rawList) {
+                const storeId = item.StoreId || item.storeId || item.Id || item.id || 0;
+                const storeName = item.StoreName || item.storeName || item.Name || item.name || 'Unknown Distributor';
+                const storeKey = `${storeId}_${storeName}`;
+
+                if (!storeMap.has(storeKey)) {
+                  storeMap.set(storeKey, {
+                    storeId,
+                    storeName,
+                    lineTotal: 0,
+                    deliveryPersons: (item.DeliveryPersonList || item.deliveryPersons || []).map((d: any) => ({
+                      name: d.SalesmanName || d.name || '', code: d.SalesmanCode || d.code || ''
+                    })),
+                    items: []
+                  });
+                }
+
+                const storeObj = storeMap.get(storeKey)!;
+                const itemQty = item.Quantity || item.qty || item.quantity || 1;
+                const itemPtr = item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0;
+                const itemAmt = item.ProductWiseAmount || item.amount || item.LineTotal || (itemPtr * itemQty);
+
+                storeObj.lineTotal += itemAmt;
+                storeObj.items.push({
+                  productId: item.ProductId || item.productId || item.Id || item.id,
+                  storeId,
+                  productCode: item.ProductCode || item.productCode || '',
+                  productName: item.ProductName || item.productName || item.Name || item.name || 'Unknown Product',
+                  company: item.Company || item.company || '',
+                  packaging: item.Packing || item.packaging || item.CasePacking || '',
+                  qty: itemQty,
+                  ptr: itemPtr,
+                  mrp: item.MRP ? parseFloat(item.MRP) : (item.mrp || 0),
+                  scheme: item.Scheme || item.scheme || '',
+                  stock: item.Stock ?? item.stock ?? null,
+                  amount: itemAmt,
+                  cartSource: item.CartSource || item.cartSource || '',
+                  isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                  createdDate: item.CreatedDate || item.createdDate || '',
+                });
+              }
+              cartDistributors = Array.from(storeMap.values());
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('Live cart details fetch error in summary route:', err.message);
+      }
+    }
+
+    const db = await dbManager.getConnection();
+    const pendingOrders = await db.all("SELECT * FROM special_orders WHERE status = 'Pending' OR status = 'Ordered' ORDER BY id DESC");
+
+    return res.json({
+      success: true,
+      cart: { distributors: cartDistributors },
+      orders: pendingOrders || [],
+      autoRefills: []
+    });
+  } catch (err: any) {
+    console.error('Error in /api/pharmarack/live-cart-summary:', err);
+    return res.status(500).json({ error: 'Failed to fetch live cart summary: ' + err.message });
   }
 });
 
