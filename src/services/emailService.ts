@@ -1508,7 +1508,8 @@ export class EmailService {
             `INSERT INTO email_order_reviews (email_uid, distributor_name, invoice_number, medicines_json, email_subject, email_date, status)
              VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
             [
-              (email as any).uid ?? null,
+              // email_uid not populated: ProcessedEmail lacks IMAP uid; would need to thread it through call chain
+              null,
               orderInfo.distributorName,
               orderInfo.invoiceNumber,
               JSON.stringify(orderInfo.medicines || []),
