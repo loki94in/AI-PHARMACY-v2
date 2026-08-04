@@ -33,7 +33,6 @@ const License = lazy(pageImports['/license']);
 const Settings = lazy(pageImports['/settings']);
 const Mail = lazy(pageImports['/mail']);
 const Returns = lazy(pageImports['/returns']);
-const Orders = lazy(pageImports['/orders']);
 const Sells = lazy(pageImports['/sells']);
 const Learning = lazy(pageImports['/learning']);
 const DatabasePage = lazy(pageImports['/database']);
@@ -141,7 +140,6 @@ function App() {
             <Route path="/" element={<Navigate to="/pos" replace />} />
             <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
             <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
-            <Route path="/orders" element={<Navigate to="/crm?tab=special_orders" replace />} />
             <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
             <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
             <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />

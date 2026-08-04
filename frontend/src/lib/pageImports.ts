@@ -11,7 +11,6 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/settings': () => import('../pages/Settings'),
   '/mail': () => import('../pages/Mail'),
   '/returns': () => import('../pages/Returns'),
-  '/orders': () => import('../pages/Orders'),
   '/sells': () => import('../pages/Sells'),
   '/learning': () => import('../pages/Learning'),
   '/database': () => import('../pages/Database'),

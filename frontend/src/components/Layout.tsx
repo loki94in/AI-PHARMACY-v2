@@ -273,12 +273,6 @@ const Sidebar = ({
                         queryFn: () => api.getDashboard(),
                         staleTime: 5 * 60_000,
                       });
-                    } else if (basePath === '/orders') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['orders'],
-                        queryFn: () => api.getOrders(),
-                        staleTime: 5 * 60_000,
-                      });
                     } else if (basePath === '/pos') {
                       queryClient.prefetchQuery({
                         queryKey: ['pos-common-combinations'],
@@ -1682,7 +1676,7 @@ export const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
-  const isFitPage = ['/pos', '/inventory', '/orders', '/expiry', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/non-mapped-distributors', '/automation-center', '/investigation', '/phone-sales', '/refills', '/migration'].includes(location.pathname);
+  const isFitPage = ['/pos', '/inventory', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/investigation', '/phone-sales', '/migration'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {
