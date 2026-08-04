@@ -1498,9 +1498,28 @@ export class EmailService {
         await this.notifyDeliveryBoys(orderInfo);
         await this.sendDistributorWhatsAppAlert(orderInfo);
 
-        // No automatic background import of purchase bills (should be manually processed by user on frontend)
-        // await this.processMedicineOrder(email);
-        console.log('Potential medicine order detected, delivery boys notified & distributor alert sent:', logMsg);
+        // No automatic background import of purchase bills (should be manually processed by user on frontend).
+        // Instead, queue the detected order into a review table so it can be surfaced to the user
+        // (e.g. a badge on the Learning or Dispatch page — not built in this task) for manual handling
+        // via the existing Purchases page. Do NOT call processMedicineOrder() — it fabricates pricing
+        // and auto-writes inventory data; left in place unused for a future redesign.
+        try {
+          await db.run(
+            `INSERT INTO email_order_reviews (email_uid, distributor_name, invoice_number, medicines_json, email_subject, email_date, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+            [
+              (email as any).uid ?? null,
+              orderInfo.distributorName,
+              orderInfo.invoiceNumber,
+              JSON.stringify(orderInfo.medicines || []),
+              email.subject,
+              email.date ? new Date(email.date).toISOString() : null
+            ]
+          );
+        } catch (queueError) {
+          console.error('Failed to queue email order for review:', queueError);
+        }
+        console.log('Potential medicine order detected, delivery boys notified, distributor alert sent, and order queued for review:', logMsg);
       }
 
       // Check for inquiry keywords

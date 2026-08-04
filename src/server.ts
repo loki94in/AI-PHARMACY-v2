@@ -244,6 +244,7 @@ app.use('/api/quick-assistant', lazyRoute(() => import('./routes/quickAssistant.
 app.use('/api/expiry', lazyRoute(() => import('./routes/expiry.js')));
 app.use('/api/reports', lazyRoute(() => import('./routes/reports.js')));
 app.use('/api/compliance', lazyRoute(() => import('./routes/compliance.js')));
+app.use('/api/email-order-reviews', lazyRoute(() => import('./routes/emailOrderReviews.js')));
 app.use('/api/license', lazyRoute(() => import('./routes/license.js')));
 // Generic /api routes
 app.use('/api', lazyRoute(() => import('./routes/upload.js')));

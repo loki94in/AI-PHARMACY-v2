@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 25;
+const CURRENT_SCHEMA_VERSION = 26;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -1427,6 +1427,19 @@ export async function ensureSchema(dbPath: string) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (distributor_id) REFERENCES distributors(id),
       FOREIGN KEY (related_purchase_id) REFERENCES purchases(id)
+    );
+
+    -- Review queue for order-detected emails (manual review, no auto-import)
+    CREATE TABLE IF NOT EXISTS email_order_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_uid INTEGER,
+      distributor_name TEXT,
+      invoice_number TEXT,
+      medicines_json TEXT,
+      email_subject TEXT,
+      email_date TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- Purchase orders sent to distributors
