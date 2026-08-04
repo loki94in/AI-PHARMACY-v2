@@ -446,9 +446,7 @@ server.on('error', (err: any) => {
           // Step 2: Unified Engine background workers
           (async () => {
             const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
-            const { startSubstituteCacheWorker } = await import('./worker/substituteCacheWorker.js');
             startStockCalculatorWorker();
-            // startSubstituteCacheWorker(); // disabled to prevent SQLite DB locks and redundant 12M rows substitutes table precomputation on boot
             console.log('[Boot] Unified Engine background workers started');
           })(),
 
