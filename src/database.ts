@@ -503,6 +503,7 @@ export async function ensureSchema(dbPath: string) {
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(distributor_id) REFERENCES distributors(id)
     );
+  `);
 
     const profileCols = await db.all("PRAGMA table_info(distributor_learning_profiles)").catch(() => []);
     const existingProfileCols = new Set(profileCols.map((c: any) => c.name));
@@ -525,6 +526,7 @@ export async function ensureSchema(dbPath: string) {
       await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME").catch(() => {});
     }
 
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS distributor_historical_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       distributor_id INTEGER,
