@@ -116,12 +116,31 @@ export async function buildOrderReadyNotificationMessage(
   requesterName: string,
   productName: string,
   qty: number | string = 1,
-  dbInstance?: any
+  dbInstance?: any,
+  lang: string = 'en'
 ): Promise<string> {
   const storeName = await getStoreMedicalName(dbInstance);
   const storePhone = await getStorePhone(dbInstance);
   const name = (requesterName || 'Customer').trim();
   const phone = storePhone ? storePhone.trim() : '';
+
+  if (lang === 'hi') {
+    let msg = `नमस्ते ${name}, 👋\n\nखुशखबरी! 🎉 आपकी मांगी गई दवाई ${storeName} पर लेने के लिए तैयार है।\n\nआपका ऑर्डर:\n• ${productName} × ${qty || 1}\n\n📍 कृपया अपनी सुविधानुसार हमारी दुकान पर आकर अपनी दवाई प्राप्त करें।`;
+    if (phone) {
+      msg += `\n\n📞 सहायता के लिए, हमें ${phone} पर कॉल करें।`;
+    }
+    msg += `\n\n${storeName} को चुनने के लिए धन्यवाद!`;
+    return msg;
+  }
+
+  if (lang === 'mr') {
+    let msg = `नमस्कार ${name}, 👋\n\nआनंदाची बातमी! 🎉 आपली मागवलेली औषध ${storeName} येथे मिळण्यास तयार आहे.\n\nआपली ऑर्डर:\n• ${productName} × ${qty || 1}\n\n📍 कृपया आपल्या सोयीनुसार आमच्या दुकानाला भेट देऊन औषध घेऊन जावे।`;
+    if (phone) {
+      msg += `\n\n📞 मदतीसाठी, आम्हाला ${phone} वर कॉल करा.`;
+    }
+    msg += `\n\n${storeName} ची निवड केल्याबद्दल धन्यवाद!`;
+    return msg;
+  }
 
   let msg = `Hi ${name}, 👋\n\nGreat news! 🎉 Your requested medicine is now ready for pickup at ${storeName}.\n\nYour Order:\n• ${productName} × ${qty || 1}\n\n📍 Please visit our store at your convenience to collect your medicine.`;
   

@@ -117,7 +117,7 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
 
         let summaryMsg = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
         orders.forEach((o: any, idx: number) => {
-          summaryMsg += `${idx + 1}. *${o.storeName}*: ${o.phone || 'N/A'} (${o.items?.length || 0} items)\n`;
+          summaryMsg += `${idx + 1}. *${o.storeName}*: (${o.items?.length || 0} items)\n    ${o.phone || 'N/A'}\n`;
         });
         summaryMsg += `\n==================================\n`;
         summaryMsg += `🚚 *Total Today Distributors:* ${orders.length}\n`;

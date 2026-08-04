@@ -2541,6 +2541,7 @@ interface SpecialOrderItem {
   pharmarack_scheme?: string | null;
   pharmarack_mapped?: number | null;
   advance_payment?: number | null;
+  language?: string;
 }
 
 const SpecialOrdersSection: React.FC = () => {
@@ -2571,6 +2572,7 @@ const SpecialOrdersSection: React.FC = () => {
   const [qty, setQty] = useState<number | ''>(1);
   const [advancePayment, setAdvancePayment] = useState<number | ''>('');
   const [priority, setPriority] = useState('Normal');
+  const [language, setLanguage] = useState('en');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
   // Edit Request Form State
@@ -2587,6 +2589,7 @@ const SpecialOrdersSection: React.FC = () => {
   const [editRate, setEditRate] = useState<number | ''>('');
   const [editMrp, setEditMrp] = useState<number | ''>('');
   const [editScheme, setEditScheme] = useState('');
+  const [editLanguage, setEditLanguage] = useState('en');
   const [editFormSubmitting, setEditFormSubmitting] = useState(false);
 
   // Pharmarack Search States
@@ -2859,6 +2862,7 @@ const SpecialOrdersSection: React.FC = () => {
         qty: Number(qty) || 1,
         priority,
         status: 'Pending',
+        language,
         pharmarack_distributor: selectedDistributor || undefined,
         pharmarack_rate: selectedRate !== '' ? Number(selectedRate) : undefined,
         pharmarack_mrp: selectedMrp !== '' ? Number(selectedMrp) : undefined,
@@ -2895,6 +2899,7 @@ const SpecialOrdersSection: React.FC = () => {
       setQty(1);
       setAdvancePayment('');
       setPriority('Normal');
+      setLanguage('en');
       setSelectedDistributor('');
       setSelectedRate('');
       setSelectedMrp('');
@@ -2928,6 +2933,7 @@ const SpecialOrdersSection: React.FC = () => {
     setEditRate(order.pharmarack_rate !== undefined && order.pharmarack_rate !== null ? Number(order.pharmarack_rate) : '');
     setEditMrp(order.pharmarack_mrp !== undefined && order.pharmarack_mrp !== null ? Number(order.pharmarack_mrp) : '');
     setEditScheme(order.pharmarack_scheme || '');
+    setEditLanguage(order.language || 'en');
     setShowEditModal(true);
   };
 
@@ -2964,6 +2970,7 @@ const SpecialOrdersSection: React.FC = () => {
         qty: Number(editQty) || 1,
         priority: editPriority,
         status: editStatus,
+        language: editLanguage,
         pharmarack_distributor: editDistributor || undefined,
         pharmarack_rate: editRate !== '' ? Number(editRate) : undefined,
         pharmarack_mrp: editMrp !== '' ? Number(editMrp) : undefined,
@@ -3190,6 +3197,9 @@ const SpecialOrdersSection: React.FC = () => {
                       <span className="font-semibold text-text flex items-center gap-1">
                         <Users size={12} className="text-primary" />
                         {order.requester}
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-bg3 text-text border border-border ml-1">
+                          {order.language === 'hi' ? '🇮🇳 HI' : order.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
+                        </span>
                       </span>
                       <span className="flex items-center gap-1 font-mono">
                         <Phone size={12} className="text-muted" />
@@ -3732,6 +3742,7 @@ interface CreditCustomerItem {
   name: string;
   phone: string;
   address?: string;
+  language?: string;
   credit_balance: number;
   credit_due_date?: string;
   unpaid_bills_count: number;
@@ -3986,6 +3997,9 @@ const CustomerCreditSection: React.FC = () => {
                     <h2 className="text-base font-bold text-text">{selectedCustomer.name || 'Unnamed Patient'}</h2>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                       CREDIT ACCOUNT
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-bg3 text-text border border-border">
+                      {selectedCustomer.language === 'hi' ? '🇮🇳 HI' : selectedCustomer.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
                     </span>
                   </div>
                   <div className="text-xs text-muted mt-0.5 flex items-center gap-3">

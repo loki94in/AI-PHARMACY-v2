@@ -128,6 +128,7 @@ const Orders = () => {
   const [advancePayment, setAdvancePayment] = useState<number | ''>('');
   const [priority, setPriority] = useState('Normal');
   const [status, setStatus] = useState('Pending');
+  const [language, setLanguage] = useState('en');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
   // Pharmarack Search States
@@ -254,6 +255,7 @@ const Orders = () => {
         qty,
         priority,
         status,
+        language,
         pharmarack_distributor: selectedDistributor || undefined,
         pharmarack_rate: selectedRate !== '' ? Number(selectedRate) : undefined,
         pharmarack_mrp: selectedMrp !== '' ? Number(selectedMrp) : undefined,
@@ -298,6 +300,7 @@ const Orders = () => {
       setQty('');
       setAdvancePayment('');
       setPriority('Normal');
+      setLanguage('en');
       setStatus('Pending');
       setSelectedDistributor('');
       setSelectedRate('');
@@ -691,6 +694,19 @@ const Orders = () => {
                   </select>
                 </div>
                 <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Message Language</label>
+                  <select 
+                    value={language}
+                    onChange={e => setLanguage(e.target.value)}
+                    className="premium-input w-full bg-[#18181b] border-glass-border/60 text-xs font-semibold py-2"
+                  >
+                    <option value="en">🇬🇧 English</option>
+                    <option value="hi">🇮🇳 Hindi</option>
+                    <option value="mr">🇮🇳 Marathi</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-2">
                   <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Initial Status</label>
                   <select 
                     value={status}
@@ -703,7 +719,6 @@ const Orders = () => {
                     <option value="Completed">Completed</option>
                   </select>
                 </div>
-              </div>
 
               <button 
                 type="submit"

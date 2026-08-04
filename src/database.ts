@@ -716,6 +716,7 @@ export async function ensureSchema(dbPath: string) {
     ['customers', 'credit_balance', 'ALTER TABLE customers ADD COLUMN credit_balance REAL DEFAULT 0'],
     ['customers', 'created_at', 'ALTER TABLE customers ADD COLUMN created_at DATETIME'],
     ['customers', 'credit_due_date', 'ALTER TABLE customers ADD COLUMN credit_due_date TEXT'],
+    ['customers', 'language', "ALTER TABLE customers ADD COLUMN language TEXT DEFAULT 'en'"],
     ['patient_refills', 'hold_for_stock', 'ALTER TABLE patient_refills ADD COLUMN hold_for_stock INTEGER DEFAULT 0'],
     ['patient_refills', 'is_active', 'ALTER TABLE patient_refills ADD COLUMN is_active INTEGER DEFAULT 1'],
     ['patient_refills', 'is_ready', 'ALTER TABLE patient_refills ADD COLUMN is_ready INTEGER DEFAULT 0'],

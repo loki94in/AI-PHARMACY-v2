@@ -68,6 +68,7 @@ export interface SpecialOrder {
   date: string;
   notified: number;
   notes?: string;
+  language?: string;
   pharmarack_distributor?: string;
   pharmarack_rate?: number;
   pharmarack_mrp?: number;

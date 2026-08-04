@@ -1044,7 +1044,12 @@ export default function PharmarackCart() {
     }
   };
 
-  const buildDistributorOrderMessage = (dist: Distributor) => {
+  // ponytail: accepts optional pre-resolved boy so Send All can pass the live-fetched boy
+  // without relying on stale React state closure from deliveryBoysList
+  const buildDistributorOrderMessage = (
+    dist: Distributor,
+    resolvedBoy?: { name: string; whatsapp_number: string } | null
+  ) => {
     const formatPhone = (raw: string) => {
       if (!raw) return '';
       let clean = raw.replace(/\D/g, '');
@@ -1054,12 +1059,18 @@ export default function PharmarackCart() {
       return raw;
     };
 
-    // Resolve registered delivery boy from deliveryBoysList or dist.deliveryPersons, or fallback to Admin/Owner
+    // Resolve registered delivery boy — prefer pre-resolved arg to avoid stale closure
     let boyName = 'Not assigned yet';
     let boyPhone = 'N/A';
 
+    // 0. Use pre-resolved boy passed in from the send handler (live-fetched, not stale state)
+    if (resolvedBoy?.name && resolvedBoy?.whatsapp_number) {
+      boyName = resolvedBoy.name;
+      boyPhone = formatPhone(resolvedBoy.whatsapp_number);
+    }
+
     // 1. Check dist.deliveryPersons first if it has a matched delivery boy in deliveryBoysList
-    if (dist.deliveryPersons && dist.deliveryPersons.length > 0 && dist.deliveryPersons[0].name && dist.deliveryPersons[0].name !== 'Not assigned yet') {
+    if ((boyName === 'Not assigned yet' || boyPhone === 'N/A') && dist.deliveryPersons && dist.deliveryPersons.length > 0 && dist.deliveryPersons[0].name && dist.deliveryPersons[0].name !== 'Not assigned yet') {
       const match = deliveryBoysList.find(b => b.name && b.name.toLowerCase().includes(dist.deliveryPersons[0].name.toLowerCase()));
       if (match) {
         boyName = match.name;
@@ -1332,6 +1343,21 @@ export default function PharmarackCart() {
     setIsSendingBatchWhatsApp(true);
 
     try {
+      // Resolve primary delivery boy FIRST — re-fetch live to avoid stale React state closure
+      let liveBoys = deliveryBoysList;
+      if (liveBoys.length === 0) {
+        try {
+          const freshRes = await apiClient.get('/dispatch/delivery-boys');
+          if (Array.isArray(freshRes.data)) {
+            liveBoys = freshRes.data.filter((b: any) => b.is_active !== 0);
+            setDeliveryBoysList(liveBoys);
+          }
+        } catch (_) {}
+      }
+      const primaryBoy = liveBoys.find(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
+      const deliveryBoyPhone = primaryBoy?.whatsapp_number || storeInfo.deliveryBoyPhone || storeInfo.adminPhone || '';
+      const deliveryBoyName = primaryBoy?.name || 'Delivery Staff';
+
       const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
 
       for (const dist of mapped) {
@@ -1354,7 +1380,7 @@ export default function PharmarackCart() {
           cleanPhone = `91${cleanPhone}`;
         }
 
-        const msg = buildDistributorOrderMessage(dist);
+        const msg = buildDistributorOrderMessage(dist, primaryBoy ?? null);
         ordersPayload.push({
           storeName: dist.storeName,
           storeId: dist.storeId,
@@ -1369,11 +1395,6 @@ export default function PharmarackCart() {
         toastEvent.trigger('No valid distributor phone numbers found to enqueue.', 'error');
         return;
       }
-
-      // Resolve primary delivery boy details
-      const primaryBoy = deliveryBoysList.find(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
-      const deliveryBoyPhone = primaryBoy?.whatsapp_number || storeInfo.deliveryBoyPhone || storeInfo.adminPhone || '';
-      const deliveryBoyName = primaryBoy?.name || 'Delivery Staff';
 
       // ENQUEUE ALL MESSAGES INSTANTLY TO BACKGROUND QUEUE WORKER
       const res = await api.enqueuePharmarackBatch({

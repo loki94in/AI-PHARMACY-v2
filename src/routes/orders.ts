@@ -124,24 +124,28 @@ router.post('/batch', async (req, res) => {
 
     const cleanReqPhone = phone.trim();
     const cleanReqName = requester.trim();
+    const reqLang = req.body.language || 'en';
     let customerId = req.body.customer_id || null;
 
     if (!customerId && (cleanReqPhone || cleanReqName)) {
-      let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanReqPhone]);
+      let cust = await db.get('SELECT id, language FROM customers WHERE phone = ? LIMIT 1', [cleanReqPhone]);
       if (!cust && cleanReqName && cleanReqName.toLowerCase() !== 'customer') {
-        cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanReqName]);
+        cust = await db.get('SELECT id, language FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanReqName]);
       }
       if (cust) {
         customerId = cust.id;
+        if (req.body.language) {
+          await db.run('UPDATE customers SET language = ? WHERE id = ?', [reqLang, cust.id]).catch(() => {});
+        }
       } else if (cleanReqPhone || cleanReqName) {
-        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanReqName, cleanReqPhone]);
+        const custRes = await db.run('INSERT INTO customers (name, phone, language) VALUES (?, ?, ?)', [cleanReqName, cleanReqPhone, reqLang]);
         customerId = custRes.lastID;
       }
 
       try {
         await db.run(
-          `INSERT OR IGNORE INTO customers (name, phone) VALUES (?, ?)`,
-          [cleanReqName, cleanReqPhone]
+          `INSERT OR IGNORE INTO customers (name, phone, language) VALUES (?, ?, ?)`,
+          [cleanReqName, cleanReqPhone, reqLang]
         );
       } catch (_) {}
     }
@@ -199,13 +203,34 @@ router.post('/batch', async (req, res) => {
       const totalAdv = Number(advance_payment || 0);
       const advText = totalAdv > 0 ? `\n💰 Total Advance Paid: ₹${totalAdv.toFixed(2)}` : '';
 
+      const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+      const lang = req.body.language || custRow?.language || 'en';
+
       let msg = '';
-      if (insertedOrders.length === 1) {
-        const single = insertedOrders[0];
-        msg = `Hi ${cleanReqName}, your order for ${single.product} (Qty: ${single.qty})${totalAdv > 0 ? ` (Advance Paid: ₹${totalAdv.toFixed(2)})` : ''} has been booked at ${medicalName}. We will notify you when it arrives.`;
+      if (lang === 'hi') {
+        if (insertedOrders.length === 1) {
+          const single = insertedOrders[0];
+          msg = `नमस्ते ${cleanReqName}, ${medicalName} पर आपकी ${single.product} (मात्रा: ${single.qty})${totalAdv > 0 ? ` (अग्रिम राशि: ₹${totalAdv.toFixed(2)})` : ''} का ऑर्डर बुक कर लिया गया है। दवाई आने पर हम आपको सूचित करेंगे।`;
+        } else {
+          const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} — मात्रा: ${o.qty}`).join('\n');
+          msg = `नमस्ते ${cleanReqName},\n\nनिम्नलिखित ${insertedOrders.length} दवाइयों के लिए आपका विशेष ऑर्डर ${medicalName} पर बुक कर लिया गया है:\n\n${itemListText}${advText}\n\nदवाई उपलब्ध होते ही हम आपको सूचित करेंगे। धन्यवाद!`;
+        }
+      } else if (lang === 'mr') {
+        if (insertedOrders.length === 1) {
+          const single = insertedOrders[0];
+          msg = `नमस्कार ${cleanReqName}, ${medicalName} येथे आपली ${single.product} (प्रमाण: ${single.qty})${totalAdv > 0 ? ` (अगाऊ रक्कम: ₹${totalAdv.toFixed(2)})` : ''} ची ऑर्डर बुक करण्यात आली आहे. औषध आल्यावर आम्ही आपल्याला कळवू.`;
+        } else {
+          const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} — प्रमाण: ${o.qty}`).join('\n');
+          msg = `नमस्कार ${cleanReqName},\n\nखालील ${insertedOrders.length} औषधांसाठी आपली ऑर्डर ${medicalName} येथे बुक झाली आहे:\n\n${itemListText}${advText}\n\nऔषध उपलब्ध होताच आम्ही आपल्याला कळवू. धन्यवाद!`;
+        }
       } else {
-        const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} — Qty: ${o.qty}`).join('\n');
-        msg = `Hi ${cleanReqName},\n\nYour special order request for the following ${insertedOrders.length} medicines has been booked at ${medicalName}:\n\n${itemListText}${advText}\n\nWe will notify you as soon as your items arrive. Thank you!`;
+        if (insertedOrders.length === 1) {
+          const single = insertedOrders[0];
+          msg = `Hi ${cleanReqName}, your order for ${single.product} (Qty: ${single.qty})${totalAdv > 0 ? ` (Advance Paid: ₹${totalAdv.toFixed(2)})` : ''} has been booked at ${medicalName}. We will notify you when it arrives.`;
+        } else {
+          const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} — Qty: ${o.qty}`).join('\n');
+          msg = `Hi ${cleanReqName},\n\nYour special order request for the following ${insertedOrders.length} medicines has been booked at ${medicalName}:\n\n${itemListText}${advText}\n\nWe will notify you as soon as your items arrive. Thank you!`;
+        }
       }
 
       try {
@@ -374,7 +399,10 @@ router.post('/:id/notify-arrival', async (req, res) => {
     const cleanPhone = order.phone.replace(/\D/g, '');
     const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
     
-    const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db);
+    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+    const lang = custRow?.language || 'en';
+
+    const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db, lang);
 
     await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
     
@@ -540,7 +568,10 @@ router.put('/:id', async (req, res) => {
         const cleanPhone = String(newPhone).replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
           const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-          const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db);
+          const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+          const lang = custRow?.language || 'en';
+
+          const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db, lang);
           await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', newRequester || existing.requester || 'Customer');
           await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
           await db.run(
@@ -586,7 +617,10 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
         const cleanPhone = String(existing.phone).replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
           const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-          const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db);
+          const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+          const lang = custRow?.language || 'en';
+
+          const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db, lang);
           await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', existing.requester || 'Customer');
           await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
           await db.run(

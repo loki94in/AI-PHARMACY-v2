@@ -3,6 +3,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendDailyDoctorReports } from '../services/doctorReportingService.js';
+import { getMessage } from '../i18n/getMessage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,16 +44,16 @@ router.get('/patients', async (req, res) => {
 
 // Create patient
 router.post('/patients', async (req, res) => {
-  const { name, phone, address, notes } = req.body;
+  const { name, phone, address, notes, language } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
   try {
     const db = await dbManager.getConnection();
     const result = await db.run(
-      'INSERT INTO customers (name, phone, address, notes) VALUES (?, ?, ?, ?)',
-      [name, phone || '', address || '', notes || '']
+      'INSERT INTO customers (name, phone, address, notes, language) VALUES (?, ?, ?, ?, ?)',
+      [name, phone || '', address || '', notes || '', language || 'en']
     );
     const newPatient = await db.get('SELECT * FROM customers WHERE id = ?', result.lastID);
-        res.status(201).json(newPatient);
+    res.status(201).json(newPatient);
   } catch (error) {
     console.error('Failed to create patient:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -62,12 +63,12 @@ router.post('/patients', async (req, res) => {
 // Update patient
 router.put('/patients/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, phone, address, notes } = req.body;
+  const { name, phone, address, notes, language } = req.body;
   try {
     const db = await dbManager.getConnection();
     await db.run(
-      'UPDATE customers SET name=?, phone=?, address=?, notes=? WHERE id=?',
-      [name, phone || '', address || '', notes || '', id]
+      'UPDATE customers SET name=?, phone=?, address=?, notes=?, language=? WHERE id=?',
+      [name, phone || '', address || '', notes || '', language || 'en', id]
     );
 
     // Cascade update linked operational tables (patient_refills, special_orders) to prevent phone/contact inconsistencies
@@ -366,7 +367,7 @@ router.get('/credit-customers', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     const rows = await db.all(
-      `SELECT c.id, c.name, c.phone, c.address, 
+      `SELECT c.id, c.name, c.phone, c.address, c.language, 
               COALESCE(c.credit_balance, (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID'), 0) as credit_balance,
               c.credit_due_date, c.credit_enabled,
               (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') as unpaid_bills_count,
@@ -471,15 +472,17 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
 
     let message = custom_message;
     if (!message) {
-      message = `Dear ${customer.name || 'Customer'},\n\n` +
-        `📌 *Credit Outstanding Balance Reminder*\n\n` +
-        (billsBreakdownStr ? billsBreakdownStr : '') +
-        `📊 *Summary Calculation*\n` +
-        `Due Date: *${dueDateStr}*\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n` +
-        `Kindly arrange payment at your earliest convenience or visit our pharmacy.\n\n` +
-        `Thank you!\n— AI Pharmacy OS`;
+      const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+      const storeName = storeSetting?.value || 'AI Pharmacy';
+      const lang = (customer.language === 'hi' || customer.language === 'mr') ? customer.language : 'en';
+
+      message = getMessage(lang, 'whatsapp.creditReminder', {
+        name: customer.name || 'Customer',
+        billsBreakdown: billsBreakdownStr ? billsBreakdownStr : '',
+        dueDate: dueDateStr,
+        total: finalOutstanding.toFixed(2),
+        storeName: storeName
+      });
     }
 
     await sendMessage(customer.phone, undefined, message);
@@ -533,7 +536,7 @@ router.post('/ledger/pay', async (req, res) => {
     await db.run('COMMIT');
 
     // Fetch updated customer info to send automated WhatsApp payment receipt
-    const customer = await db.get('SELECT name, phone, credit_balance FROM customers WHERE id = ?', [customer_id]);
+    const customer = await db.get('SELECT name, phone, credit_balance, language FROM customers WHERE id = ?', [customer_id]);
     let whatsappSent = false;
     let whatsappError = '';
 
@@ -542,13 +545,17 @@ router.post('/ledger/pay', async (req, res) => {
         const { sendMessage } = await import('../whatsappClient.js');
         const remainingBal = (customer.credit_balance || 0);
         const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+        const storeName = storeSetting?.value || 'AI Pharmacy';
+        const lang = (customer.language === 'hi' || customer.language === 'mr') ? customer.language : 'en';
 
-        const message = `Dear ${customer.name || 'Customer'},\n\n` +
-          `✅ *Payment Received Receipt*\n` +
-          `Amount Received: *₹${payAmt.toFixed(2)}*\n` +
-          `Remaining Dues: *₹${remainingBal.toFixed(2)}*\n` +
-          `Date: *${dateStr}*\n\n` +
-          `Thank you for your payment!\n— AI Pharmacy OS`;
+        const message = getMessage(lang, 'whatsapp.paymentReceipt', {
+          name: customer.name || 'Customer',
+          amount: payAmt.toFixed(2),
+          remaining: remainingBal.toFixed(2),
+          date: dateStr,
+          storeName: storeName
+        });
 
         await sendMessage(customer.phone, undefined, message);
 

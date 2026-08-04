@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { checkAllRefills } from '../services/refillService.js';
 import { sendMessage } from '../whatsappClient.js';
+import { getMessage } from '../i18n/getMessage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,8 +157,10 @@ router.post('/:id/send', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     const refill = await db.get(
-      `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+      `SELECT pr.*, m.name as medicine_name, c.language 
+       FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
+       LEFT JOIN customers c ON (pr.customer_id = c.id OR pr.patient_phone = c.phone)
        WHERE pr.id = ?`,
       [id]
     );
@@ -166,7 +169,18 @@ router.post('/:id/send', async (req, res) => {
       return res.status(404).json({ error: 'Refill schedule not found' });
     }
 
-    const message = `Hello ${refill.patient_name}, your prescription refill for ${refill.medicine_name} is now ready and in stock! Please visit the pharmacy to collect it.`;
+    const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+    const storeName = storeSetting?.value || 'AI Pharmacy';
+    const lang = (refill.language === 'hi' || refill.language === 'mr') ? refill.language : 'en';
+
+    const message = getMessage(lang, 'whatsapp.refillReminder', {
+      pharmacyName: storeName,
+      patientName: refill.patient_name || 'Patient',
+      medicineName: refill.medicine_name || 'Medicine',
+      dueDate: refill.next_refill_date || 'today',
+      quantityLeft: String(refill.quantity || 1),
+      unit: 'unit(s)'
+    });
 
     try {
       await sendMessage(refill.patient_phone, undefined, message);
