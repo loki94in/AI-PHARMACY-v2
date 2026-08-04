@@ -930,15 +930,41 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   };
 
+  const fetchLiveCartSummary = async (silent?: boolean | any) => {
+    const isSilent = typeof silent === 'boolean' ? silent : false;
+    if (!isSilent && cachedCartDistributors.length === 0) {
+      setCartLoading(true);
+    }
+    try {
+      const summary = await api.getPharmarackLiveCartSummary();
+      if (summary && summary.success) {
+        if (summary.cart?.distributors) {
+          cachedCartDistributors = summary.cart.distributors;
+          setCartDistributors(summary.cart.distributors);
+        }
+        if (Array.isArray(summary.orders)) {
+          cachedPendingOrders = summary.orders;
+          setPendingOrders(summary.orders);
+        }
+        if (Array.isArray(summary.autoRefills)) {
+          cachedAutoRefillItems = summary.autoRefills;
+          setAutoRefillItems(summary.autoRefills);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Live cart summary fetch error:', err);
+    } finally {
+      setCartLoading(false);
+    }
+  };
+
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
       await Promise.allSettled([
-        fetchCart(false),
-        fetchPendingOrders(),
+        fetchLiveCartSummary(false),
         fetchPendingRefills(),
-        fetchReconOrders(),
-        fetchAutoRefillItems()
+        fetchReconOrders()
       ]);
       toastEvent.trigger('Cart & pending lists refreshed!', 'success');
     } catch (err: any) {
@@ -952,24 +978,18 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       const hasCache = cachedCartDistributors.length > 0;
-      // Prioritize primary cart preview & session mode check immediately
-      fetchCart(hasCache);
+      // Fetch consolidated live cart summary immediately without 350ms delay
+      fetchLiveCartSummary(hasCache);
       api.checkPharmarackSession().then(data => {
         cachedPrMode = data.mode || 'Live';
         setPrMode(cachedPrMode);
       }).catch(() => setPrMode('Live'));
 
-      // Stagger secondary background fetches by 350ms to eliminate mount network saturation
-      const bgTimer = setTimeout(() => {
-        Promise.allSettled([
-          fetchPendingOrders(),
-          fetchPendingRefills(),
-          fetchReconOrders(),
-          fetchAutoRefillItems()
-        ]);
-      }, 350);
-
-      return () => clearTimeout(bgTimer);
+      // Also run secondary background refills & recon concurrently immediately
+      Promise.allSettled([
+        fetchPendingRefills(),
+        fetchReconOrders()
+      ]);
     }
   }, [isOpen]);
 
@@ -977,11 +997,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const handleRefresh = () => {
       if (isOpen) {
         Promise.allSettled([
-          fetchCart(true),
-          fetchPendingOrders(),
+          fetchLiveCartSummary(true),
           fetchPendingRefills(),
-          fetchReconOrders(),
-          fetchAutoRefillItems()
+          fetchReconOrders()
         ]);
       }
     };

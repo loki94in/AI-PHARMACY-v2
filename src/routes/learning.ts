@@ -246,15 +246,17 @@ router.get('/profiles/:distributorId', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-    const distributor = await db.get('SELECT * FROM distributors WHERE id = ?', [distId]);
+    const [distributor, profile, files] = await Promise.all([
+      db.get('SELECT * FROM distributors WHERE id = ?', [distId]),
+      db.get('SELECT * FROM distributor_learning_profiles WHERE distributor_id = ?', [distId]),
+      db.all(
+        'SELECT id, distributor_id, filename, file_path, file_type, file_headers, mapping_config, status, created_at FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC',
+        [distId]
+      )
+    ]);
     if (!distributor) {
       return res.status(404).json({ error: 'Distributor not found' });
     }
-    const profile = await db.get('SELECT * FROM distributor_learning_profiles WHERE distributor_id = ?', [distId]);
-    const files = await db.all(
-      'SELECT id, distributor_id, filename, file_path, file_type, file_headers, mapping_config, status, created_at FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC',
-      [distId]
-    );
     res.json({
       success: true,
       distributor,

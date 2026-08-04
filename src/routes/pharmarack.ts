@@ -1967,14 +1967,73 @@ router.get('/session-logs', async (_req, res) => {
 });
 
 // POST /api/pharmarack/trigger-reauth
-router.post('/trigger-reauth', async (_req, res) => {
+// GET /api/pharmarack/live-cart-summary
+// Consolidated endpoint fetching cart distributors, pending special orders, and auto-refill suggestions in parallel
+router.get('/live-cart-summary', async (_req, res) => {
   try {
-    // Run background headless login trigger asynchronously
-    tokenRefreshScheduler.triggerImmediateCheck('manual_reauth').catch(() => {});
-    res.json({ success: true, message: 'Manual re-authentication refresh initiated.' });
+    const db = await dbManager.getConnection();
+
+    const [cartRow, specialOrders, autoRefillRows] = await Promise.all([
+      db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_cart_cache'"),
+      db.all("SELECT * FROM special_orders WHERE status IN ('Pending', 'Ordered') ORDER BY id DESC"),
+      db.all(`
+        SELECT 
+          m.id as medicine_id,
+          m.name as medicine_name,
+          m.manufacturer,
+          m.packaging,
+          COALESCE(SUM(inv.quantity), 0) as current_stock,
+          MAX(inv.reorder_level) as reorder_level,
+          MAX(m.max_stock_level) as max_stock_level,
+          (
+            SELECT COALESCE(SUM(si.quantity), 0)
+            FROM sale_items si
+            JOIN sales_invoices sinv ON si.invoice_id = sinv.id
+            WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = m.id)
+            AND sinv.date >= datetime('now', '-30 days')
+          ) as sales_30d
+        FROM medicines m
+        LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
+        GROUP BY m.id
+        HAVING (current_stock <= COALESCE(reorder_level, 5) OR current_stock = 0) AND sales_30d > 0
+        ORDER BY sales_30d DESC
+        LIMIT 25
+      `)
+    ]);
+
+    let distributors: any[] = [];
+    if (cartRow && cartRow.value) {
+      try {
+        const parsed = JSON.parse(cartRow.value);
+        distributors = Array.isArray(parsed) ? parsed : (parsed.distributors || []);
+      } catch (_) {}
+    }
+
+    const autoRefills = (autoRefillRows || []).map(r => {
+      const sales30d = Number(r.sales_30d || 0);
+      const stock = Number(r.current_stock || 0);
+      const cap = r.max_stock_level ? Number(r.max_stock_level) : Math.max(10, Math.ceil(sales30d * 1.25));
+      return {
+        medicine_id: r.medicine_id,
+        medicine_name: r.medicine_name,
+        manufacturer: r.manufacturer || '',
+        packaging: r.packaging || '',
+        current_stock: stock,
+        sales_30d: sales30d,
+        reorder_level: r.reorder_level || 5,
+        recommended_qty: Math.max(1, cap - stock)
+      };
+    });
+
+    res.json({
+      success: true,
+      cart: { distributors },
+      orders: Array.isArray(specialOrders) ? specialOrders : [],
+      autoRefills
+    });
   } catch (err: any) {
-    console.error('Error triggering re-auth:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('Error fetching live cart summary:', err);
+    res.status(500).json({ error: 'Failed to fetch live cart summary: ' + err.message });
   }
 });
 

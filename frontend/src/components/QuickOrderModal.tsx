@@ -102,6 +102,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [qty, setQty] = useState(1);
   const [advancePayment, setAdvancePayment] = useState<number | ''>('');
   const [priority, setPriority] = useState<'Low' | 'Normal' | 'High'>('Normal');
+  const [language, setLanguage] = useState('en');
   
   const [selectedDistributor, setSelectedDistributor] = useState('');
   const [selectedRate, setSelectedRate] = useState<number | ''>('');
@@ -121,7 +122,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [searchLoading, setSearchLoading] = useState(false);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Unknown');
+  const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Live');
 
   // Duplicate check states
   const [duplicateMatch, setDuplicateMatch] = useState<any | null>(null);
@@ -267,8 +268,12 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     return min;
   }, [suggestions, qty]);
 
-  // Autofocus on mount
+  // Autofocus and check session mode on mount
   useEffect(() => {
+    api.checkPharmarackSession().then(data => {
+      setPrMode(data.mode || 'Live');
+    }).catch(() => setPrMode('Live'));
+
     setTimeout(() => {
       productInputRef.current?.focus();
     }, 100);
@@ -297,89 +302,15 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Medicine autocomplete search
+  // Pharmarack-Only Search
   useEffect(() => {
     if (isSelectingRef.current) return;
-
     const query = product.trim();
     if (query.length < 3) {
       setSuggestions([]);
       setShowSuggestions(false);
       return;
     }
-  }, [product]);
-
-  // React Query for local search with dedup + abort
-  const { data: localSearchData, isLoading: isLocalSearchLoading } = useApiQuery(
-    ['medicine-search-local', product.trim()],
-    () => api.searchMedicine(product.trim()),
-    { enabled: product.trim().length >= 3 && !isSelectingRef.current, staleTime: 10_000 }
-  );
-
-  // Process local search results and combine with Pharmarack
-  useEffect(() => {
-    if (isSelectingRef.current) return;
-    if (!localSearchData || !Array.isArray(localSearchData)) {
-      setSuggestions(prev => {
-        const prOnly = prev.filter(s => s.isPharmarack);
-        return prOnly;
-      });
-      return;
-    }
-
-    let localSuggestions: SuggestionMedicine[] = [];
-
-    const groupedLocal: Record<string, {
-      medicine_id?: number;
-      medicine_name: string;
-      quantity: number;
-      mrp?: number;
-    }> = {};
-
-    localSearchData.forEach((item: any) => {
-      const name = item.medicine_name || item.name || '';
-      const key = name.toLowerCase().trim();
-      const qty = Number(item.quantity) || 0;
-      
-      if (!groupedLocal[key]) {
-        groupedLocal[key] = {
-          medicine_id: item.medicine_id,
-          medicine_name: name,
-          quantity: qty,
-          mrp: item.mrp
-        };
-      } else {
-        groupedLocal[key].quantity += qty;
-        if (item.mrp && (!groupedLocal[key].mrp || item.mrp > groupedLocal[key].mrp)) {
-          groupedLocal[key].mrp = item.mrp;
-        }
-      }
-    });
-
-    Object.values(groupedLocal).forEach((med) => {
-      localSuggestions.push({
-        medicine_id: med.medicine_id,
-        medicine_name: med.medicine_name,
-        quantity: med.quantity,
-        mrp: med.mrp,
-        isPharmarack: false
-      });
-    });
-
-    setSuggestions(prev => {
-      const prOnly = prev.filter(s => s.isPharmarack);
-      return [...localSuggestions, ...prOnly];
-    });
-    setShowSuggestions(true);
-    setActiveSuggestionIndex(-1);
-    setSearchLoading(false);
-  }, [localSearchData]);
-
-  // Pharmarack search (keep existing async logic but simplify)
-  useEffect(() => {
-    if (isSelectingRef.current) return;
-    const query = product.trim();
-    if (query.length < 3) return;
 
     let active = true;
 
@@ -430,10 +361,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         }
 
         if (isSelectingRef.current) return;
-        setSuggestions(prev => {
-          const localOnly = prev.filter(s => !s.isPharmarack);
-          return [...localOnly, ...prSuggestions];
-        });
+        setSuggestions(prSuggestions);
         setShowSuggestions(true);
       } catch (err) {
         console.error('Error searching Pharmarack:', err);
@@ -531,7 +459,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   };
 
   // Submit Order Form
-  const processSubmissionQueue = async (items: any[], customerName: string, customerPhone: string, orderPriority: 'Low' | 'Normal' | 'High', advanceAmt: number) => {
+  const processSubmissionQueue = async (items: any[], customerName: string, customerPhone: string, orderPriority: 'Low' | 'Normal' | 'High', advanceAmt: number, messageLang: string) => {
     try {
       // 1. Log all requested medicines in a single batch call (sends 1 consolidated WhatsApp message to customer)
       await api.createBatchOrders({
@@ -539,7 +467,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         requester: customerName,
         phone: customerPhone,
         priority: orderPriority,
-        advance_payment: advanceAmt
+        advance_payment: advanceAmt,
+        language: messageLang
       });
 
       toastEvent.trigger(`Successfully logged request for ${items.length} medicine(s)!`, 'success');
@@ -647,7 +576,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
     // Trigger background queue processing (non-blocking)
     toastEvent.trigger(`Starting background logging for ${finalItems.length} request(s)...`, 'info');
-    processSubmissionQueue(finalItems, customerName, customerPhone, orderPriority, advanceAmt);
+    processSubmissionQueue(finalItems, customerName, customerPhone, orderPriority, advanceAmt, language);
   };
 
   if (!isOpen) return null;
@@ -911,7 +840,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                   <span className="w-1.5 h-3.5 bg-purple-500 rounded-full inline-block"></span>
                   <div className="font-bold text-xs text-text/90 uppercase tracking-wider">2. Customer Details & Priority</div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Customer Name *</label>
                     <input
@@ -949,6 +878,18 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                       step="0.01"
                       autoComplete="off"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Message Language</label>
+                    <select
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      className="w-full premium-input py-2 text-xs font-semibold rounded-xl bg-bg3/20 border-border/60"
+                    >
+                      <option value="en">🇬🇧 English</option>
+                      <option value="hi">🇮🇳 Hindi</option>
+                      <option value="mr">🇮🇳 Marathi</option>
+                    </select>
                   </div>
                 </div>
                 {phone.replace(/\D/g, '').length === 10 && (

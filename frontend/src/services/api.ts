@@ -652,6 +652,7 @@ export const api = {
   checkPharmarackOverstock: (data: { productName: string; company?: string; packaging?: string; distributorStoreId?: number; requestedQty?: number }) =>
     apiClient.post('/pharmarack/check-overstock', data).then(res => res.data),
   getPharmarackAutoRefillSuggestions: () => apiClient.get('/pharmarack/auto-refill-suggestions').then(res => res.data),
+  getPharmarackLiveCartSummary: () => apiClient.get('/pharmarack/live-cart-summary').then(res => res.data),
   launchPharmarackLoginWindow: () => apiClient.post('/pharmarack/login-window').then(res => res.data),
   
   // Composition Enrichment
@@ -723,7 +724,7 @@ export const api = {
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
-  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number }) =>
+  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string }) =>
     apiClient.post('/orders/batch', data).then(res => res.data),
   updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
   updateOrderStatus: (id: number, status: string) => apiClient.post(`/orders/${id}/status`, { status }).then(res => res.data),

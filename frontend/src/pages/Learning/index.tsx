@@ -204,6 +204,23 @@ const Learning: React.FC = () => {
     }
   );
 
+  const handlePrefetchProfile = (distributorId: number) => {
+    if (!cachedProfileDetailsMap[distributorId]) {
+      queryClient.prefetchQuery({
+        queryKey: ['learning-profile-detail', distributorId],
+        queryFn: async () => {
+          const res = await apiClient.get(`/learning/profiles/${distributorId}`);
+          const data = res.data;
+          if (data) {
+            cachedProfileDetailsMap[distributorId] = data;
+          }
+          return data;
+        },
+        staleTime: 300000
+      });
+    }
+  };
+
   // Local draft states
   const [selectedProfile, setSelectedProfile] = useState<{
     distributor: any;
@@ -341,14 +358,32 @@ const Learning: React.FC = () => {
     }
   }, [profiles, selectedProfileId]);
 
-  // Synchronously hydrate or reset selectedProfile whenever selectedProfileId changes
+  // Synchronously hydrate selectedProfile whenever selectedProfileId changes
   useEffect(() => {
-    if (selectedProfileId && cachedProfileDetailsMap[selectedProfileId]) {
+    if (!selectedProfileId) {
+      setSelectedProfile(null);
+      return;
+    }
+    if (cachedProfileDetailsMap[selectedProfileId]) {
       setSelectedProfile(cachedProfileDetailsMap[selectedProfileId]);
     } else {
-      setSelectedProfile(null);
+      const summary = profiles.find(p => p.distributor_id === selectedProfileId);
+      if (summary) {
+        setSelectedProfile({
+          distributor: {
+            id: summary.distributor_id,
+            name: summary.distributor_name,
+            email: summary.distributor_email,
+            phone: summary.distributor_phone
+          },
+          profile: null,
+          files: []
+        });
+      } else {
+        setSelectedProfile(null);
+      }
     }
-  }, [selectedProfileId]);
+  }, [selectedProfileId, profiles]);
 
   useEffect(() => {
     if (serverProfileDetail && serverProfileDetail.distributor && serverProfileDetail.distributor.id === selectedProfileId) {
@@ -1411,6 +1446,7 @@ const Learning: React.FC = () => {
                       <button
                         key={p.distributor_id}
                         onClick={() => setSelectedProfileId(p.distributor_id)}
+                        onMouseEnter={() => handlePrefetchProfile(p.distributor_id)}
                         style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
                         className={`w-full text-left p-3 rounded-xl border transition-all duration-200 flex flex-col gap-1 ${
                           isSelected 
@@ -1441,12 +1477,7 @@ const Learning: React.FC = () => {
             {/* Right Column: Profile details form */}
             <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
               {selectedProfileId !== null ? (
-                loadingDetail ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3">
-                    <RefreshCw className="animate-spin text-sky" size={24} />
-                    <span className="text-xs">Fetching profile details...</span>
-                  </div>
-                ) : detailError || !selectedProfile || selectedProfile?.distributor?.id !== selectedProfileId ? (
+                detailError && !selectedProfile ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted gap-3 px-6 text-center">
                     <AlertCircle className="text-red" size={24} />
                     <span className="text-xs">Failed to load profile details.</span>
@@ -1457,13 +1488,20 @@ const Learning: React.FC = () => {
                       <RefreshCw size={11} /> Retry
                     </button>
                   </div>
-                ) : selectedProfile ? (
+                ) : selectedProfile && selectedProfile.distributor && selectedProfile.distributor.id === selectedProfileId ? (
                   <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0 space-y-4">
                     
                     {/* Header */}
                     <div className="border-b border-glass-border pb-3 flex justify-between items-start shrink-0">
                       <div>
-                        <h2 className="text-sm font-bold text-text">{selectedProfile.distributor.name}</h2>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-sm font-bold text-text">{selectedProfile.distributor.name}</h2>
+                          {loadingDetail && !cachedProfileDetailsMap[selectedProfileId] && (
+                            <span title="Syncing layout profile...">
+                              <RefreshCw className="animate-spin text-sky" size={12} />
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-muted">Layout configuration rules & extraction parameters</p>
                       </div>
                       <button
