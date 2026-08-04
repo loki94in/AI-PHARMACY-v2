@@ -420,6 +420,38 @@ router.delete('/historical-files/:fileId', async (req, res) => {
   }
 });
 
+// GET /api/learning/dashboard-stats - unified learning activity overview
+router.get('/dashboard-stats', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const [ocrCount, aliasCount, distAliasCount, pharmCount, totalMedicines] = await Promise.all([
+      db.get('SELECT COUNT(*) as count FROM ocr_corrections').catch(() => ({ count: 0 })),
+      db.get('SELECT COUNT(*) as count FROM medicine_aliases').catch(() => ({ count: 0 })),
+      db.get('SELECT COUNT(*) as count FROM distributor_medicine_aliases').catch(() => ({ count: 0 })),
+      db.get('SELECT COUNT(*) as count FROM pharmacist_corrections').catch(() => ({ count: 0 })),
+      db.get('SELECT COUNT(*) as count FROM medicines').catch(() => ({ count: 0 }))
+    ]);
+
+    const recentOcr = await db.all('SELECT raw_ocr_text as ocr, correct_medicine_name as correct, success_count as count, updated_at FROM ocr_corrections ORDER BY updated_at DESC LIMIT 10').catch(() => []);
+    const recentAliases = await db.all('SELECT alias_name, medicine_id, created_at FROM medicine_aliases ORDER BY id DESC LIMIT 10').catch(() => []);
+
+    res.json({
+      success: true,
+      stats: {
+        ocr_corrections: ocrCount?.count || 0,
+        medicine_aliases: aliasCount?.count || 0,
+        distributor_aliases: distAliasCount?.count || 0,
+        pharmacist_corrections: pharmCount?.count || 0,
+        total_medicines: totalMedicines?.count || 0
+      },
+      recent_ocr: recentOcr,
+      recent_aliases: recentAliases
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch learning stats', details: err?.message });
+  }
+});
+
 export default router;
 
 

@@ -444,16 +444,43 @@ router.post('/', async (req, res) => {
         );
       }
     }
-
     // Commit transaction
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Trigger WhatsApp notification â€” same mechanism as CRM page (dynamic import + direct sendMessage)
+    // Bill-to-learning feedback loop: confirm OCR scanned items in ocr_corrections
+    (async () => {
+      try {
+        for (const item of items) {
+          const rawOcr = item.rawOcrText || item.raw_ocr_text;
+          const medName = item.medicine_name || item.name;
+          if (rawOcr && typeof rawOcr === 'string' && rawOcr.trim() && medName) {
+            const cleanOcr = rawOcr.toLowerCase().trim();
+            await db.run(
+              `INSERT INTO ocr_corrections (raw_ocr_text, correct_medicine_name, success_count)
+               VALUES (?, ?, 1)
+               ON CONFLICT(raw_ocr_text) DO UPDATE SET
+                 correct_medicine_name = excluded.correct_medicine_name,
+                 success_count = success_count + 1,
+                 updated_at = CURRENT_TIMESTAMP`,
+              [cleanOcr, medName.trim()]
+            ).catch(() => {});
+          }
+        }
+      } catch (learnErr) {
+        console.warn('[Sales Learning] Failed to record bill learning feedback:', learnErr);
+      }
+    })();
+
+    // Trigger WhatsApp notification — same mechanism as CRM page (dynamic import + direct sendMessage)
     if (sendWhatsApp || paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID') {
-      const phoneForWA = (patient_phone || '').trim();
+      const rawDigits = (patient_phone || '').replace(/\D/g, '');
+      const phoneForWA = rawDigits.length === 12 && rawDigits.startsWith('91')
+        ? rawDigits.slice(2)
+        : (rawDigits.length > 10 ? rawDigits.slice(-10) : rawDigits);
       const nameForWA = (patient_name || 'Customer').trim();
-      if (phoneForWA) {
+
+      if (phoneForWA && phoneForWA.length === 10) {
         // Fire-and-forget: does NOT block the API response
         (async () => {
           try {
@@ -468,6 +495,20 @@ router.post('/', async (req, res) => {
                 return dStr || '';
               }
             };
+
+            // Build Item Breakdown List
+            let itemLines = '';
+            if (items && Array.isArray(items) && items.length > 0) {
+              itemLines += `📦 *Items Purchased:*\n`;
+              items.forEach((it: any, idx: number) => {
+                const med = it.medicine_name || it.name || 'Medicine';
+                const q = Number(it.quantity || it.qty || 1);
+                const m = Number(it.mrp || 0);
+                const itemTot = Number(it.total || (m * q));
+                itemLines += `${idx + 1}. *${med}* x ${q} strip(s) = ₹${itemTot.toFixed(2)}\n`;
+              });
+              itemLines += `\n`;
+            }
 
             const isCredit = paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID';
             let waMsg = `Dear ${nameForWA},\n\n`;
@@ -489,43 +530,44 @@ router.post('/', async (req, res) => {
                 const amt = Number(inv.total_amount || 0);
                 oldDuesSum += amt;
                 const dFormatted = formatDate(inv.date);
-                oldBillsListStr += `â€¢ Bill #${inv.invoice_no} (${dFormatted}): â‚¹${amt.toFixed(2)}\n`;
+                oldBillsListStr += `• Bill #${inv.invoice_no} (${dFormatted}): ₹${amt.toFixed(2)}\n`;
               }
 
               const currentBillAmt = Number(total);
               const finalOutstanding = oldDuesSum + currentBillAmt;
               const todayStr = formatDate(invoiceDateValue);
 
-              waMsg += `ðŸ“Œ *Credit Purchase Bill & Account Summary*\n\n`;
-              waMsg += `ðŸ§¾ *Current Bill (New)*\n`;
-              waMsg += `â€¢ Bill No: *#${invoice_no}*\n`;
-              waMsg += `â€¢ Date: *${todayStr}*\n`;
-              waMsg += `â€¢ Amount: *â‚¹${currentBillAmt.toFixed(2)}*\n\n`;
+              waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
+              waMsg += `🧾 *Current Bill (#${invoice_no})*\n`;
+              waMsg += `• Date: *${todayStr}*\n`;
+              waMsg += `• Amount: *₹${currentBillAmt.toFixed(2)}*\n\n`;
+              waMsg += itemLines;
 
               if (oldInvoices.length > 0) {
-                waMsg += `ðŸ“œ *Previous Unpaid Bills (${oldInvoices.length})*\n`;
+                waMsg += `📜 *Previous Unpaid Bills (${oldInvoices.length})*\n`;
                 waMsg += `${oldBillsListStr}\n`;
 
-                waMsg += `ðŸ“Š *Total Calculation Summary*\n`;
-                waMsg += `Previous Dues: â‚¹${oldDuesSum.toFixed(2)}\n`;
-                waMsg += `Current Bill:  â‚¹${currentBillAmt.toFixed(2)}\n`;
-                waMsg += `â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n`;
-                waMsg += `ðŸ’° *Final Total Outstanding Balance: â‚¹${finalOutstanding.toFixed(2)}*\n\n`;
+                waMsg += `📊 *Total Calculation Summary*\n`;
+                waMsg += `Previous Dues: ₹${oldDuesSum.toFixed(2)}\n`;
+                waMsg += `Current Bill:  ₹${currentBillAmt.toFixed(2)}\n`;
+                waMsg += `───────────────────\n`;
+                waMsg += `💰 *Final Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
               } else {
-                waMsg += `ðŸ’° *Total Outstanding Balance: â‚¹${finalOutstanding.toFixed(2)}*\n\n`;
+                waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
               }
 
               waMsg += `This bill has been posted to your credit ledger account.\n`;
               waMsg += `Kindly arrange payment at your convenience.\n\n`;
             } else {
-              waMsg += `ðŸ“„ *Sale Invoice: #${invoice_no}*\n`;
-              waMsg += `Bill Amount Paid: *â‚¹${total.toFixed(2)}*\n\n`;
+              waMsg += `🧾 *Sale Invoice: #${invoice_no}*\n`;
+              waMsg += itemLines;
+              waMsg += `Bill Amount Paid: *₹${total.toFixed(2)}*\n\n`;
               waMsg += `Thank you for your purchase!\n\n`;
             }
-            waMsg += `â€” AI Pharmacy OS`;
+            waMsg += `— AI Pharmacy OS`;
 
             await sendMessage(phoneForWA, undefined, waMsg);
-            console.log(`[POS WhatsApp] Sent credit bill notification for ${invoice_no} to ${phoneForWA}`);
+            console.log(`[POS WhatsApp] Sent bill notification for ${invoice_no} to ${phoneForWA}`);
 
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
@@ -534,10 +576,19 @@ router.post('/', async (req, res) => {
             );
           } catch (waErr: any) {
             console.error(`[POS WhatsApp] Failed to send notification for ${invoice_no}:`, waErr);
+            try {
+              await db.run(
+                `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                ['pos_invoice_failed', nameForWA, phoneForWA, `Failed to send WhatsApp: ${waErr?.message || String(waErr)}`, 'failed', `invoice_${invoiceId}`]
+              );
+            } catch (logErr) {
+              console.error('[POS WhatsApp] Failed to log failure:', logErr);
+            }
           }
         })();
       } else {
-        console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} â€” skipping WhatsApp dispatch.`);
+        console.warn(`[POS WhatsApp] Invalid/missing 10-digit phone number for invoice ${invoice_no} — skipping WhatsApp dispatch.`);
       }
     }
 
@@ -555,13 +606,30 @@ router.post('/', async (req, res) => {
             [medName, medName]
           );
           if (matching && matching.length > 0) {
-            matching.forEach(m => {
+            for (const m of matching) {
+              const specMsg = `Hi ${m.requester || 'Customer'}, your special order for *${m.medicine}* (Qty: ${item.quantity || 1}) has been billed & fulfilled. Thank you!`;
               matchedSpecialOrders.push({
                 ...m,
                 qty_sold: Number(item.quantity) || 1,
-                whatsapp_template: `Hi ${m.requester || 'Customer'}, your special order for ${m.medicine} (Qty: ${item.quantity || 1}) has been billed/fulfilled. Thank you!`
+                whatsapp_template: specMsg
               });
-            });
+              if (m.customer_phone) {
+                try {
+                  const { sendMessage } = await import('../whatsappClient.js');
+                  const specPhone = m.customer_phone.replace(/\D/g, '').slice(-10);
+                  if (specPhone.length === 10) {
+                    await sendMessage(specPhone, undefined, specMsg);
+                    await db.run(
+                      `UPDATE special_orders SET status = 'FULFILLED' WHERE id = ?`,
+                      [m.order_id]
+                    );
+                    console.log(`[Special Order WA] Dispatched fulfillment alert for order #${m.order_id} to ${specPhone}`);
+                  }
+                } catch (specWaErr) {
+                  console.warn(`[Special Order WA] Failed dispatch for order #${m.order_id}:`, specWaErr);
+                }
+              }
+            }
           }
         }
       }

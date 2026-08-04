@@ -275,9 +275,19 @@ export class MedicineService {
       };
 
       for (const [jsKey, dbKey] of Object.entries(fieldMappings)) {
-        if (data[jsKey as keyof MedicineData] !== undefined) {
-          fields.push(`${dbKey} = ?`);
-          values.push(data[jsKey as keyof MedicineData]);
+        const newVal = data[jsKey as keyof MedicineData];
+        if (newVal !== undefined && newVal !== null && String(newVal).trim() !== '') {
+          const currentVal = (existing as any)[dbKey];
+          const isEmptyCurrent = currentVal === undefined || currentVal === null || String(currentVal).trim() === '';
+          if (options.choice === 'merge') {
+            if (isEmptyCurrent) {
+              fields.push(`${dbKey} = ?`);
+              values.push(newVal);
+            }
+          } else {
+            fields.push(`${dbKey} = ?`);
+            values.push(newVal);
+          }
         }
       }
 

@@ -15,6 +15,7 @@ import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { getLocalDateString, getTodayString, getNDaysAgoString } from '../../utils/date';
 import { toastEvent } from '../../services/events';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -2852,7 +2853,7 @@ const Purchases: React.FC = () => {
                 <input
                   type="tel"
                   value={newDistributor.phone}
-                  onChange={(e) => setNewDistributor({ ...newDistributor, phone: e.target.value })}
+                  onChange={(e) => setNewDistributor({ ...newDistributor, phone: sanitizePhoneInput(e.target.value) })}
                   className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="+91 98765 43210"
                 />

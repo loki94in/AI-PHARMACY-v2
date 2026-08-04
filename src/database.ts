@@ -494,9 +494,36 @@ export async function ensureSchema(dbPath: string) {
     CREATE TABLE IF NOT EXISTS distributor_learning_profiles (
       distributor_id INTEGER PRIMARY KEY,
       file_mapping_rules TEXT,
+      layout_type TEXT,
+      layout_patterns TEXT,
+      field_positions TEXT,
+      missing_field_rules TEXT,
+      success_count INTEGER DEFAULT 0,
+      last_success_at DATETIME,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(distributor_id) REFERENCES distributors(id)
     );
+
+    const profileCols = await db.all("PRAGMA table_info(distributor_learning_profiles)").catch(() => []);
+    const existingProfileCols = new Set(profileCols.map((c: any) => c.name));
+    if (!existingProfileCols.has('layout_type')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN layout_type TEXT").catch(() => {});
+    }
+    if (!existingProfileCols.has('layout_patterns')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN layout_patterns TEXT").catch(() => {});
+    }
+    if (!existingProfileCols.has('field_positions')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN field_positions TEXT").catch(() => {});
+    }
+    if (!existingProfileCols.has('missing_field_rules')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN missing_field_rules TEXT").catch(() => {});
+    }
+    if (!existingProfileCols.has('success_count')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN success_count INTEGER DEFAULT 0").catch(() => {});
+    }
+    if (!existingProfileCols.has('last_success_at')) {
+      await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME").catch(() => {});
+    }
 
     CREATE TABLE IF NOT EXISTS distributor_historical_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -522,6 +522,22 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
   };
 }
 
+export function detectLayoutType(content: string): 'vertical' | 'concatenated' | 'horizontal' {
+  const lines = content.split('\n');
+  let verticalScore = 0;
+  let concatScore = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\d{3}$/.test(trimmed)) verticalScore++;
+    if (/^\d{8}/.test(trimmed) || /^\d+[a-zA-Z]+$/.test(trimmed)) concatScore++;
+  }
+
+  if (verticalScore >= 2) return 'vertical';
+  if (concatScore >= 2) return 'concatenated';
+  return 'horizontal';
+}
+
 function parseItemsFromTextLines(content: string, global_cd_per: number): any[] {
   const items: any[] = [];
   const lines = content.split('\n');
@@ -1858,7 +1874,8 @@ export class EmailService {
         historicalFiles = await db.all('SELECT distributor_id, file_headers, mapping_config FROM distributor_historical_files ORDER BY id DESC');
       }
 
-      
+      let content = '';
+
       // 2. Parse File Contents
       if (nameLower.endsWith('.csv') || nameLower.endsWith('.xlsx') || nameLower.endsWith('.xls')) {
         let records: any[] = [];
@@ -2053,7 +2070,6 @@ export class EmailService {
 
       } else {
         // PDF, Image, or Plain text parsing line by line
-        let content = '';
         const isPdf = nameLower.endsWith('.pdf');
         const isImage = /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(nameLower);
         
@@ -2259,20 +2275,26 @@ export class EmailService {
           items = parseItemsFromTextLines(content, global_cd_per);
 
           if (items.length === 0) {
-            if (content.includes('SHRIYASH DISTRIBUTORS') || content.includes('SDC/')) {
+            const detectedLayout = detectLayoutType(content);
+            if (detectedLayout === 'vertical' || content.includes('SHRIYASH DISTRIBUTORS') || content.includes('SDC/')) {
               const customRes = parseShriyashInvoice(content, global_cd_per);
-              items = customRes.items;
-              if (customRes.invoice_no) invoice_no = customRes.invoice_no;
-              if (customRes.invoice_date) invoice_date = customRes.invoice_date;
-              if (customRes.total_amount) total_amount = customRes.total_amount;
-              if (customRes.distributor_name) distributor_name = customRes.distributor_name;
-            } else if (content.includes('NITIN AGENCY') || content.includes('NA/')) {
+              if (customRes.items && customRes.items.length > 0) {
+                items = customRes.items;
+                if (customRes.invoice_no) invoice_no = customRes.invoice_no;
+                if (customRes.invoice_date) invoice_date = customRes.invoice_date;
+                if (customRes.total_amount) total_amount = customRes.total_amount;
+                if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+              }
+            }
+            if (items.length === 0 && (detectedLayout === 'concatenated' || content.includes('NITIN AGENCY') || content.includes('NA/'))) {
               const customRes = parseNitinInvoice(content, global_cd_per);
-              items = customRes.items;
-              if (customRes.invoice_no) invoice_no = customRes.invoice_no;
-              if (customRes.invoice_date) invoice_date = customRes.invoice_date;
-              if (customRes.total_amount) total_amount = customRes.total_amount;
-              if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+              if (customRes.items && customRes.items.length > 0) {
+                items = customRes.items;
+                if (customRes.invoice_no) invoice_no = customRes.invoice_no;
+                if (customRes.invoice_date) invoice_date = customRes.invoice_date;
+                if (customRes.total_amount) total_amount = customRes.total_amount;
+                if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+              }
             }
           }
 
@@ -2419,6 +2441,24 @@ export class EmailService {
       } else if (!distributorId) {
         if (distributor_name === 'Unknown Distributor') {
           distributor_name = '';
+        }
+      }
+
+      if (distributorId && items.length > 0) {
+        try {
+          const layout = detectLayoutType(content);
+          await db.run(
+            `INSERT INTO distributor_learning_profiles (distributor_id, layout_type, success_count, last_success_at)
+             VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+             ON CONFLICT(distributor_id) DO UPDATE SET
+               layout_type = excluded.layout_type,
+               success_count = success_count + 1,
+               last_success_at = CURRENT_TIMESTAMP,
+               last_updated = CURRENT_TIMESTAMP`,
+            [distributorId, layout]
+          ).catch(() => {});
+        } catch (profErr) {
+          console.warn('[Email Learning] Profile update failed:', profErr);
         }
       }
 
@@ -3324,7 +3364,7 @@ export function cleanMedicineName(rawName: string): string {
 export function isNonMedicineNoise(name: string): boolean {
   if (!name || typeof name !== 'string') return true;
   const cleaned = cleanMedicineName(name);
-  if (cleaned.length <= 2) return true;
+  if (cleaned.length < 2) return true;
   const clean = cleaned.toLowerCase();
 
   // Pure digits, symbols, or punctuation

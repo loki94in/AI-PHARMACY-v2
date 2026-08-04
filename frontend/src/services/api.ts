@@ -297,6 +297,17 @@ export const setCompactInventoryCache = (
   }
 };
 
+export const invalidateCompactInventoryCache = (): void => {
+  compactInventoryCache = null;
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem(COMPACT_INVENTORY_SESSION_KEY);
+      delete (window as any).__INVENTORY__;
+    } catch {}
+    window.dispatchEvent(new Event('inventory-cache-invalidated'));
+  }
+};
+
 // ── Inline payload types for the most-used write operations ──────────────────
 // Keeping these local avoids touching types/api.ts while still giving
 // TypeScript enough info to catch field-name typos at call sites.

@@ -114,7 +114,7 @@ class AICameraService {
         preserve_interword_spaces: '1',
 
         // Medicine label specific optimizations for offline OCR
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/ mgμ%', // Expected medicine label chars
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/:, ₹mgμ%', // Expected medicine label chars including Rupee symbol
         user_defined_dictionary: './data/medicine_dict.txt', // Custom medicine dictionary
         user_patterns_file: './data/medicine_patterns.txt',  // Patterns like "\\d+mg", "\\d+ tablet"
       });
@@ -473,14 +473,51 @@ class AICameraService {
     const strengthMatch = localOcrResult.text.match(/\d+\s*(?:mg|g|ml|μg|iu)/i);
     if (strengthMatch) finalInfo.strength = strengthMatch[0];
 
-    const batchMatch = localOcrResult.text.match(/(?:batch|lot|#)\s*[:\-]?\s*([A-Z0-9]+)/i);
+    const batchMatch = localOcrResult.text.match(/(?:batch|b\.?no\.?|lot|#)\s*[:\-]?\s*([A-Z0-9\-]+)/i);
     if (batchMatch) finalInfo.batchNumber = batchMatch[1];
 
-    const expiryMatch = localOcrResult.text.match(/(?:exp|expiry)\s*[:\-]?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2})/i);
+    const expiryMatch = localOcrResult.text.match(/(?:exp|expiry|exp\.?date)\s*[:\-]?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2})/i);
     if (expiryMatch) finalInfo.expiryDate = expiryMatch[1];
 
-    const priceMatch = localOcrResult.text.match(/(?:mrp|price|₹|rs)\s*[:\-]?\s*(\d+(?:\.\d{2})?)/i);
-    if (priceMatch) finalInfo.mrp = parseFloat(priceMatch[1]);
+    // Enhanced MRP regex matching M.R.P., MAX RETAIL PRICE, Rupee symbol, Rs., 1-3 decimals or 120/- format
+    const mrpRegex = /(?:m\.?r\.?p\.?|max\.?\s*retail\s*price|price|mrp|₹|rs\.?|rupees?)\s*[:\-=]?\s*(?:rs\.?|₹)?\s*(\d+(?:[\.,]\d{1,3})?|\d+[\/\-]\s*)/i;
+    const priceMatch = localOcrResult.text.match(mrpRegex);
+    if (priceMatch && priceMatch[1]) {
+      const cleanedVal = priceMatch[1].replace(/[\/\-]/, '').replace(',', '.');
+      const parsedMrp = parseFloat(cleanedVal);
+      if (!isNaN(parsedMrp) && parsedMrp >= 1 && parsedMrp <= 100000) {
+        finalInfo.mrp = parsedMrp;
+      }
+    }
+    if (!finalInfo.mrp) {
+      const standaloneMatch = localOcrResult.text.match(/(?:₹|rs\.?)\s*(\d+(?:\.\d{1,2})?)/i);
+      if (standaloneMatch) {
+        const val = parseFloat(standaloneMatch[1]);
+        if (!isNaN(val) && val >= 1 && val <= 100000) {
+          finalInfo.mrp = val;
+        }
+      }
+    }
+
+    // Manufacturer extraction
+    const mfrMatch = localOcrResult.text.match(/(?:mfd|mfg|manufactured|mfr)\.?\s*(?:by|in)?\s*[:\-]?\s*([A-Za-z0-9\s\.,&]{3,40})/i);
+    if (mfrMatch) {
+      finalInfo.manufacturer = mfrMatch[1].trim();
+    } else {
+      const knownMfrs = ['Cipla', 'Sun Pharma', 'Sun Pharmaceutical', 'Torrent', 'Lupin', 'Abbott', 'Mankind', 'Zydus', 'Alkem', 'Macleods', 'Intas', 'Dr. Reddy', 'Dr Reddy', 'Glenmark', 'Ipca', 'Micro Labs', 'Aristo', 'Alembic'];
+      for (const km of knownMfrs) {
+        if (new RegExp(`\\b${km}\\b`, 'i').test(localOcrResult.text)) {
+          finalInfo.manufacturer = km;
+          break;
+        }
+      }
+    }
+
+    // Packaging extraction (10x1x10, 15 TABS, 30 CAPS, 100ml, 15's)
+    const packMatch = localOcrResult.text.match(/(?:\d+\s*[xX]\s*\d+(?:\s*[xX]\s*\d+)?|\d+\s*(?:tabs?|tablets?|caps?|capsules?|strips?|ml|g|gm|s|'s|blisters?))\b/i);
+    if (packMatch) {
+      finalInfo.packaging = packMatch[0].trim();
+    }
 
     // Detect dosage form from OCR text
     const detectedForm = this.detectDosageForm(localOcrResult.text);

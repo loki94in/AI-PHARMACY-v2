@@ -1850,7 +1850,7 @@ router.get('/reconciliation', async (req, res) => {
          OR LOWER(subject) LIKE '%dispatch%'
          OR LOWER(subject) LIKE '%tax%')
       ORDER BY uid DESC
-      LIMIT 50
+      LIMIT 200
     `);
 
     const uids = orderEmails.map(e => e.uid);
@@ -1940,7 +1940,7 @@ router.get('/reconciliation', async (req, res) => {
                 parsedItems.push(...resParse.items);
               }
             } catch (pe) {
-              // ignore
+              console.error('[Email Reconciliation] Attachment parse failed:', pe);
             }
           }
         }

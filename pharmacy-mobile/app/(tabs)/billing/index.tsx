@@ -30,6 +30,18 @@ import {
 } from '../../../lib/api';
 import UpwardSearchDropdown from '../../../components/UpwardSearchDropdown';
 
+const sanitizePhoneInput = (val: string | null | undefined): string => {
+  if (!val) return '';
+  const digits = val.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return digits.slice(2);
+  }
+  if (digits.length > 10 && digits.startsWith('91')) {
+    return digits.slice(2, 12);
+  }
+  return digits.slice(0, 10);
+};
+
 export interface EnhancedCartEntry extends SearchMedicineResult {
   strip_qty: number;
   loose_qty: number;
@@ -1142,7 +1154,7 @@ export default function BillingScreen() {
             <TextInput
               style={styles.textInputCompact}
               value={newCustPhone}
-              onChangeText={setNewCustPhone}
+              onChangeText={(text) => setNewCustPhone(sanitizePhoneInput(text))}
               placeholder="10-digit mobile number"
               placeholderTextColor={colors.textMuted}
               keyboardType="phone-pad"

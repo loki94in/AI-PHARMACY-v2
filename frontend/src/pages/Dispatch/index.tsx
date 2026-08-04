@@ -12,6 +12,7 @@ import {
   type CachedDeliveryBoy,
 } from '../../utils/pageModuleCaches';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 interface DispatchOrder {
   id: number;
@@ -385,7 +386,7 @@ const Dispatch = () => {
                 type="text"
                 placeholder="WhatsApp Phone (10 digits)"
                 value={newBoyPhone}
-                onChange={e => setNewBoyPhone(e.target.value)}
+                onChange={e => setNewBoyPhone(sanitizePhoneInput(e.target.value))}
                 className="w-full text-xs px-2.5 py-1.5 rounded-lg bg-bg2 border border-glass-border text-text focus:outline-none focus:border-primary font-mono"
               />
             </div>
@@ -417,7 +418,7 @@ const Dispatch = () => {
                     <input
                       type="text"
                       value={editBoyPhone}
-                      onChange={e => setEditBoyPhone(e.target.value)}
+                      onChange={e => setEditBoyPhone(sanitizePhoneInput(e.target.value))}
                       className="w-full text-xs px-2 py-1 rounded bg-bg border border-glass-border text-text font-mono"
                     />
                     <div className="flex justify-end gap-1.5">

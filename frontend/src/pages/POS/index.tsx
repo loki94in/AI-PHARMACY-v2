@@ -318,8 +318,8 @@ const POS = () => {
             looseQty: itemLooseQty,
             discount: Number(it.discount_per !== undefined ? it.discount_per : (it.discount || 0)),
             packSize: packSize,
-            availableStock: 99999,
-            availableLooseStock: 99999,
+            availableStock: Number(it.stock_qty ?? it.quantity ?? itemQty),
+            availableLooseStock: Number(it.loose_quantity ?? it.loose_qty ?? itemLooseQty),
             isEmptyRow: false
           };
         });
@@ -1322,10 +1322,10 @@ const POS = () => {
           medicine_id: medicineId,
           batch_no: refItem.batch || 'AUTO',
           expiry_date: refItem.expiry || '12/28',
-          stock_qty: Math.max(999, refQty + 10),
-          loose_quantity: Math.max(999, refLoose + 10),
+          stock_qty: Math.max(refQty, refItem.stock_qty ?? 0),
+          loose_quantity: Math.max(refLoose, refItem.loose_quantity ?? 0),
           mrp: refItem.mrp || 100,
-          cost_price: refItem.costPrice || ((refItem.mrp || 100) * 0.7),
+          cost_price: refItem.costPrice || (refItem.mrp || 100),
           unit_price: refItem.unitPrice || refItem.mrp || 100,
           pack_size: refItem.packSize || 10,
           isExpired: false
@@ -1884,15 +1884,22 @@ const POS = () => {
         });
       } else {
         // Add as custom manual entry from scan details
+        let extractedPackSize = 1;
+        if (info.packaging) {
+          const numMatch = info.packaging.match(/(\d+)\s*(?:tabs?|tablets?|caps?|'s|s\b)/i) || info.packaging.match(/^(\d+)$/);
+          if (numMatch) {
+            extractedPackSize = parseInt(numMatch[1], 10) || 1;
+          }
+        }
         addToCart({
           id: Date.now(),
           name: nameQuery.trim() || 'Scanned Item',
           batch: info.batchNumber || 'MANUAL',
           expiry: info.expiryDate || '12/28',
           mrp: info.mrp || 0,
-          costPrice: info.mrp ? info.mrp * 0.7 : 0,
+          costPrice: info.costPrice || 0,
           salts: 'OCR Scan Entry',
-          packSize: 10,
+          packSize: extractedPackSize,
           scanImage: result.capturedImage,
           rawOcrText: result.text,
           quantity: 0
@@ -2764,6 +2771,14 @@ const POS = () => {
                               type="button"
                               data-highlighted={isHighlighted ? "true" : "false"}
                               onClick={() => {
+                                if (totalUnits <= 0) {
+                                  toastEvent.trigger(`${item.medicine_name} is currently out of stock!`, 'error');
+                                  return;
+                                }
+                                if (remainingUnits <= 0) {
+                                  toastEvent.trigger(`Cannot add more ${item.medicine_name} — maximum available stock (${totalUnits} units) is already in cart!`, 'error');
+                                  return;
+                                }
                                 fetchDetailsAndAddToCart(item);
                                 setSearchTerm('');
                                 setSearchResults([]);

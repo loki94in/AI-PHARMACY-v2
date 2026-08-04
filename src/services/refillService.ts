@@ -52,9 +52,9 @@ export async function checkAllRefills(db: Database): Promise<void> {
       continue;
     }
 
-    // Check stock availability
+    // Check stock availability (full strips + loose units)
     const stockRow = await db.get(
-      'SELECT SUM(quantity) as total_qty FROM inventory_master WHERE medicine_id = ?',
+      'SELECT (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as total_qty FROM inventory_master WHERE medicine_id = ?',
       [refill.medicine_id]
     );
     const qty = stockRow ? (stockRow.total_qty || 0) : 0;

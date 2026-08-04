@@ -699,8 +699,8 @@ export async function sendMessage(
     const msgHash = hashMessageBody(fullMsg);
     const sendKey = `${cleanPhone}:${msgHash}:${fullMsg.length}`;
     const nowTs = Date.now();
-    if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey)! < 30000) {
-      console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 30s.`);
+    if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey)! < 5000) {
+      console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 5s.`);
       aggregateResult = { sent: true, suppressed: true };
       continue;
     }

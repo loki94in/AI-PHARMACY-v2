@@ -38,6 +38,7 @@ import {
   ExternalLink,
   AlertCircle
 } from 'lucide-react';
+import { sanitizeMultiPhoneInput } from '../../utils/phone';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -2565,7 +2566,7 @@ const Learning: React.FC = () => {
                   className="premium-input w-full text-xs"
                   placeholder="e.g. +919876543210, +919900000000"
                   value={newDistPhone}
-                  onChange={(e) => setNewDistPhone(e.target.value)}
+                  onChange={(e) => setNewDistPhone(sanitizeMultiPhoneInput(e.target.value))}
                 />
               </div>
               <div className="space-y-1">

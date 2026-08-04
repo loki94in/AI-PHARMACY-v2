@@ -33,7 +33,7 @@ router.get('/audit/queue', async (req, res) => {
 
 // Submit a pharmacist correction (human audit resolution)
 router.post('/audit/resolve', async (req, res) => {
-  const { id, name, strength, batchNumber, expiryDate, mrp, action } = req.body;
+  const { id, name, strength, batchNumber, expiryDate, mrp, action, manufacturer, packaging, dosageForm } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: 'Queue entry ID is required' });
@@ -65,7 +65,11 @@ router.post('/audit/resolve', async (req, res) => {
       const { medicineService } = await import('../services/medicineService.js');
       const writeResult = await medicineService.addOrUpdateMedicine(db, {
         name: adjustedName,
-        mrp: mrp || undefined
+        mrp: mrp || undefined,
+        manufacturer: manufacturer || undefined,
+        packaging: packaging || undefined,
+        itemType: dosageForm || undefined,
+        strength: strength || undefined
       }, { skipSimilarityCheck: true });
       const medicineId = writeResult.medicine.id;
 

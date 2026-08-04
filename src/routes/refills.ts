@@ -284,7 +284,7 @@ router.get('/panel', async (req, res) => {
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
        LEFT JOIN (
-         SELECT medicine_id, SUM(quantity) as in_stock_qty 
+         SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
          FROM inventory_master 
          GROUP BY medicine_id
        ) inv ON inv.medicine_id = pr.medicine_id

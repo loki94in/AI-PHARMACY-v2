@@ -1,6 +1,6 @@
 # AI PHARMACY v2 â€” COMPLETE IMPLEMENTATION PLAN
 
-> **Status:** PLANNING â€” DO NOT IMPLEMENT UNTIL APPROVED
+> **Status:** COMPLETED â€” ALL 8 PHASES IMPLEMENTED â€” DO NOT IMPLEMENT UNTIL APPROVED
 > **Created:** 2026-08-04
 > **Total Phases:** 8
 > **Estimated Total Time:** ~14 hours
@@ -62,7 +62,7 @@ Layout learning (Phase 7) -> New distributors auto-learned -> Zero configuration
 
 ## SYSTEM ARCHITECTURE OVERVIEW
 
-### Data Flow — How Everything Connects
+### Data Flow ï¿½ How Everything Connects
 
 `
 USER ACTION                    SYSTEM RESPONSE                    LEARNING FEEDBACK
@@ -115,7 +115,7 @@ USER ACTION                    SYSTEM RESPONSE                    LEARNING FEEDB
 ## PHASE 1: PHONE NUMBER CLEANUP
 
 **Time:** 30 minutes
-**Priority:** Quick win — foundational
+**Priority:** Quick win ï¿½ foundational
 **Depends on:** None
 
 ### Problem Statement
@@ -164,10 +164,10 @@ Some input fields have sanitizePhoneInput() (strips to 10 digits), others have N
 
 ---
 
-## PHASE 2: OCR DATA QUALITY — EXTRACT ALL FIELDS
+## PHASE 2: OCR DATA QUALITY ï¿½ EXTRACT ALL FIELDS
 
 **Time:** 2 hours
-**Priority:** High impact — foundation for everything
+**Priority:** High impact ï¿½ foundation for everything
 **Depends on:** Phase 1
 
 ### Problem Statement
@@ -178,10 +178,10 @@ OCR currently only extracts medicine name and MRP. It misses manufacturer, packa
 
 | # | Cause | File:Line | What Goes Wrong |
 |---|---|---|---|
-| 1 | MRP regex too narrow | aiCameraService.ts:482 | Only matches MRP: 120.00 — misses M.R.P., MAX RETAIL PRICE, Rs120/- |
+| 1 | MRP regex too narrow | aiCameraService.ts:482 | Only matches MRP: 120.00 ï¿½ misses M.R.P., MAX RETAIL PRICE, Rs120/- |
 | 2 | No MRP sanity check | aiCameraService.ts:483 | Misread 1 or 999999 accepted silently |
-| 3 | No manufacturer extraction | aiCameraService.ts:426 | Manufacturer NEVER extracted — always null |
-| 4 | No packaging extraction | aiCameraService.ts:426 | Packaging NEVER extracted — always null |
+| 3 | No manufacturer extraction | aiCameraService.ts:426 | Manufacturer NEVER extracted ï¿½ always null |
+| 4 | No packaging extraction | aiCameraService.ts:426 | Packaging NEVER extracted ï¿½ always null |
 | 5 | Rupee symbol dropped from OCR | aiCameraService.ts:117 | Char whitelist does not include Rupee symbol |
 | 6 | Hardcoded packSize=10 | POS/index.tsx:1895 | All scanned items default to 10 tablets |
 | 7 | Guessed costPrice=70% | POS/index.tsx:1893 | Cost price guessed at 70% of MRP |
@@ -194,15 +194,15 @@ OCR currently only extracts medicine name and MRP. It misses manufacturer, packa
 | # | File | Line | Change |
 |---|---|---|---|
 | 1 | src/services/aiCameraService.ts | 482 | Fix MRP regex to handle M.R.P., MAX RETAIL PRICE, Rupee symbol, Rs., multi-word separators, 1-3 decimal places |
-| 2 | src/services/aiCameraService.ts | 483 | Add MRP sanity check — reject values less than 1 or greater than 100000 |
-| 3 | src/services/aiCameraService.ts | 426 | Add manufacturer extraction — regex for common Indian pharma patterns: Mfr by, Manufactured by, company names |
-| 4 | src/services/aiCameraService.ts | 426 | Add packaging extraction — detect 10x1x10, 15 TABS, 30 CAPS, 100ml patterns |
+| 2 | src/services/aiCameraService.ts | 483 | Add MRP sanity check ï¿½ reject values less than 1 or greater than 100000 |
+| 3 | src/services/aiCameraService.ts | 426 | Add manufacturer extraction ï¿½ regex for common Indian pharma patterns: Mfr by, Manufactured by, company names |
+| 4 | src/services/aiCameraService.ts | 426 | Add packaging extraction ï¿½ detect 10x1x10, 15 TABS, 30 CAPS, 100ml patterns |
 | 5 | src/services/aiCameraService.ts | 117 | Add Rupee symbol to char whitelist so OCR does not silently drop it |
-| 6 | src/routes/aiCamera.ts | 66 | Save all OCR fields on audit resolve — pass manufacturer, packaging, strength to addOrUpdateMedicine() |
-| 7 | frontend/src/pages/POS/index.tsx | 1895 | Remove hardcoded packSize=10 — use extracted packaging or lookup from database |
-| 8 | frontend/src/pages/POS/index.tsx | 1893 | Remove guessed costPrice=70% — use rate from database or leave blank |
+| 6 | src/routes/aiCamera.ts | 66 | Save all OCR fields on audit resolve ï¿½ pass manufacturer, packaging, strength to addOrUpdateMedicine() |
+| 7 | frontend/src/pages/POS/index.tsx | 1895 | Remove hardcoded packSize=10 ï¿½ use extracted packaging or lookup from database |
+| 8 | frontend/src/pages/POS/index.tsx | 1893 | Remove guessed costPrice=70% ï¿½ use rate from database or leave blank |
 | 9 | src/services/productNameFilterService.ts | 436 | Widen MRP tolerance from +/-20% to +/-40% to handle OCR misreads |
-| 10 | src/services/aiCameraService.ts | — | Add multi-medicine detection — split image into regions, detect multiple strips, return array |
+| 10 | src/services/aiCameraService.ts | ï¿½ | Add multi-medicine detection ï¿½ split image into regions, detect multiple strips, return array |
 
 ### How This Helps Other Phases
 
@@ -226,10 +226,10 @@ OCR currently only extracts medicine name and MRP. It misses manufacturer, packa
 
 ---
 
-## PHASE 3: WHATSAPP NOTIFICATIONS — INCLUDE MEDICINE DETAILS
+## PHASE 3: WHATSAPP NOTIFICATIONS ï¿½ INCLUDE MEDICINE DETAILS
 
 **Time:** 1.5 hours
-**Priority:** High impact — customer-facing
+**Priority:** High impact ï¿½ customer-facing
 **Depends on:** Phase 2
 
 ### Problem Statement
@@ -240,9 +240,9 @@ When a bill is saved, the WhatsApp notification to the customer has NO medicine 
 
 | # | Cause | File:Line | What Goes Wrong |
 |---|---|---|---|
-| 1 | No items in template | sales.ts:473-525 | Template only has bill number + total — no item list |
+| 1 | No items in template | sales.ts:473-525 | Template only has bill number + total ï¿½ no item list |
 | 2 | PDF path not used | sales.ts:527 | Main POS sends text-only; PDF receipt only in staged-sale path |
-| 3 | Errors silently swallowed | sales.ts:458 | Fire-and-forget IIFE — if WhatsApp fails, no error shown |
+| 3 | Errors silently swallowed | sales.ts:458 | Fire-and-forget IIFE ï¿½ if WhatsApp fails, no error shown |
 | 4 | Special order template never sent | sales.ts:562 | Template built but never dispatched |
 | 5 | Phone format issues | sales.ts:454 | +91 prefix handling may produce wrong WhatsApp JID |
 
@@ -250,11 +250,11 @@ When a bill is saved, the WhatsApp notification to the customer has NO medicine 
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | src/routes/sales.ts | 473-525 | Add item list to template — loop over items array, append medicine name + qty + MRP to waMsg |
-| 2 | src/routes/sales.ts | 527 | Use PDF path — call whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId) instead of plain text |
-| 3 | src/routes/sales.ts | 458 | Add error feedback — log failure to automation_notifications with status: failed |
-| 4 | src/routes/sales.ts | 562 | Send special order notification — after building template, call sendMessage() to dispatch it |
-| 5 | src/routes/sales.ts | 454 | Normalize phone — use sanitizePhoneInput() before sending to WhatsApp |
+| 1 | src/routes/sales.ts | 473-525 | Add item list to template ï¿½ loop over items array, append medicine name + qty + MRP to waMsg |
+| 2 | src/routes/sales.ts | 527 | Use PDF path ï¿½ call whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId) instead of plain text |
+| 3 | src/routes/sales.ts | 458 | Add error feedback ï¿½ log failure to automation_notifications with status: failed |
+| 4 | src/routes/sales.ts | 562 | Send special order notification ï¿½ after building template, call sendMessage() to dispatch it |
+| 5 | src/routes/sales.ts | 454 | Normalize phone ï¿½ use sanitizePhoneInput() before sending to WhatsApp |
 
 ### Template Example (After Fix)
 
@@ -290,7 +290,7 @@ Thank you for your purchase!
 ## PHASE 4: STOCK CHECK / CART FIXES
 
 **Time:** 1.5 hours
-**Priority:** Medium impact — prevents overselling
+**Priority:** Medium impact ï¿½ prevents overselling
 **Depends on:** Phase 1
 
 ### Problem Statement
@@ -306,7 +306,7 @@ Cart sometimes shows medicines as available when they are out of stock. Refill s
 | 3 | No hard block on over-adding | POS/index.tsx:2746 | Warning shows but does not block adding more |
 | 4 | Undefined stock bypasses check | POS/index.tsx:1982 | Old/held bills skip validation entirely |
 | 5 | Edit mode 99999 | POS/index.tsx:321 | Edit bill shows unlimited stock |
-| 6 | Refill ignores loose stock | refillService.ts:56 | SUM(quantity) only — loose invisible |
+| 6 | Refill ignores loose stock | refillService.ts:56 | SUM(quantity) only ï¿½ loose invisible |
 | 7 | Refill panel ignores loose | refills.ts:283 | Same issue in panel query |
 | 8 | Recommend-quantity defaults | sales.ts:810 | Name mismatch defaults to 1 strip |
 
@@ -314,14 +314,14 @@ Cart sometimes shows medicines as available when they are out of stock. Refill s
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | frontend/src/pages/POS/index.tsx | 1315-1332 | Remove fake 999 — when activeBatches.length === 0, show Out of stock instead |
-| 2 | frontend/src/pages/POS/index.tsx | 2746-2758 | Hard block — prevent adding more than available stock in search dropdown |
-| 3 | frontend/src/pages/POS/index.tsx | 1982 | Do not skip — fetch live stock from server instead of skipping validation |
-| 4 | frontend/src/pages/POS/index.tsx | 321 | Remove 99999 — fetch real stock for edit mode |
-| 5 | src/services/refillService.ts | 56-60 | Count loose — SUM(quantity + COALESCE(loose_quantity, 0)) |
-| 6 | src/routes/refills.ts | 283-291 | Count loose — same fix |
-| 7 | src/routes/sales.ts | 810-860 | Fix fallback — use LIKE prefix match instead of exact IN match |
-| 8 | frontend/src/services/api.ts | 253-298 | Auto-refresh — ensure inventoryCache.invalidate() triggers frontend refresh |
+| 1 | frontend/src/pages/POS/index.tsx | 1315-1332 | Remove fake 999 ï¿½ when activeBatches.length === 0, show Out of stock instead |
+| 2 | frontend/src/pages/POS/index.tsx | 2746-2758 | Hard block ï¿½ prevent adding more than available stock in search dropdown |
+| 3 | frontend/src/pages/POS/index.tsx | 1982 | Do not skip ï¿½ fetch live stock from server instead of skipping validation |
+| 4 | frontend/src/pages/POS/index.tsx | 321 | Remove 99999 ï¿½ fetch real stock for edit mode |
+| 5 | src/services/refillService.ts | 56-60 | Count loose ï¿½ SUM(quantity + COALESCE(loose_quantity, 0)) |
+| 6 | src/routes/refills.ts | 283-291 | Count loose ï¿½ same fix |
+| 7 | src/routes/sales.ts | 810-860 | Fix fallback ï¿½ use LIKE prefix match instead of exact IN match |
+| 8 | frontend/src/services/api.ts | 253-298 | Auto-refresh ï¿½ ensure inventoryCache.invalidate() triggers frontend refresh |
 
 ### How This Helps Other Phases
 
@@ -342,10 +342,10 @@ Cart sometimes shows medicines as available when they are out of stock. Refill s
 
 ---
 
-## PHASE 5: EMAIL RECONCILIATION — UNIVERSAL PARSER
+## PHASE 5: EMAIL RECONCILIATION ï¿½ UNIVERSAL PARSER
 
 **Time:** 3 hours
-**Priority:** High impact — distributor invoice tracking
+**Priority:** High impact ï¿½ distributor invoice tracking
 **Depends on:** Phase 1, Phase 2
 
 ### Problem Statement
@@ -358,7 +358,7 @@ Email reconciliation fails to detect medicines from distributor invoices. Only 2
 |---|---|---|---|
 | 1 | Only 2 distributor parsers | emailService.ts:2262 | Hardcoded for Shriyash and Nitin only |
 | 2 | Generic parser too rigid | emailService.ts:525 | Requires exact 5+ token format with expiry in specific position |
-| 3 | Silent error swallowing | purchases.ts:1942 | catch (pe) { // ignore } — failures disappear |
+| 3 | Silent error swallowing | purchases.ts:1942 | catch (pe) { // ignore } ï¿½ failures disappear |
 | 4 | Medicine names lost | emailService.ts:1309 | Body text extraction only finds inline quantities |
 | 5 | PDF text garbled | emailService.ts:2060 | Scanned PDFs return empty/jumbled text |
 | 6 | Limited email query | purchases.ts:1853 | Only last 50 emails queried |
@@ -369,14 +369,14 @@ Email reconciliation fails to detect medicines from distributor invoices. Only 2
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | src/services/emailService.ts | — | Add detectLayoutType(text) — auto-detect horizontal/vertical/concatenated layout |
-| 2 | src/services/emailService.ts | 525 | Rewrite generic parser — use layout classifier instead of rigid format |
-| 3 | src/services/emailService.ts | 581 | Extract Shriyash logic — generalize into parseVerticalBlockInvoice() function |
-| 4 | src/services/emailService.ts | 731 | Extract Nitin logic — generalize into parseConcatenatedInvoice() function |
-| 5 | src/services/emailService.ts | 2262 | Remove hardcoded triggers — use layout detection, not content.includes(SHRIYASH) |
-| 6 | src/services/emailService.ts | 3324 | Improve noise filter — be less aggressive, allow single-word names |
-| 7 | src/services/emailService.ts | 2519 | Add error logging — log parsing failures instead of silent catch |
-| 8 | src/services/emailService.ts | 1936 | Handle missing attachments — log warning, skip gracefully |
+| 1 | src/services/emailService.ts | ï¿½ | Add detectLayoutType(text) ï¿½ auto-detect horizontal/vertical/concatenated layout |
+| 2 | src/services/emailService.ts | 525 | Rewrite generic parser ï¿½ use layout classifier instead of rigid format |
+| 3 | src/services/emailService.ts | 581 | Extract Shriyash logic ï¿½ generalize into parseVerticalBlockInvoice() function |
+| 4 | src/services/emailService.ts | 731 | Extract Nitin logic ï¿½ generalize into parseConcatenatedInvoice() function |
+| 5 | src/services/emailService.ts | 2262 | Remove hardcoded triggers ï¿½ use layout detection, not content.includes(SHRIYASH) |
+| 6 | src/services/emailService.ts | 3324 | Improve noise filter ï¿½ be less aggressive, allow single-word names |
+| 7 | src/services/emailService.ts | 2519 | Add error logging ï¿½ log parsing failures instead of silent catch |
+| 8 | src/services/emailService.ts | 1936 | Handle missing attachments ï¿½ log warning, skip gracefully |
 | 9 | src/routes/purchases.ts | 1853 | Increase email limit from 50 to 200 |
 | 10 | src/routes/purchases.ts | 2031 | Increase purchase limit from 200 to 500 |
 
@@ -426,7 +426,7 @@ detectLayoutType(text):
 ## PHASE 6: SELF-LEARNING INTEGRATION
 
 **Time:** 2 hours
-**Priority:** Medium impact — app improvement over time
+**Priority:** Medium impact ï¿½ app improvement over time
 **Depends on:** Phase 2, Phase 3, Phase 5
 
 ### Problem Statement
@@ -447,12 +447,12 @@ The app has 4 isolated learning tables that do not talk to each other. Bills do 
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | src/routes/sales.ts | after save | Bill to Learning — after sale, confirm medicine name in ocr_corrections if scan was used |
-| 2 | src/services/productNameFilterService.ts | 286 | Load all fields — extend initialize() to load name + MRP + manufacturer + packaging + strength |
-| 3 | src/services/productNameFilterService.ts | 364 | Use all fields in scoring — add manufacturer/packaging/strength as scoring signals |
-| 4 | src/services/medicineService.ts | 226 | Auto-fill missing fields — merge new data with existing (do not overwrite good data) |
-| 5 | src/routes/learning.ts | — | Add unified dashboard — show all learning activity in one view |
-| 6 | frontend/src/pages/Learning/index.tsx | — | Add Learning Stats — show accuracy rate, most scanned, most corrected |
+| 1 | src/routes/sales.ts | after save | Bill to Learning ï¿½ after sale, confirm medicine name in ocr_corrections if scan was used |
+| 2 | src/services/productNameFilterService.ts | 286 | Load all fields ï¿½ extend initialize() to load name + MRP + manufacturer + packaging + strength |
+| 3 | src/services/productNameFilterService.ts | 364 | Use all fields in scoring ï¿½ add manufacturer/packaging/strength as scoring signals |
+| 4 | src/services/medicineService.ts | 226 | Auto-fill missing fields ï¿½ merge new data with existing (do not overwrite good data) |
+| 5 | src/routes/learning.ts | ï¿½ | Add unified dashboard ï¿½ show all learning activity in one view |
+| 6 | frontend/src/pages/Learning/index.tsx | ï¿½ | Add Learning Stats ï¿½ show accuracy rate, most scanned, most corrected |
 
 ### Learning Flow Diagram
 
@@ -491,7 +491,7 @@ Manual alias created           medicine_aliases               Alias resolves acr
 ## PHASE 7: PER-DISTRIBUTOR LAYOUT LEARNING
 
 **Time:** 2 hours
-**Priority:** Medium impact — zero-configuration for new distributors
+**Priority:** Medium impact ï¿½ zero-configuration for new distributors
 **Depends on:** Phase 5, Phase 6
 
 ### Problem Statement
@@ -512,12 +512,12 @@ The app has CSV/XLSX column learning per distributor, but NO text/PDF layout lea
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | src/database.ts | 494 | Extend schema — add layout_type, layout_patterns, field_positions, missing_field_rules, success_count, last_success_at |
-| 2 | src/services/emailService.ts | — | Save layout on success — after parse, store layout_type, regex patterns, field positions |
-| 3 | src/services/emailService.ts | — | Use learned layout — on next email, load profile, apply patterns |
-| 4 | src/services/emailService.ts | — | Handle missing fields — use missing_field_rules (GST default, batch generation, rate calculation) |
-| 5 | frontend/src/pages/Learning/index.tsx | — | Add Layout Editor — show/edit layout type, field rules, missing field defaults |
-| 6 | frontend/src/pages/Learning/index.tsx | — | Add Parse History — show last 5 successful parses |
+| 1 | src/database.ts | 494 | Extend schema ï¿½ add layout_type, layout_patterns, field_positions, missing_field_rules, success_count, last_success_at |
+| 2 | src/services/emailService.ts | ï¿½ | Save layout on success ï¿½ after parse, store layout_type, regex patterns, field positions |
+| 3 | src/services/emailService.ts | ï¿½ | Use learned layout ï¿½ on next email, load profile, apply patterns |
+| 4 | src/services/emailService.ts | ï¿½ | Handle missing fields ï¿½ use missing_field_rules (GST default, batch generation, rate calculation) |
+| 5 | frontend/src/pages/Learning/index.tsx | ï¿½ | Add Layout Editor ï¿½ show/edit layout type, field rules, missing field defaults |
+| 6 | frontend/src/pages/Learning/index.tsx | ï¿½ | Add Parse History ï¿½ show last 5 successful parses |
 
 ### Schema Extension
 
@@ -537,9 +537,9 @@ ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME;
 | GST | Use 12% (most common pharma slab) | {gst_default: 18} |
 | Batch | Generate from invoice_no + serial | {batch_prefix: B-IMPORT} |
 | Rate | Calculate: rate = MRP / (1 + gst%/100) | {rate_calculation: from_mrp_and_gst} |
-| MRP | Flag for review | — |
-| Expiry | Flag for review | — |
-| Quantity | Flag for review | — |
+| MRP | Flag for review | ï¿½ |
+| Expiry | Flag for review | ï¿½ |
+| Quantity | Flag for review | ï¿½ |
 
 ### How This Helps Other Phases
 
@@ -562,7 +562,7 @@ ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME;
 ## PHASE 8: NOTIFICATION & COMMUNICATION FIXES
 
 **Time:** 1 hour
-**Priority:** Quick wins — fixing silent failures
+**Priority:** Quick wins ï¿½ fixing silent failures
 **Depends on:** Phase 3
 
 ### Problem Statement
@@ -583,11 +583,11 @@ Multiple notification paths fail silently. Errors are swallowed. Special order n
 
 | # | File | Line | Change |
 |---|---|---|---|
-| 1 | src/routes/sales.ts | 458 | Log errors — add try/catch with error saved to automation_notifications |
-| 2 | src/routes/sales.ts | 530 | Save details — include medicine names in automation_notifications.message |
-| 3 | src/whatsappClient.ts | 696 | Reduce window — change from 30s to 5s for different message types |
-| 4 | src/routes/sales.ts | 477 | Fix null customer — always resolve customer before building notification |
-| 5 | src/services/bouncedAlertService.ts | — | Count loose — add loose stock to bounce detection query |
+| 1 | src/routes/sales.ts | 458 | Log errors ï¿½ add try/catch with error saved to automation_notifications |
+| 2 | src/routes/sales.ts | 530 | Save details ï¿½ include medicine names in automation_notifications.message |
+| 3 | src/whatsappClient.ts | 696 | Reduce window ï¿½ change from 30s to 5s for different message types |
+| 4 | src/routes/sales.ts | 477 | Fix null customer ï¿½ always resolve customer before building notification |
+| 5 | src/services/bouncedAlertService.ts | ï¿½ | Count loose ï¿½ add loose stock to bounce detection query |
 
 ### How This Helps Other Phases
 
@@ -610,29 +610,29 @@ Multiple notification paths fail silently. Errors are swallowed. Special order n
 
 ### Before Each Phase
 
-1. Read this plan — understand the cause, fix, and verification for the current phase
-2. Read AGENTS.md — follow DOX hierarchy and editing rules
-3. Read relevant source files — understand current code before modifying
-4. Run node scripts/quick-update.mjs — ensure knowledge graph is current
+1. Read this plan ï¿½ understand the cause, fix, and verification for the current phase
+2. Read AGENTS.md ï¿½ follow DOX hierarchy and editing rules
+3. Read relevant source files ï¿½ understand current code before modifying
+4. Run node scripts/quick-update.mjs ï¿½ ensure knowledge graph is current
 
 ### During Each Phase
 
-1. Implement changes — follow the exact file/line references in the plan
-2. Run linter/typecheck — npm run lint and npm run typecheck if available
-3. Test each change — follow the verification checklist for the phase
-4. Run node scripts/quick-update.mjs — update knowledge graph after each file change
+1. Implement changes ï¿½ follow the exact file/line references in the plan
+2. Run linter/typecheck ï¿½ npm run lint and npm run typecheck if available
+3. Test each change ï¿½ follow the verification checklist for the phase
+4. Run node scripts/quick-update.mjs ï¿½ update knowledge graph after each file change
 
 ### After Each Phase
 
-1. Run full verification checklist — test ALL items in the phase
-2. Run node scripts/quick-update.mjs — final knowledge graph update
-3. Check for regressions — ensure previous phases still work
-4. Update this plan — mark phase as complete with date
+1. Run full verification checklist ï¿½ test ALL items in the phase
+2. Run node scripts/quick-update.mjs ï¿½ final knowledge graph update
+3. Check for regressions ï¿½ ensure previous phases still work
+4. Update this plan ï¿½ mark phase as complete with date
 5. DO NOT proceed to next phase until verification passes
 
 ### Final Verification (After All Phases)
 
-1. Run all 8 phase verification checklists — confirm everything passes
+1. Run all 8 phase verification checklists ï¿½ confirm everything passes
 2. Test end-to-end flow:
    - Scan medicine -> verify all fields extracted
    - Save bill -> verify WhatsApp includes medicine details
@@ -640,9 +640,9 @@ Multiple notification paths fail silently. Errors are swallowed. Special order n
    - Send email from new distributor -> verify auto-parsed
    - Correct OCR scan -> verify learning saved
    - Check Learning page -> verify all data displayed
-3. Run node scripts/quick-update.mjs — final knowledge graph update
-4. Update AGENTS.md — document all changes
-5. Finalize task — mark all phases complete
+3. Run node scripts/quick-update.mjs ï¿½ final knowledge graph update
+4. Update AGENTS.md ï¿½ document all changes
+5. Finalize task ï¿½ mark all phases complete
 
 ---
 
@@ -729,4 +729,4 @@ Phase 1 -> Phase 2 -> Phase 3 -> Phase 6 -> Phase 7
 
 > **END OF IMPLEMENTATION PLAN**
 > Created: 2026-08-04
-> Status: PLANNING — DO NOT IMPLEMENT UNTIL APPROVED
+> Status: PLANNING ï¿½ DO NOT IMPLEMENT UNTIL APPROVED

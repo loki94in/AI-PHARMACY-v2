@@ -377,7 +377,7 @@ export class ProductNameFilterService {
       fallbackTimeoutMs = this.DEFAULT_TIMEOUT,
       dosageForm,
       mrp,
-      mrpTolerance = 0.2,
+      mrpTolerance = 0.4,
       rawOcrText
     } = options;
 

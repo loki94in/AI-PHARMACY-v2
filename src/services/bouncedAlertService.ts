@@ -143,7 +143,7 @@ export class BouncedAlertService {
         const receivedMap = new Map<string, number>();
         for (const item of receivedItems) {
           const norm = normalizeName(item.medicine_name);
-          const totalQty = (Number(item.quantity) || 0) + (Number(item.free_qty) || 0);
+          const totalQty = (Number(item.quantity) || 0) + (Number(item.free_qty) || 0) + (Number((item as any).loose_quantity) || 0);
           receivedMap.set(norm, (receivedMap.get(norm) || 0) + totalQty);
         }
 
