@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { getAppDataDir } from '../config/index.js';
+import { generateInvoiceBarcodeData } from './barcodeService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +49,8 @@ export class PdfInvoiceService {
     const shopAddress = settings.shop_address || '123 Health Ave, Medical District, Tech City';
     const shopPhone = settings.shop_phone || '+91 99999 99999';
     const shopLicence = settings.shop_licence || 'N/A';
+
+    const barcodeData = await generateInvoiceBarcodeData(invoice.invoice_no, invoice.date);
 
     return new Promise((resolve, reject) => {
       try {
@@ -166,6 +169,16 @@ export class PdfInvoiceService {
         doc.fontSize(12).fillColor('#0f172a').font('Helvetica-Bold');
         doc.text('Grand Total:', 360, doc.y, { width: 100, align: 'right' });
         doc.text(`₹${total.toFixed(2)}`, 480, doc.y - 12, { width: 70, align: 'right' });
+
+        // Draw Scannable Invoice Barcode (QR + Code128)
+        try {
+          const barcodeY = Math.max(doc.y - 50, 620);
+          doc.image(barcodeData.qrBuffer, 40, barcodeY, { width: 55, height: 55 });
+          doc.image(barcodeData.code128Buffer, 102, barcodeY + 5, { width: 140, height: 45 });
+          doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(`Scannable Bill Barcode: ${barcodeData.barcodeText}`, 40, barcodeY + 57);
+        } catch (bcErr) {
+          console.warn('[PdfInvoice] Failed to embed barcode image in PDF:', bcErr);
+        }
 
         // Check if custom stamp/signature files exist (only draw if includeStampAndSig is true)
         const uploadsDir = path.resolve(getAppDataDir(), 'uploads');

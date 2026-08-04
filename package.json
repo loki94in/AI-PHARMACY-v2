@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@types/compression": "^1.8.1",
+    "@types/jsbarcode": "^3.11.4",
     "adm-zip": "^0.5.17",
     "aws-sdk": "^2.1693.0",
     "axios": "^1.16.1",
@@ -36,6 +37,7 @@
     "helmet": "^8.2.0",
     "imap-simple": "^1.6.3",
     "jimp": "^1.6.1",
+    "jsbarcode": "^3.12.3",
     "mailparser": "^3.9.8",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download } from 'lucide-react';
+import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download, QrCode, Printer } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { api } from '../../services/api';
@@ -109,6 +109,30 @@ const Sells = () => {
 
   // Universal Edit state
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
+
+  // Barcode state
+  const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
+  const [barcodeData, setBarcodeData] = useState<{ invoiceNo: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string; barcodeText: string } | null>(null);
+  const [loadingBarcode, setLoadingBarcode] = useState(false);
+
+  const handleOpenBarcode = async (invoiceNo: string) => {
+    setBarcodeModalInvoice(invoiceNo);
+    setLoadingBarcode(true);
+    setBarcodeData(null);
+    try {
+      const res = await api.generateSaleInvoiceBarcode(invoiceNo);
+      if (res.success) {
+        setBarcodeData(res);
+      } else {
+        toastEvent.trigger('Failed to generate invoice barcode', 'error');
+      }
+    } catch (err) {
+      console.error('Barcode load error:', err);
+      toastEvent.trigger('Failed to load invoice barcode', 'error');
+    } finally {
+      setLoadingBarcode(false);
+    }
+  };
 
   const isDateFilterExcludingToday = !!(
     (dateRangeHelper.dateRange.from && dateRangeHelper.dateRange.from > todayStr) ||
@@ -255,6 +279,7 @@ const Sells = () => {
     try {
       const full = await api.getSale(invoice.id);
       setViewInvoice(full);
+      handleOpenBarcode(full.invoice_no);
     } catch (err) {
       toastEvent.trigger('Failed to load invoice details', 'error');
     }
@@ -660,10 +685,20 @@ const Sells = () => {
                           <>
                             <button
                               onClick={() => openView(inv)}
-                              className="p-2 rounded-lg bg-white/5 hover:bg-sky-500 hover:text-white border border-glass-border hover:border-sky-500 shadow-sm hover:shadow-[0_0_15px_rgba(14,165,233,0.4)] text-muted transition-all transform hover:scale-105 active:scale-95"
+                              className="p-2 rounded-lg bg-white/5 hover:bg-sky-500 hover:text-white border border-glass-border hover:border-sky-500 shadow-sm hover:shadow-[0_0_15px_rgba(14,165,233,0.4)] text-muted transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
                               title="View invoice details"
                             >
                               <FileText size={14} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBarcode(inv.invoice_no);
+                              }}
+                              className="p-2 rounded-lg bg-white/5 hover:bg-purple-500 hover:text-white border border-glass-border hover:border-purple-500 shadow-sm hover:shadow-[0_0_15px_rgba(168,85,247,0.4)] text-muted transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+                              title="View / Print Barcode"
+                            >
+                              <QrCode size={14} />
                             </button>
                             <button
                               onClick={() => openEdit(inv)}
@@ -984,7 +1019,7 @@ const Sells = () => {
             {/* Modal Body */}
             <div className="p-5 space-y-5 flex-1 overflow-y-auto">
               {/* Customer Info */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white/5 p-4 rounded-xl border border-glass-border">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-bg2/50 p-4 rounded-xl border border-glass-border">
                 <div>
                   <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Customer Name</div>
                   <div className="text-sm font-semibold text-text">{viewInvoice.customer_name || 'Walk-in'}</div>
@@ -1002,6 +1037,32 @@ const Sells = () => {
                   <div className="text-sm font-semibold text-text">{formatDate(viewInvoice.date)}</div>
                 </div>
               </div>
+
+              {/* Scannable Barcode Section */}
+              {barcodeData && barcodeData.invoiceNo === viewInvoice.invoice_no ? (
+                <div className="bg-bg2/60 p-4 rounded-xl border border-glass-border flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <img src={barcodeData.qrDataUrl} alt="Invoice QR" className="w-16 h-16 rounded bg-white p-1 shrink-0 shadow-sm" />
+                    <div>
+                      <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                        <QrCode size={12} className="text-purple-400" /> Scannable Return Barcode (Code128 + QR)
+                      </div>
+                      <img src={barcodeData.code128DataUrl} alt="Invoice Code128" className="h-10 bg-white p-1 rounded max-w-[220px]" />
+                      <div className="text-[10px] font-mono text-muted mt-1">{barcodeData.barcodeText}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
+                    className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                  >
+                    <Printer size={14} /> Print Barcode Label
+                  </button>
+                </div>
+              ) : loadingBarcode ? (
+                <div className="p-3 text-center text-xs text-muted bg-bg2/30 rounded-xl border border-glass-border">
+                  Loading scannable invoice barcode...
+                </div>
+              ) : null}
 
               {/* Items Table */}
               <div>
@@ -1215,6 +1276,49 @@ const Sells = () => {
             fetchInvoices(true);
           }} 
         />
+      )}
+
+      {/* Standalone Barcode Modal Portal */}
+      {barcodeModalInvoice && !viewInvoice && createPortal(
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="glass-panel w-full max-w-md p-6 border-purple-500/30 flex flex-col items-center space-y-4">
+            <div className="w-full flex justify-between items-center border-b border-glass-border pb-3">
+              <h3 className="font-bold text-base flex items-center gap-2 text-text">
+                <QrCode size={18} className="text-purple-400" />
+                Invoice Barcode: {barcodeModalInvoice}
+              </h3>
+              <button
+                onClick={() => setBarcodeModalInvoice(null)}
+                className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {loadingBarcode ? (
+              <div className="py-10 text-center text-sm text-muted">Generating barcode labels...</div>
+            ) : barcodeData ? (
+              <div className="w-full flex flex-col items-center space-y-4 bg-bg2/80 p-5 rounded-xl border border-glass-border">
+                <img src={barcodeData.qrDataUrl} alt="QR Code" className="w-32 h-32 bg-white p-2 rounded-lg shadow-md" />
+                <div className="w-full text-center">
+                  <div className="text-[11px] font-bold text-muted uppercase tracking-wider mb-1">Code128 Barcode</div>
+                  <img src={barcodeData.code128DataUrl} alt="Code128" className="h-14 bg-white p-2 rounded-lg w-full object-contain shadow-md" />
+                  <div className="text-xs font-mono text-muted mt-2 font-bold">{barcodeData.barcodeText}</div>
+                </div>
+
+                <button
+                  onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
+                  className="w-full py-2.5 bg-primary text-white rounded-lg font-bold text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <Printer size={16} /> Open & Print PDF Barcode Label
+                </button>
+              </div>
+            ) : (
+              <div className="py-6 text-center text-sm text-muted">Failed to generate barcode label.</div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Floating Action Bar for Exporting Data */}

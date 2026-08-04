@@ -478,8 +478,11 @@ const RefillsSection: React.FC = () => {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search patient or phone…"
+            onChange={e => {
+              const val = e.target.value;
+              setSearch(val.includes('|') ? val.split('|')[0].trim() : val);
+            }}
+            placeholder="Search patient, phone or barcode..."
             className="w-full pl-8 pr-3 py-2 bg-bg2 border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
           />
         </div>
@@ -3034,9 +3037,12 @@ const SpecialOrdersSection: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
-              placeholder="Search medicine, customer, phone, distributor..."
+              placeholder="Search medicine, customer, phone, invoice, distributor..."
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setSearchQuery(val.includes('|') ? val.split('|')[0].trim() : val);
+              }}
               className="w-full pl-9 pr-3 py-1.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
             />
           </div>
@@ -3937,9 +3943,12 @@ const CustomerCreditSection: React.FC = () => {
               <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
               <input
                 type="text"
-                placeholder="Search customer name or mobile..."
+                placeholder="Search customer name, mobile or barcode..."
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSearch(val.includes('|') ? val.split('|')[0].trim() : val);
+                }}
                 className="w-full pl-8 pr-2.5 py-1.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
               />
             </div>

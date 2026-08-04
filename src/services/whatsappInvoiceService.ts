@@ -18,7 +18,7 @@ export class WhatsappInvoiceService {
       db = await dbManager.getConnection();
       
       const invoice = await db.get(
-        `SELECT si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
+        `SELECT si.invoice_no, si.date, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
                 c.name as customer_name, c.phone as customer_phone, c.credit_balance
          FROM sales_invoices si
          LEFT JOIN customers c ON si.customer_id = c.id
@@ -43,16 +43,21 @@ export class WhatsappInvoiceService {
       }
 
       // Format instant WhatsApp text message
+      const invoiceDate = invoice.date ? invoice.date.split('T')[0] : new Date().toISOString().split('T')[0];
+      const barcodeText = `${invoice.invoice_no}|${invoiceDate}`;
+
       let caption = `Dear ${invoice.customer_name || 'Customer'},\n\n`;
       if (invoice.payment_medium === 'CREDIT' || invoice.payment_status === 'UNPAID') {
         const totalDues = (invoice.credit_balance || invoice.total_amount || 0);
         caption += `📌 *Credit Purchase Bill: #${invoice.invoice_no}*\n`;
         caption += `Bill Amount: *₹${(invoice.total_amount || 0).toFixed(2)}*\n`;
-        caption += `Total Outstanding Dues: *₹${totalDues.toFixed(2)}*\n\n`;
+        caption += `Total Outstanding Dues: *₹${totalDues.toFixed(2)}*\n`;
+        caption += `🔍 Scannable Bill Barcode: *${barcodeText}*\n\n`;
         caption += `This bill has been posted to your credit ledger account.\n\n`;
       } else {
         caption += `📄 *Sale Invoice: #${invoice.invoice_no}*\n`;
-        caption += `Bill Amount Paid: *₹${(invoice.total_amount || 0).toFixed(2)}*\n\n`;
+        caption += `Bill Amount Paid: *₹${(invoice.total_amount || 0).toFixed(2)}*\n`;
+        caption += `🔍 Scannable Bill Barcode: *${barcodeText}*\n\n`;
         caption += `Thank you for your purchase!\n\n`;
       }
       caption += `— AI Pharmacy OS`;

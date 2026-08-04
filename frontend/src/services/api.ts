@@ -927,4 +927,14 @@ export const api = {
 
   // Sales Reorder Suggestions API
   getSalesReorderSuggestions: () => apiClient.get<{ success: boolean; count: number; items: any[] }>('/sales/reorder-suggestions').then(res => res.data),
+
+  // Sale Invoice Barcode API
+  generateSaleInvoiceBarcode: (invoiceNo: string) => apiClient.get<{
+    success: boolean;
+    invoiceNo: string;
+    barcodeText: string;
+    qrDataUrl: string;
+    code128DataUrl: string;
+    pdfUrl: string;
+  }>(`/utilities/sale-invoice-barcode/${encodeURIComponent(invoiceNo)}`).then(res => res.data),
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
-import { CheckCircle, RotateCcw, AlertCircle, History } from 'lucide-react';
+import { CheckCircle, RotateCcw, AlertCircle, History, QrCode, Printer } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
@@ -27,15 +27,28 @@ export default function CustomerReturn() {
   const [items, setItems] = useState<SaleItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<number, number>>({});
   const [reason, setReason] = useState('');
+  const [barcodeInfo, setBarcodeInfo] = useState<any>(null);
   const [_, setSearchParams] = useSearchParams();
 
-  const handleSearch = async () => {
-    if (!invoiceNo.trim()) return;
+  const cleanInvoiceNoString = (raw: string) => {
+    let text = raw.trim();
+    if (text.includes('|')) {
+      text = text.split('|')[0].trim();
+    }
+    return text;
+  };
+
+  const handleSearch = async (targetNo?: string | React.SyntheticEvent) => {
+    const rawNo = typeof targetNo === 'string' ? targetNo : invoiceNo;
+    const searchVal = cleanInvoiceNoString(rawNo);
+    if (!searchVal) return;
     setLoading(true);
     setError(null);
+    setBarcodeInfo(null);
     try {
-      const data = await api.searchInvoiceForReturn(invoiceNo.trim());
+      const data = await api.searchInvoiceForReturn(searchVal);
       setInvoice(data.invoice);
+      setInvoiceNo(data.invoice.invoice_no);
       
       const enrichedItems = data.items.map((item: any) => {
         // Find if this item was already returned
@@ -48,6 +61,11 @@ export default function CustomerReturn() {
       
       setItems(enrichedItems);
       setReturnQuantities({});
+
+      // Fetch invoice barcode info for display & return receipts
+      api.generateSaleInvoiceBarcode(data.invoice.invoice_no).then(bc => {
+        if (bc.success) setBarcodeInfo(bc);
+      }).catch(() => {});
     } catch (err: any) {
       setError(err.response?.data?.error || 'Invoice not found');
       setInvoice(null);
@@ -146,17 +164,25 @@ export default function CustomerReturn() {
             <div className="relative">
               <input
                 type="text"
-                className="premium-input w-full"
-                placeholder="e.g. S-2026-0001"
+                className="premium-input w-full font-mono text-sm"
+                placeholder="Scan barcode or type bill no (e.g. S-2026-0001)"
                 value={invoiceNo}
-                onChange={e => setInvoiceNo(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setInvoiceNo(val);
+                  if (val.includes('|')) {
+                    const cleaned = cleanInvoiceNoString(val);
+                    setInvoiceNo(cleaned);
+                    handleSearch(cleaned);
+                  }
+                }}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
               />
             </div>
           </div>
           <button 
             className="btn-primary py-2.5 px-6"
-            onClick={handleSearch}
+            onClick={() => handleSearch()}
             disabled={loading || !invoiceNo}
           >
             {loading ? 'Searching...' : 'Search Invoice'}
@@ -236,6 +262,27 @@ export default function CustomerReturn() {
               </h3>
               
               <div className="space-y-4">
+                {barcodeInfo && (
+                  <div className="p-3 bg-bg2/70 rounded-xl border border-glass-border space-y-2">
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center justify-between">
+                      <span className="flex items-center gap-1"><QrCode size={12} className="text-purple-400" /> Invoice Barcode</span>
+                      <button
+                        type="button"
+                        onClick={() => window.open(barcodeInfo.pdfUrl, '_blank')}
+                        className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Printer size={11} /> Print Label
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <img src={barcodeInfo.qrDataUrl} alt="QR" className="w-12 h-12 bg-white p-1 rounded shrink-0 shadow-sm" />
+                      <div className="overflow-hidden">
+                        <img src={barcodeInfo.code128DataUrl} alt="Code128" className="h-7 bg-white p-1 rounded max-w-[150px]" />
+                        <div className="text-[9px] font-mono text-muted mt-0.5 truncate">{barcodeInfo.barcodeText}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Reason for Return</label>
                   <textarea

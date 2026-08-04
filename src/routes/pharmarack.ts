@@ -11,6 +11,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getAppDataDir } from '../config/index.js';
 import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
+import { pharmarackCatalogCache } from '../services/pharmarackCatalogCache.js';
 
 const execAsync = promisify(exec);
 
@@ -173,6 +174,38 @@ function cleanSearchQuery(query: string): { cleaned: string; detectedForms: stri
   return { cleaned: cleaned.replace(/\s+/g, ' ').trim(), detectedForms };
 }
 
+// Search offline distributor catalog fallback helper
+async function searchOfflineCatalogFallback(q: string, storeId?: number | null, isMapped?: boolean) {
+  try {
+    const offlineResults = await pharmarackCatalogCache.searchCatalog(q);
+    const combined = [...offlineResults.mapped, ...offlineResults.nonMapped];
+    
+    let filtered = combined;
+    if (storeId !== null && storeId !== undefined && !isNaN(storeId)) {
+      filtered = combined.filter(p => p.storeId === storeId && (isMapped === undefined || p.isMapped === isMapped));
+    }
+    
+    return filtered.map(p => ({
+      name: p.name,
+      shortName: p.name,
+      fullName: p.name,
+      packaging: p.packaging || '',
+      distributor: p.distributor || '',
+      rate: p.distributorPrice,
+      mrp: p.mrp,
+      mapped: p.isMapped,
+      stock: p.availability || 'High',
+      scheme: '',
+      productId: 0,
+      productCode: '',
+      company: p.manufacturer || '',
+      storeId: p.storeId
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
 // Search endpoint
 router.get('/search', async (req, res) => {
   const qRaw = (req.query.q as string || '').trim();
@@ -189,12 +222,17 @@ router.get('/search', async (req, res) => {
     const token = settings['pharmarack_session_token'] || '';
 
     if (!token) {
+      // If token is missing, attempt offline catalog search before returning NEED_LOGIN
+      const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+      if (offline.length > 0) {
+        return res.json(offline);
+      }
       return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
     }
 
     // Direct pass-through query to Pharmarack OpenSearch Engine (exact payload used by official site)
-    const payload: any = {
-      SearchKeyword: qRaw,
+    const buildPayload = (keyword: string) => ({
+      SearchKeyword: keyword,
       StoreId: hasStoreFilter && isMapped ? [storeId] : [],
       NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
       Count: 50,
@@ -204,45 +242,69 @@ router.get('/search', async (req, res) => {
       IsScheme: 2,
       IsSort: 1,
       CartSource: 'MOVP'
-    };
+    });
 
-    const response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+    let response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(buildPayload(qRaw)),
       signal: AbortSignal.timeout(3500)
     });
 
-    if (response.ok) {
-      const data: any = await response.json();
-      if (data && Array.isArray(data.data)) {
-        const results = data.data.map((p: any) => {
-          const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || '';
+    let data: any = response.ok ? await response.json().catch(() => null) : null;
 
-          return {
-            name: rawName,
-            shortName: rawName,
-            fullName: rawName,
-            packaging: p.Packing || '',
-            distributor: p.StoreName || '',
-            rate: p.PTR !== undefined ? p.PTR : null,
-            mrp: p.MRP !== undefined ? p.MRP : null,
-            mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === '1' || String(p.Ismapped) === '1',
-            stock: p.Stock !== undefined ? String(p.Stock) : 'High',
-            scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
-            productId: p.ProductId || p.PrProductId || p.ProductCode,
-            productCode: p.ProductCode || '',
-            company: p.Company || '',
-            storeId: p.StoreId
-          };
-        });
-
-        return res.json(results);
+    // Retry 1: If raw query returned 0 items and contains hyphens/slashes, try with cleaned search term
+    const cleanedTerm = qRaw.replace(/[-_/]/g, ' ').replace(/\s+/g, ' ').trim();
+    if ((!data || !Array.isArray(data.data) || data.data.length === 0) && cleanedTerm !== qRaw && cleanedTerm.length >= 2) {
+      response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+        method: 'POST',
+        body: JSON.stringify(buildPayload(cleanedTerm)),
+        signal: AbortSignal.timeout(3000)
+      });
+      if (response.ok) {
+        data = await response.json().catch(() => null);
       }
     }
 
-    return res.json([]);
+    if (data && Array.isArray(data.data) && data.data.length > 0) {
+      const results = data.data.map((p: any) => {
+        const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || '';
+
+        return {
+          name: rawName,
+          shortName: rawName,
+          fullName: rawName,
+          packaging: p.Packing || '',
+          distributor: p.StoreName || '',
+          rate: p.PTR !== undefined ? p.PTR : null,
+          mrp: p.MRP !== undefined ? p.MRP : null,
+          mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === '1' || String(p.Ismapped) === '1',
+          stock: p.Stock !== undefined ? String(p.Stock) : 'High',
+          scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || '',
+          productId: p.ProductId || p.PrProductId || p.ProductCode,
+          productCode: p.ProductCode || '',
+          company: p.Company || '',
+          storeId: p.StoreId
+        };
+      });
+
+      return res.json(results);
+    }
+
+    // Fallback: If live OpenSearch returns 0 items, search local catalog cache
+    const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+    return res.json(offline);
+
   } catch (err: any) {
     console.error('Pharmarack direct live API search failed:', err.message);
+
+    // Fallback: On network error or timeout, search local catalog cache before returning 503
+    try {
+      const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+      if (offline.length > 0) {
+        return res.json(offline);
+      }
+    } catch (_) {}
+
     return res.status(503).json({ error: 'Connection error, please check internet or reconnect', code: 'CONNECTION_ERROR' });
   }
 });
