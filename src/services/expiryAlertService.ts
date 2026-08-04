@@ -166,65 +166,82 @@ export function getExpiryYearMonth(expiryDateStr: string | null | undefined): st
   return `${year}_${String(month).padStart(2, '0')}`;
 }
 
-export async function rebuildAllExpiryCaches(): Promise<void> {
-  console.log('[ExpiryCache] Rebuilding all month-wise expiry cache files...');
-  try {
-    const db = await dbManager.getConnection();
-    // Only fetch items that still have stock — zero-qty = sold/returned
-    const rows = await db.all(`
-      SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
-             pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
-             d.id as distributor_id, d.name as distributor_name
-      FROM inventory_master im
-      JOIN medicines m ON im.medicine_id = m.id
-      LEFT JOIN purchase_items pi ON pi.id = (
-        SELECT pi3.id 
-        FROM purchase_items pi3 
-        WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
-        ORDER BY pi3.id DESC 
-        LIMIT 1
-      )
-      LEFT JOIN purchases p ON pi.purchase_id = p.id
-      LEFT JOIN distributors d ON p.distributor_id = d.id
-      WHERE ${INVENTORY_ACTIVE_WHERE}
-      ORDER BY im.expiry_date ASC
-    `);
+let activeRebuildPromise: Promise<void> | null = null;
 
-    const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
-    
-    // Delete all existing cache files — old files for empty months must not survive
-    if (fs.existsSync(cacheDir)) {
-      const files = await fs.promises.readdir(cacheDir);
-      for (const file of files) {
-        if (file.startsWith('expiry_') && file.endsWith('.json')) {
-          await fs.promises.unlink(path.join(cacheDir, file));
+export async function rebuildAllExpiryCaches(): Promise<void> {
+  if (activeRebuildPromise) {
+    return activeRebuildPromise;
+  }
+
+  activeRebuildPromise = (async () => {
+    console.log('[ExpiryCache] Rebuilding all month-wise expiry cache files...');
+    try {
+      const db = await dbManager.getConnection();
+      // Only fetch items that still have stock — zero-qty = sold/returned
+      const rows = await db.all(`
+        SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
+               pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+               d.id as distributor_id, d.name as distributor_name
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        LEFT JOIN purchase_items pi ON pi.id = (
+          SELECT pi3.id 
+          FROM purchase_items pi3 
+          WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+          ORDER BY pi3.id DESC 
+          LIMIT 1
+        )
+        LEFT JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN distributors d ON p.distributor_id = d.id
+        WHERE ${INVENTORY_ACTIVE_WHERE}
+        ORDER BY im.expiry_date ASC
+      `);
+
+      const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
+      if (!fs.existsSync(cacheDir)) {
+        await fs.promises.mkdir(cacheDir, { recursive: true });
+      }
+
+      // Group items by year_month
+      const groups: Record<string, typeof rows> = {};
+      for (const r of rows) {
+        const ym = getExpiryYearMonth(r.expiry_date);
+        if (!groups[ym]) groups[ym] = [];
+        groups[ym].push(r);
+      }
+
+      const validMonthFiles = new Set<string>();
+      let written = 0;
+      for (const [ym, items] of Object.entries(groups)) {
+        if (ym === 'unknown') continue; // skip bad expiry dates
+        const fileName = `expiry_${ym}.json`;
+        validMonthFiles.add(fileName);
+        const filePath = path.join(cacheDir, fileName);
+        await fs.promises.writeFile(filePath, JSON.stringify(items, null, 2), 'utf-8');
+        written++;
+      }
+
+      // Safely remove obsolete cache files for empty months
+      const existingFiles = await fs.promises.readdir(cacheDir);
+      for (const file of existingFiles) {
+        if (file.startsWith('expiry_') && file.endsWith('.json') && !validMonthFiles.has(file)) {
+          try {
+            await fs.promises.unlink(path.join(cacheDir, file));
+          } catch (_) {
+            // Ignore transient Windows EPERM file lock errors on cleanup
+          }
         }
       }
-    } else {
-      await fs.promises.mkdir(cacheDir, { recursive: true });
-    }
 
-    // Group items by year_month
-    const groups: Record<string, typeof rows> = {};
-    for (const r of rows) {
-      const ym = getExpiryYearMonth(r.expiry_date);
-      if (!groups[ym]) groups[ym] = [];
-      groups[ym].push(r);
+      console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
+    } catch (err) {
+      console.error('[ExpiryCache] Error rebuilding expiry caches:', err);
+    } finally {
+      activeRebuildPromise = null;
     }
+  })();
 
-    // Write a file ONLY for months that have at least one item with stock.
-    // Empty months get NO file — a missing file = empty month (all sold/returned).
-    let written = 0;
-    for (const [ym, items] of Object.entries(groups)) {
-      if (ym === 'unknown') continue; // skip bad expiry dates
-      const filePath = path.join(cacheDir, `expiry_${ym}.json`);
-      await fs.promises.writeFile(filePath, JSON.stringify(items, null, 2), 'utf-8');
-      written++;
-    }
-    console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
-  } catch (err) {
-    console.error('[ExpiryCache] Error rebuilding expiry caches:', err);
-  }
+  return activeRebuildPromise;
 }
 
 let rebuildTimeout: NodeJS.Timeout | null = null;

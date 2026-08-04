@@ -1826,15 +1826,18 @@ export async function ensureSchema(dbPath: string) {
 
     const discountResult = await db.run(`
       UPDATE sales_invoices
-      SET discount = CASE 
-        WHEN subtotal > total_amount THEN ROUND(subtotal - total_amount) 
-        ELSE 0 
-      END
-      WHERE discount IS NULL OR discount = 0;
+      SET discount = ROUND(subtotal - total_amount)
+      WHERE subtotal > total_amount AND (discount IS NULL OR discount = 0);
     `);
     if (discountResult && discountResult.changes !== undefined && discountResult.changes > 0) {
       console.log(`[Database Healing] Backfilled discounts for ${discountResult.changes} invoices.`);
     }
+
+    await db.run(`
+      UPDATE sales_invoices
+      SET discount = 0
+      WHERE discount IS NULL;
+    `);
   } catch (healErr) {
     console.warn('[Database Healing] Non-critical warning, failed to run database healing checks:', healErr);
   }

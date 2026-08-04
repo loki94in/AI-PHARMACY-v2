@@ -7,6 +7,19 @@ const DEFAULT_MIN_STOCK = 10;
 export async function recalculateStockLimits(): Promise<void> {
   const db = await dbManager.getConnection();
   try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_config (
+        medicine_id INTEGER PRIMARY KEY,
+        avg_daily_sales REAL DEFAULT 0,
+        lead_time_days INTEGER DEFAULT 7,
+        safety_factor REAL DEFAULT 1.5,
+        min_stock_level INTEGER DEFAULT 10,
+        max_stock_level INTEGER DEFAULT 30,
+        reorder_level INTEGER DEFAULT 12,
+        last_calculated DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     const medicines = await db.all(
       `SELECT id, name FROM medicines WHERE id IN (
          SELECT DISTINCT medicine_id FROM inventory_master
@@ -52,8 +65,8 @@ export async function recalculateStockLimits(): Promise<void> {
     }
 
     console.log('[StockCalculatorWorker] Stock limits recalculated successfully');
-  } finally {
-    await dbManager.close();
+  } catch (err) {
+    console.error('[StockCalculatorWorker] Recalculation error:', err);
   }
 }
 
@@ -68,9 +81,41 @@ export function startStockCalculatorWorker(intervalMs: number = 86400000): void 
   if (intervalId) return;
 
   console.log(`[StockCalculatorWorker] Starting with interval ${intervalMs}ms`);
-  recalculateStockLimits().catch(err =>
-    console.error('[StockCalculatorWorker] Initial calculation failed:', err)
-  );
+
+  (async () => {
+    try {
+      const db = await dbManager.getConnection();
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS stock_config (
+          medicine_id INTEGER PRIMARY KEY,
+          avg_daily_sales REAL DEFAULT 0,
+          lead_time_days INTEGER DEFAULT 7,
+          safety_factor REAL DEFAULT 1.5,
+          min_stock_level INTEGER DEFAULT 10,
+          max_stock_level INTEGER DEFAULT 30,
+          reorder_level INTEGER DEFAULT 12,
+          last_calculated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      const row = await db.get<{ last_calc: string | null }>(
+        `SELECT MAX(last_calculated) as last_calc FROM stock_config`
+      );
+
+      if (row && row.last_calc) {
+        const lastTime = new Date(row.last_calc).getTime();
+        const now = Date.now();
+        const diffMs = now - lastTime;
+        if (diffMs < intervalMs) {
+          console.log(`[StockCalculatorWorker] Stock limits were calculated ${(diffMs / 3600000).toFixed(1)}h ago. Skipping boot recalculation.`);
+          return;
+        }
+      }
+
+      await recalculateStockLimits();
+    } catch (err) {
+      console.error('[StockCalculatorWorker] Initial calculation check failed:', err);
+    }
+  })();
 
   intervalId = setInterval(() => {
     recalculateStockLimits().catch(err =>
