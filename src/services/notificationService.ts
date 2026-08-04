@@ -1,6 +1,7 @@
 import { sendMessage, type SendMessageResult } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
 import { whatsappBusinessService } from './whatsappBusinessService.js';
+import { emailService } from './emailService.js';
 import { config } from '../config/index.js';
 import { dbManager } from '../database/connection.js';
 import { recordPlacedOrder } from './pharmarackDailyDispatchService.js';
@@ -96,14 +97,32 @@ export class NotificationService {
   }
 
   /**
+   * Send an email notification
+   */
+  async sendEmailNotification(email: string, message: string): Promise<NotificationResult> {
+    try {
+      const sent = await emailService.sendEmail({
+        to: email,
+        subject: 'Notification from AI Pharmacy',
+        text: message,
+      });
+      if (sent) return { success: true };
+      return { success: false, error: 'Email send failed' };
+    } catch (error) {
+      console.error('Failed to send email notification:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
    * Send a notification via the appropriate channel based on type.
-   * Channel status: whatsapp, telegram, and whatsapp_business are live and used
-   * elsewhere in the app (via sendWhatsApp/sendTelegram/sendWhatsAppBusiness, and
-   * the dedicated notifyDistributor... / notifyDeliveryBoys... methods below). `email`
-   * has no sending implementation — outbound mail in this app goes through
-   * emailService.ts directly, not through this notifier. This 'email' branch and
-   * this generic dispatcher are not currently called from anywhere in the app;
-   * treat 'email' as planned-but-not-implemented rather than a live channel.
+   * Channel status: whatsapp, telegram, whatsapp_business, and email are implemented.
+   * This generic dispatcher is not currently called from anywhere in the app;
+   * real outbound mail elsewhere goes through emailService.ts directly, but this
+   * implementation is here for completeness in case a future caller uses this dispatcher.
    */
   async sendNotification(data: NotificationData): Promise<NotificationResult> {
     switch (data.type) {
@@ -119,10 +138,7 @@ export class NotificationService {
       case 'whatsapp_business':
         return await this.sendWhatsAppBusiness(data.recipient, data.message);
       case 'email':
-        return {
-          success: false,
-          error: 'Email notifications not yet implemented'
-        };
+        return await this.sendEmailNotification(data.recipient, data.message);
       default:
         return {
           success: false,
