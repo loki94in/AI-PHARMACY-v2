@@ -1,11 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, ClipboardList, ClipboardPlus, Sparkles, Loader2, ShoppingCart, AlertTriangle } from 'lucide-react';
+import { 
+  X, 
+  Search, 
+  Plus, 
+  Minus, 
+  ClipboardPlus, 
+  Sparkles, 
+  Loader2, 
+  ShoppingCart, 
+  AlertTriangle,
+  User,
+  Phone,
+  IndianRupee,
+  Globe,
+  Flame,
+  Layers,
+  Store,
+  Tag,
+  CheckCircle2,
+  Trash2,
+  Zap,
+  Package,
+  Clock
+} from 'lucide-react';
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent, specialOrdersEvent } from '../services/events';
 import { useApiQuery } from '../hooks/useApiQuery';
-
-
 
 interface SuggestionMedicine {
   inventory_id?: number;
@@ -33,23 +54,23 @@ const getStockStyle = (stockStr: string | undefined): string => {
   const stock = stockStr.trim();
   
   if (stock.toLowerCase() === 'high') {
-    return 'bg-green-500/15 text-green border border-green-500/30';
+    return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
   }
   if (stock.toLowerCase() === 'medium') {
-    return 'bg-blue-500/15 text-blue border border-blue-500/30';
+    return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
   }
   if (stock.toLowerCase() === 'low' || stock.toLowerCase() === 'out of stock' || stock.toLowerCase() === 'no stock' || stock === '0') {
-    return 'bg-red-500/15 text-red border border-red-500/30';
+    return 'bg-red-500/15 text-red-400 border border-red-500/30';
   }
   
   const num = parseInt(stock);
   if (!isNaN(num)) {
     if (num >= 50) {
-      return 'bg-green-500/15 text-green border border-green-500/30';
+      return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
     } else if (num >= 15) {
-      return 'bg-blue-500/15 text-blue border border-blue-500/30';
+      return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
     } else {
-      return 'bg-red-500/15 text-red border border-red-500/30';
+      return 'bg-red-500/15 text-red-400 border border-red-500/30';
     }
   }
   
@@ -128,8 +149,6 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [duplicateMatch, setDuplicateMatch] = useState<any | null>(null);
   const [duplicateMatchIndex, setDuplicateMatchIndex] = useState<number>(-1);
   const [pendingItemToAdd, setPendingItemToAdd] = useState<any | null>(null);
-
-
 
   const resetInputsAndFocus = () => {
     setProduct('');
@@ -538,24 +557,11 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
       });
     }
 
-    // Capture customer & priority details
-    const customerName = requester.trim();
-    const customerPhone = phone.replace(/\D/g, '');
+    // Capture customer & priority details (Customer details optional / store default)
+    const customerName = requester.trim() || 'Store Inventory';
+    const customerPhone = phone.replace(/\D/g, '') || '';
     const orderPriority = priority;
     const advanceAmt = advancePayment !== '' ? Number(advancePayment) : 0;
-
-    if (!customerName) {
-      toastEvent.trigger('Customer Name is required.', 'error');
-      return;
-    }
-    if (!customerPhone) {
-      toastEvent.trigger('Phone Number is required.', 'error');
-      return;
-    }
-    if (customerPhone.length < 10) {
-      toastEvent.trigger('Please enter a valid 10-digit mobile number.', 'error');
-      return;
-    }
 
     // Reset state and close modal immediately
     setCart([]);
@@ -582,54 +588,49 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-all duration-300">
-      <div className="glass-panel max-w-md md:max-w-3xl w-full p-6 relative border border-glass-border shadow-[0_0_50px_rgba(59,130,246,0.2)] bg-bg2 text-text animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300">
+      <div className="glass-panel max-w-md md:max-w-3xl w-full p-6 relative border border-glass-border shadow-[0_0_50px_rgba(59,130,246,0.2)] bg-bg2 text-text animate-in fade-in zoom-in-95 duration-200 rounded-3xl">
         
         {/* Close Button */}
         <button 
           onClick={handleClose}
-          className="absolute top-4 right-4 p-1.5 text-muted hover:text-text rounded-lg hover:bg-bg3 transition-all"
+          className="absolute top-4 right-4 p-2 text-muted hover:text-text rounded-xl hover:bg-bg3 border border-transparent hover:border-glass-border transition-all duration-200"
           title="Close Modal (Esc)"
         >
           <X size={18} />
         </button>
 
-        {/* Title */}
-        <div className="flex items-center gap-2 mb-4">
-          <div className="p-2 bg-primary/10 rounded-lg text-primary border border-primary/20">
-            <ClipboardPlus size={20} />
+        {/* Header Title Bar */}
+        <div className="flex items-center gap-3 mb-5 select-none">
+          <div className="p-2.5 bg-primary/10 rounded-2xl text-primary border border-primary/20 shadow-sm flex items-center justify-center">
+            <ClipboardPlus size={22} />
           </div>
           <div>
             <h3 className="text-lg font-bold text-text flex items-center gap-2">
               Quick Special Request
-              <span className="text-[10px] bg-bg3 border border-glass-border text-muted px-2 py-0.5 rounded font-mono">Alt + O</span>
+              <span className="text-[10px] bg-bg3 border border-glass-border text-muted px-2 py-0.5 rounded-md font-mono font-semibold">Alt + O</span>
               {prMode !== 'Unknown' && (
-                <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-                  ● LIVE
+                <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span> LIVE
                 </span>
               )}
             </h3>
-            <p className="text-xs text-muted">Instantly log out-of-stock demands from any screen</p>
+            <p className="text-xs text-muted">Instantly log out-of-stock demands & shortage requests</p>
           </div>
         </div>
 
         {/* Form Grid */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             
-            {/* Left Column: Input Form (3/5 cols) */}
-            <div className="md:col-span-3 flex flex-col gap-4">
+            {/* Left Column: Input Form & Staging Controls (3/5 cols) */}
+            <div className="md:col-span-3 flex flex-col gap-3">
               
               {/* Search & Add Item Section */}
-              <div className="space-y-4 p-4.5 bg-bg2/40 border border-border/40 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300">
-                <div className="flex items-center gap-2 mb-1.5 select-none">
-                  <span className="w-1.5 h-3.5 bg-primary rounded-full inline-block"></span>
-                  <div className="font-bold text-xs text-text/90 uppercase tracking-wider">1. Search & Stage Medicine</div>
-                </div>
+              <div className="space-y-3 p-4 bg-bg2/50 border border-glass-border rounded-3xl shadow-sm hover:shadow-md transition-all duration-300">
                 
-                {/* Product / Medicine Autocomplete */}
+                {/* Product / Medicine Autocomplete (No label header) */}
                 <div className="relative animate-in fade-in duration-200" ref={autocompleteRef}>
-                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Medicine Name</label>
                   <div className="relative">
                     <span className="absolute left-3.5 top-[13px] text-muted">
                       {searchLoading ? <Loader2 size={16} className="animate-spin text-primary" /> : <Search size={16} />}
@@ -640,14 +641,14 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                       value={product}
                       onChange={(e) => handleProductChange(e.target.value)}
                       onKeyDown={handleProductKeyDown}
-                      className="w-full premium-input pl-11 pr-5 py-3 text-sm font-semibold"
+                      className="w-full premium-input pl-11 pr-5 py-3 text-sm font-semibold rounded-2xl"
                       placeholder="Search or enter medicine name..."
                       autoComplete="off"
                     />
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
+                    <ul className="absolute z-[9999] left-0 right-0 mt-1.5 max-h-[380px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
                       {suggestions.map((med, index) => (
                         <li
                           key={index}
@@ -655,7 +656,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                             e.preventDefault();
                             selectSuggestion(med);
                           }}
-                          className={`px-3.5 py-2 text-xs cursor-pointer flex justify-between items-center transition-all ${
+                          className={`px-3.5 py-2.5 text-xs cursor-pointer flex justify-between items-center transition-all ${
                             med.isErrorMessage
                               ? 'bg-red-500/10 text-red border-l-2 border-red cursor-default'
                               : index === activeSuggestionIndex
@@ -668,26 +669,26 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-text truncate text-sm">{med.medicine_name}</span>
                               {med.scheme && !med.isErrorMessage && (
-                                <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
-                                  {med.scheme}
+                                <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-md font-bold uppercase shrink-0 flex items-center gap-1">
+                                  <Tag size={10} /> {med.scheme}
                                 </span>
                               )}
                               {med.rate !== undefined && med.rate !== null && !med.isErrorMessage && getEffectiveRate(med.rate, med.scheme, qty) === minEffectiveRate && (
-                                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
-                                  <Sparkles size={8} className="text-emerald-400 animate-pulse" /> Best Rate
+                                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-md font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
+                                  <Sparkles size={9} className="text-emerald-400 animate-pulse" /> Best Rate
                                 </span>
                               )}
                             </div>
 
                             {/* Line 2: Distributor name + company */}
                             {!med.isErrorMessage && (
-                              <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs">
-                                <span className={`font-semibold ${ med.isPharmarack ? (med.mapped ? 'text-sky-400' : 'text-purple-400') : 'text-muted' }`}>
-                                  {med.isPharmarack ? (med.distributor || 'No Distributor') : 'Local Inventory'}
+                              <div className="flex items-center gap-2 flex-wrap mt-1 text-xs">
+                                <span className={`font-semibold flex items-center gap-1 ${ med.isPharmarack ? (med.mapped ? 'text-sky-400' : 'text-purple-400') : 'text-muted' }`}>
+                                  <Store size={11} /> {med.isPharmarack ? (med.distributor || 'No Distributor') : 'Local Inventory'}
                                 </span>
                                 {(med.company || (med as any).manufacturer) && (
                                   <span className="text-[10px] text-muted/70 font-semibold uppercase tracking-wider">
-                                    {med.company || (med as any).manufacturer}
+                                    • {med.company || (med as any).manufacturer}
                                   </span>
                                 )}
                               </div>
@@ -695,7 +696,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
                             {/* Line 3: PTR, MRP, packaging & stock pill */}
                             {!med.isErrorMessage && (
-                              <div className="flex items-center gap-2.5 text-[11px] mt-0.5 flex-wrap">
+                              <div className="flex items-center gap-2.5 text-[11px] mt-1 flex-wrap">
                                 {med.isPharmarack ? (
                                   <>
                                     {med.rate !== undefined && med.rate !== null && (
@@ -708,20 +709,20 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                                       <span className="text-muted font-mono font-semibold">{med.packaging}</span>
                                     )}
                                     {med.stock !== undefined && (
-                                      <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-[10px] flex items-center gap-1 ${
+                                      <span className={`font-bold font-mono px-1.5 py-0.5 rounded-md text-[10px] flex items-center gap-1 ${
                                         (med.stock.toLowerCase() === 'high' || parseInt(med.stock) >= 15)
                                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                                           : (med.stock.toLowerCase() === 'low' || parseInt(med.stock) > 0)
                                           ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                                           : 'bg-red-500/10 text-red border border-red-500/20'
                                       }`}>
-                                        📦 {med.stock}
+                                        <Package size={10} /> {med.stock}
                                       </span>
                                     )}
                                   </>
                                 ) : (
                                   med.mrp !== undefined && (
-                                    <span className="font-bold text-green font-mono">MRP: ₹{Math.round(med.mrp)}</span>
+                                    <span className="font-bold text-emerald-400 font-mono">MRP: ₹{Math.round(med.mrp)}</span>
                                   )
                                 )}
                               </div>
@@ -734,28 +735,32 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
                   {/* Selected Pharmarack item details preview */}
                   {selectedDistributor && (
-                    <div className="mt-3 p-3.5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="mt-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
                       <div className="truncate pr-2">
-                        <div className="font-bold text-emerald-500 text-[10px] uppercase tracking-wider mb-1">Pharmarack Match</div>
+                        <div className="font-bold text-emerald-400 text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1">
+                          <Zap size={12} className="text-emerald-400" /> Pharmarack Match
+                        </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-text font-semibold truncate">{selectedDistributor}</span>
+                          <span className="text-text font-semibold truncate flex items-center gap-1">
+                            <Store size={12} className="text-emerald-400 shrink-0" /> {selectedDistributor}
+                          </span>
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
                             selectedMapped 
-                              ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
-                              : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                           }`}>
                             {selectedMapped ? 'Mapped' : 'Non-mapped'}
                           </span>
                           {selectedScheme && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20 uppercase">
-                              Scheme: {selectedScheme}
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase flex items-center gap-0.5">
+                              <Tag size={9} /> {selectedScheme}
                             </span>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <div className="font-mono font-extrabold whitespace-nowrap flex flex-col items-end gap-0.5 text-right shrink-0">
-                          {selectedRate !== '' && <span className="text-emerald-500 text-sm">PTR: ₹{selectedRate}</span>}
+                          {selectedRate !== '' && <span className="text-emerald-400 text-sm">PTR: ₹{selectedRate}</span>}
                           {selectedMrp !== '' && <span className="text-muted text-[10px]">MRP: ₹{selectedMrp}</span>}
                         </div>
                         <button
@@ -774,7 +779,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                             setProduct('');
                             setTimeout(() => productInputRef.current?.focus(), 50);
                           }}
-                          className="p-1.5 text-muted hover:text-red hover:bg-red-500/10 rounded-xl transition-all ml-1.5"
+                          className="p-1.5 text-muted hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all ml-1.5"
                           title="Cancel distributor selection"
                         >
                           <X size={14} />
@@ -783,18 +788,70 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                     </div>
                   )}
 
-
                 </div>
 
-                {/* Quantity and Add Button Row */}
-                <div className="flex gap-3 items-end">
-                  <div className="flex-1">
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Quantity</label>
-                    <div className="flex items-center justify-between bg-bg3 border border-border/50 rounded-2xl h-11 px-1.5">
+                {/* Priority Selector Row (No label header) */}
+                <div className="flex items-center gap-2">
+                  <div className="flex bg-bg3 border border-glass-border rounded-2xl p-1 h-9 flex-1 select-none">
+                    {(['Low', 'Normal', 'High'] as const).map((p) => {
+                      const active = priority === p;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setPriority(p)}
+                          className={`flex-1 text-xs font-bold rounded-xl transition-all duration-300 flex items-center justify-center gap-1.5 ${
+                            active 
+                              ? p === 'High' 
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30 shadow-sm' 
+                                : p === 'Low'
+                                ? 'bg-bg2 text-text border border-border/50 shadow-sm'
+                                : 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
+                              : 'text-muted hover:text-text hover:bg-bg2/50'
+                          }`}
+                        >
+                          {p === 'Low' && <Clock size={11} />}
+                          {p === 'Normal' && <CheckCircle2 size={11} />}
+                          {p === 'High' && <Flame size={11} className="text-red-400 animate-pulse" />}
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Quantity & Presets & Stage Medicine Bar (No label header) */}
+                <div className="pt-2 border-t border-glass-border/40 space-y-2">
+                  <div className="flex items-center justify-between select-none">
+                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                      Presets
+                    </span>
+                    <div className="flex gap-1">
+                      {[1, 5, 10, 50].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setQty(preset)}
+                          className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded-lg transition-all ${
+                            qty === preset
+                              ? 'bg-primary/20 text-primary border border-primary/30'
+                              : 'bg-bg3 text-muted hover:text-text hover:bg-bg2 border border-transparent'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 items-center">
+                    {/* Stepper Input Capsule */}
+                    <div className="flex items-center justify-between bg-bg3 border border-glass-border rounded-2xl h-11 px-1.5 shadow-inner w-36 shrink-0">
                       <button
                         type="button"
                         onClick={() => setQty(prev => Math.max(1, prev - 1))}
-                        className="w-8 h-8 rounded-xl hover:bg-bg2/80 active:scale-90 text-muted hover:text-text transition-all flex items-center justify-center"
+                        className="w-8 h-8 rounded-xl hover:bg-bg2 active:scale-90 text-muted hover:text-text transition-all flex items-center justify-center"
+                        title="Decrease Quantity"
                       >
                         <Minus size={14} />
                       </button>
@@ -809,82 +866,86 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                             handleAddItemToCart();
                           }
                         }}
-                        className="w-full bg-transparent text-center text-sm font-bold outline-none text-text focus:ring-0 border-0 p-0"
+                        className="w-full bg-transparent text-center text-sm font-bold outline-none text-text focus:ring-0 border-0 p-0 font-mono"
                         min="1"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => setQty(prev => prev + 1)}
-                        className="w-8 h-8 rounded-xl hover:bg-bg2/80 active:scale-90 text-muted hover:text-text transition-all flex items-center justify-center"
+                        className="w-8 h-8 rounded-xl hover:bg-bg2 active:scale-90 text-muted hover:text-text transition-all flex items-center justify-center"
+                        title="Increase Quantity"
                       >
                         <Plus size={14} />
                       </button>
                     </div>
+
+                    {/* Add to List Button */}
+                    <button
+                      type="button"
+                      onClick={handleAddItemToCart}
+                      disabled={!product.trim()}
+                      className="flex-1 h-11 bg-gradient-to-r from-primary to-blue-600 hover:opacity-95 text-white disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-primary/20"
+                    >
+                      <Plus size={16} /> Stage Medicine
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddItemToCart}
-                    disabled={!product.trim()}
-                    className="px-5 h-11 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold rounded-2xl transition-all flex items-center gap-1.5 active:scale-95 shrink-0 shadow-sm"
-                  >
-                    <Plus size={16} /> Add to Cart
-                  </button>
                 </div>
 
               </div>
 
-              {/* Customer & Priority details */}
-              <div className="space-y-4 p-4.5 bg-bg2/40 border border-border/40 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300">
-                <div className="flex items-center gap-2 mb-1.5 select-none">
-                  <span className="w-1.5 h-3.5 bg-purple-500 rounded-full inline-block"></span>
-                  <div className="font-bold text-xs text-text/90 uppercase tracking-wider">2. Customer Details & Priority</div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Customer Name *</label>
+              {/* Customer Details Inputs (No label headers) */}
+              <div className="p-4 bg-bg2/50 border border-glass-border rounded-3xl shadow-sm space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {/* Customer Name */}
+                  <div className="relative">
+                    <User size={14} className="absolute left-3.5 top-3 text-muted pointer-events-none" />
                     <input
                       type="text"
                       value={requester}
                       onChange={(e) => setRequester(e.target.value)}
-                      className="w-full premium-input py-2 text-xs font-semibold rounded-xl bg-bg3/20 border-border/60"
-                      placeholder="e.g. John Doe"
-                      required
+                      className="w-full premium-input pl-10 pr-3 py-2.5 text-xs font-semibold rounded-2xl bg-bg3/40 border-glass-border"
+                      placeholder="Customer Name (Optional)"
                       autoComplete="off"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Phone Number *</label>
+
+                  {/* Phone Number */}
+                  <div className="relative">
+                    <Phone size={14} className="absolute left-3.5 top-3 text-muted pointer-events-none" />
                     <input
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      className="w-full premium-input py-2 text-xs font-semibold rounded-xl bg-bg3/20 border-border/60"
-                      placeholder="e.g. 9876543210"
+                      className="w-full premium-input pl-10 pr-3 py-2.5 text-xs font-semibold rounded-2xl bg-bg3/40 border-glass-border font-mono"
+                      placeholder="Phone Number (Optional)"
                       maxLength={15}
-                      required
                       autoComplete="off"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Advance Payment</label>
+
+                  {/* Advance Payment */}
+                  <div className="relative">
+                    <IndianRupee size={14} className="absolute left-3.5 top-3 text-muted pointer-events-none" />
                     <input
                       type="number"
                       value={advancePayment}
                       onChange={(e) => setAdvancePayment(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full premium-input py-2 text-xs font-semibold rounded-xl bg-bg3/20 border-border/60"
-                      placeholder="e.g. 500 (Optional)"
+                      className="w-full premium-input pl-10 pr-3 py-2.5 text-xs font-semibold rounded-2xl bg-bg3/40 border-glass-border font-mono"
+                      placeholder="Advance Payment (₹)"
                       min="0"
                       step="0.01"
                       autoComplete="off"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Message Language</label>
+
+                  {/* Message Language */}
+                  <div className="relative">
+                    <Globe size={14} className="absolute left-3.5 top-3 text-muted pointer-events-none" />
                     <select
                       value={language}
                       onChange={(e) => setLanguage(e.target.value)}
-                      className="w-full premium-input py-2 text-xs font-semibold rounded-xl bg-bg3/20 border-border/60"
+                      className="w-full premium-input pl-10 pr-3 py-2.5 text-xs font-semibold rounded-2xl bg-bg3/40 border-glass-border appearance-none cursor-pointer text-text"
                     >
                       <option value="en">🇬🇧 English</option>
                       <option value="hi">🇮🇳 Hindi</option>
@@ -892,95 +953,65 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                     </select>
                   </div>
                 </div>
-                {phone.replace(/\D/g, '').length === 10 && (
-                  <span className="text-[9px] text-green/80 flex items-center gap-1 mt-1 font-medium select-none animate-pulse">
-                    <Sparkles size={10} /> Automated WhatsApp booking confirmation will be dispatched
-                  </span>
-                )}
-                
-                <div>
-                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5 select-none">Priority</label>
-                  <div className="flex bg-bg3 border border-border/40 rounded-2xl p-1 h-10 select-none">
-                    {(['Low', 'Normal', 'High'] as const).map((p) => {
-                      const active = priority === p;
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => setPriority(p)}
-                          className={`flex-1 text-xs font-bold rounded-xl transition-all duration-300 ${
-                            active 
-                              ? p === 'High' 
-                                ? 'bg-red-500/20 text-red border border-red-500/30 shadow-sm' 
-                                : p === 'Low'
-                                ? 'bg-bg3 text-text border border-border'
-                                : 'bg-primary/20 text-primary border border-primary/30 shadow-sm'
-                              : 'text-muted hover:text-text hover:bg-bg3'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
             </div>
 
+
             {/* Right Column: Selected Items / Cart (2/5 cols) */}
-            <div className="md:col-span-2 border-t md:border-t-0 md:border-l border-glass-border/40 pt-4 md:pt-0 md:pl-4 flex flex-col h-[280px] md:h-auto overflow-hidden">
-              <div className="flex items-center justify-between mb-2 select-none flex-shrink-0">
-                <span className="font-semibold text-xs text-muted uppercase tracking-wider flex items-center gap-1.5">
-                  <ClipboardPlus size={14} className="text-primary" /> Staged Items ({cart.length})
+            <div className="md:col-span-2 border-t md:border-t-0 md:border-l border-glass-border pt-4 md:pt-0 md:pl-5 flex flex-col h-[280px] md:h-auto overflow-hidden">
+              <div className="flex items-center justify-between mb-3 select-none flex-shrink-0">
+                <span className="font-semibold text-xs text-text uppercase tracking-wider flex items-center gap-1.5">
+                  <ShoppingCart size={15} className="text-primary" /> Staged Items ({cart.length})
                 </span>
                 {cart.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setCart([])}
-                    className="text-[10px] font-bold text-red hover:text-red-400"
+                    className="text-[10px] font-bold text-red-400 hover:text-red-300 flex items-center gap-1 px-2 py-0.5 rounded-lg hover:bg-red-500/10 transition-all"
                   >
-                    Clear All
+                    <Trash2 size={11} /> Clear All
                   </button>
                 )}
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin max-h-[260px] md:max-h-none">
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin max-h-[260px] md:max-h-none">
                 {cart.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-4 text-muted/65 italic text-xs select-none">
-                    No items added yet. Search and click "Add to Cart" to build your list.
+                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted/65 italic text-xs select-none border border-dashed border-glass-border rounded-3xl bg-bg3/20">
+                    <ShoppingCart size={32} className="text-muted/30 mb-2" />
+                    <span>No items added yet. Search and click "Add to List" to build your order list.</span>
                   </div>
                 ) : (
                   cart.map((item, idx) => (
                     <div 
                       key={idx} 
-                      className="flex items-center justify-between p-3.5 rounded-2xl border border-border/40 bg-bg2 hover:bg-bg3/50 text-xs animate-in fade-in slide-in-from-right-3 duration-250 transition-all shadow-sm hover:shadow-md"
+                      className="flex items-center justify-between p-3.5 rounded-2xl border border-glass-border bg-bg2 hover:bg-bg3/50 text-xs animate-in fade-in slide-in-from-right-3 duration-250 transition-all shadow-sm hover:shadow-md"
                     >
                       <div className="min-w-0 flex-1 pr-2">
                         <div className="font-bold text-text truncate text-sm" title={item.product}>{item.product}</div>
                         {item.distributor && (
                           <div className="text-[10px] text-muted flex items-center gap-1.5 mt-1 truncate">
-                            <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0"></span>
-                            <span className="truncate font-medium">{item.distributor}</span>
+                            <Store size={11} className="text-emerald-400 shrink-0" />
+                            <span className="truncate font-semibold text-text/80">{item.distributor}</span>
                             {item.scheme && (
-                              <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[8px] px-1.5 py-0.5 rounded-md font-extrabold uppercase shrink-0">
-                                {item.scheme}
+                              <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[8px] px-1.5 py-0.5 rounded-md font-extrabold uppercase shrink-0 flex items-center gap-0.5">
+                                <Tag size={8} /> {item.scheme}
                               </span>
                             )}
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="font-mono font-extrabold bg-primary/10 text-primary border border-primary/20 px-2.5 py-1 rounded-xl text-xs animate-in zoom-in-75 duration-200">
+                      <div className="flex items-center gap-2.5 flex-shrink-0">
+                        <span className="font-mono font-extrabold bg-primary/15 text-primary border border-primary/25 px-2.5 py-1 rounded-xl text-xs flex items-center gap-1">
                           x{item.qty}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleRemoveCartItem(idx)}
-                          className="p-1.5 text-muted hover:text-red hover:bg-red-500/10 rounded-xl transition-all"
+                          className="p-1.5 text-muted hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
                           title="Remove item"
                         >
-                          <X size={14} />
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
@@ -992,26 +1023,26 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
           </div>
 
           {/* Action Buttons */}
-          <div className="pt-2 border-t border-glass-border/30 flex justify-between items-center gap-4">
-            <div className="text-[10px] text-muted font-mono font-semibold hidden md:block">
-              Total items to add: {cart.length === 0 && product.trim() ? 1 : cart.length}
+          <div className="pt-3 border-t border-glass-border flex justify-between items-center gap-4">
+            <div className="text-[10px] text-muted font-mono font-semibold hidden md:flex items-center gap-1.5">
+              <Layers size={12} className="text-primary" /> Total items to submit: {cart.length === 0 && product.trim() ? 1 : cart.length}
             </div>
-            <div className="flex gap-3 w-full md:w-auto md:min-w-[240px]">
+            <div className="flex gap-3 w-full md:w-auto md:min-w-[260px]">
               <button
                 type="button"
-                onClick={() => setIsOpen(false)}
-                className="flex-1 bg-bg3 hover:bg-bg2 border border-glass-border/50 premium-btn text-muted hover:text-text text-xs font-bold py-2"
+                onClick={handleClose}
+                className="flex-1 bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold py-2.5 rounded-2xl transition-all flex items-center justify-center gap-1.5"
               >
-                Cancel
+                <X size={14} /> Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting || (cart.length === 0 && !product.trim())}
-                className="flex-1 bg-gradient-to-r from-primary to-purple-600 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed premium-btn text-white text-xs font-bold py-2 shadow-[0_0_15px_rgba(59,130,246,0.2)] flex items-center justify-center gap-1.5"
+                className="flex-1 bg-gradient-to-r from-primary to-purple-600 hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold py-2.5 rounded-2xl transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] flex items-center justify-center gap-1.5 active:scale-95"
               >
                 {isSubmitting ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" /> Adding...
+                    <Loader2 size={14} className="animate-spin" /> Submitting...
                   </>
                 ) : (
                   <>
@@ -1028,7 +1059,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         {/* Duplicate Item Resolution Overlay */}
         {duplicateMatch && pendingItemToAdd && (
           <div className="absolute inset-0 z-modal flex items-center justify-center p-6 bg-black/80 backdrop-blur-md rounded-3xl transition-all duration-300 animate-in fade-in">
-            <div className="bg-bg2 border border-glass-border p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl">
+            <div className="bg-bg2 border border-glass-border p-6 rounded-3xl max-w-md w-full space-y-4 shadow-2xl">
               <div className="flex items-center gap-2 text-amber-400">
                 <AlertTriangle size={20} />
                 <h4 className="text-sm font-extrabold uppercase tracking-wide">Similar Item Staged</h4>
@@ -1038,11 +1069,11 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                 <p>
                   You are staging <span className="font-bold text-text">"{pendingItemToAdd.product}"</span> (Qty: {pendingItemToAdd.qty}), which is similar to an item already in your list:
                 </p>
-                <div className="bg-bg3/60 border border-glass-border/30 rounded-xl p-3 space-y-1">
+                <div className="bg-bg3/60 border border-glass-border/30 rounded-2xl p-3.5 space-y-1.5">
                   <div className="font-bold text-text truncate">"{duplicateMatch.product}"</div>
                   <div className="text-[10px] text-muted flex items-center justify-between">
-                    <span>Distributor: {duplicateMatch.distributor || 'None'}</span>
-                    <span className="font-mono bg-primary/10 text-primary border border-primary/20 px-1.5 rounded">Qty: {duplicateMatch.qty}</span>
+                    <span className="flex items-center gap-1"><Store size={10} /> Distributor: {duplicateMatch.distributor || 'None'}</span>
+                    <span className="font-mono bg-primary/10 text-primary border border-primary/20 px-1.5 rounded-md">Qty: {duplicateMatch.qty}</span>
                   </div>
                 </div>
                 <p className="text-muted leading-relaxed">
@@ -1054,30 +1085,30 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                 <button
                   type="button"
                   onClick={handleResolveCombine}
-                  className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-xs font-bold rounded-xl transition-all"
+                  className="w-full py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-2xl transition-all flex items-center justify-center gap-1.5"
                 >
-                  Combine Quantities (Total Qty: {duplicateMatch.qty + pendingItemToAdd.qty})
+                  <Plus size={14} /> Combine Quantities (Total Qty: {duplicateMatch.qty + pendingItemToAdd.qty})
                 </button>
                 <button
                   type="button"
                   onClick={handleResolveSeparate}
-                  className="w-full py-2 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-bold rounded-xl transition-all"
+                  className="w-full py-2.5 bg-primary/15 hover:bg-primary/25 border border-primary/30 text-primary text-xs font-bold rounded-2xl transition-all flex items-center justify-center gap-1.5"
                 >
-                  Add Separately (Different Customer)
+                  <ShoppingCart size={14} /> Add Separately (Different Customer)
                 </button>
                 <button
                   type="button"
                   onClick={handleResolveReplace}
-                  className="w-full py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-400 text-xs font-bold rounded-xl transition-all"
+                  className="w-full py-2.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 text-xs font-bold rounded-2xl transition-all flex items-center justify-center gap-1.5"
                 >
-                  Replace Staged Item
+                  <Zap size={14} /> Replace Staged Item
                 </button>
                 <button
                   type="button"
                   onClick={handleResolveCancel}
-                  className="w-full py-2 bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold rounded-xl transition-all"
+                  className="w-full py-2.5 bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold rounded-2xl transition-all flex items-center justify-center gap-1.5"
                 >
-                  Cancel / Ignore Addition
+                  <X size={14} /> Cancel / Ignore Addition
                 </button>
               </div>
             </div>
@@ -1086,9 +1117,9 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
         {/* Footer info hints */}
         <div className="mt-4 pt-3 border-t border-glass-border/30 flex justify-between text-[9px] text-muted/60 font-medium font-mono">
-          <span>[Esc] Close</span>
-          <span>[Alt + O] Toggle modal</span>
-          <span>[Enter] Add / Submit</span>
+          <span className="flex items-center gap-1"><Clock size={10} /> [Esc] Close</span>
+          <span className="flex items-center gap-1"><Zap size={10} /> [Alt + O] Toggle modal</span>
+          <span className="flex items-center gap-1"><CheckCircle2 size={10} /> [Enter] Add / Submit</span>
         </div>
       </div>
     </div>,
