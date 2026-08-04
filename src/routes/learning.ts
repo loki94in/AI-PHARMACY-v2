@@ -4,6 +4,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { getSummaryCache, rebuildLearningStatsCache, triggerBackgroundSummaryRebuild } from '../services/summaryCacheService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,17 +159,12 @@ router.post('/apply-model', async (req, res) => {
 // Live counts for the Intelligent Suggestions stats card
 router.get('/stats', async (_req, res) => {
   try {
-    const db = await dbManager.getConnection();
-    const ocrRow = await db.get('SELECT COUNT(*) as count FROM ocr_corrections');
-    const aliasRow = await db.get('SELECT COUNT(*) as count FROM medicine_aliases');
-    const lastRetrain = await db.get(
-      "SELECT created_at FROM action_logs WHERE action_type = 'REFRESH_MODEL' ORDER BY created_at DESC LIMIT 1"
-    );
-    res.json({
-      activeOcrCorrections: ocrRow?.count || 0,
-      learnedRxCombos: aliasRow?.count || 0,
-      lastRetrainedAt: lastRetrain?.created_at || null
-    });
+    const cached = await getSummaryCache<any>('learning_stats');
+    if (cached) {
+      return res.json(cached);
+    }
+    const fresh = await rebuildLearningStatsCache();
+    res.json(fresh);
   } catch (error) {
     console.error('Learning stats fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch learning stats' });

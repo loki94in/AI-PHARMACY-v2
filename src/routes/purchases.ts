@@ -19,6 +19,7 @@ import { inventoryCache } from '../services/inventoryCache.js';
 import fs from 'fs';
 import { medicineService } from '../services/medicineService.js';
 import { OrderFulfillmentService } from '../services/orderFulfillmentService.js';
+import { getSummaryCache, rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '../services/summaryCacheService.js';
 
 
 
@@ -28,6 +29,21 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Persistent pre-computed summary endpoint for Purchase History KPI cards (<5ms response)
+router.get('/summary', async (_req, res) => {
+  try {
+    const cached = await getSummaryCache<any>('purchase_summary');
+    if (cached) {
+      return res.json(cached);
+    }
+    const fresh = await rebuildPurchaseSummaryCache();
+    res.json(fresh);
+  } catch (err) {
+    console.error('Failed to fetch purchase summary cache:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 function normalizeDateToYYYYMMDD(dateStr: string): string {
   if (!dateStr) return '';
@@ -1264,6 +1280,7 @@ router.put('/:id/full', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    triggerBackgroundSummaryRebuild();
 
     // Background enrichment for medicines in this purchase
     const medicineNamesToEnrich = items

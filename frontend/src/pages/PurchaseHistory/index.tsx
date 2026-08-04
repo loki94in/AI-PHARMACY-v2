@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
+import { api, apiClient } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
 import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
@@ -281,15 +282,21 @@ const PurchaseHistory = () => {
     }
   };
 
-  // Purchase Analytics — driven by server aggregates (totalItems/meta.totalAmount) so the
-  // cards reflect the full filtered result set, not just the batch loaded so far by
-  // infinite scroll. Column filters are client-only, so fall back to the loaded batch
-  // when any are active (server aggregates can't account for them).
+  const { data: persistentSummary } = useApiQuery<{ totalAmount: number; totalInvoices: number; totalGst: number }>(
+    'purchase-summary-cache',
+    async () => {
+      const res = await apiClient.get('/purchases/summary');
+      return res.data;
+    },
+    { staleTime: 300000, refetchOnWindowFocus: false }
+  );
+
+  // Purchase Analytics — driven by pre-computed persistent summary & server aggregates
   const hasColumnFilters = !!(colFilterId || colFilterDistributor || colFilterInvoiceNo || colFilterDate || colFilterMinAmount || colFilterMaxAmount);
-  const totalPurchases = hasColumnFilters ? items.length : totalItems;
+  const totalPurchases = hasColumnFilters ? items.length : (totalItems || persistentSummary?.totalInvoices || 0);
   const totalAmount = hasColumnFilters
     ? items.reduce((sum, t) => sum + (t.total_amount || 0), 0)
-    : (meta.totalAmount ?? 0);
+    : (meta.totalAmount || persistentSummary?.totalAmount || 0);
   const paidAmount = totalAmount; // Cash workflow, all are paid
 
   const handleExport = (type: 'csv' | 'pdf') => {
