@@ -5,7 +5,6 @@ import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText, Sparkles } from 'lucide-react';
 import AICamera from '../../components/AICamera';
-import BrandBanner from '../../components/POS/BrandBanner';
 import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, type SpecialOrder } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';

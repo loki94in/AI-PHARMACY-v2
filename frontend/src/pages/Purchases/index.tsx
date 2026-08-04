@@ -7,7 +7,6 @@ import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { PriceIntelPanel } from '../../components/PriceIntelPanel';
 import { HoverPriceIntelTable } from '../../components/HoverPriceIntelTable';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
