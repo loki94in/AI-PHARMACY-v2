@@ -31,23 +31,14 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
             return true; // No items is a successful scan
     }
 
-    // Load owner/pharmacist phone number from settings
-    const phoneRow = await db.get("SELECT value FROM app_settings WHERE key = 'owner_phone'");
-    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-    
-    const targetPhone = phoneRow?.value;
-    const medicalName = nameRow?.value || 'AI Pharmacy';
+    // Load store name & phone dynamically
+    const { getStoreMedicalName, getStorePhone } = await import('./storeSettingsService.js');
+    const medicalName = await getStoreMedicalName(db);
+    const targetPhone = await getStorePhone(db);
 
     if (!targetPhone) {
-      console.warn('[ExpiryScan] Expiry scan completed, but no `owner_phone` is configured in app_settings. WhatsApp alert skipped.');
-      // Fallback: log system alert
-      const dbLog = await dbManager.getConnection();
-      await dbLog.run(
-        "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
-        'AUTOMATION_ALERT',
-        `❌ Expiry Alert Failure: Owner WhatsApp number not configured. Expiring list contains ${rows.length} item(s).`
-      );
-            return false; // Not fully successful (skipped notification)
+      console.log('[ExpiryScan] Expiry scan completed successfully. WhatsApp notification skipped (no store phone configured in app_settings).');
+      return true; // Scan completed successfully, optional notification skipped
     }
 
     // Load WhatsApp client and send message
