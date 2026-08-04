@@ -2,6 +2,9 @@
 node_modules/
 **/node_modules/
 
+# ─── Agent scratch workspace ──────────────────────────────────────────────────
+.superpowers/
+
 # ─── Environment / Secrets ───────────────────────────────────────────────────
 .env
 .env.*

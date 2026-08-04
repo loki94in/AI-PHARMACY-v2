@@ -1270,17 +1270,18 @@ router.put('/:id/full', async (req, res) => {
       .map((item: any) => item.medicine || item.medicine_name)
       .filter((name: any) => typeof name === 'string' && name.trim().length > 0);
 
-    // [DISABLED] Background enrichment on purchase save - only runs on explicit user action.
-    // (async () => {
-    //   for (const name of medicineNamesToEnrich) {
-    //     try {
-    //       await activityTracker.waitUntilIdle();
-    //       await onlineDataEnricher.enrichMedicineByName(name);
-    //     } catch (e) {
-    //       console.error('[Background Enrichment] Error enriching:', name, e);
-    //     }
-    //   }
-    // })();
+    if (medicineNamesToEnrich.length > 0) {
+      (async () => {
+        for (const name of medicineNamesToEnrich) {
+          try {
+            await activityTracker.waitUntilIdle();
+            await onlineDataEnricher.enrichMedicineByName(name);
+          } catch (e) {
+            console.error('[Background Enrichment] Error enriching:', name, e);
+          }
+        }
+      })();
+    }
 
         res.json({ success: true, message: 'Purchase updated successfully' });
   } catch (error: any) {

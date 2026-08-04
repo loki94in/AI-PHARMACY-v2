@@ -64,10 +64,9 @@ function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.
 // Register process-level crash handler (logs to crash_log, exits(1) for watchdog restart)
 registerProcessGuardian();
 
-// Enforce stopping and disabling all background self-healing workers
-process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || 'true';
-process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || 'true';
-console.log('🛑 ALL SELF-HEALING WORKERS AND BACKGROUND SUPERVISORS ARE STOPPED AND DISABLED.');
+// Enable background workers and supervisors by default (can be disabled via env var if needed)
+process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || 'false';
+process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || 'false';
 
 // ── SKIP_AUTH safety guard ──────────────────────────────────────────
 // Hard block: never allow auth bypass when ENFORCE_PROD_AUTH=true in production

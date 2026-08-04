@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 26;
+const CURRENT_SCHEMA_VERSION = 27;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -1041,6 +1041,34 @@ export async function ensureSchema(dbPath: string) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       file_headers TEXT UNIQUE,
       mapping_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS credit_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      cn_number TEXT,
+      cn_date TEXT,
+      amount REAL DEFAULT 0,
+      applied_amount REAL DEFAULT 0,
+      reason TEXT,
+      related_purchase_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+      FOREIGN KEY (related_purchase_id) REFERENCES purchases(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS compliance_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT,
+      drug_name TEXT,
+      patient_name TEXT,
+      doctor_name TEXT,
+      license_no TEXT,
+      qty INTEGER,
+      bill_no TEXT,
+      schedule_type TEXT DEFAULT 'general',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 

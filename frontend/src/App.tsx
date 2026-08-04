@@ -152,9 +152,15 @@ function App() {
                 routes={pageRoutes}
                 fallback={<PageLoader />}
                 notFoundElement={
-                  <div className="flex flex-col items-center justify-center h-full text-muted">
-                    <h1 className="text-2xl font-bold mb-2">Coming Soon</h1>
-                    <p>This module is currently being migrated to React.</p>
+                  <div className="flex flex-col items-center justify-center h-full text-text p-6 text-center space-y-4">
+                    <h1 className="text-3xl font-extrabold">404 — Page Not Found</h1>
+                    <p className="text-muted text-sm max-w-md">The requested route does not exist or has been relocated to another workspace tab.</p>
+                    <a
+                      href="/dashboard"
+                      className="px-5 py-2.5 bg-primary text-text font-bold text-xs rounded-xl shadow-lg hover:bg-primary/90 transition-all inline-flex items-center gap-2"
+                    >
+                      Return to Dashboard
+                    </a>
                   </div>
                 }
               />
