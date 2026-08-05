@@ -41,6 +41,7 @@ const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
+const CompliancePage = lazy(() => import('./pages/Compliance'));
 
 // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
 // NOTE: /non-mapped-distributors redirects to /learning?tab=distributors (see Routes below),
@@ -57,6 +58,7 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/manual-purchase', element: <Purchases /> },
   { path: '/purchase-history', element: <PurchaseHistory /> },
   { path: '/crm', element: <CRM /> },
+  { path: '/compliance', element: <CompliancePage /> },
   { path: '/pharmarack-cart', element: <PharmarackCart /> },
   { path: '/migration', element: <Migration /> },
   { path: '/reports', element: <Reports /> },

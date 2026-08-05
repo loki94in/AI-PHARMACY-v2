@@ -865,9 +865,9 @@ export const api = {
   
   getReportsSummary: (params: { type?: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports', { params }).then(res => res.data),
   getReportsData: (params: { type: string; fromDate?: string; toDate?: string }) => apiClient.get('/reports/data', { params }).then(res => res.data),
-  exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
-  exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-excel', { params, responseType: 'blob' }).then(res => res.data),
-  exportReportsCSV: (params: { type: string; fromDate?: string; toDate?: string; days?: number }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
+  exportReportsCSV: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
   getNonMovingReportData: (params: { days: number }) => apiClient.get<{ success: boolean; periodDays: number; count: number; items: any[] }>('/reports/non-moving/data', { params }).then(res => res.data),
   getProductTrace: (params: { q: string }) => apiClient.get<{ purchases: any[]; sales: any[] }>('/reports/product-trace', { params }).then(res => res.data),
 
@@ -946,6 +946,13 @@ export const api = {
     barcodeText: string;
     qrDataUrl: string;
     code128DataUrl: string;
-    pdfUrl: string;
-  }>(`/utilities/sale-invoice-barcode/${encodeURIComponent(invoiceNo)}`).then(res => res.data),
+  }>('/sales/invoice-barcode', { params: { invoiceNo } }).then(res => res.data),
+
+  // Schedule H1 Regulatory Compliance API
+  getComplianceDashboard: () => apiClient.get<{ success: boolean; todayH1Sales: number; monthlyH1Sales: number; pendingDoctorAssignments: number; totalComplianceLogs: number }>('/compliance/dashboard').then(res => res.data),
+  getH1Register: (params?: { startDate?: string; endDate?: string; search?: string; doctor?: string; scheduleType?: string }) => apiClient.get<any[]>('/compliance/h1-register', { params }).then(res => res.data),
+  updateComplianceDoctor: (id: number, data: { doctor_name: string; license_no?: string }) => apiClient.put<{ success: boolean; message: string }>(`/compliance/${id}/doctor`, data).then(res => res.data),
+
+  // Therapeutic Search API
+  searchByTherapeutic: (query: string) => apiClient.get<any[]>('/inventory/therapeutic-search', { params: { query } }).then(res => res.data),
 };

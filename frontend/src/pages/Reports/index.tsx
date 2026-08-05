@@ -30,6 +30,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString } from '../../utils/date';
+import { exportToCSV, exportToPDF } from '../../utils/export';
 
 // Module-level cache for instant report hydration on tab switches / re-mounts
 const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
@@ -95,38 +96,111 @@ const Reports = () => {
 
   // Complete Report Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'pdf' | 'csv'>('pdf');
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'csv'>('csv');
+  const [exportSplitMode, setExportSplitMode] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState(false);
 
   const handleDownloadExport = async () => {
     setIsExporting(true);
     try {
-      let blob: Blob;
-      if (activeTab === 'nonMoving') {
-        if (exportFormat === 'pdf') {
-          blob = await api.exportReportsPDF({ type: 'nonMoving', days: nonMovingDays });
-        } else {
-          blob = await api.exportReportsCSV({ type: 'nonMoving', days: nonMovingDays });
-        }
-      } else if (activeTab === 'trace') {
+      if (activeTab === 'trace') {
         alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
         setIsExporting(false);
         return;
-      } else {
-        if (exportFormat === 'pdf') {
-          blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
-        } else {
-          blob = await api.exportReportsCSV({ type: activeTab, fromDate, toDate });
-        }
       }
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `report_${activeTab}_${Date.now()}.${exportFormat === 'pdf' ? 'pdf' : 'csv'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+
+      let exportData: any[] = [];
+      let exportColumns: Array<{ key: string; label: string }> = [];
+      let reportTitle = `${activeTab.toUpperCase()} Report`;
+
+      if (activeTab === 'nonMoving') {
+        exportData = filteredNonMovingItems;
+        reportTitle = `Non-Moving Inventory Report (${nonMovingDays}+ Days Inactive)`;
+        exportColumns = [
+          { key: 'medicineName', label: 'Medicine Name' },
+          { key: 'batchNo', label: 'Batch No' },
+          { key: 'purchaseDate', label: 'Purchase Date' },
+          { key: 'quantity', label: 'Stock Qty' },
+          { key: 'expiryDate', label: 'Expiry Date' },
+          { key: 'costPrice', label: 'Unit Cost (Rs.)' },
+          { key: 'totalCostValue', label: 'Hold Value Cost (Rs.)' },
+          { key: 'totalValue', label: 'Hold Value MRP (Rs.)' },
+          { key: 'dormantDaysLabel', label: 'Dormant Period' }
+        ];
+      } else if (activeTab === 'sales') {
+        exportData = records;
+        reportTitle = `Sales History Report (${fromDate} to ${toDate})`;
+        exportColumns = [
+          { key: 'date', label: 'Date' },
+          { key: 'invoice_no', label: 'Invoice Number' },
+          { key: 'total_amount', label: 'Total Amount (Rs.)' }
+        ];
+      } else if (activeTab === 'purchases') {
+        exportData = records;
+        reportTitle = `Purchase Log Bills Report (${fromDate} to ${toDate})`;
+        exportColumns = [
+          { key: 'date', label: 'Date' },
+          { key: 'invoice_no', label: 'Bill / Invoice No' },
+          { key: 'distributor_name', label: 'Distributor Supplier' },
+          { key: 'total_amount', label: 'Amount (Rs.)' }
+        ];
+      } else if (activeTab === 'inventory') {
+        exportData = records;
+        reportTitle = `Valued Inventory Status Report`;
+        exportColumns = [
+          { key: 'medicine_name', label: 'Medicine Stock Name' },
+          { key: 'batch_no', label: 'Batch No' },
+          { key: 'stock', label: 'Current Stock Qty' },
+          { key: 'cost_price', label: 'Unit Cost (Rs.)' },
+          { key: 'mrp', label: 'Unit MRP (Rs.)' },
+          { key: 'value', label: 'Hold Valuation Cost (Rs.)' }
+        ];
+      } else if (activeTab === 'expiry') {
+        exportData = records;
+        reportTitle = `Expiry Warning Report (${fromDate} to ${toDate})`;
+        exportColumns = [
+          { key: 'medicine_name', label: 'Medicine Name' },
+          { key: 'batch_no', label: 'Batch Number' },
+          { key: 'quantity', label: 'Stock Qty' },
+          { key: 'cost_price', label: 'Unit Cost (Rs.)' },
+          { key: 'expiry_date', label: 'Expiry Date' },
+          { key: 'value', label: 'Valuation at Risk (Rs.)' }
+        ];
+      }
+
+      if (exportSplitMode && exportData.length > 0) {
+        // Multi-file export mode: generate & download separate files for each 30 items chunk
+        const filename = `report_${activeTab}_split30_${Date.now()}`;
+        if (exportFormat === 'pdf') {
+          exportToPDF(exportData, exportColumns, filename, reportTitle, { split: true, itemsPerPage: 30 });
+        } else {
+          exportToCSV(exportData, exportColumns, filename, { split: true, itemsPerPage: 30 });
+        }
+      } else {
+        // Single file download mode
+        let blob: Blob;
+        if (activeTab === 'nonMoving') {
+          if (exportFormat === 'pdf') {
+            blob = await api.exportReportsPDF({ type: 'nonMoving', days: nonMovingDays });
+          } else {
+            blob = await api.exportReportsCSV({ type: 'nonMoving', days: nonMovingDays });
+          }
+        } else {
+          if (exportFormat === 'pdf') {
+            blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
+          } else {
+            blob = await api.exportReportsCSV({ type: activeTab, fromDate, toDate });
+          }
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${activeTab}_${Date.now()}.${exportFormat === 'pdf' ? 'pdf' : 'csv'}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
       setShowExportModal(false);
     } catch (err) {
       console.error(`Error exporting ${exportFormat}:`, err);
@@ -134,6 +208,11 @@ const Reports = () => {
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleExport = (format: 'pdf' | 'csv' = 'csv') => {
+    setExportFormat(format);
+    setShowExportModal(true);
   };
 
   const handleSendToWhatsapp = async (overrideFormat?: string) => {
@@ -170,40 +249,6 @@ const Reports = () => {
       alert(err.response?.data?.message || 'Error sending PDF samples via WhatsApp');
     } finally {
       setSendingSamples(false);
-    }
-  };
-
-  // Automated PDF / Excel Exporter
-  const handleExport = async (format: 'pdf' | 'excel') => {
-    try {
-      let blob;
-      if (activeTab === 'nonMoving') {
-        if (format === 'pdf') {
-          blob = await api.exportReportsPDF({ type: 'nonMoving', days: nonMovingDays });
-        } else {
-          blob = await api.exportReportsExcel({ type: 'nonMoving', days: nonMovingDays });
-        }
-      } else if (activeTab === 'trace') {
-        alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
-        return;
-      } else {
-        if (format === 'pdf') {
-          blob = await api.exportReportsPDF({ type: activeTab, fromDate, toDate });
-        } else {
-          blob = await api.exportReportsExcel({ type: activeTab, fromDate, toDate });
-        }
-      }
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `report_${activeTab}_${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error(`Error exporting ${format}:`, err);
-      alert(`Failed to export ${format} report.`);
     }
   };
 
@@ -868,11 +913,11 @@ const Reports = () => {
                     <span>PDF</span>
                   </button>
                   <button
-                    onClick={() => handleExport('excel')}
-                    className="px-3 py-1.5 bg-green/10 hover:bg-green/20 border border-green/20 text-green rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    onClick={() => handleExport('csv')}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
-                    <Download size={12} />
-                    <span>Excel</span>
+                    <FileSpreadsheet size={12} />
+                    <span>CSV</span>
                   </button>
                 </div>
               </div>
@@ -942,11 +987,11 @@ const Reports = () => {
                     <span>PDF</span>
                   </button>
                   <button
-                    onClick={() => handleExport('excel')}
-                    className="px-3 py-1.5 bg-green/10 hover:bg-green/20 border border-green/20 text-green rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    onClick={() => handleExport('csv')}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
-                    <Download size={12} />
-                    <span>Excel</span>
+                    <FileSpreadsheet size={12} />
+                    <span>CSV</span>
                   </button>
                 </div>
               </div>
@@ -1018,11 +1063,11 @@ const Reports = () => {
                     <span>PDF</span>
                   </button>
                   <button
-                    onClick={() => handleExport('excel')}
-                    className="px-3 py-1.5 bg-green/10 hover:bg-green/20 border border-green/20 text-green rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    onClick={() => handleExport('csv')}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
-                    <Download size={12} />
-                    <span>Excel</span>
+                    <FileSpreadsheet size={12} />
+                    <span>CSV</span>
                   </button>
                 </div>
               </div>
@@ -1098,11 +1143,11 @@ const Reports = () => {
                     <span>PDF</span>
                   </button>
                   <button
-                    onClick={() => handleExport('excel')}
-                    className="px-3 py-1.5 bg-green/10 hover:bg-green/20 border border-green/20 text-green rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                    onClick={() => handleExport('csv')}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
-                    <Download size={12} />
-                    <span>Excel</span>
+                    <FileSpreadsheet size={12} />
+                    <span>CSV</span>
                   </button>
                 </div>
               </div>
@@ -1169,6 +1214,20 @@ const Reports = () => {
                   >
                     <Send size={12} />
                     <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleExport('pdf')}
+                    className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                  >
+                    <FileCheck2 size={12} />
+                    <span>PDF</span>
+                  </button>
+                  <button
+                    onClick={() => handleExport('csv')}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                  >
+                    <FileSpreadsheet size={12} />
+                    <span>CSV</span>
                   </button>
                 </div>
               </div>
@@ -1399,7 +1458,7 @@ const Reports = () => {
                   </div>
                   <div>
                     <h4 className="font-bold text-xs text-text">PDF Document</h4>
-                    <p className="text-[10px] text-muted mt-0.5">Multi-page itemized report (.pdf)</p>
+                    <p className="text-[10px] text-muted mt-0.5"> Branded PDF Report (.pdf)</p>
                   </div>
                 </button>
 
@@ -1419,9 +1478,52 @@ const Reports = () => {
                   </div>
                   <div>
                     <h4 className="font-bold text-xs text-text">CSV Spreadsheet</h4>
-                    <p className="text-[10px] text-muted mt-0.5">Full data rows (.csv)</p>
+                    <p className="text-[10px] text-muted mt-0.5">Raw Data Rows (.csv)</p>
                   </div>
                 </button>
+              </div>
+            </div>
+
+            {/* File & List Splitting Choice */}
+            <div className="space-y-2.5 pt-2 border-t border-glass-border/30">
+              <label className="text-xs font-bold text-muted uppercase tracking-wider block">List Splitting Mode</label>
+              
+              <div className="flex flex-col gap-2">
+                <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  !exportSplitMode
+                    ? 'bg-purple-500/10 border-purple-500/60 text-text ring-1 ring-purple-500/30'
+                    : 'bg-bg3/30 border-glass-border/30 text-muted hover:bg-bg3/60'
+                }`}>
+                  <input
+                    type="radio"
+                    name="splitMode"
+                    checked={!exportSplitMode}
+                    onChange={() => setExportSplitMode(false)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-text">Single File (All Products in 1 File)</div>
+                    <div className="text-[10px] text-muted mt-0.5">Export all products & medicines in 1 single file</div>
+                  </div>
+                </label>
+
+                <label className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
+                  exportSplitMode
+                    ? 'bg-purple-500/10 border-purple-500/60 text-text ring-1 ring-purple-500/30'
+                    : 'bg-bg3/30 border-glass-border/30 text-muted hover:bg-bg3/60'
+                }`}>
+                  <input
+                    type="radio"
+                    name="splitMode"
+                    checked={exportSplitMode}
+                    onChange={() => setExportSplitMode(true)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-text">Split into Multiple Files (30 Products per File)</div>
+                    <div className="text-[10px] text-muted mt-0.5">Downloads separate individual files for every 30 products</div>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -1437,20 +1539,10 @@ const Reports = () => {
               <button
                 type="button"
                 onClick={handleDownloadExport}
-                disabled={isExporting}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:scale-95 transition-all shadow-md shadow-purple-600/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:scale-95 transition-all shadow-md shadow-purple-600/25 flex items-center gap-2 cursor-pointer"
               >
-                {isExporting ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Generating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download size={14} />
-                    <span>Download {exportFormat.toUpperCase()} File</span>
-                  </>
-                )}
+                <Download size={14} />
+                <span>Download {exportFormat.toUpperCase()} File</span>
               </button>
             </div>
           </div>

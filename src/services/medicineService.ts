@@ -23,6 +23,12 @@ export interface MedicineData {
   sgst_per?: number;
   igst_per?: number;
   rack?: string;
+  therapeutic?: string;
+  subTherapeutic?: string;
+  shortCode?: string;
+  ucode?: string;
+  disableAutoBarcode?: number;
+  tbMedicine?: number;
   source?: string;
   possibleDuplicateOf?: number;
 }
@@ -49,6 +55,12 @@ export interface MedicineResult {
   sgst_per?: number;
   igst_per?: number;
   rack?: string;
+  therapeutic?: string;
+  subTherapeutic?: string;
+  shortCode?: string;
+  ucode?: string;
+  disableAutoBarcode?: number;
+  tbMedicine?: number;
   source?: string;
   possibleDuplicateOf?: number;
 }
@@ -86,8 +98,8 @@ export class MedicineService {
         `INSERT INTO medicines (
           name, api_reference, mrp, hsn_code, schedule_type, manufacturer,
           category, marketed_by, legacy_id, packaging,
-          item_type, cgst_per, sgst_per, igst_per, rack, source, possible_duplicate_of
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          item_type, cgst_per, sgst_per, igst_per, rack, therapeutic, sub_therapeutic, short_code, ucode, disable_auto_barcode, tb_medicine, source, possible_duplicate_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.name,
           data.apiReference ?? null,
@@ -104,6 +116,12 @@ export class MedicineService {
           data.sgst_per ?? 0,
           data.igst_per ?? 0,
           data.rack ?? null,
+          data.therapeutic ?? null,
+          data.subTherapeutic ?? null,
+          data.shortCode ?? null,
+          data.ucode ?? null,
+          data.disableAutoBarcode ?? 0,
+          data.tbMedicine ?? 0,
           data.source ?? 'manual',
           data.possibleDuplicateOf ?? null
         ]
@@ -194,6 +212,30 @@ export class MedicineService {
       if (data.rack !== undefined) {
         fields.push('rack = ?');
         values.push(data.rack);
+      }
+      if (data.therapeutic !== undefined) {
+        fields.push('therapeutic = ?');
+        values.push(data.therapeutic);
+      }
+      if (data.subTherapeutic !== undefined) {
+        fields.push('sub_therapeutic = ?');
+        values.push(data.subTherapeutic);
+      }
+      if (data.shortCode !== undefined) {
+        fields.push('short_code = ?');
+        values.push(data.shortCode);
+      }
+      if (data.ucode !== undefined) {
+        fields.push('ucode = ?');
+        values.push(data.ucode);
+      }
+      if (data.disableAutoBarcode !== undefined) {
+        fields.push('disable_auto_barcode = ?');
+        values.push(data.disableAutoBarcode ? 1 : 0);
+      }
+      if (data.tbMedicine !== undefined) {
+        fields.push('tb_medicine = ?');
+        values.push(data.tbMedicine ? 1 : 0);
       }
       if (data.source !== undefined) {
         fields.push('source = ?');

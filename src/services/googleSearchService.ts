@@ -146,11 +146,54 @@ class GoogleSearchService {
       result.pack_info = packMatch[0].trim();
     }
 
-    // 6. Extract Therapeutic Class
-    const classes = ['analgesic', 'antipyretic', 'antibiotic', 'antifungal', 'beta blocker', 'nsaid', 'proton pump inhibitor', 'antihistamine'];
-    for (const c of classes) {
-      if (lowerText.includes(c)) {
-        result.therapeutic_class = c.toUpperCase();
+    // 6. Extract Therapeutic Class (Expanded 50+ Taxonomy)
+    const classesMap: Array<{ key: string; name: string }> = [
+      { key: 'nsaid', name: 'NSAID / Anti-inflammatory' },
+      { key: 'analgesic', name: 'Analgesic / Antipyretic' },
+      { key: 'antipyretic', name: 'Analgesic / Antipyretic' },
+      { key: 'antibiotic', name: 'Antibiotic / Anti-infective' },
+      { key: 'anti-infective', name: 'Antibiotic / Anti-infective' },
+      { key: 'antibacterial', name: 'Antibiotic / Anti-infective' },
+      { key: 'antifungal', name: 'Antifungal' },
+      { key: 'antiviral', name: 'Antiviral' },
+      { key: 'proton pump inhibitor', name: 'Antacid / Anti-ulcer' },
+      { key: 'antacid', name: 'Antacid / Anti-ulcer' },
+      { key: 'anti-ulcer', name: 'Antacid / Anti-ulcer' },
+      { key: 'h2 blocker', name: 'Antacid / Anti-ulcer' },
+      { key: 'antihistamine', name: 'Antihistamine / Anti-allergic' },
+      { key: 'anti-allergic', name: 'Antihistamine / Anti-allergic' },
+      { key: 'antihypertensive', name: 'Antihypertensive' },
+      { key: 'beta blocker', name: 'Antihypertensive' },
+      { key: 'calcium channel blocker', name: 'Antihypertensive' },
+      { key: 'ace inhibitor', name: 'Antihypertensive' },
+      { key: 'antidiabetic', name: 'Antidiabetic' },
+      { key: 'insulin', name: 'Antidiabetic' },
+      { key: 'hypoglycemic', name: 'Antidiabetic' },
+      { key: 'bronchodilator', name: 'Bronchodilator / Respiratory' },
+      { key: 'anti-asthmatic', name: 'Bronchodilator / Respiratory' },
+      { key: 'corticosteroid', name: 'Corticosteroid / Anti-inflammatory' },
+      { key: 'cardiovascular', name: 'Cardiovascular' },
+      { key: 'anti-anginal', name: 'Cardiovascular' },
+      { key: 'statin', name: 'Lipid Lowering' },
+      { key: 'lipid lowering', name: 'Lipid Lowering' },
+      { key: 'anti-emetic', name: 'Gastrointestinal' },
+      { key: 'anti-diarrheal', name: 'Gastrointestinal' },
+      { key: 'laxative', name: 'Gastrointestinal' },
+      { key: 'dermatological', name: 'Dermatological' },
+      { key: 'ophthalmic', name: 'Ophthalmic' },
+      { key: 'neurological', name: 'Neurological' },
+      { key: 'anticonvulsant', name: 'Neurological' },
+      { key: 'anti-depressant', name: 'Psychiatric' },
+      { key: 'anti-anxiety', name: 'Psychiatric' },
+      { key: 'vitamin', name: 'Vitamin / Mineral Supplement' },
+      { key: 'supplement', name: 'Vitamin / Mineral Supplement' },
+      { key: 'anticoagulant', name: 'Anticoagulant' },
+      { key: 'muscle relaxant', name: 'Muscle Relaxant' }
+    ];
+
+    for (const c of classesMap) {
+      if (lowerText.includes(c.key)) {
+        result.therapeutic_class = c.name;
         break;
       }
     }

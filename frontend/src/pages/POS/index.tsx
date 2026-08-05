@@ -26,6 +26,16 @@ const getLocalDateString = (d: Date = new Date()) => {
 const parsePackSizeFromPackaging = (packaging: string | null | undefined): number | null => {
   if (!packaging) return null;
   const trimmed = packaging.trim();
+  const stripOfMatch = trimmed.match(/^\s*(?:STRIP|PACK|BOX|BLISTER)\s+OF\s+(\d+)/i);
+  if (stripOfMatch) {
+    const size = parseInt(stripOfMatch[1], 10);
+    if (size > 0) return size;
+  }
+  const bottleOfMatch = trimmed.match(/^\s*BOTTLE\s+OF\s+(\d+)/i);
+  if (bottleOfMatch) {
+    const size = parseInt(bottleOfMatch[1], 10);
+    if (size > 0) return size;
+  }
   if (/\b\d+\s*x\s*\d+\b/i.test(trimmed)) {
     const parts = trimmed.split(/x/i);
     return (parseInt(parts[0], 10) || 1) * (parseInt(parts[1], 10) || 1);
@@ -175,6 +185,9 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
     (item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) ||
     (item.name && item.name.toLowerCase().startsWith(term)) ||
     (item.item_code && item.item_code.toLowerCase().startsWith(term)) ||
+    (item.short_code && item.short_code.toLowerCase().startsWith(term)) ||
+    (item.therapeutic && item.therapeutic.toLowerCase().startsWith(term)) ||
+    (item.sub_therapeutic && item.sub_therapeutic.toLowerCase().startsWith(term)) ||
     (item.batch_no && item.batch_no.toLowerCase().startsWith(term))
   );
   
@@ -187,10 +200,15 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
     ((item.medicine_name && item.medicine_name.toLowerCase().includes(term)) ||
     (item.name && item.name.toLowerCase().includes(term)) ||
     (item.item_code && item.item_code.toLowerCase().includes(term)) ||
+    (item.short_code && item.short_code.toLowerCase().includes(term)) ||
+    (item.therapeutic && item.therapeutic.toLowerCase().includes(term)) ||
+    (item.sub_therapeutic && item.sub_therapeutic.toLowerCase().includes(term)) ||
     (item.batch_no && item.batch_no.toLowerCase().includes(term))) &&
     !(item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) &&
     !(item.name && item.name.toLowerCase().startsWith(term)) &&
     !(item.item_code && item.item_code.toLowerCase().startsWith(term)) &&
+    !(item.short_code && item.short_code.toLowerCase().startsWith(term)) &&
+    !(item.therapeutic && item.therapeutic.toLowerCase().startsWith(term)) &&
     !(item.batch_no && item.batch_no.toLowerCase().startsWith(term))
   );
   

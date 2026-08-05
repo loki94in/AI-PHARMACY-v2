@@ -911,8 +911,12 @@ router.post('/manual', async (req, res) => {
           // Auto-create new medicine if no existing match exists
           if (!medId) {
             const insMed = await db.run(
-              'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
-              [cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '']
+              'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name, packaging, category, marketed_by, schedule_type, pack_unit, pack_size, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              [
+                cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '',
+                item.generic_name || null, item.packaging || null, item.category || null, item.marketed_by || null,
+                item.schedule_type || null, item.pack_unit || null, item.pack_size || null, item.item_type || null
+              ]
             );
             medId = insMed.lastID;
           }

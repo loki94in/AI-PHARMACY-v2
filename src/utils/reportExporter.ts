@@ -55,7 +55,8 @@ export function exportToPdf(
   keys: string[],
   rows: any[],
   alignMap?: Record<string, 'left' | 'center' | 'right'>,
-  columnWidths?: number[]
+  columnWidths?: number[],
+  splitPerPage: boolean = false
 ): void {
   const doc = new PDFDocument({ margin: 50, bufferPages: true });
   doc.pipe(res);
@@ -63,6 +64,7 @@ export function exportToPdf(
   const tableWidth = 512; // 612 page width - 100 margin
   const startX = 50;
   const rowHeight = 22;
+  const itemsPerPageLimit = 30;
 
   // Calculates x coordinate and width for a column index
   const getColXAndWidth = (index: number) => {
@@ -80,7 +82,7 @@ export function exportToPdf(
   };
 
   // Branding Page Header
-  const drawPageHeader = (pageTitle: string) => {
+  const drawPageHeader = (pageTitle: string, batchIndex?: number, totalBatches?: number) => {
     doc.font('Helvetica');
     doc.fillColor('#1e293b');
     doc.fontSize(16).text('AI PHARMACY OS', { align: 'left' });
@@ -91,12 +93,22 @@ export function exportToPdf(
     doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(startX, doc.y).lineTo(startX + tableWidth, doc.y).stroke();
     doc.moveDown(0.6);
 
-    doc.font('Helvetica-Bold').fontSize(12).fillColor('#1e293b').text(pageTitle, { align: 'center' });
+    let displayTitle = pageTitle;
+    if (splitPerPage && batchIndex !== undefined && totalBatches !== undefined) {
+      const startItem = batchIndex * itemsPerPageLimit + 1;
+      const endItem = Math.min((batchIndex + 1) * itemsPerPageLimit, rows.length);
+      displayTitle = `${pageTitle} — Part ${batchIndex + 1} of ${totalBatches} (Items ${startItem} to ${endItem})`;
+    }
+
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#1e293b').text(displayTitle, { align: 'center' });
     doc.font('Helvetica'); // Reset back to standard font
     doc.moveDown(0.8);
   };
 
-  drawPageHeader(title);
+  const totalBatches = splitPerPage ? Math.ceil(rows.length / itemsPerPageLimit) || 1 : 1;
+  let currentBatch = 0;
+
+  drawPageHeader(title, currentBatch, totalBatches);
 
   // Draw Table Headers
   let currentY = doc.y;
@@ -113,10 +125,15 @@ export function exportToPdf(
 
   // Draw Rows
   rows.forEach((row, rowIndex) => {
-    // If row exceeds page height boundary, split to a new page
-    if (currentY + rowHeight > 720) {
+    const isNewBatchBoundary = splitPerPage && rowIndex > 0 && rowIndex % itemsPerPageLimit === 0;
+
+    // If row exceeds page height boundary OR splitPerPage batch boundary is hit (30 items per batch/page)
+    if (currentY + rowHeight > 720 || isNewBatchBoundary) {
       doc.addPage();
-      drawPageHeader(title);
+      if (isNewBatchBoundary) {
+        currentBatch++;
+      }
+      drawPageHeader(title, currentBatch, totalBatches);
 
       // Re-draw Table Headers on new page
       currentY = doc.y;
@@ -195,7 +212,12 @@ export function exportToCsv(
     keys.map(k => {
       const val = row[k];
       const strVal = val !== undefined && val !== null ? String(val) : '';
-      return `"${strVal.replace(/"/g, '""')}"`;
+      const cleaned = strVal.replace(/"/g, '""');
+      // Prevent Excel from removing leading zeros and popping up conversion warnings
+      if (/^0\d+$/.test(strVal)) {
+        return `="${cleaned}"`;
+      }
+      return `"${cleaned}"`;
     }).join(',')
   );
   return [headerLine, ...rowLines].join('\n');

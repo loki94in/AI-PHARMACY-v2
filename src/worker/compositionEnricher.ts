@@ -411,12 +411,12 @@ export async function getEnrichmentStatus(): Promise<EnrichmentStatus> {
   return { total, enriched, needsReview, unmatched, nonPharma, pending, isRunning: isEnrichmentRunning };
 }
 
-type ReferenceRow = { name: string; composition1: string | null; composition2: string | null; manufacturer: string | null };
+type ReferenceRow = { name: string; composition1: string | null; composition2: string | null; manufacturer: string | null; therapeutic?: string | null };
 type IndexedReferenceRow = ReferenceRow & { cleaned: string; tokens: string[]; tokenSet: Set<string> };
 
 /** Loads `medicine_reference` and builds the exact-match map + inverted token index used for scoring. */
 async function buildReferenceIndex(db: DbConnection) {
-  const refs: ReferenceRow[] = await db.all('SELECT name, composition1, composition2, manufacturer FROM medicine_reference');
+  const refs: ReferenceRow[] = await db.all('SELECT name, composition1, composition2, manufacturer, therapeutic FROM medicine_reference');
 
   const refsWithCleanName: IndexedReferenceRow[] = refs.map(ref => {
     const cleaned = cleanMedicineName(ref.name);
@@ -698,8 +698,8 @@ export async function runEnrichment(
           const composition = formatComposition(bestRef);
 
           await db.run(
-            "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = ? WHERE id = ?",
-            composition, bestScore, med.id
+            "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = ?, therapeutic = COALESCE(therapeutic, ?) WHERE id = ?",
+            composition, bestScore, bestRef.therapeutic || null, med.id
           );
           matched++;
         } else if (bestRef && bestScore >= 0.6) {

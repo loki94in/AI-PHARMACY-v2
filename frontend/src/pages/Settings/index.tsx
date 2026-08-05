@@ -1632,7 +1632,7 @@ const Settings = () => {
               <span className="text-[10px] text-emerald-400 font-normal">Included in WhatsApp Dispatch Templates</span>
             </label>
             <div className="flex flex-wrap gap-2 mb-1">
-              {['CSV', 'CSV Only', 'CSV & PDF', 'CSV, Excel (.xlsx), PDF'].map((fmt) => (
+              {['CSV Only', 'PDF Only', 'CSV & PDF'].map((fmt) => (
                 <button
                   key={fmt}
                   type="button"
@@ -1651,12 +1651,12 @@ const Settings = () => {
               id="distributorInvoiceFileFormat"
               type="text"
               className="premium-input w-full bg-bg border border-border"
-              placeholder="e.g. CSV or CSV (.csv)"
+              placeholder="e.g. CSV or PDF"
               value={distributorInvoiceFileFormat}
               onChange={(e) => setDistributorInvoiceFileFormat(e.target.value)}
             />
             <p className="text-[10px] text-muted">
-              Distributors & delivery boys receive this format requirement in daily WhatsApp orders so they attach supported invoice copies (PDF, Excel, CSV) when emailing bills.
+              Distributors & delivery boys receive this format requirement in daily WhatsApp orders so they attach supported invoice copies (PDF, CSV) when emailing bills.
             </p>
           </div>
         </div>
@@ -1735,10 +1735,10 @@ const Settings = () => {
               <option value="text">📱 WhatsApp Text with Bar Chart</option>
               <option value="pdf">📄 PDF Document Report (Attached)</option>
               <option value="combined">📬 WhatsApp Text + PDF Document (Combined)</option>
-              <option value="excel">📊 Excel Spreadsheet Report (Attached)</option>
+              <option value="csv">📊 CSV Spreadsheet Report (Attached)</option>
             </select>
             <p className="text-[10px] text-muted">
-              Select whether scheduled reports should be delivered as text message, PDF attachment, both, or Excel sheet.
+              Select whether scheduled reports should be delivered as text message, PDF attachment, both, or CSV sheet.
             </p>
           </div>
 

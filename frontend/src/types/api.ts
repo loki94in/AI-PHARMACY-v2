@@ -31,11 +31,14 @@ export interface DashboardStats {
 export interface Medicine {
   id: number;
   name: string;
+  generic_name?: string;
   api_reference?: string;
   item_code?: string;
   strength?: string;
   packaging?: string;
+  pack_unit?: string;
   item_type?: string;
+  category?: string;
   manufacturer?: string;
   marketed_by?: string;
   manufactured_by?: string;
@@ -43,8 +46,21 @@ export interface Medicine {
   purchase_price?: number;
   gst?: string;
   hsn?: string;
+  hsn_code?: string;
+  cgst_per?: number;
+  sgst_per?: number;
+  igst_per?: number;
   pack_size?: number;
   schedule_type?: string;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  short_code?: string;
+  ucode?: string;
+  max_stock_level?: number;
+  rack?: string;
+  disable_auto_barcode?: number | boolean;
+  tb_medicine?: number | boolean;
+  metadata?: any;
 }
 
 export interface InventoryItem extends Medicine {

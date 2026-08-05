@@ -28,6 +28,12 @@ interface MedicineRow {
   last_distributor_name?: string;
   source?: string;
   possible_duplicate_of?: number;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  short_code?: string;
+  ucode?: string;
+  schedule_type?: string;
+  item_type?: string;
 }
 
 // Module-level cache for instant re-mount

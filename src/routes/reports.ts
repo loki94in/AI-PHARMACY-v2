@@ -278,19 +278,21 @@ router.get('/export-pdf', async (req, res) => {
         dormantDaysLabel: `${item.daysSinceLastTransaction} days`
       }));
 
+      const isSplit = req.query.split === 'true';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.pdf`);
-      return exportToPdf(res, title, headers, keys, rows, alignMap, colWidths);
+      return exportToPdf(res, title, headers, keys, rows, alignMap, colWidths, isSplit);
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }
 
     const rows = await db.all(query, params);
+    const isSplit = req.query.split === 'true';
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${Date.now()}.pdf`);
     
-    exportToPdf(res, title, headers, keys, rows, alignMap, colWidths);
+    exportToPdf(res, title, headers, keys, rows, alignMap, colWidths, isSplit);
   } catch (err: any) {
     console.error('PDF export error:', err);
     res.status(500).json({ error: 'Failed to export PDF' });
@@ -359,20 +361,20 @@ router.get('/export-excel', async (req, res) => {
         dormantDaysLabel: `${item.daysSinceLastTransaction} days`
       }));
 
-      const excelBuffer = exportToExcel(title, headers, keys, rows);
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.xlsx`);
-      return res.send(excelBuffer);
+      const csvContent = exportToCsv(headers, keys, rows);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=report_nonMoving_${Date.now()}.csv`);
+      return res.send(csvContent);
     } else {
       return res.status(400).json({ error: 'Invalid report type' });
     }
 
     const rows = await db.all(query, params);
-    const excelBuffer = exportToExcel(title, headers, keys, rows);
+    const csvContent = exportToCsv(headers, keys, rows);
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${Date.now()}.xlsx`);
-    res.send(excelBuffer);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${Date.now()}.csv`);
+    res.send(csvContent);
   } catch (err: any) {
     console.error('Excel export error:', err);
     res.status(500).json({ error: 'Failed to export Excel sheet' });

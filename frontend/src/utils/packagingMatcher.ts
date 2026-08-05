@@ -18,7 +18,8 @@ export function parsePackaging(str: string | undefined | null): ParsedPackaging 
   }
 
   const text = str.trim();
-  const lower = text.toLowerCase();
+  let lower = text.toLowerCase();
+  lower = lower.replace(/^strip\s+of\s+/i, '').replace(/^bottle\s+of\s+/i, '');
 
   let volumeMl: number | null = null;
   let weightGm: number | null = null;

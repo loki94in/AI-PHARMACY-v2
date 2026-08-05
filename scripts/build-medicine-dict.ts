@@ -46,6 +46,7 @@ async function buildMedicineDict() {
       // Also add common medicine suffixes/prefixes that might be OCR'd separately
       const commonPatterns = [
         'mg', 'ml', 'g', 'tablet', 'capsule', 'syrup', 'injection', 'drops',
+        'strip', 'bottle', 'vial', 'amp', 'tube', 'susp',
         'forte', 'plus', 'max', 'sr', 'xr', 'lt', 'od', 'bd', 'tds', 'qid'
       ];
 

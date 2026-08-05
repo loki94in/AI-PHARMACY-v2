@@ -261,6 +261,50 @@ class MedicineAvailabilityEngine {
         });
       }
 
+      if (medicine.therapeutic) {
+        const therapeuticAlts = await db.all(
+          `SELECT * FROM medicines
+           WHERE therapeutic = ? AND id != ?
+           AND therapeutic IS NOT NULL AND therapeutic != ''
+           LIMIT 5`,
+          [medicine.therapeutic, medicineId]
+        );
+        for (const alt of therapeuticAlts) {
+          if (!alternatives.some(a => a.medicine.id === alt.id)) {
+            const stock = await this.getStock(db, alt.id);
+            alternatives.push({
+              medicine: alt,
+              confidence: 0.85,
+              matchType: 'category',
+              stock,
+              inStock: stock > 0
+            });
+          }
+        }
+      }
+
+      if (medicine.sub_therapeutic) {
+        const subTherapeuticAlts = await db.all(
+          `SELECT * FROM medicines
+           WHERE sub_therapeutic = ? AND id != ?
+           AND sub_therapeutic IS NOT NULL AND sub_therapeutic != ''
+           LIMIT 5`,
+          [medicine.sub_therapeutic, medicineId]
+        );
+        for (const alt of subTherapeuticAlts) {
+          if (!alternatives.some(a => a.medicine.id === alt.id)) {
+            const stock = await this.getStock(db, alt.id);
+            alternatives.push({
+              medicine: alt,
+              confidence: 0.75,
+              matchType: 'category',
+              stock,
+              inStock: stock > 0
+            });
+          }
+        }
+      }
+
       if (medicine.item_type) {
         const categoryAlts = await db.all(
           `SELECT * FROM medicines
@@ -269,14 +313,16 @@ class MedicineAvailabilityEngine {
           [medicine.item_type, medicineId]
         );
         for (const alt of categoryAlts) {
-          const stock = await this.getStock(db, alt.id);
-          alternatives.push({
-            medicine: alt,
-            confidence: 0.70,
-            matchType: 'category',
-            stock,
-            inStock: stock > 0
-          });
+          if (!alternatives.some(a => a.medicine.id === alt.id)) {
+            const stock = await this.getStock(db, alt.id);
+            alternatives.push({
+              medicine: alt,
+              confidence: 0.70,
+              matchType: 'category',
+              stock,
+              inStock: stock > 0
+            });
+          }
         }
       }
 

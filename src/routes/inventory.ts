@@ -764,7 +764,11 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
   const { 
     name, generic_name, manufacturer, marketed_by, 
     packaging, pack_unit, item_code, category, api_reference,
-    inventory_id, quantity, rack_location, hsn_code
+    inventory_id, quantity, rack_location, hsn_code,
+    item_type, therapeutic, sub_therapeutic, schedule_type,
+    short_code, ucode, cgst_per, sgst_per, igst_per,
+    reorder_level, max_stock_level, rack, disable_auto_barcode, tb_medicine,
+    metadata
   } = req.body;
   
   try {
@@ -774,7 +778,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     db = await dbManager.getConnection();
     await db.run('BEGIN TRANSACTION');
  
-    // 1. Update medicines table
+    // 1. Update medicines table (up to 23 fields)
     const updates = [];
     const params = [];
     
@@ -796,18 +800,36 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (category !== undefined) { updates.push('category = ?'); params.push(category); }
     if (api_reference !== undefined) { updates.push('api_reference = ?'); params.push(api_reference); }
     if (hsn_code !== undefined) { updates.push('hsn_code = ?'); params.push(hsn_code); }
+    if (item_type !== undefined) { updates.push('item_type = ?'); params.push(item_type); }
+    if (therapeutic !== undefined) { updates.push('therapeutic = ?'); params.push(therapeutic); }
+    if (sub_therapeutic !== undefined) { updates.push('sub_therapeutic = ?'); params.push(sub_therapeutic); }
+    if (schedule_type !== undefined) { updates.push('schedule_type = ?'); params.push(schedule_type); }
+    if (short_code !== undefined) { updates.push('short_code = ?'); params.push(short_code); }
+    if (ucode !== undefined) { updates.push('ucode = ?'); params.push(ucode); }
+    if (cgst_per !== undefined) { updates.push('cgst_per = ?'); params.push(parseFloat(cgst_per) || 0); }
+    if (sgst_per !== undefined) { updates.push('sgst_per = ?'); params.push(parseFloat(sgst_per) || 0); }
+    if (igst_per !== undefined) { updates.push('igst_per = ?'); params.push(parseFloat(igst_per) || 0); }
+    if (max_stock_level !== undefined) { updates.push('max_stock_level = ?'); params.push(parseInt(max_stock_level, 10) || null); }
+    if (rack !== undefined) { updates.push('rack = ?'); params.push(rack); }
+    if (disable_auto_barcode !== undefined) { updates.push('disable_auto_barcode = ?'); params.push(disable_auto_barcode ? 1 : 0); }
+    if (tb_medicine !== undefined) { updates.push('tb_medicine = ?'); params.push(tb_medicine ? 1 : 0); }
+    if (metadata !== undefined) { updates.push('metadata = ?'); params.push(typeof metadata === 'string' ? metadata : JSON.stringify(metadata)); }
  
     if (updates.length > 0) {
       params.push(id);
       await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
     }
 
-    // 2. Update primary inventory record if inventory_id is provided
+    // 2. Update primary inventory record if inventory_id or inventory fields are provided
     if (inventory_id) {
       const invUpdates = [];
       const invParams = [];
       if (quantity !== undefined) { invUpdates.push('quantity = ?'); invParams.push(quantity); }
-      if (rack_location !== undefined) { invUpdates.push('rack_location = ?'); invParams.push(rack_location); }
+      if (rack_location !== undefined || rack !== undefined) { 
+        invUpdates.push('rack_location = ?'); 
+        invParams.push(rack_location !== undefined ? rack_location : rack); 
+      }
+      if (reorder_level !== undefined) { invUpdates.push('reorder_level = ?'); invParams.push(parseInt(reorder_level, 10) || 10); }
       
       if (invUpdates.length > 0) {
         invParams.push(inventory_id);
@@ -818,7 +840,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
     
-    res.json({ success: true, message: 'Medicine universally updated' });
+    res.json({ success: true, message: 'Medicine universally updated across 26 fields' });
   } catch (error: any) {
     if (db) {
       try { await db.run('ROLLBACK'); } catch(e) {}
@@ -865,11 +887,31 @@ router.post('/sync', async (req, res) => {
     await db.run('COMMIT');
     res.json({ success: true, message: `Successfully synced ${count} stock override(s).`, count });
   } catch (error: any) {
-    if (db) {
-      try { await db.run('ROLLBACK'); } catch (_) {}
-    }
     console.error('Failed to sync stock overrides:', error);
     res.status(500).json({ error: error.message || 'Internal server error during stock sync' });
+  }
+});
+
+// Therapeutic Search Endpoint (POS fallback search)
+router.get('/therapeutic-search', async (req, res) => {
+  const { query } = req.query;
+  if (!query || typeof query !== 'string') {
+    return res.json([]);
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const results = await db.all(
+      `SELECT m.*, i.id as inventory_id, i.quantity, i.batch_no, i.expiry_date, i.mrp, i.rate, i.rack_location
+       FROM medicines m
+       LEFT JOIN inventory_master i ON i.medicine_id = m.id AND i.is_active = 1
+       WHERE m.therapeutic LIKE ? OR m.sub_therapeutic LIKE ?
+       ORDER BY m.name ASC LIMIT 30`,
+      [`%${query.trim()}%`, `%${query.trim()}%`]
+    );
+    res.json(results);
+  } catch (err: any) {
+    console.error('Error searching by therapeutic class:', err);
+    res.status(500).json({ error: 'Failed to search by therapeutic class' });
   }
 });
 

@@ -354,7 +354,11 @@ export async function importMedicine(row: Record<string, string | null>, db: Dat
     igst: parseFloat(row['igst'] || '0') || 0,
     rack: row['rack'] || row['rack_no'] || row['rack_location'] || row['batch_rack'] || null,
     marketed_by: row['marketer_name'] || null,
-    schedule_type: row['therapeutic'] || 'None',
+    schedule_type: row['schedule_type'] || row['schedule'] || row['schedule_class'] || 'None',
+    therapeutic: row['therapeutic'] || row['therapeutic_class'] || null,
+    sub_therapeutic: row['sub_therapeutic'] || row['sub_therapeutic_class'] || null,
+    short_code: row['medicine_short_code'] || row['short_code'] || null,
+    ucode: row['ucode'] || row['mdm_itemcode'] || null,
     api_reference: apiReference,
     generic_name: apiReference, // generic_name mirrors composition from genericMap
     item_code: row['medicine_short_code'] || row['mdm_itemcode'] || null,
@@ -373,9 +377,9 @@ export async function flushMedicines(db: Database) {
     for (const m of medicineBatch) {
       try {
         const result = await db.run(
-          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
+          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, rack, marketed_by, schedule_type, therapeutic, sub_therapeutic, short_code, ucode, api_reference, generic_name, item_code, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.rack, m.marketed_by, m.schedule_type, m.therapeutic || null, m.sub_therapeutic || null, m.short_code || null, m.ucode || null, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
         );
         medicineMap.set(m.legacy_id, result.lastID!);
         medicineImportResult.inserted++;

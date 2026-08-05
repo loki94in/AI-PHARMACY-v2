@@ -7,6 +7,15 @@ describe('parsePackSizeFromPackaging', () => {
     expect(parsePackSizeFromPackaging("6 NO'S")).toBe(6);
   });
 
+  it('parses STRIP OF and PACK OF packaging formats', () => {
+    expect(parsePackSizeFromPackaging("STRIP OF 10 TAB")).toBe(10);
+    expect(parsePackSizeFromPackaging("STRIP OF 15 CAP")).toBe(15);
+    expect(parsePackSizeFromPackaging("PACK OF 4 TAB")).toBe(4);
+    expect(parsePackSizeFromPackaging("BLISTER OF 10")).toBe(10);
+    expect(parsePackSizeFromPackaging("BOTTLE OF 100ML")).toBe(100);
+    expect(parsePackSizeFromPackaging("BOTTLE OF 60 ML")).toBe(60);
+  });
+
   it('does not treat weight/volume units as a pack size', () => {
     expect(parsePackSizeFromPackaging('200 ML')).toBeNull();
     expect(parsePackSizeFromPackaging('50 G')).toBeNull();

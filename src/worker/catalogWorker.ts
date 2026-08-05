@@ -745,6 +745,10 @@ export async function runCatalogImport(jobId: number) {
           if (item.marketed_by !== undefined) { updates.push("marketed_by = COALESCE(NULLIF(marketed_by, ''), ?)"); params.push(item.marketed_by); }
           if (item.hsn_code !== undefined) { updates.push("hsn_code = COALESCE(NULLIF(hsn_code, ''), ?)"); params.push(item.hsn_code); }
           if (item.schedule_type !== undefined) { updates.push("schedule_type = COALESCE(NULLIF(schedule_type, ''), ?)"); params.push(item.schedule_type); }
+          if (item.therapeutic !== undefined) { updates.push("therapeutic = COALESCE(NULLIF(therapeutic, ''), ?)"); params.push(item.therapeutic); }
+          if (item.sub_therapeutic !== undefined) { updates.push("sub_therapeutic = COALESCE(NULLIF(sub_therapeutic, ''), ?)"); params.push(item.sub_therapeutic); }
+          if (item.short_code !== undefined) { updates.push("short_code = COALESCE(NULLIF(short_code, ''), ?)"); params.push(item.short_code); }
+          if (item.ucode !== undefined) { updates.push("ucode = COALESCE(NULLIF(ucode, ''), ?)"); params.push(item.ucode); }
           if (item.mrp !== undefined) { updates.push("mrp = COALESCE(NULLIF(mrp, 0), ?)"); params.push(item.mrp); }
           if (item.cgst !== undefined) { updates.push("cgst_per = COALESCE(NULLIF(cgst_per, 0), ?)"); params.push(item.cgst); }
           if (item.sgst !== undefined) { updates.push("sgst_per = COALESCE(NULLIF(sgst_per, 0), ?)"); params.push(item.sgst); }
@@ -766,8 +770,8 @@ export async function runCatalogImport(jobId: number) {
         } else {
           newCount++;
           // Create new product record in Product Master
-          const columns = ['name', 'api_reference', 'packaging', 'manufacturer', 'marketed_by', 'hsn_code', 'schedule_type', 'mrp', 'cgst_per', 'sgst_per', 'rack', 'metadata'];
-          const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
+          const columns = ['name', 'api_reference', 'packaging', 'manufacturer', 'marketed_by', 'hsn_code', 'schedule_type', 'therapeutic', 'sub_therapeutic', 'short_code', 'ucode', 'mrp', 'cgst_per', 'sgst_per', 'rack', 'metadata'];
+          const placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
           const params = [
             item.name,
             item.api_reference || null,
@@ -776,6 +780,10 @@ export async function runCatalogImport(jobId: number) {
             item.marketed_by || null,
             item.hsn_code || null,
             item.schedule_type || null,
+            item.therapeutic || null,
+            item.sub_therapeutic || null,
+            item.short_code || null,
+            item.ucode || null,
             item.mrp || 0,
             item.cgst || 0,
             item.sgst || 0,

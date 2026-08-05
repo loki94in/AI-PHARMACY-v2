@@ -18,7 +18,7 @@ describe('Google Search OCR Parser', () => {
     expect(parsed1.manufacturer).toBe('Micro Labs');
     expect(parsed1.dosage_form).toBe('Tablet');
     expect(parsed1.pack_info).toBe('Pack of');
-    expect(parsed1.therapeutic_class).toBe('ANALGESIC');
+    expect(parsed1.therapeutic_class).toBe('Analgesic / Antipyretic');
 
     const text2 = `
       Clavam 625 Tablet is an antibiotic agent containing Amoxicillin 500 mg and Clavulanic Acid 125 mg.

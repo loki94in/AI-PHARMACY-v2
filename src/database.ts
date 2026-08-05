@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 28;
+const CURRENT_SCHEMA_VERSION = 29;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -213,7 +213,28 @@ export async function ensureSchema(dbPath: string) {
     CREATE TABLE IF NOT EXISTS medicines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      api_reference TEXT
+      api_reference TEXT,
+      mrp REAL,
+      hsn_code TEXT,
+      schedule_type TEXT,
+      manufacturer TEXT,
+      category TEXT,
+      marketed_by TEXT,
+      legacy_id TEXT,
+      packaging TEXT,
+      item_type TEXT,
+      cgst_per REAL DEFAULT 0,
+      sgst_per REAL DEFAULT 0,
+      igst_per REAL DEFAULT 0,
+      rack TEXT,
+      therapeutic TEXT DEFAULT NULL,
+      sub_therapeutic TEXT DEFAULT NULL,
+      short_code TEXT DEFAULT NULL,
+      ucode TEXT DEFAULT NULL,
+      disable_auto_barcode INTEGER DEFAULT 0,
+      tb_medicine INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'manual',
+      possible_duplicate_of INTEGER DEFAULT NULL
     );
     CREATE TABLE IF NOT EXISTS catalog_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +268,7 @@ export async function ensureSchema(dbPath: string) {
     );
     CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines (name);
     CREATE INDEX IF NOT EXISTS idx_medicines_api_ref ON medicines (api_reference);
+    CREATE INDEX IF NOT EXISTS idx_medicines_therapeutic ON medicines (therapeutic);
     CREATE INDEX IF NOT EXISTS idx_catalog_jobs_status ON catalog_jobs (status);
     CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases (date);
 
@@ -786,6 +808,12 @@ export async function ensureSchema(dbPath: string) {
     ['medicines', 'pack_size', 'ALTER TABLE medicines ADD COLUMN pack_size INTEGER'],
     ['medicines', 'source', 'ALTER TABLE medicines ADD COLUMN source TEXT DEFAULT \'manual\''],
     ['medicines', 'possible_duplicate_of', 'ALTER TABLE medicines ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL'],
+    ['medicines', 'therapeutic', 'ALTER TABLE medicines ADD COLUMN therapeutic TEXT DEFAULT NULL'],
+    ['medicines', 'sub_therapeutic', 'ALTER TABLE medicines ADD COLUMN sub_therapeutic TEXT DEFAULT NULL'],
+    ['medicines', 'short_code', 'ALTER TABLE medicines ADD COLUMN short_code TEXT DEFAULT NULL'],
+    ['medicines', 'ucode', 'ALTER TABLE medicines ADD COLUMN ucode TEXT DEFAULT NULL'],
+    ['medicines', 'disable_auto_barcode', 'ALTER TABLE medicines ADD COLUMN disable_auto_barcode INTEGER DEFAULT 0'],
+    ['medicines', 'tb_medicine', 'ALTER TABLE medicines ADD COLUMN tb_medicine INTEGER DEFAULT 0'],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs
@@ -1897,6 +1925,32 @@ export async function ensureSchema(dbPath: string) {
     }
   } catch (colErr) {
     console.warn('[Database Schema] Column check warning for whatsapp_send_queue:', colErr);
+  }
+
+  // Ensure 6 new columns exist on medicines table for upgraded 26-field editor
+  try {
+    const medCols = await db.all("PRAGMA table_info(medicines)");
+    const medColNames = new Set(medCols.map((c: any) => c.name));
+    if (!medColNames.has('therapeutic')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN therapeutic TEXT DEFAULT NULL").catch(() => {});
+    }
+    if (!medColNames.has('sub_therapeutic')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN sub_therapeutic TEXT DEFAULT NULL").catch(() => {});
+    }
+    if (!medColNames.has('short_code')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN short_code TEXT DEFAULT NULL").catch(() => {});
+    }
+    if (!medColNames.has('ucode')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN ucode TEXT DEFAULT NULL").catch(() => {});
+    }
+    if (!medColNames.has('disable_auto_barcode')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN disable_auto_barcode INTEGER DEFAULT 0").catch(() => {});
+    }
+    if (!medColNames.has('tb_medicine')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN tb_medicine INTEGER DEFAULT 0").catch(() => {});
+    }
+  } catch (medColErr) {
+    console.warn('[Database Schema] Column check warning for medicines:', medColErr);
   }
 
   // Pacing settings default (min 5s, max 8s)
