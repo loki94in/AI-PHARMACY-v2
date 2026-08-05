@@ -127,8 +127,14 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
     // Prioritize mapped stores to avoid 355 unmapped error spam on boot
     const targetStores = stores.filter((s: any) => s.Ismapped === 1);
     const storesToSync = targetStores.length > 0 ? targetStores : stores.slice(0, 20);
+    let consecutiveErrors = 0;
 
     for (const store of storesToSync) {
+      if (consecutiveErrors >= 3) {
+        console.warn(`[Catalog Cache] Aborting catalog sync after ${consecutiveErrors} consecutive store errors.`);
+        break;
+      }
+
       const storeId = store.StoreId;
       const storeName = store.StoreName || 'Unknown';
       const isMapped = store.Ismapped === 1;
@@ -148,19 +154,33 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
           CartSource: 'MOVP'
         };
 
+        let errReason = '';
         const catalogRes = await fetchPharmarackApi('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
           method: 'POST',
           body: JSON.stringify(searchPayload),
           signal: AbortSignal.timeout(8000)
-        }).catch(() => null);
+        }).catch((err) => {
+          errReason = err.message || 'Fetch failed';
+          return null;
+        });
 
         if (!catalogRes || !catalogRes.ok) {
           errors++;
+          consecutiveErrors++;
+          if (consecutiveErrors === 1) {
+            console.warn(`[Catalog Cache] Search API returned ${catalogRes?.status || errReason} for store ${storeName}`);
+          }
           continue;
         }
 
-        const catalogData: any = await catalogRes.json();
-        if (!catalogData?.data || !Array.isArray(catalogData.data)) continue;
+        const catalogData: any = await catalogRes.json().catch(() => null);
+        if (!catalogData?.data || !Array.isArray(catalogData.data)) {
+          errors++;
+          consecutiveErrors++;
+          continue;
+        }
+
+        consecutiveErrors = 0; // reset on success
 
         await db.run('BEGIN TRANSACTION');
         try {
@@ -195,6 +215,7 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
         console.log(`[Catalog Cache] Synced ${catalogData.data.length} products from ${storeName} (${isMapped ? 'mapped' : 'non-mapped'})`);
       } catch (storeErr: any) {
         errors++;
+        consecutiveErrors++;
         console.warn(`[Catalog Cache] Failed to sync store ${storeName}:`, storeErr.message);
       }
     }
