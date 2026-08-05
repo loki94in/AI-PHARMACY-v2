@@ -115,9 +115,14 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
         const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
         const totalItems = orders.reduce((sum: number, o: any) => sum + (o.items?.length || 0), 0);
 
-        let summaryMsg = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+        const shopRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
+        const headerShopName = storeInfo?.name || storeInfo?.storeName || shopRow?.value || 'AI Pharmacy';
+
+        let summaryMsg = `🏥 *${headerShopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
         orders.forEach((o: any, idx: number) => {
-          summaryMsg += `${idx + 1}. *${o.storeName}*: (${o.items?.length || 0} items)\n    ${o.phone || 'N/A'}\n`;
+          const cleanP = String(o.phone || '').replace(/\D/g, '');
+          const phoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : (cleanP.length >= 10 ? `+${cleanP}` : (o.phone || 'N/A'));
+          summaryMsg += `${idx + 1}. *${o.storeName}*: (${o.items?.length || 0} items)\n    ${phoneNoGap}\n`;
         });
         summaryMsg += `\n==================================\n`;
         summaryMsg += `🚚 *Total Today Distributors:* ${orders.length}\n`;

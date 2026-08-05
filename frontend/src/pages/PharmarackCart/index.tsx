@@ -1103,7 +1103,12 @@ export default function PharmarackCart() {
     const fileFormat = storeInfo.invoiceFileFormat ? storeInfo.invoiceFileFormat.replace(' File Format', '') : 'CSV';
     const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-    let msg = `🏥 *${storeName}*\n\n`;
+    const storePhone = storeInfo.phone || storeInfo.adminPhone || '';
+    const formattedStorePhone = storePhone ? formatPhone(storePhone) : 'N/A';
+
+    let msg = `🏥 *${storeName}*\n`;
+    msg += `*Delivery Location:* ${address}\n`;
+    msg += `📞 *Pharmacy Contact:* ${formattedStorePhone}\n\n`;
     msg += `📅 *Date:* ${dateStr}\n\n`;
     msg += `📋 *Items Requested:*\n`;
 
@@ -1117,9 +1122,8 @@ export default function PharmarackCart() {
     });
 
     msg += `\n🚚 *Assigned Delivery Boy:*\n`;
-    msg += `  👤 ${boyName}\n  📞 ${boyPhone || 'N/A'}\n`;
+    msg += `  👤 ${boyName}\n  📞 ${boyPhone || 'N/A'}\n\n`;
 
-    msg += `\n*Delivery Location:* ${address}\n`;
     msg += `*Note:* ${email} (${fileFormat}) when sending bills.`;
 
     return msg;

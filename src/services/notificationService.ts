@@ -27,12 +27,13 @@ export interface CartOrderNotifyResult {
   suppressedCount: number;
 }
 
-function isSendSuccess(result: SendMessageResult): boolean {
-  return result.sent === true;
+function isSendSuccess(result: SendMessageResult | boolean): boolean {
+  return (result as any) === true || (!!result && typeof result === 'object' && result.sent === true);
 }
 
-function sendLogStatus(result: SendMessageResult): 'sent' | 'suppressed' | 'failed' {
-  if (!result.sent) return 'failed';
+function sendLogStatus(result: SendMessageResult | boolean): 'sent' | 'suppressed' | 'failed' {
+  if ((result as any) === true) return 'sent';
+  if (!result || typeof result !== 'object' || !result.sent) return 'failed';
   if (result.suppressed) return 'suppressed';
   return 'sent';
 }
@@ -240,7 +241,7 @@ export class NotificationService {
 
   private async getStoreSettings(db: any) {
     const settingsRows = await db.all(
-      "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'distributor_invoice_file_format')"
+      "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'shop_phone', 'phone', 'owner_whatsapp_number', 'distributor_invoice_file_format')"
     );
     const settings: Record<string, string> = {};
     for (const r of settingsRows) {
@@ -248,9 +249,11 @@ export class NotificationService {
     }
     const storeName = settings.shop_name || settings.pharmacy_name || 'AI Pharmacy';
     const address = settings.shop_address || settings.address || 'N/A';
+    const rawPhone = settings.shop_phone || settings.phone || settings.owner_whatsapp_number || '';
+    const phone = rawPhone ? formatDisplayPhone(rawPhone) : 'N/A';
     const email = settings.shop_email || settings.email || 'N/A';
     const fileFormat = (settings.distributor_invoice_file_format || 'CSV').replace(' File Format', '');
-    return { storeName, address, email, fileFormat };
+    return { storeName, address, phone, email, fileFormat };
   }
 
   /**
@@ -348,11 +351,12 @@ export class NotificationService {
         }
       }
 
-      const message = `🏥 *${store.storeName}*\n\n` +
+      const message = `🏥 *${store.storeName}*\n` +
+        `*Delivery Location:* ${store.address}\n` +
+        `📞 *Pharmacy Contact:* ${store.phone}\n\n` +
         `📅 *Date:* ${dateStr}\n\n` +
         `📋 *Items Requested:*\n${itemsText}\n\n` +
         `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
-        `*Delivery Location:* ${store.address}\n` +
         `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
 
       // 5. Parse & format distributor numbers (support comma/space-separated in distributor phone)
@@ -528,11 +532,12 @@ export class NotificationService {
         }
       }
 
-      const message = `🏥 *${store.storeName}*\n\n` +
+      const message = `🏥 *${store.storeName}*\n` +
+        `*Delivery Location:* ${store.address}\n` +
+        `📞 *Pharmacy Contact:* ${store.phone}\n\n` +
         `📅 *Date:* ${dateStr}\n\n` +
         `📋 *Items Requested:*\n${itemsText}\n\n` +
         `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
-        `*Delivery Location:* ${store.address}\n` +
         `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
 
       // 5. Parse distributor numbers
@@ -609,6 +614,19 @@ export class NotificationService {
   }
 
   /**
+   * Alias for notifyDistributorCartOrder returning boolean success.
+   */
+  async notifyAboutCartOrder(
+    storeName: string,
+    storeId: number,
+    deliveryPersons?: any[],
+    items?: any[]
+  ): Promise<boolean> {
+    const res = await this.notifyDistributorCartOrder(storeName, storeId, items || [], deliveryPersons);
+    return res.ok;
+  }
+
+  /**
    * Send WhatsApp notification messages to delivery boy(s) for a batch of distributor orders.
    * Sends Summary message FIRST, followed by individual distributor order messages with packaging and qty.
    */
@@ -620,6 +638,7 @@ export class NotificationService {
     let db = null;
     try {
       db = await dbManager.getConnection();
+      const store = await this.getStoreSettings(db);
 
       // 1. Resolve delivery boy contacts
       const resolvedDeliveryBoys: { name: string; phone: string }[] = [];
@@ -696,11 +715,13 @@ export class NotificationService {
 
       const summaryLines: string[] = [];
       orders.forEach((order, idx) => {
-        const phone = distPhonesMap[order.storeName] || 'No phone set';
-        summaryLines.push(`${idx + 1}. *${order.storeName}*: ${phone} (${order.items?.length || 0} items)`);
+        const rawPhone = distPhonesMap[order.storeName] || 'No phone set';
+        const cleanP = String(rawPhone).replace(/\D/g, '');
+        const phoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : (cleanP.length >= 10 ? `+${cleanP}` : rawPhone);
+        summaryLines.push(`${idx + 1}. *${order.storeName}*: (${order.items?.length || 0} items)\n    ${phoneNoGap}`);
       });
 
-      let summaryMessage = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+      let summaryMessage = `🏥 *${store.storeName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
       summaryMessage += summaryLines.join('\n') + `\n\n`;
       summaryMessage += `==================================\n`;
       summaryMessage += `🚚 *Total Today Distributors:* ${totalDistributors}\n`;

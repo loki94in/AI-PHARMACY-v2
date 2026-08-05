@@ -9,6 +9,7 @@
  */
 import { dbManager } from '../database/connection.js';
 import { sendMessage } from '../whatsappClient.js';
+import { formatDisplayPhone } from './notificationService.js';
 
 const CYCLE_DAYS = 45;
 const BAND_START_HOUR = 11;
@@ -180,14 +181,19 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
     }
 
     distMessages.push({ distName, message: msg.trim() });
-    summaryLines.push(`${distIndex}. *${distName}*: ${distPhone} (${items.length} items)`);
+    const cleanP = String(distPhone).replace(/\D/g, '');
+    const displayPhoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : (cleanP.length >= 10 ? `+${cleanP}` : (distPhone || 'N/A'));
+    summaryLines.push(`${distIndex}. *${distName}*: (${items.length} items)\n    ${displayPhoneNoGap}`);
     distIndex++;
   }
 
   const totalDists = Object.keys(grouped).length;
   const totalItems = Object.values(grouped).reduce((acc, items) => acc + items.length, 0);
 
-  let summaryMsg = `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+  const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
+  const shopName = shopNameRow?.value || 'AI Pharmacy';
+
+  let summaryMsg = `🏥 *${shopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
   summaryMsg += summaryLines.join('\n') + `\n\n`;
   summaryMsg += `==================================\n`;
   summaryMsg += `🚚 *Total Today Distributors:* ${totalDists}\n`;

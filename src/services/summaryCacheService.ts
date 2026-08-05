@@ -63,7 +63,7 @@ export async function rebuildPurchaseSummaryCache(): Promise<PurchaseSummaryCach
     
     // Estimate total GST from purchase items
     const taxRow = await db.get<{ total_gst: number }>(
-      'SELECT COALESCE(SUM((cgst_per + sgst_per + igst_per) * (purchase_price * quantity) / 100), 0) AS total_gst FROM purchase_items'
+      'SELECT COALESCE(SUM((cgst_per + sgst_per + igst_per) * (COALESCE(cost_price, 0) * quantity) / 100), 0) AS total_gst FROM purchase_items'
     );
 
     const summary: PurchaseSummaryCache = {
