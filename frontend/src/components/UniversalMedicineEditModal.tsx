@@ -336,6 +336,9 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
             sgst_per: med.sgst_per ?? 6,
             igst_per: med.igst_per ?? 12,
             api_reference: med.api_reference || '',
+            mrp: med.mrp || 0,
+            rate: med.rate || 0,
+            sell_price: med.sell_price !== null && med.sell_price !== undefined ? med.sell_price : '',
             quantity: data.inventory?.quantity || 0,
             reorder_level: data.inventory?.reorder_level ?? 10,
             max_stock_level: med.max_stock_level ?? 500,
@@ -913,6 +916,57 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
                     >
                       Reset Standard 12% Pharma HSN
                     </button>
+                  </div>
+
+                  <div className="pt-4 border-t border-glass-border space-y-4">
+                    <h4 className="text-xs font-bold uppercase text-muted tracking-wider">Pricing & Sell Price (Special Rates)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Cost Price / Rate (₹)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          name="rate" 
+                          value={form.rate ?? 0} 
+                          onChange={handleChange}
+                          className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-mono font-bold focus:border-primary focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">MRP (₹)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          name="mrp" 
+                          value={form.mrp ?? 0} 
+                          onChange={handleChange}
+                          className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-mono font-bold focus:border-primary focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Sell Price / Special Rate (₹)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          name="sell_price" 
+                          placeholder={form.mrp ? `${form.mrp}` : 'Optional'}
+                          value={form.sell_price ?? ''} 
+                          onChange={handleChange}
+                          className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-mono font-bold focus:border-primary focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp && (
+                      <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-primary font-medium">
+                        <span>Auto-Calculated POS Discount:</span>
+                        <span className="font-mono font-bold text-sm">
+                          {(((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

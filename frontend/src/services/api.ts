@@ -356,9 +356,20 @@ interface PurchaseBillItem {
 interface PurchasePayload {
   invoice_no: string;
   distributor_id?: number | null;
+  distributor?: string;
   distributor_name?: string;
-  purchase_date: string;
-  items: PurchaseBillItem[];
+  date?: string;
+  purchase_date?: string;
+  cd_per?: number;
+  extra_credit?: number;
+  cn_amount?: number;
+  cn_number?: string;
+  reconcile_expiry_return_id?: number | null;
+  source_filename?: string;
+  source_file_headers?: string[];
+  mapping_config?: Record<string, any>;
+  email_uid?: string | number | null;
+  items: any[];
   total_amount?: number;
   discount?: number;
 }
@@ -487,6 +498,8 @@ export const api = {
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
   getManufacturers: (q: string) => apiClient.get('/manufacturers', { params: { q } }).then(res => res.data),
   getMarketedBy: (q: string) => apiClient.get('/marketed-by', { params: { q } }).then(res => res.data),
+  updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null }>) =>
+    apiClient.post('/inventory/bulk-sell-prices', { items }).then(res => res.data),
 
 
   

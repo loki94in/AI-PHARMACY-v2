@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 29;
+const CURRENT_SCHEMA_VERSION = 30;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -234,7 +234,8 @@ export async function ensureSchema(dbPath: string) {
       disable_auto_barcode INTEGER DEFAULT 0,
       tb_medicine INTEGER DEFAULT 0,
       source TEXT DEFAULT 'manual',
-      possible_duplicate_of INTEGER DEFAULT NULL
+      possible_duplicate_of INTEGER DEFAULT NULL,
+      sell_price REAL DEFAULT NULL
     );
     CREATE TABLE IF NOT EXISTS catalog_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -546,6 +547,12 @@ export async function ensureSchema(dbPath: string) {
     }
     if (!existingProfileCols.has('last_success_at')) {
       await db.run("ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME").catch(() => {});
+    }
+
+    const medCols = await db.all("PRAGMA table_info(medicines)").catch(() => []);
+    const existingMedCols = new Set(medCols.map((c: any) => c.name));
+    if (!existingMedCols.has('sell_price')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN sell_price REAL DEFAULT NULL").catch(() => {});
     }
 
   await db.exec(`

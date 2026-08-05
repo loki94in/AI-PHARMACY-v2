@@ -126,7 +126,8 @@ router.get('/', async (req, res) => {
                COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
                im.batch_no as batch_number, 
                im.quantity as stock_quantity, 
-               m.item_code as item_code
+               m.item_code as item_code,
+               m.sell_price as sell_price
         ${baseQuery}
         ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       `, params);
@@ -146,7 +147,8 @@ router.get('/', async (req, res) => {
              COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
              im.batch_no as batch_number, 
              im.quantity as stock_quantity, 
-             m.item_code as item_code
+             m.item_code as item_code,
+             m.sell_price as sell_price
       ${baseQuery}
       ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       LIMIT ? OFFSET ?
@@ -243,7 +245,7 @@ router.get('/peek/:medicine_id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   let db;
   const { id } = req.params;
-  const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity, pack_size } = req.body;
+  const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity, pack_size, sell_price } = req.body;
   const qtyVal = quantity !== undefined ? quantity : req.body.stock_quantity;
   const batchNoVal = batch_no !== undefined ? batch_no : req.body.batch_number;
   try {
@@ -292,14 +294,19 @@ router.put('/:id', async (req, res) => {
       }
     }
 
-    // 3. Update the medicines table if name, mrp, or pack_size changes
+    // 3. Update the medicines table if name, mrp, pack_size, or sell_price changes
     if (oldInv.medicine_id) {
-      if (name !== undefined || mrp !== undefined || pack_size !== undefined) {
+      if (name !== undefined || mrp !== undefined || pack_size !== undefined || sell_price !== undefined) {
         const medUpdates = [];
         const medParams = [];
         if (name !== undefined) { medUpdates.push('name = ?'); medParams.push(name); }
         if (mrp !== undefined) { medUpdates.push('mrp = ?'); medParams.push(mrp); }
         if (pack_size !== undefined) { medUpdates.push('pack_size = ?'); medParams.push(parseInt(pack_size, 10) || null); }
+        if (sell_price !== undefined) {
+          const parsedPrice = (sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : null;
+          medUpdates.push('sell_price = ?');
+          medParams.push(parsedPrice);
+        }
 
         if (medUpdates.length > 0) {
           medParams.push(oldInv.medicine_id);
@@ -320,6 +327,38 @@ router.put('/:id', async (req, res) => {
     }
     console.error('Inventory update error:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Bulk update sell prices for multiple medicines
+router.post('/bulk-sell-prices', async (req, res) => {
+  let db;
+  try {
+    const { items = [] } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'items array is required' });
+    }
+    db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
+    for (const item of items) {
+      const { medicine_id, sell_price } = item;
+      if (!medicine_id) continue;
+      const parsedPrice = (sell_price !== null && sell_price !== '' && sell_price !== undefined && !isNaN(Number(sell_price)))
+        ? parseFloat(sell_price)
+        : null;
+      await db.run('UPDATE medicines SET sell_price = ? WHERE id = ?', [parsedPrice, medicine_id]);
+    }
+
+    await db.run('COMMIT');
+    inventoryCache.invalidate();
+    res.json({ success: true, message: 'Bulk sell prices updated successfully' });
+  } catch (error: any) {
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (_) {}
+    }
+    console.error('Bulk sell prices update error:', error);
+    res.status(500).json({ error: error.message || 'Failed to update sell prices' });
   }
 });
 

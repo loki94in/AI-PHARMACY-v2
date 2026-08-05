@@ -856,6 +856,7 @@ router.post('/manual', async (req, res) => {
 
     // 3. Process items
     const uniqueMedicineIds = new Set<number>();
+    const savedItems: any[] = [];
     for (const item of items) {
       const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
       
@@ -953,6 +954,16 @@ router.post('/manual', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
+      // Fetch current sell_price for saved_items
+      const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
+      savedItems.push({
+        medicine_id: medId,
+        medicine_name: medName,
+        rate: rawRate,
+        mrp: mrp || 0,
+        sell_price: medRow?.sell_price ?? null
+      });
+
       // Update inventory_master (unified storage)
       const totalQty = rawQty + rawFreeQty;
       const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
@@ -989,7 +1000,13 @@ router.post('/manual', async (req, res) => {
     inventoryCache.invalidate();
 
     // Respond instantly to client (<20ms) and perform background tasks asynchronously
-    res.json({ success: true, message: 'Purchase saved successfully', app_invoice_no: appInvoiceNo });
+    res.json({
+      success: true,
+      message: 'Purchase saved successfully',
+      app_invoice_no: appInvoiceNo,
+      purchase_id: purchaseId,
+      saved_items: savedItems
+    });
 
     setImmediate(async () => {
       // Trigger refills and special orders after transaction commits successfully

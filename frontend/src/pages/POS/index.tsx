@@ -1520,6 +1520,16 @@ const POS = () => {
       const initialUnitPrice = hasRealBatch ? (med.unitPrice || med.unit_price || med.mrp || 0) : 0;
       const initialGst = med.gst_percent !== undefined ? med.gst_percent : (med.gst !== undefined ? med.gst : (med.tax_percent !== undefined ? med.tax_percent : 12));
 
+      // Auto-calculate discount percentage if sell_price is set for this medicine
+      let initialDiscount = med.discount !== undefined ? med.discount : 0;
+      if (!initialDiscount || initialDiscount === 0) {
+        const sellPrice = Number(med.sell_price || 0);
+        const mrpVal = Number(initialMrp || med.mrp || 0);
+        if (sellPrice > 0 && mrpVal > 0 && sellPrice < mrpVal) {
+          initialDiscount = parseFloat((((mrpVal - sellPrice) / mrpVal) * 100).toFixed(2));
+        }
+      }
+
       const newItem = { 
         id: med.id, 
         medicine_id: med.medicine_id || med.id,
@@ -1529,10 +1539,11 @@ const POS = () => {
         expiry: med.expiry || med.expiry_date || '', 
         qty: incQty, 
         looseQty: incLooseQty,
-        discount: med.discount !== undefined ? med.discount : 0,
+        discount: initialDiscount,
         gst_percent: initialGst,
         packSize: med.packSize || 10,
         mrp: initialMrp, 
+        sell_price: med.sell_price || null,
         unitPrice: initialUnitPrice,
         costPrice: med.costPrice || (initialMrp * 0.7),
         salts: med.salts || '',

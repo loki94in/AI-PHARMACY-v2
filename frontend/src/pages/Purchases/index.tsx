@@ -66,6 +66,16 @@ interface BillItem {
   scheme_free: number;
   stock_qty?: number;
   loose_qty?: number;
+  name?: string;
+  medicine?: string;
+  quantity?: number | string;
+  free_quantity?: number | string;
+  batch?: string;
+  expiry?: string;
+  price?: number | string;
+  cgst?: number | string;
+  sgst?: number | string;
+  pack_size?: number | string;
 }
 
 interface Distributor {
@@ -1305,7 +1315,7 @@ const Purchases: React.FC = () => {
         
         // Auto-resolve medicine IDs for the loaded items
         const resolveMedicines = async () => {
-          const updatedItems = loadedItems.map(item => ({ ...item, original_name: item.medicine_name }));
+          const updatedItems: BillItem[] = loadedItems.map(item => ({ ...item, original_name: item.medicine_name }));
           let hasChanges = false;
           
           for (let i = 0; i < updatedItems.length; i++) {
@@ -1604,7 +1614,8 @@ const Purchases: React.FC = () => {
 
     const validItems = items.filter(item => {
       const name = item.medicine_name || item.name || item.medicine || '';
-      const qty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
+      const qtyVal = item.qty !== undefined ? item.qty : item.quantity;
+      const qty = parseFloat(String(qtyVal || 0)) || 0;
       return (item.medicine_id || name.trim().length > 0) && qty > 0;
     });
 
@@ -1626,9 +1637,9 @@ const Purchases: React.FC = () => {
         distributor: distNameToSave,
         invoice_no: finalInvoiceNo,
         date: invoiceDate || getTodayString(),
-        cd_per: parseFloat(globalCdPer as any) || 0,
-        extra_credit: parseFloat(cnAmount as any) || 0,
-        cn_amount: parseFloat(cnAmount as any) || 0,
+        cd_per: parseFloat(String(globalCdPer || 0)) || 0,
+        extra_credit: parseFloat(String(cnAmount || 0)) || 0,
+        cn_amount: parseFloat(String(cnAmount || 0)) || 0,
         cn_number: cnNumber,
         reconcile_expiry_return_id: reconcileExpiryReturnId,
         source_filename: sourceFilename,
@@ -1644,15 +1655,15 @@ const Purchases: React.FC = () => {
             original_name: item.original_name || medName,
             batch_no: item.batch_no || item.batch || '',
             expiry_date: item.expiry_date || item.expiry || '',
-            qty: parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0,
-            free_qty: parseFloat(item.free_qty !== undefined ? item.free_qty : item.free_quantity) || 0,
-            rate: parseFloat(item.rate !== undefined ? item.rate : item.price) || 0,
-            mrp: parseFloat(item.mrp as any) || 0,
-            cgst_per: parseFloat(item.cgst_per !== undefined ? item.cgst_per : item.cgst) || 0,
-            sgst_per: parseFloat(item.sgst_per !== undefined ? item.sgst_per : item.sgst) || 0,
-            cd_rs: parseFloat(item.cd_rs as any) || 0,
-            cd_per: parseFloat(item.cd_per as any) || 0,
-            additional_discount: parseFloat(item.additional_discount as any) || 0,
+            qty: parseFloat(String(item.qty !== undefined ? item.qty : item.quantity || 0)) || 0,
+            free_qty: parseFloat(String(item.free_qty !== undefined ? item.free_qty : item.free_quantity || 0)) || 0,
+            rate: parseFloat(String(item.rate !== undefined ? item.rate : item.price || 0)) || 0,
+            mrp: parseFloat(String(item.mrp || 0)) || 0,
+            cgst_per: parseFloat(String(item.cgst_per !== undefined ? item.cgst_per : item.cgst || 0)) || 0,
+            sgst_per: parseFloat(String(item.sgst_per !== undefined ? item.sgst_per : item.sgst || 0)) || 0,
+            cd_rs: parseFloat(String(item.cd_rs || 0)) || 0,
+            cd_per: parseFloat(String(item.cd_per || 0)) || 0,
+            additional_discount: parseFloat(String(item.additional_discount || 0)) || 0,
           };
         }),
       };
@@ -1713,6 +1724,17 @@ const Purchases: React.FC = () => {
 
       // Refresh local POS inventory search cache
       api.getCompactInventory().catch(() => {});
+
+      // Redirect user to dedicated Sell Price configuration page
+      const itemsToConfigure = response?.saved_items || validItems;
+      setTimeout(() => {
+        navigate('/sell-price-config', {
+          state: {
+            invoiceNo: savedInvoiceNo,
+            saved_items: itemsToConfigure
+          }
+        });
+      }, 300);
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
@@ -1866,6 +1888,7 @@ const Purchases: React.FC = () => {
           totalSgst += sgstAmount;
         });
 
+        const calculatedGrandTotal = subtotal + totalCgst + totalSgst;
         const parsedCnAmt = parseFloat(response.data.cn_amount);
         if (!isNaN(parsedCnAmt) && parsedCnAmt > 0) {
           setCnAmount(parsedCnAmt);
