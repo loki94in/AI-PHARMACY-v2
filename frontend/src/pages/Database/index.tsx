@@ -63,6 +63,7 @@ const DatabasePage = () => {
   const [sort, setSort] = useState('name_asc');
   const [letter, setLetter] = useState('');
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
 
   // Add / Delete features
   const [showAddModal, setShowAddModal] = useState(false);
@@ -797,7 +798,10 @@ const DatabasePage = () => {
                           Rates
                         </button>
                         <button
-                          onClick={() => setUniversalEditMedicineId(item.id)}
+                          onClick={() => {
+                            setUniversalEditItem(item);
+                            setUniversalEditMedicineId(item.id);
+                          }}
                           className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white transition-all font-bold text-[10px] uppercase flex items-center gap-0.5"
                           title="Edit global medicine details"
                         >
@@ -936,7 +940,11 @@ const DatabasePage = () => {
       {universalEditMedicineId && (
         <UniversalMedicineEditModal 
           medicineId={universalEditMedicineId} 
-          onClose={() => setUniversalEditMedicineId(null)} 
+          initialData={universalEditItem}
+          onClose={() => {
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
+          }} 
           onSave={() => {
             setPage(1);
             loadDatabase();

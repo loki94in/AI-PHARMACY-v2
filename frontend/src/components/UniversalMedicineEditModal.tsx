@@ -162,6 +162,7 @@ const THERAPEUTIC_CLASSES = [
 
 interface Props {
   medicineId: number;
+  initialData?: any;
   ocrData?: {
     potentialName?: string;
     genericName?: string;
@@ -179,23 +180,66 @@ interface Props {
 
 type TabType = 'basic' | 'classification' | 'codes' | 'tax' | 'stock' | 'substitutes';
 
-const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, ocrData, onClose, onSave }) => {
+const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialData, ocrData, onClose, onSave }) => {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabType>('basic');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<any>({});
+  const [form, setForm] = useState<any>(() => {
+    if (!initialData) return {};
+    const nameVal = initialData.name || '';
+    const packagingVal = initialData.packaging || '';
+    return {
+      name: ocrData?.potentialName || nameVal,
+      item_type: ocrData?.dosageForm || initialData.item_type || 'TABLET',
+      category: initialData.category || 'Allopathy',
+      pack_unit: initialData.pack_unit || 'TAB',
+      packaging: ocrData?.packaging || packagingVal,
+      pack_size: initialData.pack_size || 10,
+      therapeutic: initialData.therapeutic || '',
+      sub_therapeutic: initialData.sub_therapeutic || '',
+      schedule_type: initialData.schedule_type || 'None',
+      generic_name: ocrData?.genericName || initialData.generic_name || '',
+      manufacturer: ocrData?.manufacturer || initialData.manufacturer || '',
+      marketed_by: initialData.marketed_by || '',
+      item_code: initialData.item_code || '',
+      short_code: initialData.short_code || '',
+      ucode: initialData.ucode || '',
+      hsn_code: initialData.hsn_code || '',
+      cgst_per: initialData.cgst_per ?? 6,
+      sgst_per: initialData.sgst_per ?? 6,
+      igst_per: initialData.igst_per ?? 12,
+      api_reference: initialData.api_reference || '',
+      quantity: initialData.quantity || 0,
+      reorder_level: initialData.reorder_level ?? 10,
+      max_stock_level: initialData.max_stock_level ?? 500,
+      rack_location: initialData.rack_location || initialData.rack || '',
+      is_loose: false,
+      disable_auto_barcode: !!initialData.disable_auto_barcode,
+      tb_medicine: !!initialData.tb_medicine,
+    };
+  });
   const [inventoryId, setInventoryId] = useState<number | null>(null);
-  const [totalStock, setTotalStock] = useState<number>(0);
+  const [totalStock, setTotalStock] = useState<number>(initialData?.quantity || 0);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
   const [mrkSuggestions, setMrkSuggestions] = useState<string[]>([]);
   const [showMrkSuggestions, setShowMrkSuggestions] = useState(false);
 
-  const [baseName, setBaseName] = useState('');
-  const [packType, setPackType] = useState('TAB');
-  const [packQtyUnit, setPackQtyUnit] = useState('10_TAB');
+  const [baseName, setBaseName] = useState(() => {
+    if (!initialData) return '';
+    return splitMedicineName(initialData.name || '', initialData.packaging || '').baseName;
+  });
+  const [packType, setPackType] = useState(() => {
+    if (!initialData) return 'TAB';
+    return splitMedicineName(initialData.name || '', initialData.packaging || '').packType;
+  });
+  const [packQtyUnit, setPackQtyUnit] = useState(() => {
+    if (!initialData) return '10_TAB';
+    const parsed = splitMedicineName(initialData.name || '', initialData.packaging || '');
+    return getMatchingPreset(initialData.packaging || '', parsed.packType);
+  });
   const [customPackaging, setCustomPackaging] = useState('');
   const [isManualName, setIsManualName] = useState(false);
 
@@ -242,7 +286,9 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, ocrData,
   };
 
   useEffect(() => {
-    setLoading(true);
+    if (!initialData) {
+      setLoading(true);
+    }
     api.getQuickEditMedicine(medicineId)
       .then((data: any) => {
         if (data && data.medicine) {
@@ -302,14 +348,16 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, ocrData,
           setInventoryId(data.inventory?.inventory_id || null);
           setTotalStock(data.total_stock || 0);
           setIsManualName(false);
-        } else {
+        } else if (!initialData) {
           setError("Failed to load medicine details.");
         }
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
-        setError("Failed to load medicine details.");
+        if (!initialData) {
+          setError("Failed to load medicine details.");
+        }
         setLoading(false);
       });
   }, [medicineId]);

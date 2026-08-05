@@ -866,6 +866,7 @@ const Inventory = () => {
         <Suspense fallback={<ModalSkeleton />}>
           <UniversalMedicineEditModal
             medicineId={universalEditMedicineId}
+            initialData={selectedItem}
             onClose={() => setUniversalEditMedicineId(null)}
             onSave={() => {
               loadInventory();

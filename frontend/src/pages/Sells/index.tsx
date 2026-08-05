@@ -109,6 +109,7 @@ const Sells = () => {
 
   // Universal Edit state
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
 
   // Barcode state
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
@@ -842,7 +843,16 @@ const Sells = () => {
                                   type="button"
                                   onClick={(e) => {
                                     e.preventDefault();
-                                    if (item.medicine_id) setUniversalEditMedicineId(item.medicine_id);
+                                    if (item.medicine_id) {
+                                      setUniversalEditItem({
+                                        name: item.medicine_name,
+                                        mrp: item.mrp,
+                                        pack_size: item.pack_size,
+                                        batch_no: item.batch_no,
+                                        quantity: item.qty
+                                      });
+                                      setUniversalEditMedicineId(item.medicine_id);
+                                    }
                                   }}
                                   disabled={!item.medicine_id}
                                   className={`p-1 rounded-lg transition-all border shadow-sm ${item.medicine_id ? 'bg-sky/10 border-sky/20 text-sky hover:text-white hover:bg-sky' : 'opacity-30 cursor-not-allowed border-glass-border text-muted bg-white/5'}`}
@@ -1270,7 +1280,11 @@ const Sells = () => {
       {universalEditMedicineId && (
         <UniversalMedicineEditModal 
           medicineId={universalEditMedicineId} 
-          onClose={() => setUniversalEditMedicineId(null)} 
+          initialData={universalEditItem}
+          onClose={() => {
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
+          }} 
           onSave={() => {
             // Refetch to reflect any potential naming changes if needed
             fetchInvoices(true);

@@ -489,8 +489,13 @@ export class BackupRecoveryService {
         const filePath = path.join(ARCHIVES_DIR, filename);
         const stats = fs.statSync(filePath);
         
-        // Extract date YYYY-MM-DD from archive_YYYY-MM-DD.zip
-        const date = filename.replace('archive_', '').replace('.zip', '');
+        // Extract date YYYY-MM-DD from archive_YYYY-MM-DD.zip or archive_manual_YYYY-MM-DD_timestamp.zip
+        let rawDate = filename.replace(/^archive_/, '').replace(/\.zip$/, '');
+        if (rawDate.startsWith('manual_')) {
+          rawDate = rawDate.replace(/^manual_/, '');
+        }
+        const dateMatch = rawDate.match(/^(\d{4}-\d{2}-\d{2})/);
+        const date = dateMatch ? dateMatch[1] : stats.mtime.toISOString().split('T')[0];
         
         const sources = ['Local'];
         if (uploadLog[filename]?.gdrive) sources.push('Google Drive');
@@ -503,7 +508,7 @@ export class BackupRecoveryService {
           source: sources.join(', ')
         };
       })
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort((a, b) => b.filename.localeCompare(a.filename));
   }
 
   /**

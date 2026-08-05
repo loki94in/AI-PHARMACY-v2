@@ -725,22 +725,22 @@ router.get('/medicines/:id/quick-edit', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     
-    // Fetch medicine details
-    const medicine = await db.get('SELECT * FROM medicines WHERE id = ?', [id]);
+    // Fetch medicine details, primary inventory, and total stock in parallel
+    const [medicine, invPrimary, stockRow] = await Promise.all([
+      db.get('SELECT * FROM medicines WHERE id = ?', [id]),
+      db.get(`
+        SELECT id as inventory_id, quantity, rack_location, batch_no, expiry_date 
+        FROM inventory_master 
+        WHERE medicine_id = ? 
+        ORDER BY quantity DESC LIMIT 1
+      `, [id]),
+      db.get(`SELECT SUM(quantity) as total_stock FROM inventory_master WHERE medicine_id = ?`, [id])
+    ]);
+
     if (!medicine) {
-            return res.status(404).json({ error: 'Medicine not found' });
+      return res.status(404).json({ error: 'Medicine not found' });
     }
 
-    // Fetch primary inventory record (latest batch or highest quantity)
-    const invPrimary = await db.get(`
-      SELECT id as inventory_id, quantity, rack_location, batch_no, expiry_date 
-      FROM inventory_master 
-      WHERE medicine_id = ? 
-      ORDER BY quantity DESC LIMIT 1
-    `, [id]);
-
-    // Calculate total stock across all batches
-    const stockRow = await db.get(`SELECT SUM(quantity) as total_stock FROM inventory_master WHERE medicine_id = ?`, [id]);
     const total_stock = stockRow?.total_stock || 0;
 
     

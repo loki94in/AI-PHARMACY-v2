@@ -510,6 +510,7 @@ const Purchases: React.FC = () => {
   }, [queryClient]);
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
 
   const handleGlobalCdChange = (newVal: number) => {
     setGlobalCdPer(newVal);
@@ -2693,7 +2694,16 @@ const Purchases: React.FC = () => {
                     <div className="flex items-center gap-1.5 h-8">
                       <button
                         onClick={() => {
-                          if (item.medicine_id) setUniversalEditMedicineId(item.medicine_id);
+                          if (item.medicine_id) {
+                            setUniversalEditItem({
+                              name: item.name,
+                              mrp: item.mrp,
+                              pack_size: item.pack_size || 10,
+                              batch_no: item.batch_no,
+                              quantity: item.qty
+                            });
+                            setUniversalEditMedicineId(item.medicine_id);
+                          }
                         }}
                         disabled={!item.medicine_id}
                         className={`p-1 rounded transition-colors ${item.medicine_id ? 'text-sky-400 hover:text-sky-300' : 'text-gray-600 cursor-not-allowed'}`}
@@ -3380,7 +3390,11 @@ const Purchases: React.FC = () => {
       {universalEditMedicineId && (
         <UniversalMedicineEditModal 
           medicineId={universalEditMedicineId} 
-          onClose={() => setUniversalEditMedicineId(null)} 
+          initialData={universalEditItem}
+          onClose={() => {
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
+          }} 
           onSave={() => {
             // Optional: You can trigger a refetch of items here if needed, or rely on next search
           }} 

@@ -1753,19 +1753,11 @@ const POS = () => {
     setRowSearchHighlightIndex(-1);
   };
 
-  const fetchDetailsAndChangeRowMedicine = async (index: number, med: any) => {
+  const fetchDetailsAndChangeRowMedicine = (index: number, med: any) => {
     skipEmptyRowAutofocusRef.current = true;
-    try {
-      const details = await api.getMedicineQuickDetails(med.medicine_id);
-      changeRowMedicine(index, {
-        ...med,
-        salts: details.api_reference || details.hsn_code || 'Generic',
-        alternatives: details.alternatives
-      });
-    } catch (error) {
-      console.warn('Failed to load quick details for row change, falling back:', error);
-      changeRowMedicine(index, med);
-    }
+    
+    // Apply medicine selection synchronously for instant UI response (<5ms)
+    changeRowMedicine(index, med);
 
     setTimeout(() => {
       const qtyInput = document.getElementById(`row-qty-input-${index}`);
@@ -1773,7 +1765,25 @@ const POS = () => {
         qtyInput.focus();
         (qtyInput as HTMLInputElement).select();
       }
-    }, 120);
+    }, 40);
+
+    // Enrich salts & alternatives asynchronously in the background
+    api.getMedicineQuickDetails(med.medicine_id)
+      .then((details: any) => {
+        if (details) {
+          updateCart((prevCart: any[]) => {
+            const updated = [...prevCart];
+            const target = updated[index];
+            if (!target || target.medicine_id !== med.medicine_id) return prevCart;
+            target.salts = details.api_reference || details.hsn_code || target.salts || 'Generic';
+            target.alternatives = details.alternatives || target.alternatives;
+            return updated;
+          });
+        }
+      })
+      .catch((error: any) => {
+        console.warn('Background quick details fetch failed/skipped:', error);
+      });
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
@@ -4175,6 +4185,7 @@ const POS = () => {
         <Suspense fallback={<ModalSkeleton />}>
           <UniversalMedicineEditModal 
             medicineId={editMedicineId} 
+            initialData={cart.find((i: any) => i.medicine_id === editMedicineId || i.id === editMedicineId)}
             onClose={() => setEditMedicineId(null)} 
             onSave={async () => {
               const currentMedId = editMedicineId;
