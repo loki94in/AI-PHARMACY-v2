@@ -803,11 +803,38 @@ router.post('/reset-data', async (req, res) => {
         }
       }
 
-      // Wipe WhatsApp web.js auth/cache sessions (forces fresh auth on restart)
+      // Destroy the live WhatsApp client FIRST so Chromium releases its file locks.
+      // Without this, unlinkSync on .wwebjs_auth/.wwebjs_cache silently fails on
+      // Windows (files still open by the running browser process) and the old
+      // WhatsApp session/config survives a "wipe everything" reset.
+      try {
+        const { destroyClient } = await import('../whatsappClient.js');
+        await destroyClient();
+      } catch (err: any) {
+        console.warn('[Reset] Failed to destroy WhatsApp client before wipe:', err.message);
+      }
+
+      // Wipe WhatsApp web.js auth/cache sessions (forces fresh auth/QR on restart)
       const wwwebAuthDir = path.resolve(getAppDataDir(), '.wwebjs_auth');
       const wwwebCacheDir = path.resolve(getAppDataDir(), '.wwebjs_cache');
-      clearDir(wwwebAuthDir);
-      clearDir(wwwebCacheDir);
+      const removeDirWithRetry = async (dirPath: string, attempts = 3) => {
+        if (!fs.existsSync(dirPath)) return;
+        for (let i = 0; i < attempts; i++) {
+          try {
+            fs.rmSync(dirPath, { recursive: true, force: true });
+            return;
+          } catch (err: any) {
+            if (i === attempts - 1) {
+              console.warn(`[Reset] Failed to remove ${dirPath} after ${attempts} attempts:`, err.message);
+            } else {
+              // OS may take a moment to release file handles after the browser process exits
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          }
+        }
+      };
+      await removeDirWithRetry(wwwebAuthDir);
+      await removeDirWithRetry(wwwebCacheDir);
 
       // Wipe Pharmarack profile and temp cache directories
       const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
