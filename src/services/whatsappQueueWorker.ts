@@ -158,22 +158,9 @@ class WhatsAppQueueWorker {
     const cleanPhone = number.replace(/[^0-9]/g, '');
     const now = Date.now();
 
-    // Deduplication check: suppress identical messages sent to the same number within the same day
-    try {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const startOfDayMs = startOfDay.getTime();
-
-      const existingToday = await db.get(
-        `SELECT id, status FROM whatsapp_send_queue 
-         WHERE number = ? AND message = ? AND created_at >= ? LIMIT 1`,
-        [cleanPhone, message, startOfDayMs]
-      );
-      if (existingToday?.id) {
-        console.log(`[Queue Safeguard] Suppressed duplicate enqueue for ${cleanPhone} today (status: ${existingToday.status}, queue ID: ${existingToday.id}).`);
-        return existingToday.id;
-      }
-    } catch (_) {}
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDayMs = startOfDay.getTime();
 
     // Auto-resolve targetName if omitted
     let resolvedTargetName = targetName?.trim() || '';
@@ -225,11 +212,29 @@ class WhatsAppQueueWorker {
       }
     }
 
+    // Atomic dedup + insert: the WHERE NOT EXISTS runs inside the same statement as the INSERT,
+    // so two near-simultaneous enqueue() calls for the same number+message can't both pass a
+    // separate SELECT check and both insert (that race caused duplicate WhatsApp sends).
     const result = await db.run(
       `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name)
-       VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
-      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null]
+       SELECT ?, ?, ?, 'pending', 0, ?, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM whatsapp_send_queue WHERE number = ? AND message = ? AND created_at >= ?
+       )`,
+      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, cleanPhone, message, startOfDayMs]
     );
+
+    if (!result.changes) {
+      const existingToday = await db.get(
+        `SELECT id, status FROM whatsapp_send_queue
+         WHERE number = ? AND message = ? AND created_at >= ? LIMIT 1`,
+        [cleanPhone, message, startOfDayMs]
+      );
+      if (existingToday?.id) {
+        console.log(`[Queue Safeguard] Suppressed duplicate enqueue for ${cleanPhone} today (status: ${existingToday.status}, queue ID: ${existingToday.id}).`);
+        return existingToday.id;
+      }
+    }
 
     // Trigger processing if scheduled time is now or past
     if (scheduledAt <= now) {

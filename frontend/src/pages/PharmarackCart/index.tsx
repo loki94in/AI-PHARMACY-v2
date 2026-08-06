@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2 } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
@@ -290,6 +290,7 @@ export default function PharmarackCart() {
   };
 
   const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
+  const isSendingBatchRef = useRef(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
 
   // Persistent WhatsApp sent status map by storeId (preserves history across reloads & sessions)
@@ -1319,6 +1320,11 @@ export default function PharmarackCart() {
   };
 
   const handleSendAllWhatsAppOrders = async (bypassMissingBoyCheck = false) => {
+    if (isSendingBatchRef.current) {
+      toastEvent.trigger('A WhatsApp batch send is already in progress.', 'info');
+      return;
+    }
+
     if (!hasPharmacySettings()) {
       toastEvent.trigger('Pharmacy Name and Contact Phone are required in Settings before sending orders.', 'error');
       navigate('/settings?missing=pharmacy_details');
@@ -1345,6 +1351,7 @@ export default function PharmarackCart() {
       return;
     }
 
+    isSendingBatchRef.current = true;
     setIsSendingBatchWhatsApp(true);
 
     try {
@@ -1462,6 +1469,7 @@ export default function PharmarackCart() {
         console.warn('Tab fallback error:', tabErr);
       }
     } finally {
+      isSendingBatchRef.current = false;
       setIsSendingBatchWhatsApp(false);
     }
   };
