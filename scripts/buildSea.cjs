@@ -37,3 +37,41 @@ execSync(
 );
 
 console.log('[build-sea] Done ->', outExe);
+
+// Automatically check for Inno Setup compiler (ISCC.exe) and compile installer if installed
+const isccCandidates = [
+  'iscc',
+  'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe',
+  'C:\\Program Files\\Inno Setup 6\\ISCC.exe'
+];
+
+let isccExe = null;
+for (const cand of isccCandidates) {
+  try {
+    if (cand === 'iscc') {
+      execSync('iscc /?', { stdio: 'ignore' });
+      isccExe = 'iscc';
+      break;
+    } else if (fs.existsSync(cand)) {
+      isccExe = cand;
+      break;
+    }
+  } catch (err) {
+    // try next
+  }
+}
+
+const issPath = path.join(root, 'installer.iss');
+if (isccExe && fs.existsSync(issPath)) {
+  console.log('[build-sea] Found Inno Setup compiler! Building standalone installer setup package...');
+  try {
+    execSync(`"${isccExe}" "${issPath}"`, { cwd: root, stdio: 'inherit' });
+    console.log('[build-sea] 🎉 Standalone Installer created at: dist\\installer\\AI-Pharmacy-OS-Portable-Setup-v0.1.0.exe');
+  } catch (e) {
+    console.error('[build-sea] Inno Setup compilation failed:', e.message);
+  }
+} else {
+  console.log('[build-sea] Notice: Inno Setup compiler (ISCC.exe) was not found in standard paths.');
+  console.log('[build-sea] If you want a 1-file setup installer, download Inno Setup 6 (https://jrsoftware.org/isinfo.php)');
+}
+

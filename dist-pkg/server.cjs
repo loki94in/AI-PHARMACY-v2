@@ -111,7 +111,7 @@ function migrateLegacyPackagedDataIfNeeded(oldRoot, newRoot) {
     }
   }
 }
-var import_dotenv, import_path, import_url, import_module, import_fs, __filename, __dirname, isPkg, isPackagedApp, getAppDataDir, appDataDir, config;
+var import_dotenv, import_path, import_url, import_module, import_fs, __filename, __dirname, isPackagedApp, getAppDataDir, appDataDir, config;
 var init_config = __esm({
   "src/config/index.ts"() {
     "use strict";
@@ -122,8 +122,7 @@ var init_config = __esm({
     import_fs = __toESM(require("fs"), 1);
     __filename = (0, import_url.fileURLToPath)(import_meta_url);
     __dirname = import_path.default.dirname(__filename);
-    isPkg = typeof process.pkg !== "undefined";
-    isPackagedApp = () => isPkg || isNodeSea();
+    isPackagedApp = () => isNodeSea();
     if (isPackagedApp()) {
       (0, import_dotenv.config)({ path: import_path.default.join(import_path.default.dirname(process.execPath), ".env") });
     } else {
@@ -162,7 +161,7 @@ var init_config = __esm({
       uploadDir: process.env.UPLOAD_DIR || import_path.default.join(appDataDir, "uploads"),
       tempDir: process.env.TEMP_DIR || import_path.default.join(appDataDir, "uploads", "temp"),
       backupDir: process.env.BACKUP_DIR || import_path.default.join(appDataDir, "backup"),
-      apiKey: process.env.API_KEY || "Pass@123",
+      apiKey: process.env.API_KEY || "",
       corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5174",
       taxRate: parseFloat(process.env.TAX_RATE || "0.05"),
       maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE || "50", 10) * 1024 * 1024,
@@ -1068,6 +1067,30 @@ var init_intentKeywords = __esm({
       "anna",
       "bhau",
       "saheb",
+      // Common English filler/pronoun words — a "thank you so much" style residual
+      // (after stripping 'thank'/'bhai' etc.) must not be searched as a medicine.
+      "you",
+      "your",
+      "yours",
+      "so",
+      "much",
+      "too",
+      "also",
+      "well",
+      "how",
+      "are",
+      "soon",
+      "see",
+      "come",
+      "coming",
+      "going",
+      "love",
+      "miss",
+      "fine",
+      "great",
+      "welcome",
+      "sorry",
+      "very",
       // Common Devanagari chatter (greetings/particles/questions)
       "\u0928\u093E",
       "\u0928\u093E\u0939\u0940",
@@ -1186,7 +1209,12 @@ async function syncCatalog() {
     const stores = storeData.data.Stores;
     const targetStores = stores.filter((s) => s.Ismapped === 1);
     const storesToSync = targetStores.length > 0 ? targetStores : stores.slice(0, 20);
+    let consecutiveErrors = 0;
     for (const store of storesToSync) {
+      if (consecutiveErrors >= 3) {
+        console.warn(`[Catalog Cache] Aborting catalog sync after ${consecutiveErrors} consecutive store errors.`);
+        break;
+      }
       const storeId = store.StoreId;
       const storeName = store.StoreName || "Unknown";
       const isMapped = store.Ismapped === 1;
@@ -1203,17 +1231,30 @@ async function syncCatalog() {
           IsSort: 1,
           CartSource: "MOVP"
         };
+        let errReason = "";
         const catalogRes = await fetchPharmarackApi("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
           method: "POST",
           body: JSON.stringify(searchPayload),
           signal: AbortSignal.timeout(8e3)
-        }).catch(() => null);
+        }).catch((err) => {
+          errReason = err.message || "Fetch failed";
+          return null;
+        });
         if (!catalogRes || !catalogRes.ok) {
           errors++;
+          consecutiveErrors++;
+          if (consecutiveErrors === 1) {
+            console.warn(`[Catalog Cache] Search API returned ${catalogRes?.status || errReason} for store ${storeName}`);
+          }
           continue;
         }
-        const catalogData = await catalogRes.json();
-        if (!catalogData?.data || !Array.isArray(catalogData.data)) continue;
+        const catalogData = await catalogRes.json().catch(() => null);
+        if (!catalogData?.data || !Array.isArray(catalogData.data)) {
+          errors++;
+          consecutiveErrors++;
+          continue;
+        }
+        consecutiveErrors = 0;
         await db2.run("BEGIN TRANSACTION");
         try {
           for (const p of catalogData.data) {
@@ -1251,6 +1292,7 @@ async function syncCatalog() {
         console.log(`[Catalog Cache] Synced ${catalogData.data.length} products from ${storeName} (${isMapped ? "mapped" : "non-mapped"})`);
       } catch (storeErr) {
         errors++;
+        consecutiveErrors++;
         console.warn(`[Catalog Cache] Failed to sync store ${storeName}:`, storeErr.message);
       }
     }
@@ -1506,6 +1548,13 @@ var init_productNameFilterService = __esm({
       // 5 seconds
       corrections = /* @__PURE__ */ new Map();
       correctionsPath;
+      // Caches full filterProductNames() results for repeat lookups of the same name.
+      // The full-array fuzzy fallback scans all medicine names (O(n) Levenshtein/phonetic/n-gram
+      // per candidate) and can take 15-20+ seconds once the catalog grows into the hundreds of
+      // thousands; callers like Pharmarack Cart's price-history prefetch look up the same product
+      // names repeatedly, so caching turns every repeat lookup into an instant hit.
+      filterCache = /* @__PURE__ */ new Map();
+      FILTER_CACHE_MAX = 2e3;
       constructor(dbPath = "./data/app.db") {
         this.dbPath = dbPath;
         this.correctionsPath = import_path3.default.resolve(process.cwd(), "data", "ocr_corrections.json");
@@ -1596,6 +1645,7 @@ var init_productNameFilterService = __esm({
           });
         }
         this.saveCorrections();
+        this.filterCache.clear();
         dbManager.getConnection().then(async (db2) => {
           await db2.run(
             "INSERT OR REPLACE INTO ocr_corrections (ocr, correct, count) VALUES (?, ?, ?)",
@@ -1620,7 +1670,7 @@ var init_productNameFilterService = __esm({
           fallbackTimeoutMs = this.DEFAULT_TIMEOUT,
           dosageForm,
           mrp,
-          mrpTolerance = 0.2,
+          mrpTolerance = 0.4,
           rawOcrText
         } = options;
         if (!ocrText || ocrText.trim() === "") {
@@ -1635,6 +1685,11 @@ var init_productNameFilterService = __esm({
           };
         }
         const normalizedOcr = ocrText.toLowerCase().trim();
+        const cacheKey = !enableInternetFallback ? `${normalizedOcr}|${dosageForm || ""}|${mrp || ""}|${minConfidenceThreshold}` : null;
+        if (cacheKey && this.filterCache.has(cacheKey)) {
+          const cached = this.filterCache.get(cacheKey);
+          return { ...cached, processingTimeMs: Date.now() - startTime };
+        }
         const scoredMatches = [];
         for (const [ocrKey, correctionVal] of this.corrections.entries()) {
           if (normalizedOcr === ocrKey || normalizedOcr.includes(ocrKey) || ocrKey.length >= 4 && normalizedOcr.includes(ocrKey)) {
@@ -1685,7 +1740,7 @@ var init_productNameFilterService = __esm({
         } catch (ftsErr) {
           console.warn("[Filter] FTS5 query failed, using full-array fallback:", ftsErr.message);
         }
-        if (!fts5Used || scoredMatches.length < 3) {
+        if (!fts5Used || scoredMatches.length < 1) {
           for (const medicineName of this.medicineNames) {
             const similarityScore = enhancedSimilarity(normalizedOcr, medicineName.toLowerCase());
             if (similarityScore >= minConfidenceThreshold) {
@@ -1743,7 +1798,7 @@ var init_productNameFilterService = __esm({
         if (totalMatches > 0) {
           averageConfidence = minConfidenceThreshold * 100;
         }
-        return {
+        const result = {
           matches: allMatches,
           sources: {
             local: localMatches.length > 0,
@@ -1757,6 +1812,14 @@ var init_productNameFilterService = __esm({
           scoredMatches,
           topScore: scoredMatches.length > 0 ? scoredMatches[0].score : 0
         };
+        if (cacheKey) {
+          if (this.filterCache.size >= this.FILTER_CACHE_MAX) {
+            const oldestKey = this.filterCache.keys().next().value;
+            if (oldestKey !== void 0) this.filterCache.delete(oldestKey);
+          }
+          this.filterCache.set(cacheKey, result);
+        }
+        return result;
       }
       async queryInternetApi(query, endpoint, apiKey, timeoutMs, minConfidenceThreshold) {
         const abortController = new AbortController();
@@ -2508,10 +2571,52 @@ var init_googleSearchService = __esm({
         if (packMatch) {
           result.pack_info = packMatch[0].trim();
         }
-        const classes = ["analgesic", "antipyretic", "antibiotic", "antifungal", "beta blocker", "nsaid", "proton pump inhibitor", "antihistamine"];
-        for (const c of classes) {
-          if (lowerText.includes(c)) {
-            result.therapeutic_class = c.toUpperCase();
+        const classesMap = [
+          { key: "nsaid", name: "NSAID / Anti-inflammatory" },
+          { key: "analgesic", name: "Analgesic / Antipyretic" },
+          { key: "antipyretic", name: "Analgesic / Antipyretic" },
+          { key: "antibiotic", name: "Antibiotic / Anti-infective" },
+          { key: "anti-infective", name: "Antibiotic / Anti-infective" },
+          { key: "antibacterial", name: "Antibiotic / Anti-infective" },
+          { key: "antifungal", name: "Antifungal" },
+          { key: "antiviral", name: "Antiviral" },
+          { key: "proton pump inhibitor", name: "Antacid / Anti-ulcer" },
+          { key: "antacid", name: "Antacid / Anti-ulcer" },
+          { key: "anti-ulcer", name: "Antacid / Anti-ulcer" },
+          { key: "h2 blocker", name: "Antacid / Anti-ulcer" },
+          { key: "antihistamine", name: "Antihistamine / Anti-allergic" },
+          { key: "anti-allergic", name: "Antihistamine / Anti-allergic" },
+          { key: "antihypertensive", name: "Antihypertensive" },
+          { key: "beta blocker", name: "Antihypertensive" },
+          { key: "calcium channel blocker", name: "Antihypertensive" },
+          { key: "ace inhibitor", name: "Antihypertensive" },
+          { key: "antidiabetic", name: "Antidiabetic" },
+          { key: "insulin", name: "Antidiabetic" },
+          { key: "hypoglycemic", name: "Antidiabetic" },
+          { key: "bronchodilator", name: "Bronchodilator / Respiratory" },
+          { key: "anti-asthmatic", name: "Bronchodilator / Respiratory" },
+          { key: "corticosteroid", name: "Corticosteroid / Anti-inflammatory" },
+          { key: "cardiovascular", name: "Cardiovascular" },
+          { key: "anti-anginal", name: "Cardiovascular" },
+          { key: "statin", name: "Lipid Lowering" },
+          { key: "lipid lowering", name: "Lipid Lowering" },
+          { key: "anti-emetic", name: "Gastrointestinal" },
+          { key: "anti-diarrheal", name: "Gastrointestinal" },
+          { key: "laxative", name: "Gastrointestinal" },
+          { key: "dermatological", name: "Dermatological" },
+          { key: "ophthalmic", name: "Ophthalmic" },
+          { key: "neurological", name: "Neurological" },
+          { key: "anticonvulsant", name: "Neurological" },
+          { key: "anti-depressant", name: "Psychiatric" },
+          { key: "anti-anxiety", name: "Psychiatric" },
+          { key: "vitamin", name: "Vitamin / Mineral Supplement" },
+          { key: "supplement", name: "Vitamin / Mineral Supplement" },
+          { key: "anticoagulant", name: "Anticoagulant" },
+          { key: "muscle relaxant", name: "Muscle Relaxant" }
+        ];
+        for (const c of classesMap) {
+          if (lowerText.includes(c.key)) {
+            result.therapeutic_class = c.name;
             break;
           }
         }
@@ -2969,8 +3074,8 @@ var init_aiCameraService = __esm({
             // Sparse text. Find as much text as possible in no particular order.
             preserve_interword_spaces: "1",
             // Medicine label specific optimizations for offline OCR
-            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/ mg\u03BC%",
-            // Expected medicine label chars
+            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-/:, \u20B9mg\u03BC%",
+            // Expected medicine label chars including Rupee symbol
             user_defined_dictionary: "./data/medicine_dict.txt",
             // Custom medicine dictionary
             user_patterns_file: "./data/medicine_patterns.txt"
@@ -3340,12 +3445,44 @@ var init_aiCameraService = __esm({
         finalInfo.potentialName = resolvedGeneric || rawName;
         const strengthMatch = localOcrResult.text.match(/\d+\s*(?:mg|g|ml|μg|iu)/i);
         if (strengthMatch) finalInfo.strength = strengthMatch[0];
-        const batchMatch = localOcrResult.text.match(/(?:batch|lot|#)\s*[:\-]?\s*([A-Z0-9]+)/i);
+        const batchMatch = localOcrResult.text.match(/(?:batch|b\.?no\.?|lot|#)\s*[:\-]?\s*([A-Z0-9\-]+)/i);
         if (batchMatch) finalInfo.batchNumber = batchMatch[1];
-        const expiryMatch = localOcrResult.text.match(/(?:exp|expiry)\s*[:\-]?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2})/i);
+        const expiryMatch = localOcrResult.text.match(/(?:exp|expiry|exp\.?date)\s*[:\-]?\s*(\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2})/i);
         if (expiryMatch) finalInfo.expiryDate = expiryMatch[1];
-        const priceMatch = localOcrResult.text.match(/(?:mrp|price|₹|rs)\s*[:\-]?\s*(\d+(?:\.\d{2})?)/i);
-        if (priceMatch) finalInfo.mrp = parseFloat(priceMatch[1]);
+        const mrpRegex = /(?:m\.?r\.?p\.?|max\.?\s*retail\s*price|price|mrp|₹|rs\.?|rupees?)\s*[:\-=]?\s*(?:rs\.?|₹)?\s*(\d+(?:[\.,]\d{1,3})?|\d+[\/\-]\s*)/i;
+        const priceMatch = localOcrResult.text.match(mrpRegex);
+        if (priceMatch && priceMatch[1]) {
+          const cleanedVal = priceMatch[1].replace(/[\/\-]/, "").replace(",", ".");
+          const parsedMrp = parseFloat(cleanedVal);
+          if (!isNaN(parsedMrp) && parsedMrp >= 1 && parsedMrp <= 1e5) {
+            finalInfo.mrp = parsedMrp;
+          }
+        }
+        if (!finalInfo.mrp) {
+          const standaloneMatch = localOcrResult.text.match(/(?:₹|rs\.?)\s*(\d+(?:\.\d{1,2})?)/i);
+          if (standaloneMatch) {
+            const val = parseFloat(standaloneMatch[1]);
+            if (!isNaN(val) && val >= 1 && val <= 1e5) {
+              finalInfo.mrp = val;
+            }
+          }
+        }
+        const mfrMatch = localOcrResult.text.match(/(?:mfd|mfg|manufactured|mfr)\.?\s*(?:by|in)?\s*[:\-]?\s*([A-Za-z0-9\s\.,&]{3,40})/i);
+        if (mfrMatch) {
+          finalInfo.manufacturer = mfrMatch[1].trim();
+        } else {
+          const knownMfrs = ["Cipla", "Sun Pharma", "Sun Pharmaceutical", "Torrent", "Lupin", "Abbott", "Mankind", "Zydus", "Alkem", "Macleods", "Intas", "Dr. Reddy", "Dr Reddy", "Glenmark", "Ipca", "Micro Labs", "Aristo", "Alembic"];
+          for (const km of knownMfrs) {
+            if (new RegExp(`\\b${km}\\b`, "i").test(localOcrResult.text)) {
+              finalInfo.manufacturer = km;
+              break;
+            }
+          }
+        }
+        const packMatch = localOcrResult.text.match(/(?:\d+\s*[xX]\s*\d+(?:\s*[xX]\s*\d+)?|\d+\s*(?:tabs?|tablets?|caps?|capsules?|strips?|ml|g|gm|s|'s|blisters?))\b/i);
+        if (packMatch) {
+          finalInfo.packaging = packMatch[0].trim();
+        }
         const detectedForm = this.detectDosageForm(localOcrResult.text);
         if (detectedForm) finalInfo.dosageForm = detectedForm;
         try {
@@ -3532,6 +3669,7 @@ async function runScan(item) {
       phone: item.meta.phone,
       chatId: item.meta.chatId,
       messageBody: item.meta.messageBody,
+      imagePath: item.meta.imagePath,
       ocrResult: result
     };
     eventService.broadcast("ocr_scan_complete", scanPayload);
@@ -3581,10 +3719,10 @@ var init_ocrScanQueue = __esm({
 });
 
 // src/services/waAdminEscalationService.ts
-async function resolvePhone(db2, raw, chatId, customerPhone) {
+async function resolvePhone(db2, raw2, chatId, customerPhone) {
   const strip = (p) => p.replace(/@c\.us$/i, "").replace(/@lid$/i, "").replace(/@s\.whatsapp\.net$/i, "");
-  const stripped = strip(raw);
-  const isLid = /@lid$/i.test(raw) || /^\d+$/.test(stripped) && stripped.length > 12;
+  const stripped = strip(raw2);
+  const isLid = /@lid$/i.test(raw2) || /^\d+$/.test(stripped) && stripped.length > 12;
   let candidate = stripped;
   if (isLid) {
     candidate = "";
@@ -3603,8 +3741,27 @@ async function resolvePhone(db2, raw, chatId, customerPhone) {
   let waDigits = null;
   if (digits.length === 10) waDigits = `91${digits}`;
   else if ((digits.length === 11 || digits.length === 12) && digits.startsWith("91")) waDigits = digits;
-  const display = waDigits ? `+${waDigits}` : candidate || stripped || raw;
+  const display = waDigits ? `+${waDigits}` : candidate || stripped || raw2;
   return { display, waDigits };
+}
+async function resolveAdminWhatsappNumber(db2) {
+  for (const key of ADMIN_PHONE_SETTING_KEYS) {
+    const row = await db2.get("SELECT value FROM app_settings WHERE key = ?", [key]);
+    if (row?.value && row.value.trim() !== "") {
+      return row.value.trim();
+    }
+  }
+  return "";
+}
+async function notifyAdminOfUnprocessedMedia(db2, opts) {
+  const adminWhatsapp = await resolveAdminWhatsappNumber(db2);
+  if (!adminWhatsapp) return false;
+  const caption = `\u26A0\uFE0F *Unprocessed WhatsApp Image*
+\u{1F4DE} ${opts.phone}
+${opts.reason}
+Please check this chat manually.`;
+  await sendMessage(adminWhatsapp, opts.imagePath, caption);
+  return true;
 }
 async function maybeEscalate(payload) {
   try {
@@ -3621,9 +3778,9 @@ async function maybeEscalate(payload) {
     if (autoShare === "false") {
       return;
     }
-    const adminWhatsapp = await getSetting4("admin_whatsapp", "");
-    if (!adminWhatsapp || adminWhatsapp.trim() === "") {
-      console.warn("[Admin Escalation] wa_auto_share_admin is enabled, but admin_whatsapp is empty. Skipping.");
+    const adminWhatsapp = await resolveAdminWhatsappNumber(db2);
+    if (!adminWhatsapp) {
+      console.warn(`[Admin Escalation] wa_auto_share_admin is enabled, but no admin WhatsApp number is configured (checked ${ADMIN_PHONE_SETTING_KEYS.join(", ")}). Skipping.`);
       return;
     }
     const customerPhoneRaw = payload.phone || payload.customer?.phone || "";
@@ -3801,13 +3958,14 @@ ${matchBlock}${contextBlock}
     console.error("[Admin Escalation] Error in maybeEscalate:", err);
   }
 }
-var waAdminEscalationService;
+var ADMIN_PHONE_SETTING_KEYS, waAdminEscalationService;
 var init_waAdminEscalationService = __esm({
   "src/services/waAdminEscalationService.ts"() {
     "use strict";
     init_connection();
     init_whatsappClient();
-    waAdminEscalationService = { maybeEscalate };
+    ADMIN_PHONE_SETTING_KEYS = ["admin_whatsapp", "owner_whatsapp_number", "admin_whatsapp_number", "shop_phone", "store_phone"];
+    waAdminEscalationService = { maybeEscalate, notifyAdminOfUnprocessedMedia, resolveAdminWhatsappNumber };
   }
 });
 
@@ -4866,6 +5024,48 @@ var init_medicineAvailabilityEngine = __esm({
               inStock: stock > 0
             });
           }
+          if (medicine.therapeutic) {
+            const therapeuticAlts = await db2.all(
+              `SELECT * FROM medicines
+           WHERE therapeutic = ? AND id != ?
+           AND therapeutic IS NOT NULL AND therapeutic != ''
+           LIMIT 5`,
+              [medicine.therapeutic, medicineId]
+            );
+            for (const alt of therapeuticAlts) {
+              if (!alternatives.some((a) => a.medicine.id === alt.id)) {
+                const stock = await this.getStock(db2, alt.id);
+                alternatives.push({
+                  medicine: alt,
+                  confidence: 0.85,
+                  matchType: "category",
+                  stock,
+                  inStock: stock > 0
+                });
+              }
+            }
+          }
+          if (medicine.sub_therapeutic) {
+            const subTherapeuticAlts = await db2.all(
+              `SELECT * FROM medicines
+           WHERE sub_therapeutic = ? AND id != ?
+           AND sub_therapeutic IS NOT NULL AND sub_therapeutic != ''
+           LIMIT 5`,
+              [medicine.sub_therapeutic, medicineId]
+            );
+            for (const alt of subTherapeuticAlts) {
+              if (!alternatives.some((a) => a.medicine.id === alt.id)) {
+                const stock = await this.getStock(db2, alt.id);
+                alternatives.push({
+                  medicine: alt,
+                  confidence: 0.75,
+                  matchType: "category",
+                  stock,
+                  inStock: stock > 0
+                });
+              }
+            }
+          }
           if (medicine.item_type) {
             const categoryAlts = await db2.all(
               `SELECT * FROM medicines
@@ -4874,14 +5074,16 @@ var init_medicineAvailabilityEngine = __esm({
               [medicine.item_type, medicineId]
             );
             for (const alt of categoryAlts) {
-              const stock = await this.getStock(db2, alt.id);
-              alternatives.push({
-                medicine: alt,
-                confidence: 0.7,
-                matchType: "category",
-                stock,
-                inStock: stock > 0
-              });
+              if (!alternatives.some((a) => a.medicine.id === alt.id)) {
+                const stock = await this.getStock(db2, alt.id);
+                alternatives.push({
+                  medicine: alt,
+                  confidence: 0.7,
+                  matchType: "category",
+                  stock,
+                  inStock: stock > 0
+                });
+              }
             }
           }
           return alternatives.sort((a, b) => b.confidence - a.confidence);
@@ -5770,12 +5972,18 @@ async function buildSeparateDispatchMessages(db2, orders, isLate = false) {
 \u{1F4E9} *Please email bill copies to:* ${pharmacyEmail}`;
     }
     distMessages.push({ distName, message: msg.trim() });
-    summaryLines.push(`${distIndex}. *${distName}*: ${distPhone} (${items.length} items)`);
+    const cleanP = String(distPhone).replace(/\D/g, "");
+    const displayPhoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : cleanP.length >= 10 ? `+${cleanP}` : distPhone || "N/A";
+    summaryLines.push(`${distIndex}. *${distName}*: (${items.length} items)
+    ${displayPhoneNoGap}`);
     distIndex++;
   }
   const totalDists = Object.keys(grouped).length;
   const totalItems = Object.values(grouped).reduce((acc, items) => acc + items.length, 0);
-  let summaryMsg = `\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
+  const shopNameRow = await db2.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
+  const shopName = shopNameRow?.value || "AI Pharmacy";
+  let summaryMsg = `\u{1F3E5} *${shopName}*
+\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
 
 `;
   summaryMsg += summaryLines.join("\n") + `
@@ -5956,10 +6164,11 @@ var init_pharmarackDailyDispatchService = __esm({
 
 // src/services/notificationService.ts
 function isSendSuccess(result) {
-  return result.sent === true;
+  return result === true || !!result && typeof result === "object" && result.sent === true;
 }
 function sendLogStatus(result) {
-  if (!result.sent) return "failed";
+  if (result === true) return "sent";
+  if (!result || typeof result !== "object" || !result.sent) return "failed";
   if (result.suppressed) return "suppressed";
   return "sent";
 }
@@ -5984,6 +6193,7 @@ var init_notificationService = __esm({
     init_whatsappClient();
     init_telegramBot();
     init_whatsappBusinessService();
+    init_emailService();
     init_connection();
     init_pharmarackDailyDispatchService();
     NotificationService = class {
@@ -6021,14 +6231,31 @@ var init_notificationService = __esm({
         }
       }
       /**
+       * Send an email notification
+       */
+      async sendEmailNotification(email, message) {
+        try {
+          const sent = await emailService.sendEmail({
+            to: email,
+            subject: "Notification from AI Pharmacy",
+            text: message
+          });
+          if (sent) return { success: true };
+          return { success: false, error: "Email send failed" };
+        } catch (error) {
+          console.error("Failed to send email notification:", error);
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error"
+          };
+        }
+      }
+      /**
        * Send a notification via the appropriate channel based on type.
-       * Channel status: whatsapp, telegram, and whatsapp_business are live and used
-       * elsewhere in the app (via sendWhatsApp/sendTelegram/sendWhatsAppBusiness, and
-       * the dedicated notifyDistributor... / notifyDeliveryBoys... methods below). `email`
-       * has no sending implementation — outbound mail in this app goes through
-       * emailService.ts directly, not through this notifier. This 'email' branch and
-       * this generic dispatcher are not currently called from anywhere in the app;
-       * treat 'email' as planned-but-not-implemented rather than a live channel.
+       * Channel status: whatsapp, telegram, whatsapp_business, and email are implemented.
+       * This generic dispatcher is not currently called from anywhere in the app;
+       * real outbound mail elsewhere goes through emailService.ts directly, but this
+       * implementation is here for completeness in case a future caller uses this dispatcher.
        */
       async sendNotification(data) {
         switch (data.type) {
@@ -6044,10 +6271,7 @@ var init_notificationService = __esm({
           case "whatsapp_business":
             return await this.sendWhatsAppBusiness(data.recipient, data.message);
           case "email":
-            return {
-              success: false,
-              error: "Email notifications not yet implemented"
-            };
+            return await this.sendEmailNotification(data.recipient, data.message);
           default:
             return {
               success: false,
@@ -6120,7 +6344,7 @@ var init_notificationService = __esm({
       }
       async getStoreSettings(db2) {
         const settingsRows = await db2.all(
-          "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'distributor_invoice_file_format')"
+          "SELECT key, value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name', 'shop_address', 'address', 'shop_email', 'email', 'shop_phone', 'phone', 'owner_whatsapp_number', 'distributor_invoice_file_format')"
         );
         const settings = {};
         for (const r of settingsRows) {
@@ -6128,9 +6352,11 @@ var init_notificationService = __esm({
         }
         const storeName = settings.shop_name || settings.pharmacy_name || "AI Pharmacy";
         const address = settings.shop_address || settings.address || "N/A";
+        const rawPhone = settings.shop_phone || settings.phone || settings.owner_whatsapp_number || "";
+        const phone = rawPhone ? formatDisplayPhone(rawPhone) : "N/A";
         const email = settings.shop_email || settings.email || "N/A";
         const fileFormat = (settings.distributor_invoice_file_format || "CSV").replace(" File Format", "");
-        return { storeName, address, email, fileFormat };
+        return { storeName, address, phone, email, fileFormat };
       }
       /**
        * Automatically send order/bill information to distributor WhatsApp numbers
@@ -6205,6 +6431,8 @@ var init_notificationService = __esm({
             }
           }
           const message = `\u{1F3E5} *${store.storeName}*
+*Delivery Location:* ${store.address}
+\u{1F4DE} *Pharmacy Contact:* ${store.phone}
 
 \u{1F4C5} *Date:* ${dateStr}
 
@@ -6215,7 +6443,6 @@ ${itemsText}
   \u{1F464} ${boyName}
   \u{1F4DE} ${boyPhone}
 
-*Delivery Location:* ${store.address}
 *Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
           const distPhones = rawPhone.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
           const uniqueDistPhones = Array.from(new Set(distPhones));
@@ -6339,7 +6566,7 @@ Mobile: ${formatDisplayPhone(clean)}
           const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
           let itemsText = "";
           if (items && items.length > 0) {
-            itemsText = items.map((item) => `  \u2022 ${item.productName || item.name || "Medicine Item"} \u2014 
+            itemsText = items.map((item) => `  \u2022 ${item.productName || item.name || "Medicine Item"}
     Qty: ${item.qty || item.Quantity || 1}`).join("\n");
           } else {
             itemsText = "  \u2022 Standard Pharmacy Order Items";
@@ -6357,6 +6584,8 @@ Mobile: ${formatDisplayPhone(clean)}
             }
           }
           const message = `\u{1F3E5} *${store.storeName}*
+*Delivery Location:* ${store.address}
+\u{1F4DE} *Pharmacy Contact:* ${store.phone}
 
 \u{1F4C5} *Date:* ${dateStr}
 
@@ -6367,7 +6596,6 @@ ${itemsText}
   \u{1F464} ${boyName}
   \u{1F4DE} ${boyPhone}
 
-*Delivery Location:* ${store.address}
 *Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
           const distPhones = rawPhone.split(/[\s,;]+/).map((num) => num.replace(/\D/g, "")).filter((num) => num.length >= 10).map((num) => num.length === 10 ? `91${num}` : num);
           const uniqueDistPhones = Array.from(new Set(distPhones));
@@ -6398,6 +6626,10 @@ ${itemsText}
             }
           }
           for (const boy of resolvedDeliveryBoys) {
+            if (uniqueDistPhones.includes(boy.phone)) {
+              console.log(`[CartOrderNotif] Skipping duplicate send to delivery boy ${boy.name} at ${boy.phone} (already messaged in distributor batch).`);
+              continue;
+            }
             try {
               const sendResult = await sendMessage(boy.phone, void 0, message);
               const logStatus = sendLogStatus(sendResult);
@@ -6428,6 +6660,13 @@ ${itemsText}
         }
       }
       /**
+       * Alias for notifyDistributorCartOrder returning boolean success.
+       */
+      async notifyAboutCartOrder(storeName, storeId, deliveryPersons, items) {
+        const res = await this.notifyDistributorCartOrder(storeName, storeId, items || [], deliveryPersons);
+        return res.ok;
+      }
+      /**
        * Send WhatsApp notification messages to delivery boy(s) for a batch of distributor orders.
        * Sends Summary message FIRST, followed by individual distributor order messages with packaging and qty.
        */
@@ -6436,6 +6675,7 @@ ${itemsText}
         let db2 = null;
         try {
           db2 = await dbManager.getConnection();
+          const store = await this.getStoreSettings(db2);
           const resolvedDeliveryBoys = [];
           const boyNamesSeen = /* @__PURE__ */ new Set();
           for (const order of orders) {
@@ -6499,10 +6739,14 @@ ${itemsText}
           const totalItems = orders.reduce((sum, o) => sum + (o.items?.length || 0), 0);
           const summaryLines = [];
           orders.forEach((order, idx) => {
-            const phone = distPhonesMap[order.storeName] || "No phone set";
-            summaryLines.push(`${idx + 1}. *${order.storeName}*: ${phone} (${order.items?.length || 0} items)`);
+            const rawPhone = distPhonesMap[order.storeName] || "No phone set";
+            const cleanP = String(rawPhone).replace(/\D/g, "");
+            const phoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : cleanP.length >= 10 ? `+${cleanP}` : rawPhone;
+            summaryLines.push(`${idx + 1}. *${order.storeName}*: (${order.items?.length || 0} items)
+    ${phoneNoGap}`);
           });
-          let summaryMessage = `\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
+          let summaryMessage = `\u{1F3E5} *${store.storeName}*
+\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
 
 `;
           summaryMessage += summaryLines.join("\n") + `
@@ -6749,14 +6993,51 @@ var init_shortageReminderService = __esm({
 var whatsappIntentService_exports = {};
 __export(whatsappIntentService_exports, {
   default: () => whatsappIntentService_default,
+  downloadMediaWithRetry: () => downloadMediaWithRetry,
   handleInbound: () => handleInbound,
   handleOcrComplete: () => handleOcrComplete,
   passesGate: () => passesGate,
+  resolveOcrGateDecision: () => resolveOcrGateDecision,
+  saveInboundMedia: () => saveInboundMedia,
   whatsappIntentService: () => whatsappIntentService
 });
 function passesGate(bestScore, hasIntentWords, source) {
   const threshold = hasIntentWords || source !== "text" ? GATE_WITH_INTENT : GATE_IMPLICIT;
   return bestScore >= threshold;
+}
+async function downloadMediaWithRetry(downloadFn, options = {}) {
+  const maxAttempts = options.maxAttempts ?? 3;
+  const delayMs = options.delayMs ?? 1e3;
+  const sleep2 = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await downloadFn();
+      if (result?.data) return result;
+      lastErr = new Error("downloadMedia returned no data");
+    } catch (err) {
+      lastErr = err;
+    }
+    if (attempt < maxAttempts) {
+      await sleep2(delayMs);
+    }
+  }
+  throw lastErr;
+}
+async function saveInboundMedia(msgId, buffer) {
+  await import_fs10.default.promises.mkdir(INBOUND_MEDIA_DIR, { recursive: true });
+  const safeId = String(msgId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const filePath = import_path12.default.join(INBOUND_MEDIA_DIR, `${safeId}.jpg`);
+  await import_fs10.default.promises.writeFile(filePath, buffer);
+  return filePath;
+}
+function resolveOcrGateDecision(ocrRaw, finalName, knownApis) {
+  const v2Gate = GATE_VARIANTS.find((v) => v.id === "V2");
+  if (!v2Gate) return "skip";
+  if (knownApis.size === 0) {
+    console.warn("[Intent Service] api_substances is empty; scan gate relying on dose-form/strength heuristics only.");
+  }
+  return v2Gate.decide(ocrRaw, finalName, { knownApis });
 }
 async function isIgnored(phone) {
   const db2 = await dbManager.getConnection();
@@ -6913,13 +7194,29 @@ async function handleInbound(msg) {
     }
     if (hasMedia) {
       try {
-        const media = await msg.downloadMedia();
+        const media = await downloadMediaWithRetry(() => msg.downloadMedia());
         if (media?.data) {
           const buffer = Buffer.from(media.data, "base64");
-          ocrScanQueue.enqueue(msgId, buffer, { phone, chatId, messageBody: body });
+          let imagePath;
+          try {
+            imagePath = await saveInboundMedia(msgId, buffer);
+          } catch (saveErr) {
+            console.error("[Intent Service] Failed to persist inbound media to disk:", saveErr);
+          }
+          ocrScanQueue.enqueue(msgId, buffer, { phone, chatId, messageBody: body, imagePath });
         }
       } catch (mediaErr) {
-        console.error("[Intent Service] Failed to download media:", mediaErr);
+        console.error("[Intent Service] Failed to download media after retries:", mediaErr);
+        try {
+          const db2 = await dbManager.getConnection();
+          await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db2, {
+            phone,
+            chatId,
+            reason: "Received an image from this customer but could not download it after 3 attempts."
+          });
+        } catch (notifyErr) {
+          console.error("[Intent Service] Failed to notify admin of media download failure:", notifyErr);
+        }
       }
     }
     const effectiveMedicineName = parsed.isMedicineRequest && parsed.medicineName ? parsed.medicineName : scispacyMedicineName;
@@ -6949,7 +7246,7 @@ async function handleInbound(msg) {
   }
 }
 async function searchAndBroadcast(opts) {
-  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone, chatId } = opts;
+  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone, chatId, imagePath } = opts;
   const hasIntentWords = !!opts.hasIntentWords;
   let filterResult;
   try {
@@ -7002,6 +7299,19 @@ async function searchAndBroadcast(opts) {
   const bestScore = Math.max(filterResult.topScore ?? 0, catalogTopScore());
   if (!passesGate(bestScore, hasIntentWords, source)) {
     console.log(`[Intent Service] Gate: discarding "${medicineName}" (bestScore=${bestScore.toFixed(2)}, intent=${hasIntentWords}, source=${source}). Not a medicine.`);
+    if (source !== "text" && imagePath) {
+      try {
+        const db2 = await dbManager.getConnection();
+        await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db2, {
+          phone: phone || customer?.phone || "",
+          chatId,
+          imagePath,
+          reason: `Found "${medicineName}" in this photo but the match confidence was too low to auto-identify (score ${Math.round(bestScore * 100)}%).`
+        });
+      } catch (notifyErr) {
+        console.error("[Intent Service] Failed to notify admin of uncertain scan:", notifyErr);
+      }
+    }
     return;
   }
   const confidence = Math.round(bestScore * 100);
@@ -7073,7 +7383,7 @@ async function searchAndBroadcast(opts) {
   console.log(`[Intent Service] Match result for "${medicineName}": ${filterResult.matches.length} local, ${catalogResults?.mapped?.length || 0} mapped, ${catalogResults?.nonMapped?.length || 0} non-mapped (bestScore=${bestScore.toFixed(2)})`);
 }
 function handleOcrComplete(data) {
-  const { phone, chatId, messageBody, ocrResult, msgId } = data;
+  const { phone, chatId, messageBody, ocrResult, msgId, imagePath } = data;
   if (!ocrResult) return;
   let medicineName = ocrResult.medicineInfo?.potentialName;
   const dosageForm = ocrResult.medicineInfo?.dosageForm;
@@ -7095,7 +7405,24 @@ function handleOcrComplete(data) {
       return;
     }
   }
-  if (!finalName) return;
+  if (!finalName) {
+    if (imagePath) {
+      (async () => {
+        try {
+          const db2 = await dbManager.getConnection();
+          await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db2, {
+            phone: phone || "",
+            chatId,
+            imagePath,
+            reason: "Could not extract any readable medicine name from this photo."
+          });
+        } catch (notifyErr) {
+          console.error("[Intent Service] Failed to notify admin of unreadable scan:", notifyErr);
+        }
+      })();
+    }
+    return;
+  }
   const ocrRaw = [
     ocrResult?.text,
     ocrResult?.rawText,
@@ -7107,13 +7434,7 @@ function handleOcrComplete(data) {
     dbManager.getConnection().then((db2) => db2.all("SELECT api FROM api_substances"))
   ]).then(([customer, rows]) => {
     const knownApis = new Set(rows.map((r) => (r.api || "").toLowerCase()));
-    const v2Gate = GATE_VARIANTS.find((v) => v.id === "V2");
-    let decision = "identify";
-    if (knownApis.size === 0) {
-      console.warn("[Intent Service] Scan gate bypassed: api_substances is empty. Run reference enrichment to enable gating.");
-    } else if (v2Gate) {
-      decision = v2Gate.decide(ocrRaw, finalName, { knownApis });
-    }
+    const decision = resolveOcrGateDecision(ocrRaw, finalName, knownApis);
     if (decision === "skip") {
       console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
       return;
@@ -7131,16 +7452,19 @@ function handleOcrComplete(data) {
       msgId,
       phone,
       chatId,
+      imagePath,
       hasIntentWords: textParsed.rawIntentWords.length > 0
     }).catch((err) => console.error("[Intent Service] OCR post-search failed:", err));
   }).catch((err) => {
     console.error("[Intent Service] Error in handleOcrComplete lookup:", err);
   });
 }
-var GATE_WITH_INTENT, GATE_IMPLICIT, whatsappIntentService, whatsappIntentService_default;
+var import_fs10, import_path12, GATE_WITH_INTENT, GATE_IMPLICIT, INBOUND_MEDIA_DIR, whatsappIntentService, whatsappIntentService_default;
 var init_whatsappIntentService = __esm({
   "src/services/whatsappIntentService.ts"() {
     "use strict";
+    import_fs10 = __toESM(require("fs"), 1);
+    import_path12 = __toESM(require("path"), 1);
     init_connection();
     init_eventService();
     init_intentKeywords();
@@ -7151,6 +7475,7 @@ var init_whatsappIntentService = __esm({
     init_scanGateAlgorithms();
     GATE_WITH_INTENT = 0.6;
     GATE_IMPLICIT = 0.72;
+    INBOUND_MEDIA_DIR = import_path12.default.resolve(process.cwd(), "data", "inbound_media");
     whatsappIntentService = { handleInbound, handleOcrComplete, searchAndBroadcast };
     whatsappIntentService_default = whatsappIntentService;
   }
@@ -7216,7 +7541,7 @@ async function shouldRouteToBusiness() {
   return false;
 }
 function cleanupProfileLocks() {
-  const sessionPath = import_path12.default.join(WWEBJS_AUTH_DIR, "session");
+  const sessionPath = import_path13.default.join(WWEBJS_AUTH_DIR, "session");
   try {
     if (process.platform === "win32") {
       const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*wwebjs_auth*session*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
@@ -7228,10 +7553,10 @@ function cleanupProfileLocks() {
   }
   const filesToClean = ["lockfile", "SingletonLock", "DevToolsActivePort"];
   for (const file of filesToClean) {
-    const filePath = import_path12.default.join(sessionPath, file);
-    if (import_fs10.default.existsSync(filePath)) {
+    const filePath = import_path13.default.join(sessionPath, file);
+    if (import_fs11.default.existsSync(filePath)) {
       try {
-        import_fs10.default.unlinkSync(filePath);
+        import_fs11.default.unlinkSync(filePath);
         console.log(`[WhatsApp Init] Cleaned stale lock file: ${file}`);
       } catch (err) {
         console.warn(`[WhatsApp Init] Could not delete lock file ${file}: ${err.message}`);
@@ -7408,7 +7733,7 @@ async function initClient() {
       "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
     ];
     for (const p of paths) {
-      if (import_fs10.default.existsSync(p)) {
+      if (import_fs11.default.existsSync(p)) {
         execPath = p;
         break;
       }
@@ -7428,18 +7753,11 @@ async function initClient() {
     });
     activeClient = client;
     client.on("qr", (qr) => {
-      console.log("WhatsApp QR code received");
+      console.log("[WhatsApp] QR code received (standing by for scan)...");
       currentQr = qr;
       isReady = false;
-      if (qrTimeout) clearTimeout(qrTimeout);
-      qrTimeout = setTimeout(() => {
-        if (!isReady) {
-          console.log("QR Code expired (30s). Destroying client to prevent leak. Standing by.");
-          client.destroy().catch((err) => console.error("Error destroying WA client:", err));
-        }
-      }, 3e4);
     });
-    client.on("ready", () => {
+    client.on("ready", async () => {
       console.log("WhatsApp Client is ready!");
       if (qrTimeout) clearTimeout(qrTimeout);
       clientInstance = client;
@@ -7448,6 +7766,37 @@ async function initClient() {
       isReady = true;
       currentQr = null;
       resolve(client);
+      try {
+        const infoNumber = client?.info?.wid?.user || client?.info?.wid?._serialized?.split("@")[0];
+        if (infoNumber) {
+          const cleanPhone = String(infoNumber).replace(/\D/g, "");
+          console.log(`[WhatsApp Persist] Connected phone number detected: ${cleanPhone}`);
+          const db2 = await dbManager.getConnection();
+          await db2.run(
+            `INSERT INTO app_settings (key, value) VALUES ('whatsapp_connected_number', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+            [cleanPhone]
+          );
+          const existingOwner = await db2.get("SELECT value FROM app_settings WHERE key = 'owner_whatsapp_number'");
+          if (!existingOwner || !existingOwner.value || !existingOwner.value.trim()) {
+            await db2.run(
+              `INSERT INTO app_settings (key, value) VALUES ('owner_whatsapp_number', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+              [cleanPhone]
+            );
+          }
+          const existingShopPhone = await db2.get("SELECT value FROM app_settings WHERE key = 'shop_phone'");
+          if (!existingShopPhone || !existingShopPhone.value || !existingShopPhone.value.trim()) {
+            await db2.run(
+              `INSERT INTO app_settings (key, value) VALUES ('shop_phone', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+              [cleanPhone]
+            );
+          }
+        }
+      } catch (saveErr) {
+        console.warn("[WhatsApp Persist] Failed to save connected phone number to app_settings:", saveErr);
+      }
       drainSendQueue().catch((err) => {
         console.error("[WhatsApp] Queue drain failed (non-fatal):", err);
       });
@@ -7638,8 +7987,8 @@ async function forceReconnect() {
   clientInstance = null;
   const authPath = WWEBJS_AUTH_DIR;
   try {
-    if (import_fs10.default.existsSync(authPath)) {
-      import_fs10.default.rmSync(authPath, { recursive: true, force: true });
+    if (import_fs11.default.existsSync(authPath)) {
+      import_fs11.default.rmSync(authPath, { recursive: true, force: true });
       console.log("[WhatsApp] Old session data cleared from", authPath);
     }
   } catch (err) {
@@ -7692,8 +8041,8 @@ async function sendMessage(to, mediaPath, caption, file) {
     const msgHash = hashMessageBody(fullMsg);
     const sendKey = `${cleanPhone}:${msgHash}:${fullMsg.length}`;
     const nowTs = Date.now();
-    if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey) < 3e4) {
-      console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 30s.`);
+    if (recentSendsCache.has(sendKey) && nowTs - recentSendsCache.get(sendKey) < 5e3) {
+      console.log(`[WhatsApp Safeguard] Suppressed duplicate send to ${cleanPhone} within 5s.`);
       aggregateResult = { sent: true, suppressed: true };
       continue;
     }
@@ -7766,7 +8115,7 @@ async function sendMessage(to, mediaPath, caption, file) {
           }
         }
         try {
-          const provisionalBody = file ? `[Document] ${file.filename || ""} ${caption || ""}`.trim() : mediaPath ? `[Document] ${import_path12.default.basename(mediaPath)} ${caption || ""}`.trim() : caption || "";
+          const provisionalBody = file ? `[Document] ${file.filename || ""} ${caption || ""}`.trim() : mediaPath ? `[Document] ${import_path13.default.basename(mediaPath)} ${caption || ""}`.trim() : caption || "";
           const provTimestamp = Math.floor(Date.now() / 1e3);
           const provHasMedia = file || mediaPath ? 1 : 0;
           await db2.run(
@@ -7805,18 +8154,18 @@ async function sendMessage(to, mediaPath, caption, file) {
         continue;
       } else {
         if (file && file.mimetype && file.data) {
-          if (!import_fs10.default.existsSync(config.tempDir)) {
-            import_fs10.default.mkdirSync(config.tempDir, { recursive: true });
+          if (!import_fs11.default.existsSync(config.tempDir)) {
+            import_fs11.default.mkdirSync(config.tempDir, { recursive: true });
           }
-          const tempFilePath = import_path12.default.join(config.tempDir, `wa_temp_${Date.now()}_${file.filename || "document.pdf"}`);
-          import_fs10.default.writeFileSync(tempFilePath, Buffer.from(file.data, "base64"));
+          const tempFilePath = import_path13.default.join(config.tempDir, `wa_temp_${Date.now()}_${file.filename || "document.pdf"}`);
+          import_fs11.default.writeFileSync(tempFilePath, Buffer.from(file.data, "base64"));
           try {
             const result = await whatsappBusinessService.sendDocument(cleanPhone, tempFilePath, caption, file.filename);
             success = result.success;
             if (result.messageId) messageId = result.messageId;
           } finally {
-            if (import_fs10.default.existsSync(tempFilePath)) {
-              import_fs10.default.unlinkSync(tempFilePath);
+            if (import_fs11.default.existsSync(tempFilePath)) {
+              import_fs11.default.unlinkSync(tempFilePath);
             }
           }
         } else if (mediaPath) {
@@ -7833,7 +8182,7 @@ async function sendMessage(to, mediaPath, caption, file) {
       console.error("[WhatsApp Client Wrapper] Send failed:", err?.message || err);
       throw err;
     }
-    const bodyText = file ? `[Document] ${file.filename || ""} ${caption || ""}` : mediaPath ? `[Document] ${import_path12.default.basename(mediaPath)} ${caption || ""}` : caption || "";
+    const bodyText = file ? `[Document] ${file.filename || ""} ${caption || ""}` : mediaPath ? `[Document] ${import_path13.default.basename(mediaPath)} ${caption || ""}` : caption || "";
     const timestamp = Math.floor(Date.now() / 1e3);
     const hasMedia = file || mediaPath ? 1 : 0;
     try {
@@ -7974,19 +8323,19 @@ async function getChats() {
   }
 }
 async function getChatMessages(chatId, limit = 500) {
-  const raw = String(chatId || "").trim();
-  if (!raw) return [];
-  const digits = raw.replace(/\D/g, "");
+  const raw2 = String(chatId || "").trim();
+  if (!raw2) return [];
+  const digits = raw2.replace(/\D/g, "");
   const phoneWithoutCc = digits.length >= 10 ? digits.slice(-10) : digits;
   const likePattern = `%${phoneWithoutCc}%`;
   try {
     const db2 = await dbManager.getConnection();
-    const relatedChatIds = /* @__PURE__ */ new Set([raw]);
+    const relatedChatIds = /* @__PURE__ */ new Set([raw2]);
     if (phoneWithoutCc && phoneWithoutCc.length >= 7) {
       const chatRows = await db2.all(
         `SELECT id, resolved_number FROM whatsapp_chats
          WHERE id = ? OR id LIKE ? OR resolved_number LIKE ? OR resolved_number = ?`,
-        [raw, likePattern, likePattern, phoneWithoutCc]
+        [raw2, likePattern, likePattern, phoneWithoutCc]
       );
       for (const c of chatRows) {
         if (c.id) relatedChatIds.add(c.id);
@@ -8023,35 +8372,35 @@ async function getChatMessages(chatId, limit = 500) {
   }
 }
 async function getMessageMedia(chatId, messageId) {
-  if (!import_fs10.default.existsSync(UPLOADS_DIR)) {
-    import_fs10.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+  if (!import_fs11.default.existsSync(UPLOADS_DIR)) {
+    import_fs11.default.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
-  const files = import_fs10.default.readdirSync(UPLOADS_DIR);
+  const files = import_fs11.default.readdirSync(UPLOADS_DIR);
   const matchedFile = files.find((f) => f.startsWith(messageId));
   if (!matchedFile) {
     throw new Error(`Media not found locally for message ID: ${messageId}`);
   }
-  const filePath = import_path12.default.join(UPLOADS_DIR, matchedFile);
-  const ext = import_path12.default.extname(matchedFile).toLowerCase();
+  const filePath = import_path13.default.join(UPLOADS_DIR, matchedFile);
+  const ext = import_path13.default.extname(matchedFile).toLowerCase();
   let mimetype = "image/jpeg";
   if (ext === ".png") mimetype = "image/png";
   else if (ext === ".pdf") mimetype = "application/pdf";
   else if (ext === ".mp3") mimetype = "audio/mp3";
   else if (ext === ".mp4") mimetype = "video/mp4";
-  const data = import_fs10.default.readFileSync(filePath).toString("base64");
+  const data = import_fs11.default.readFileSync(filePath).toString("base64");
   return {
     mimetype,
     data,
     filename: matchedFile
   };
 }
-var import_whatsapp_web, import_fs10, import_path12, import_url11, import_child_process2, Client, LocalAuth, MessageMedia, __filename10, __dirname10, UPLOADS_DIR, WWEBJS_AUTH_DIR, clientInstance, activeClient, initializing, isSyncing, qrTimeout, lastSyncFailureAt, SYNC_RETRY_COOLDOWN_MS, currentQr, isReady, recentSendsCache;
+var import_whatsapp_web, import_fs11, import_path13, import_url11, import_child_process2, Client, LocalAuth, MessageMedia, __filename10, __dirname10, UPLOADS_DIR, WWEBJS_AUTH_DIR, clientInstance, activeClient, initializing, isSyncing, qrTimeout, lastSyncFailureAt, SYNC_RETRY_COOLDOWN_MS, currentQr, isReady, recentSendsCache;
 var init_whatsappClient = __esm({
   "src/whatsappClient.ts"() {
     "use strict";
     import_whatsapp_web = __toESM(require("whatsapp-web.js"), 1);
-    import_fs10 = __toESM(require("fs"), 1);
-    import_path12 = __toESM(require("path"), 1);
+    import_fs11 = __toESM(require("fs"), 1);
+    import_path13 = __toESM(require("path"), 1);
     import_url11 = require("url");
     import_child_process2 = require("child_process");
     init_eventService();
@@ -8060,9 +8409,9 @@ var init_whatsappClient = __esm({
     init_whatsappBusinessService();
     ({ Client, LocalAuth, MessageMedia } = import_whatsapp_web.default);
     __filename10 = (0, import_url11.fileURLToPath)(import_meta_url);
-    __dirname10 = import_path12.default.dirname(__filename10);
-    UPLOADS_DIR = import_path12.default.resolve(getAppDataDir(), "uploads");
-    WWEBJS_AUTH_DIR = import_path12.default.resolve(getAppDataDir(), ".wwebjs_auth");
+    __dirname10 = import_path13.default.dirname(__filename10);
+    UPLOADS_DIR = import_path13.default.resolve(getAppDataDir(), "uploads");
+    WWEBJS_AUTH_DIR = import_path13.default.resolve(getAppDataDir(), ".wwebjs_auth");
     process.on("unhandledRejection", (reason) => {
       const msg = reason?.message || String(reason);
       if (isPuppeteerDetachedError(msg)) {
@@ -8114,6 +8463,14 @@ var init_emailSanitizer = __esm({
 });
 
 // src/services/storeSettingsService.ts
+var storeSettingsService_exports = {};
+__export(storeSettingsService_exports, {
+  buildOrderReadyNotificationMessage: () => buildOrderReadyNotificationMessage,
+  getEmailRetentionLimit: () => getEmailRetentionLimit,
+  getStoreMedicalName: () => getStoreMedicalName,
+  getStoreMedicalNameAndPhone: () => getStoreMedicalNameAndPhone,
+  getStorePhone: () => getStorePhone
+});
 async function getStoreMedicalName(dbInstance) {
   try {
     const db2 = dbInstance || await dbManager.getConnection();
@@ -8157,15 +8514,17 @@ async function getStorePhone(dbInstance) {
     const db2 = dbInstance || await dbManager.getConnection();
     const row = await db2.get(
       `SELECT value FROM app_settings 
-       WHERE key IN ('shop_phone', 'store_phone', 'pharmacy_phone', 'phone', 'contact_number', 'phone_number') 
+       WHERE key IN ('shop_phone', 'store_phone', 'pharmacy_phone', 'phone', 'contact_number', 'phone_number', 'owner_whatsapp_number', 'whatsapp_connected_number') 
          AND value IS NOT NULL 
          AND TRIM(value) != '' 
        ORDER BY CASE key 
          WHEN 'shop_phone' THEN 1 
          WHEN 'store_phone' THEN 2 
-         WHEN 'pharmacy_phone' THEN 3 
-         WHEN 'phone' THEN 4
-         ELSE 5 END 
+         WHEN 'owner_whatsapp_number' THEN 3
+         WHEN 'whatsapp_connected_number' THEN 4
+         WHEN 'pharmacy_phone' THEN 5 
+         WHEN 'phone' THEN 6
+         ELSE 7 END 
        LIMIT 1`
     );
     if (row && row.value && row.value.trim()) {
@@ -8197,11 +8556,49 @@ async function getEmailRetentionLimit(dbInstance) {
   }
   return 50;
 }
-async function buildOrderReadyNotificationMessage(requesterName, productName, qty = 1, dbInstance) {
+async function buildOrderReadyNotificationMessage(requesterName, productName, qty = 1, dbInstance, lang = "en") {
   const storeName = await getStoreMedicalName(dbInstance);
   const storePhone = await getStorePhone(dbInstance);
   const name = (requesterName || "Customer").trim();
   const phone = storePhone ? storePhone.trim() : "";
+  if (lang === "hi") {
+    let msg2 = `\u0928\u092E\u0938\u094D\u0924\u0947 ${name}, \u{1F44B}
+
+\u0916\u0941\u0936\u0916\u092C\u0930\u0940! \u{1F389} \u0906\u092A\u0915\u0940 \u092E\u093E\u0902\u0917\u0940 \u0917\u0908 \u0926\u0935\u093E\u0908 ${storeName} \u092A\u0930 \u0932\u0947\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F \u0924\u0948\u092F\u093E\u0930 \u0939\u0948\u0964
+
+\u0906\u092A\u0915\u093E \u0911\u0930\u094D\u0921\u0930:
+\u2022 ${productName} \xD7 ${qty || 1}
+
+\u{1F4CD} \u0915\u0943\u092A\u092F\u093E \u0905\u092A\u0928\u0940 \u0938\u0941\u0935\u093F\u0927\u093E\u0928\u0941\u0938\u093E\u0930 \u0939\u092E\u093E\u0930\u0940 \u0926\u0941\u0915\u093E\u0928 \u092A\u0930 \u0906\u0915\u0930 \u0905\u092A\u0928\u0940 \u0926\u0935\u093E\u0908 \u092A\u094D\u0930\u093E\u092A\u094D\u0924 \u0915\u0930\u0947\u0902\u0964`;
+    if (phone) {
+      msg2 += `
+
+\u{1F4DE} \u0938\u0939\u093E\u092F\u0924\u093E \u0915\u0947 \u0932\u093F\u090F, \u0939\u092E\u0947\u0902 ${phone} \u092A\u0930 \u0915\u0949\u0932 \u0915\u0930\u0947\u0902\u0964`;
+    }
+    msg2 += `
+
+${storeName} \u0915\u094B \u091A\u0941\u0928\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F \u0927\u0928\u094D\u092F\u0935\u093E\u0926!`;
+    return msg2;
+  }
+  if (lang === "mr") {
+    let msg2 = `\u0928\u092E\u0938\u094D\u0915\u093E\u0930 ${name}, \u{1F44B}
+
+\u0906\u0928\u0902\u0926\u093E\u091A\u0940 \u092C\u093E\u0924\u092E\u0940! \u{1F389} \u0906\u092A\u0932\u0940 \u092E\u093E\u0917\u0935\u0932\u0947\u0932\u0940 \u0914\u0937\u0927 ${storeName} \u092F\u0947\u0925\u0947 \u092E\u093F\u0933\u0923\u094D\u092F\u093E\u0938 \u0924\u092F\u093E\u0930 \u0906\u0939\u0947.
+
+\u0906\u092A\u0932\u0940 \u0911\u0930\u094D\u0921\u0930:
+\u2022 ${productName} \xD7 ${qty || 1}
+
+\u{1F4CD} \u0915\u0943\u092A\u092F\u093E \u0906\u092A\u0932\u094D\u092F\u093E \u0938\u094B\u092F\u0940\u0928\u0941\u0938\u093E\u0930 \u0906\u092E\u091A\u094D\u092F\u093E \u0926\u0941\u0915\u093E\u0928\u093E\u0932\u093E \u092D\u0947\u091F \u0926\u0947\u090A\u0928 \u0914\u0937\u0927 \u0918\u0947\u090A\u0928 \u091C\u093E\u0935\u0947\u0964`;
+    if (phone) {
+      msg2 += `
+
+\u{1F4DE} \u092E\u0926\u0924\u0940\u0938\u093E\u0920\u0940, \u0906\u092E\u094D\u0939\u093E\u0932\u093E ${phone} \u0935\u0930 \u0915\u0949\u0932 \u0915\u0930\u093E.`;
+    }
+    msg2 += `
+
+${storeName} \u091A\u0940 \u0928\u093F\u0935\u0921 \u0915\u0947\u0932\u094D\u092F\u093E\u092C\u0926\u094D\u0926\u0932 \u0927\u0928\u094D\u092F\u0935\u093E\u0926!`;
+    return msg2;
+  }
   let msg = `Hi ${name}, \u{1F44B}
 
 Great news! \u{1F389} Your requested medicine is now ready for pickup at ${storeName}.
@@ -8350,7 +8747,7 @@ async function checkAllRefills(db2) {
       continue;
     }
     const stockRow = await db2.get(
-      "SELECT SUM(quantity) as total_qty FROM inventory_master WHERE medicine_id = ?",
+      "SELECT (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as total_qty FROM inventory_master WHERE medicine_id = ?",
       [refill.medicine_id]
     );
     const qty = stockRow ? stockRow.total_qty || 0 : 0;
@@ -9117,6 +9514,7 @@ __export(emailService_exports, {
   EmailService: () => EmailService,
   cleanMedicineName: () => cleanMedicineName,
   default: () => emailService_default,
+  detectLayoutType: () => detectLayoutType,
   emailService: () => emailService,
   isNonMedicineNoise: () => isNonMedicineNoise
 });
@@ -9529,7 +9927,7 @@ function parseRecordTypeInvoice(csvRecords, filename) {
     }
   }
   if (!distributor_name && filename) {
-    const base = import_path13.default.basename(filename).toLowerCase();
+    const base = import_path14.default.basename(filename).toLowerCase();
     if (base.includes("prakash_pharmaceuticals") || base.includes("prakashpharmaceuticals")) {
       distributor_name = "PRAKASH PHARMACEUTICALS";
     }
@@ -9541,6 +9939,19 @@ function parseRecordTypeInvoice(csvRecords, filename) {
     total_amount,
     items
   };
+}
+function detectLayoutType(content) {
+  const lines = content.split("\n");
+  let verticalScore = 0;
+  let concatScore = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\d{3}$/.test(trimmed)) verticalScore++;
+    if (/^\d{8}/.test(trimmed) || /^\d+[a-zA-Z]+$/.test(trimmed)) concatScore++;
+  }
+  if (verticalScore >= 2) return "vertical";
+  if (concatScore >= 2) return "concatenated";
+  return "horizontal";
 }
 function parseItemsFromTextLines(content, global_cd_per) {
   const items = [];
@@ -9955,7 +10366,7 @@ function cleanMedicineName(rawName) {
 function isNonMedicineNoise(name) {
   if (!name || typeof name !== "string") return true;
   const cleaned = cleanMedicineName(name);
-  if (cleaned.length <= 2) return true;
+  if (cleaned.length < 2) return true;
   const clean = cleaned.toLowerCase();
   if (/^[\d\s\-\/\:\.\,\(\)\%\#\$\@\+\=\_]+$/.test(clean)) return true;
   if (/^dl\s*[\:\.\-\s_]/i.test(clean) || /^dl\s*no/i.test(clean) || /^d\.l\./i.test(clean) || /drug\s*licen[cs]e/i.test(clean) || /^licen[cs]e\s*no/i.test(clean)) {
@@ -10072,7 +10483,7 @@ function isNonMedicineNoise(name) {
   }
   return false;
 }
-var import_imap_simple, import_mailparser, import_nodemailer, import_path13, import_fs11, import_url12, import_sync, XLSX, __filename11, __dirname11, getDbPath, getUploadsDir, EmailService, emailService, emailService_default;
+var import_imap_simple, import_mailparser, import_nodemailer, import_path14, import_fs12, import_url12, import_sync, XLSX, __filename11, __dirname11, getDbPath, getUploadsDir, EmailService, emailService, emailService_default;
 var init_emailService = __esm({
   "src/services/emailService.ts"() {
     "use strict";
@@ -10080,8 +10491,8 @@ var init_emailService = __esm({
     import_mailparser = require("mailparser");
     init_connection();
     import_nodemailer = require("nodemailer");
-    import_path13 = __toESM(require("path"), 1);
-    import_fs11 = __toESM(require("fs"), 1);
+    import_path14 = __toESM(require("path"), 1);
+    import_fs12 = __toESM(require("fs"), 1);
     import_url12 = require("url");
     init_database();
     init_whatsappClient();
@@ -10096,9 +10507,9 @@ var init_emailService = __esm({
     init_storeSettingsService();
     init_config();
     __filename11 = (0, import_url12.fileURLToPath)(import_meta_url);
-    __dirname11 = import_path13.default.dirname(__filename11);
+    __dirname11 = import_path14.default.dirname(__filename11);
     getDbPath = () => config.dbPath;
-    getUploadsDir = () => process.env.UPLOADS_DIR || import_path13.default.resolve(getAppDataDir(), "uploads");
+    getUploadsDir = () => process.env.UPLOADS_DIR || import_path14.default.resolve(getAppDataDir(), "uploads");
     EmailService = class {
       imapConfig;
       smtpTransporter = null;
@@ -10500,7 +10911,24 @@ ${itemsText}
             );
             await this.notifyDeliveryBoys(orderInfo);
             await this.sendDistributorWhatsAppAlert(orderInfo);
-            console.log("Potential medicine order detected, delivery boys notified & distributor alert sent:", logMsg);
+            try {
+              await db2.run(
+                `INSERT INTO email_order_reviews (email_uid, distributor_name, invoice_number, medicines_json, email_subject, email_date, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+                [
+                  // email_uid not populated: ProcessedEmail lacks IMAP uid; would need to thread it through call chain
+                  null,
+                  orderInfo.distributorName,
+                  orderInfo.invoiceNumber,
+                  JSON.stringify(orderInfo.medicines || []),
+                  email.subject,
+                  email.date ? new Date(email.date).toISOString() : null
+                ]
+              );
+            } catch (queueError) {
+              console.error("Failed to queue email order for review:", queueError);
+            }
+            console.log("Potential medicine order detected, delivery boys notified, distributor alert sent, and order queued for review:", logMsg);
           }
           const inquiryKeywords = ["inquiry", "question", "info", "available", "stock", "price"];
           const isInquiryRelated = inquiryKeywords.some(
@@ -10534,14 +10962,14 @@ ${itemsText}
               await this.processMedicineListAttachment(attachment);
               console.log("Medicine list attachment processed:", attachment.filename);
             }
-            const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
-            if (!import_fs11.default.existsSync(uploadsDir)) {
-              import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
+            const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
+            if (!import_fs12.default.existsSync(uploadsDir)) {
+              import_fs12.default.mkdirSync(uploadsDir, { recursive: true });
             }
-            const sanitizedFilename = import_path13.default.basename(attachment.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+            const sanitizedFilename = import_path14.default.basename(attachment.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
             const prefix = uid ? `att-${uid}-` : `${Date.now()}-`;
-            const filePath = import_path13.default.join(uploadsDir, `${prefix}${sanitizedFilename}`);
-            import_fs11.default.writeFileSync(filePath, attachment.content);
+            const filePath = import_path14.default.join(uploadsDir, `${prefix}${sanitizedFilename}`);
+            import_fs12.default.writeFileSync(filePath, attachment.content);
           }
         } catch (error) {
           console.error("Error processing email attachments:", error);
@@ -10711,19 +11139,19 @@ AI Pharmacy Team`
             });
             if (validEntry) {
               const uploadsDir = getUploadsDir();
-              const tempExt = import_path13.default.extname(validEntry.entryName);
-              const tempChildPath = import_path13.default.join(uploadsDir, `zip-extracted-${Date.now()}${tempExt}`);
-              import_fs11.default.writeFileSync(tempChildPath, validEntry.getData());
+              const tempExt = import_path14.default.extname(validEntry.entryName);
+              const tempChildPath = import_path14.default.join(uploadsDir, `zip-extracted-${Date.now()}${tempExt}`);
+              import_fs12.default.writeFileSync(tempChildPath, validEntry.getData());
               try {
                 const result = await this.parseAndImportAttachment(tempChildPath, importData);
                 try {
-                  import_fs11.default.unlinkSync(tempChildPath);
+                  import_fs12.default.unlinkSync(tempChildPath);
                 } catch {
                 }
                 return result;
               } catch (err) {
                 try {
-                  import_fs11.default.unlinkSync(tempChildPath);
+                  import_fs12.default.unlinkSync(tempChildPath);
                 } catch {
                 }
                 throw err;
@@ -10748,7 +11176,7 @@ AI Pharmacy Team`
           let mappingConfig = {};
           let rawHeaders = [];
           let needsReview = false;
-          const safeBasename = import_path13.default.basename(filePath);
+          const safeBasename = import_path14.default.basename(filePath);
           const db2 = await dbManager.getConnection();
           let distributor = null;
           let emailAttachment = await db2.get(
@@ -10772,12 +11200,13 @@ AI Pharmacy Team`
           } else {
             historicalFiles = await db2.all("SELECT distributor_id, file_headers, mapping_config FROM distributor_historical_files ORDER BY id DESC");
           }
+          let content = "";
           if (nameLower.endsWith(".csv") || nameLower.endsWith(".xlsx") || nameLower.endsWith(".xls")) {
             let records = [];
             let isRecordType = false;
             let recordData = null;
             if (nameLower.endsWith(".csv")) {
-              const fileBuffer = import_fs11.default.readFileSync(filePath);
+              const fileBuffer = import_fs12.default.readFileSync(filePath);
               const textContent = fileBuffer.toString("utf8");
               const firstLine = textContent.split("\n")[0]?.trim() || "";
               const firstField = firstLine.split(",")[0]?.trim();
@@ -10794,7 +11223,7 @@ AI Pharmacy Team`
                 records = (0, import_sync.parse)(fileBuffer, { columns: true, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, bom: true, trim: true });
               }
             } else {
-              const fileBuffer = import_fs11.default.readFileSync(filePath);
+              const fileBuffer = import_fs12.default.readFileSync(filePath);
               const workbook = XLSX.read(fileBuffer, { type: "buffer" });
               const sheetName = workbook.SheetNames[0];
               if (sheetName) {
@@ -10894,7 +11323,7 @@ AI Pharmacy Team`
               }).filter((item) => item.name !== "Unknown CSV Item" && item.name !== distributor_name);
             }
           } else if (nameLower.endsWith(".dav") || nameLower.endsWith(".dac")) {
-            const text = import_fs11.default.readFileSync(filePath, "utf8");
+            const text = import_fs12.default.readFileSync(filePath, "utf8");
             const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
             const headerLine = lines.find((l) => l.startsWith("H,"));
             if (headerLine) {
@@ -10945,32 +11374,31 @@ AI Pharmacy Team`
               }
             }
           } else {
-            let content = "";
             const isPdf = nameLower.endsWith(".pdf");
             const isImage = /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(nameLower);
             if (isPdf) {
               const { default: pdfParse3 } = await import("pdf-parse");
-              const fileBuffer = import_fs11.default.readFileSync(filePath);
+              const fileBuffer = import_fs12.default.readFileSync(filePath);
               const pdfData = await pdfParse3(fileBuffer);
               content = pdfData.text || "";
             } else if (isImage) {
-              const fileBuffer = import_fs11.default.readFileSync(filePath);
+              const fileBuffer = import_fs12.default.readFileSync(filePath);
               const ocrResult = await aiCameraService.processImage(fileBuffer, true);
               content = ocrResult?.text || "";
             } else {
-              content = import_fs11.default.readFileSync(filePath, "utf-8");
+              content = import_fs12.default.readFileSync(filePath, "utf-8");
             }
             const runPdfOcrFallback = async () => {
               console.log("[emailService] PDF jumbled or scanned. Falling back to page-by-page OCR rendering.");
-              const fileBuffer = import_fs11.default.readFileSync(filePath);
+              const fileBuffer = import_fs12.default.readFileSync(filePath);
               try {
                 const canvasPkg = await import("@napi-rs/canvas");
-                const { createCanvas, Canvas, Image } = canvasPkg;
+                const { createCanvas: createCanvas2, Canvas, Image } = canvasPkg;
                 globalThis.Canvas = Canvas;
                 globalThis.Image = Image;
                 class NodeCanvasFactory {
                   create(width, height) {
-                    const canvas = createCanvas(width, height);
+                    const canvas = createCanvas2(width, height);
                     return {
                       canvas,
                       context: canvas.getContext("2d")
@@ -11003,7 +11431,7 @@ AI Pharmacy Team`
                   const height = Math.floor(viewport.height);
                   let pageBuffer;
                   try {
-                    const canvas = createCanvas(width, height);
+                    const canvas = createCanvas2(width, height);
                     const ctx = canvas.getContext("2d");
                     await page.render({ canvasContext: ctx, viewport, canvasFactory }).promise;
                     pageBuffer = canvas.toBuffer("image/png");
@@ -11114,7 +11542,7 @@ AI Pharmacy Team`
                 }
               }
               if (!invoice_no) {
-                const filename = import_path13.default.basename(filePath);
+                const filename = import_path14.default.basename(filePath);
                 const fileDigits = filename.replace(/\.[^/.]+$/, "").match(/\d+/);
                 if (fileDigits) {
                   invoice_no = fileDigits[0];
@@ -11131,20 +11559,26 @@ AI Pharmacy Team`
               cn_number = totals.cn_number || "";
               items = parseItemsFromTextLines(content, global_cd_per);
               if (items.length === 0) {
-                if (content.includes("SHRIYASH DISTRIBUTORS") || content.includes("SDC/")) {
+                const detectedLayout = detectLayoutType(content);
+                if (detectedLayout === "vertical" || content.includes("SHRIYASH DISTRIBUTORS") || content.includes("SDC/")) {
                   const customRes = parseShriyashInvoice(content, global_cd_per);
-                  items = customRes.items;
-                  if (customRes.invoice_no) invoice_no = customRes.invoice_no;
-                  if (customRes.invoice_date) invoice_date = customRes.invoice_date;
-                  if (customRes.total_amount) total_amount = customRes.total_amount;
-                  if (customRes.distributor_name) distributor_name = customRes.distributor_name;
-                } else if (content.includes("NITIN AGENCY") || content.includes("NA/")) {
+                  if (customRes.items && customRes.items.length > 0) {
+                    items = customRes.items;
+                    if (customRes.invoice_no) invoice_no = customRes.invoice_no;
+                    if (customRes.invoice_date) invoice_date = customRes.invoice_date;
+                    if (customRes.total_amount) total_amount = customRes.total_amount;
+                    if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+                  }
+                }
+                if (items.length === 0 && (detectedLayout === "concatenated" || content.includes("NITIN AGENCY") || content.includes("NA/"))) {
                   const customRes = parseNitinInvoice(content, global_cd_per);
-                  items = customRes.items;
-                  if (customRes.invoice_no) invoice_no = customRes.invoice_no;
-                  if (customRes.invoice_date) invoice_date = customRes.invoice_date;
-                  if (customRes.total_amount) total_amount = customRes.total_amount;
-                  if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+                  if (customRes.items && customRes.items.length > 0) {
+                    items = customRes.items;
+                    if (customRes.invoice_no) invoice_no = customRes.invoice_no;
+                    if (customRes.invoice_date) invoice_date = customRes.invoice_date;
+                    if (customRes.total_amount) total_amount = customRes.total_amount;
+                    if (customRes.distributor_name) distributor_name = customRes.distributor_name;
+                  }
                 }
               }
               if (items.length === 0) {
@@ -11276,6 +11710,24 @@ AI Pharmacy Team`
               distributor_name = "";
             }
           }
+          if (distributorId && items.length > 0) {
+            try {
+              const layout = detectLayoutType(content);
+              await db2.run(
+                `INSERT INTO distributor_learning_profiles (distributor_id, layout_type, success_count, last_success_at)
+             VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+             ON CONFLICT(distributor_id) DO UPDATE SET
+               layout_type = excluded.layout_type,
+               success_count = success_count + 1,
+               last_success_at = CURRENT_TIMESTAMP,
+               last_updated = CURRENT_TIMESTAMP`,
+                [distributorId, layout]
+              ).catch(() => {
+              });
+            } catch (profErr) {
+              console.warn("[Email Learning] Profile update failed:", profErr);
+            }
+          }
           if (items.length === 0) {
             return {
               success: true,
@@ -11329,7 +11781,7 @@ AI Pharmacy Team`
                 );
               }
             }
-            const filename = import_path13.default.basename(filePath);
+            const filename = import_path14.default.basename(filePath);
             await db3.run(
               "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
               ["EMAIL_ATTACHMENT_PROCESSED", `Manually parsed attachment: ${filename}, imported ${items.length} items.`]
@@ -11377,17 +11829,17 @@ AI Pharmacy Team`
         try {
           await db2.run("BEGIN TRANSACTION");
           const uploadsDir = getUploadsDir();
-          const historicalDir = import_path13.default.join(uploadsDir, "historical");
-          if (!import_fs11.default.existsSync(historicalDir)) {
-            import_fs11.default.mkdirSync(historicalDir, { recursive: true });
+          const historicalDir = import_path14.default.join(uploadsDir, "historical");
+          if (!import_fs12.default.existsSync(historicalDir)) {
+            import_fs12.default.mkdirSync(historicalDir, { recursive: true });
           }
-          const srcPath = import_path13.default.isAbsolute(filename) ? filename : import_path13.default.join(uploadsDir, filename);
-          const safeBasename = import_path13.default.basename(filename);
-          const destPath = import_path13.default.join(historicalDir, safeBasename);
-          if (import_fs11.default.existsSync(srcPath) && srcPath !== destPath) {
-            import_fs11.default.copyFileSync(srcPath, destPath);
+          const srcPath = import_path14.default.isAbsolute(filename) ? filename : import_path14.default.join(uploadsDir, filename);
+          const safeBasename = import_path14.default.basename(filename);
+          const destPath = import_path14.default.join(historicalDir, safeBasename);
+          if (import_fs12.default.existsSync(srcPath) && srcPath !== destPath) {
+            import_fs12.default.copyFileSync(srcPath, destPath);
           }
-          const fileType = import_path13.default.extname(safeBasename).slice(1).toLowerCase();
+          const fileType = import_path14.default.extname(safeBasename).slice(1).toLowerCase();
           const headersJson = JSON.stringify(rawHeaders);
           const mappingJson = JSON.stringify(mappingConfig);
           const dataJson = JSON.stringify(extractedItems);
@@ -11402,9 +11854,9 @@ AI Pharmacy Team`
           if (historicalFiles.length > 5) {
             const toDelete = historicalFiles.slice(5);
             for (const fileToDelete of toDelete) {
-              if (fileToDelete.file_path && import_fs11.default.existsSync(fileToDelete.file_path)) {
+              if (fileToDelete.file_path && import_fs12.default.existsSync(fileToDelete.file_path)) {
                 try {
-                  import_fs11.default.unlinkSync(fileToDelete.file_path);
+                  import_fs12.default.unlinkSync(fileToDelete.file_path);
                 } catch (err) {
                   console.warn("Failed to delete old historical file:", fileToDelete.file_path, err);
                 }
@@ -11465,11 +11917,11 @@ AI Pharmacy Team`
           const latestResults = results.slice(0, autodeleteLimit);
           const latestUids = latestResults.map((item) => item.attributes.uid);
           console.log(`[Sync] Syncing attachments for latest ${latestUids.length} UIDs:`, latestUids);
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
-          if (!import_fs11.default.existsSync(uploadsDir)) {
-            import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
+          const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
+          if (!import_fs12.default.existsSync(uploadsDir)) {
+            import_fs12.default.mkdirSync(uploadsDir, { recursive: true });
           }
-          const cachedFiles = import_fs11.default.readdirSync(uploadsDir);
+          const cachedFiles = import_fs12.default.readdirSync(uploadsDir);
           for (const item of latestResults) {
             const uid = item.attributes.uid;
             const prefix = `att-${uid}-`;
@@ -11522,17 +11974,17 @@ AI Pharmacy Team`
           const emailsToDelete = nonSavedEmails.slice(limit);
           const uidsToDelete = emailsToDelete.map((e) => e.uid);
           let deletedCount = 0;
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
+          const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
           for (const uid of uidsToDelete) {
             const attachments = await db2.all(
               "SELECT local_path, filename FROM email_attachments WHERE uid = ?",
               [uid]
             );
             for (const att of attachments) {
-              const filePath = att.local_path || (att.filename ? import_path13.default.join(uploadsDir, att.filename) : null);
-              if (filePath && import_fs11.default.existsSync(filePath)) {
+              const filePath = att.local_path || (att.filename ? import_path14.default.join(uploadsDir, att.filename) : null);
+              if (filePath && import_fs12.default.existsSync(filePath)) {
                 try {
-                  import_fs11.default.unlinkSync(filePath);
+                  import_fs12.default.unlinkSync(filePath);
                   console.log(`[EmailPruner] Cleaned up attachment file: ${filePath}`);
                 } catch (fileErr) {
                   console.warn(`[EmailPruner] Failed to delete file ${filePath}:`, fileErr);
@@ -11602,22 +12054,36 @@ AI Pharmacy Team`
           return [];
         }
       }
+      async getImapStatus() {
+        try {
+          const { imapConfig, isConfigured } = await this.buildImapConfig();
+          return {
+            isConfigured,
+            user: imapConfig?.user || ""
+          };
+        } catch {
+          return { isConfigured: false };
+        }
+      }
       /**
        * Helper to build IMAP config object (avoids code duplication).
        */
       async buildImapConfig() {
         let user = this.imapConfig.user ? this.imapConfig.user.trim() : "";
         let password = "";
-        let authMethod = "oauth2";
+        let authMethod = "password";
         let xoauth2 = void 0;
         try {
           const db2 = await dbManager.getConnection();
-          const userRow = await db2.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
+          const userRow = await db2.get("SELECT value FROM app_settings WHERE key IN ('gmail_user', 'email_user', 'store_email') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
           if (userRow && userRow.value) user = userRow.value.trim();
           const authMethodRow = await db2.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
           if (authMethodRow && authMethodRow.value) authMethod = authMethodRow.value.trim();
-          const passRow = await db2.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
+          else authMethod = "password";
+          const passRow = await db2.get("SELECT value FROM app_settings WHERE key IN ('gmail_pass', 'email_pass', 'gmail_password', 'email_password') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
           if (passRow && passRow.value) password = passRow.value.trim();
+          if (!user) user = (process.env.GMAIL_USER || process.env.IMAP_USER || "").trim();
+          if (!password) password = (process.env.GMAIL_PASS || process.env.IMAP_PASS || "").trim();
           const compact = password.replace(/\s+/g, "");
           if (/^[a-zA-Z]{16}$/.test(compact)) password = compact;
         } catch (_) {
@@ -11710,8 +12176,8 @@ AI Pharmacy Team`
           const limitedResults = newResults.slice(0, 50);
           limitedResults.sort((a, b) => a - b);
           console.log(`[Sync] Found ${newResults.length} new email(s) to download.`);
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
-          if (!import_fs11.default.existsSync(uploadsDir)) import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
+          const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
+          if (!import_fs12.default.existsSync(uploadsDir)) import_fs12.default.mkdirSync(uploadsDir, { recursive: true });
           for (const uid of limitedResults) {
             try {
               const fetchResult = await connection.search([["UID", uid]], { bodies: [""], struct: true });
@@ -11760,13 +12226,13 @@ AI Pharmacy Team`
                   ".ods": "application/vnd.oasis.opendocument.spreadsheet"
                 };
                 for (const att of processedEmail.attachments) {
-                  const sanitized = import_path13.default.basename(att.filename || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
+                  const sanitized = import_path14.default.basename(att.filename || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
                   const finalFilename = `att-${uid}-${sanitized}`;
-                  const filePath = import_path13.default.join(uploadsDir, finalFilename);
-                  if (!import_fs11.default.existsSync(filePath)) {
-                    import_fs11.default.writeFileSync(filePath, att.content);
+                  const filePath = import_path14.default.join(uploadsDir, finalFilename);
+                  if (!import_fs12.default.existsSync(filePath)) {
+                    import_fs12.default.writeFileSync(filePath, att.content);
                   }
-                  const ext = import_path13.default.extname(sanitized).toLowerCase();
+                  const ext = import_path14.default.extname(sanitized).toLowerCase();
                   const contentType = contentTypes[ext] || att.contentType || "application/octet-stream";
                   const size = att.content ? att.content.length : 0;
                   await db2.run(
@@ -11791,9 +12257,11 @@ AI Pharmacy Team`
               console.error(`[Sync] Error processing UID ${uid}:`, emailError);
             }
           }
-          this.syncAndCleanAttachments().catch((err) => {
-            console.error("[Sync] Background email cleanup failed:", err);
-          });
+          setTimeout(() => {
+            this.syncAndCleanAttachments().catch((err) => {
+              console.error("[Sync] Background email cleanup failed:", err);
+            });
+          }, 5e3);
           console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
           try {
             await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'connected')");
@@ -11802,19 +12270,23 @@ AI Pharmacy Team`
             console.error("Failed to save gmail auth success:", dbErr);
           }
         } catch (err) {
-          const errMsg = err.message || "";
-          if (errMsg.includes("AUTHENTICATIONFAILED") || errMsg.includes("Invalid credentials") || errMsg.includes("login") || errMsg.includes("auth")) {
+          const errMsg = err.message || String(err) || "Unknown IMAP error";
+          const isAuthError = errMsg.includes("AUTHENTICATIONFAILED") || errMsg.includes("Invalid credentials") || errMsg.includes("login") || errMsg.includes("auth");
+          if (isAuthError) {
             eventService.broadcast("auth_failure", {
               message: "Gmail authentication failed. Please update your credentials in Settings.",
               service: "gmail"
             });
-            try {
-              const dbConn = await dbManager.getConnection();
-              await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'failed')");
-              await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_error', ?)", [errMsg]);
-            } catch (dbErr) {
-              console.error("Failed to save gmail auth error:", dbErr);
-            }
+          }
+          try {
+            const dbConn = await dbManager.getConnection();
+            await dbConn.run(
+              "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', ?)",
+              [isAuthError ? "failed" : "error"]
+            );
+            await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_error', ?)", [errMsg]);
+          } catch (dbErr) {
+            console.error("Failed to save gmail sync error status:", dbErr);
           }
           console.error("[Sync] syncNewEmailsFromIMAP error:", err);
         } finally {
@@ -11872,17 +12344,17 @@ AI Pharmacy Team`
           if (!bodyPart) return this.getLocalAttachmentsForUid(uid);
           const parsed = await (0, import_mailparser.simpleParser)(bodyPart.body);
           const attachments = parsed.attachments || [];
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
-          if (!import_fs11.default.existsSync(uploadsDir)) {
-            import_fs11.default.mkdirSync(uploadsDir, { recursive: true });
+          const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
+          if (!import_fs12.default.existsSync(uploadsDir)) {
+            import_fs12.default.mkdirSync(uploadsDir, { recursive: true });
           }
           const savedList = [];
           for (const att of attachments) {
-            const sanitizedFilename = import_path13.default.basename(att.filename || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
+            const sanitizedFilename = import_path14.default.basename(att.filename || "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
             const finalFilename = `att-${uid}-${sanitizedFilename}`;
-            const filePath = import_path13.default.join(uploadsDir, finalFilename);
-            import_fs11.default.writeFileSync(filePath, att.content);
-            const ext = import_path13.default.extname(sanitizedFilename).toLowerCase();
+            const filePath = import_path14.default.join(uploadsDir, finalFilename);
+            import_fs12.default.writeFileSync(filePath, att.content);
+            const ext = import_path14.default.extname(sanitizedFilename).toLowerCase();
             const contentTypes = {
               ".pdf": "application/pdf",
               ".csv": "text/csv",
@@ -11916,9 +12388,9 @@ AI Pharmacy Team`
        */
       getLocalAttachmentsForUid(uid) {
         try {
-          const uploadsDir = process.env.UPLOADS_DIR || import_path13.default.join(getAppDataDir(), "uploads");
-          if (!import_fs11.default.existsSync(uploadsDir)) return [];
-          const files = import_fs11.default.readdirSync(uploadsDir);
+          const uploadsDir = process.env.UPLOADS_DIR || import_path14.default.join(getAppDataDir(), "uploads");
+          if (!import_fs12.default.existsSync(uploadsDir)) return [];
+          const files = import_fs12.default.readdirSync(uploadsDir);
           const prefix = `att-${uid}-`;
           const contentTypes = {
             ".pdf": "application/pdf",
@@ -11929,9 +12401,9 @@ AI Pharmacy Team`
             ".ods": "application/vnd.oasis.opendocument.spreadsheet"
           };
           return files.filter((file) => file.startsWith(prefix) && file.match(/\.(csv|txt|xlsx?|ods|pdf)$/i)).map((filename) => {
-            const filePath = import_path13.default.join(uploadsDir, filename);
-            const stats = import_fs11.default.statSync(filePath);
-            const ext = import_path13.default.extname(filename).toLowerCase();
+            const filePath = import_path14.default.join(uploadsDir, filename);
+            const stats = import_fs12.default.statSync(filePath);
+            const ext = import_path14.default.extname(filename).toLowerCase();
             return {
               filename,
               size: stats.size,
@@ -11995,6 +12467,7 @@ AI Pharmacy Team`
 // src/database.ts
 var database_exports = {};
 __export(database_exports, {
+  dropFtsTriggers: () => dropFtsTriggers,
   ensureMedicinesFts: () => ensureMedicinesFts,
   ensureSchema: () => ensureSchema,
   purgeMedicinesFts: () => purgeMedicinesFts
@@ -12093,11 +12566,13 @@ async function ensureMedicinesFts(db2) {
     await db2.exec(FTS_CREATE_SQL);
   } catch (err) {
     await dropFtsTriggers(db2);
+    await purgeMedicinesFts(db2);
     console.error("[Schema] Could not create medicines_fts \u2014 medicine search disabled:", err.message);
     return "unavailable";
   }
   if (await inspectFts(db2) !== "ok") {
     await dropFtsTriggers(db2);
+    await purgeMedicinesFts(db2);
     console.error("[Schema] medicines_fts still unusable after rebuild \u2014 medicine search disabled.");
     return "unavailable";
   }
@@ -12132,7 +12607,29 @@ async function ensureSchema(dbPath) {
     CREATE TABLE IF NOT EXISTS medicines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      api_reference TEXT
+      api_reference TEXT,
+      mrp REAL,
+      hsn_code TEXT,
+      schedule_type TEXT,
+      manufacturer TEXT,
+      category TEXT,
+      marketed_by TEXT,
+      legacy_id TEXT,
+      packaging TEXT,
+      item_type TEXT,
+      cgst_per REAL DEFAULT 0,
+      sgst_per REAL DEFAULT 0,
+      igst_per REAL DEFAULT 0,
+      rack TEXT,
+      therapeutic TEXT DEFAULT NULL,
+      sub_therapeutic TEXT DEFAULT NULL,
+      short_code TEXT DEFAULT NULL,
+      ucode TEXT DEFAULT NULL,
+      disable_auto_barcode INTEGER DEFAULT 0,
+      tb_medicine INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'manual',
+      possible_duplicate_of INTEGER DEFAULT NULL,
+      sell_price REAL DEFAULT NULL
     );
     CREATE TABLE IF NOT EXISTS catalog_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12166,6 +12663,7 @@ async function ensureSchema(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines (name);
     CREATE INDEX IF NOT EXISTS idx_medicines_api_ref ON medicines (api_reference);
+    CREATE INDEX IF NOT EXISTS idx_medicines_therapeutic ON medicines (therapeutic);
     CREATE INDEX IF NOT EXISTS idx_catalog_jobs_status ON catalog_jobs (status);
     CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases (date);
 
@@ -12242,6 +12740,22 @@ async function ensureSchema(dbPath) {
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT DEFAULT 'general',
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      gstin TEXT,
+      notes TEXT,
+      alias_names TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts (phone);
+    CREATE INDEX IF NOT EXISTS idx_contacts_type ON contacts (type);
     CREATE TABLE IF NOT EXISTS action_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action_type TEXT,
@@ -12397,10 +12911,49 @@ async function ensureSchema(dbPath) {
     CREATE TABLE IF NOT EXISTS distributor_learning_profiles (
       distributor_id INTEGER PRIMARY KEY,
       file_mapping_rules TEXT,
+      layout_type TEXT,
+      layout_patterns TEXT,
+      field_positions TEXT,
+      missing_field_rules TEXT,
+      success_count INTEGER DEFAULT 0,
+      last_success_at DATETIME,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(distributor_id) REFERENCES distributors(id)
     );
-
+  `);
+  const profileCols = await db2.all("PRAGMA table_info(distributor_learning_profiles)").catch(() => []);
+  const existingProfileCols = new Set(profileCols.map((c) => c.name));
+  if (!existingProfileCols.has("layout_type")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN layout_type TEXT").catch(() => {
+    });
+  }
+  if (!existingProfileCols.has("layout_patterns")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN layout_patterns TEXT").catch(() => {
+    });
+  }
+  if (!existingProfileCols.has("field_positions")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN field_positions TEXT").catch(() => {
+    });
+  }
+  if (!existingProfileCols.has("missing_field_rules")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN missing_field_rules TEXT").catch(() => {
+    });
+  }
+  if (!existingProfileCols.has("success_count")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN success_count INTEGER DEFAULT 0").catch(() => {
+    });
+  }
+  if (!existingProfileCols.has("last_success_at")) {
+    await db2.run("ALTER TABLE distributor_learning_profiles ADD COLUMN last_success_at DATETIME").catch(() => {
+    });
+  }
+  const medCols = await db2.all("PRAGMA table_info(medicines)").catch(() => []);
+  const existingMedCols = new Set(medCols.map((c) => c.name));
+  if (!existingMedCols.has("sell_price")) {
+    await db2.run("ALTER TABLE medicines ADD COLUMN sell_price REAL DEFAULT NULL").catch(() => {
+    });
+  }
+  await db2.exec(`
     CREATE TABLE IF NOT EXISTS distributor_historical_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       distributor_id INTEGER,
@@ -12535,6 +13088,7 @@ async function ensureSchema(dbPath) {
     ["inventory_master", "legacy_batch_id", "ALTER TABLE inventory_master ADD COLUMN legacy_batch_id TEXT"],
     ["inventory_master", "loose_quantity", "ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0"],
     ["inventory_master", "is_active", "ALTER TABLE inventory_master ADD COLUMN is_active INTEGER DEFAULT 1"],
+    ["inventory_master", "created_at", "ALTER TABLE inventory_master ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"],
     ["medicines", "max_stock_level", "ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL"],
     ["medicines", "mrp", "ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0"],
     ["medicines", "hsn_code", "ALTER TABLE medicines ADD COLUMN hsn_code TEXT"],
@@ -12555,6 +13109,7 @@ async function ensureSchema(dbPath) {
     ["medicines", "igst_per", "ALTER TABLE medicines ADD COLUMN igst_per REAL DEFAULT 0"],
     ["medicines", "item_code", "ALTER TABLE medicines ADD COLUMN item_code TEXT"],
     ["medicines", "metadata", "ALTER TABLE medicines ADD COLUMN metadata TEXT"],
+    ["medicines", "sell_price", "ALTER TABLE medicines ADD COLUMN sell_price REAL DEFAULT NULL"],
     ["purchases", "cgst_value", "ALTER TABLE purchases ADD COLUMN cgst_value REAL DEFAULT 0"],
     ["purchases", "sgst_value", "ALTER TABLE purchases ADD COLUMN sgst_value REAL DEFAULT 0"],
     ["purchases", "igst_value", "ALTER TABLE purchases ADD COLUMN igst_value REAL DEFAULT 0"],
@@ -12615,6 +13170,7 @@ async function ensureSchema(dbPath) {
     ["customers", "credit_balance", "ALTER TABLE customers ADD COLUMN credit_balance REAL DEFAULT 0"],
     ["customers", "created_at", "ALTER TABLE customers ADD COLUMN created_at DATETIME"],
     ["customers", "credit_due_date", "ALTER TABLE customers ADD COLUMN credit_due_date TEXT"],
+    ["customers", "language", "ALTER TABLE customers ADD COLUMN language TEXT DEFAULT 'en'"],
     ["patient_refills", "hold_for_stock", "ALTER TABLE patient_refills ADD COLUMN hold_for_stock INTEGER DEFAULT 0"],
     ["patient_refills", "is_active", "ALTER TABLE patient_refills ADD COLUMN is_active INTEGER DEFAULT 1"],
     ["patient_refills", "is_ready", "ALTER TABLE patient_refills ADD COLUMN is_ready INTEGER DEFAULT 0"],
@@ -12654,7 +13210,13 @@ async function ensureSchema(dbPath) {
     ["medicines", "enrichment_confidence", "ALTER TABLE medicines ADD COLUMN enrichment_confidence REAL DEFAULT NULL"],
     ["medicines", "pack_size", "ALTER TABLE medicines ADD COLUMN pack_size INTEGER"],
     ["medicines", "source", "ALTER TABLE medicines ADD COLUMN source TEXT DEFAULT 'manual'"],
-    ["medicines", "possible_duplicate_of", "ALTER TABLE medicines ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL"]
+    ["medicines", "possible_duplicate_of", "ALTER TABLE medicines ADD COLUMN possible_duplicate_of INTEGER DEFAULT NULL"],
+    ["medicines", "therapeutic", "ALTER TABLE medicines ADD COLUMN therapeutic TEXT DEFAULT NULL"],
+    ["medicines", "sub_therapeutic", "ALTER TABLE medicines ADD COLUMN sub_therapeutic TEXT DEFAULT NULL"],
+    ["medicines", "short_code", "ALTER TABLE medicines ADD COLUMN short_code TEXT DEFAULT NULL"],
+    ["medicines", "ucode", "ALTER TABLE medicines ADD COLUMN ucode TEXT DEFAULT NULL"],
+    ["medicines", "disable_auto_barcode", "ALTER TABLE medicines ADD COLUMN disable_auto_barcode INTEGER DEFAULT 0"],
+    ["medicines", "tb_medicine", "ALTER TABLE medicines ADD COLUMN tb_medicine INTEGER DEFAULT 0"]
   ];
   for (const [table, col, stmt] of alterStatements) {
     try {
@@ -12747,6 +13309,13 @@ async function ensureSchema(dbPath) {
         await db2.run("UPDATE held_bills SET customer_id = ? WHERE id = ?", [cust.id, bill.id]);
       }
     }
+    await db2.run(`
+      UPDATE distributors SET
+        phone = CASE WHEN phone LIKE '%@%' OR phone LIKE '%<%' OR phone LIKE '%.com%' THEN '' ELSE phone END,
+        contact = CASE WHEN contact LIKE '%@%' OR contact LIKE '%<%' OR contact LIKE '%.com%' THEN '' ELSE contact END
+      WHERE (phone LIKE '%@%' OR phone LIKE '%<%' OR phone LIKE '%.com%')
+         OR (contact LIKE '%@%' OR contact LIKE '%<%' OR contact LIKE '%.com%')
+    `);
     await db2.run("UPDATE distributors SET phone = contact WHERE (phone IS NULL OR phone = '') AND contact IS NOT NULL AND contact != ''");
     await db2.run("UPDATE distributors SET contact = phone WHERE (contact IS NULL OR contact = '') AND phone IS NOT NULL AND phone != ''");
     await db2.run("UPDATE special_orders SET product = medicine_name WHERE (product IS NULL OR product = '') AND medicine_name IS NOT NULL AND medicine_name != ''");
@@ -12882,6 +13451,40 @@ async function ensureSchema(dbPath) {
       file_headers TEXT UNIQUE,
       mapping_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS credit_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      cn_number TEXT,
+      cn_date TEXT,
+      amount REAL DEFAULT 0,
+      applied_amount REAL DEFAULT 0,
+      reason TEXT,
+      related_purchase_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+      FOREIGN KEY (related_purchase_id) REFERENCES purchases(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS compliance_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT,
+      drug_name TEXT,
+      patient_name TEXT,
+      doctor_name TEXT,
+      license_no TEXT,
+      qty INTEGER,
+      bill_no TEXT,
+      schedule_type TEXT DEFAULT 'general',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS summary_cache (
+      cache_key TEXT PRIMARY KEY,
+      cache_value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TRIGGER IF NOT EXISTS auto_generate_item_code
@@ -13252,6 +13855,35 @@ async function ensureSchema(dbPath) {
       FOREIGN KEY(sales_invoice_id) REFERENCES sales_invoices(id)
     );
 
+    -- Distributor credit notes tracking
+    CREATE TABLE IF NOT EXISTS credit_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      cn_number TEXT,
+      cn_date TEXT,
+      amount REAL DEFAULT 0,
+      applied_amount REAL DEFAULT 0,
+      reason TEXT,
+      related_purchase_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+      FOREIGN KEY (related_purchase_id) REFERENCES purchases(id)
+    );
+
+    -- Review queue for order-detected emails (manual review, no auto-import)
+    CREATE TABLE IF NOT EXISTS email_order_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_uid INTEGER,
+      distributor_name TEXT,
+      invoice_number TEXT,
+      medicines_json TEXT,
+      email_subject TEXT,
+      email_date TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Purchase orders sent to distributors
     CREATE TABLE IF NOT EXISTS purchase_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13511,13 +14143,13 @@ async function ensureSchema(dbPath) {
           if (unpopulated.length > 0) {
             console.log(`[Database Migration] Populating medicine names for ${unpopulated.length} emails in background...`);
             const { emailService: emailService2, isNonMedicineNoise: isNonMedicineNoise2, cleanMedicineName: cleanMedicineName3 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
-            const fs44 = await import("fs");
+            const fs45 = await import("fs");
             for (const email of unpopulated) {
               try {
                 const attachments = await backgroundDb.all("SELECT local_path, filename FROM email_attachments WHERE uid = ?", [email.uid]);
                 const parsedItems = [];
                 for (const att of attachments) {
-                  if (att.local_path && fs44.existsSync(att.local_path)) {
+                  if (att.local_path && fs45.existsSync(att.local_path)) {
                     try {
                       const resParse = await emailService2.parseAndImportAttachment(att.local_path, false);
                       if (resParse && resParse.success && resParse.items) {
@@ -13578,15 +14210,17 @@ async function ensureSchema(dbPath) {
     }
     const discountResult = await db2.run(`
       UPDATE sales_invoices
-      SET discount = CASE 
-        WHEN subtotal > total_amount THEN ROUND(subtotal - total_amount) 
-        ELSE 0 
-      END
-      WHERE discount IS NULL OR discount = 0;
+      SET discount = ROUND(subtotal - total_amount)
+      WHERE subtotal > total_amount AND (discount IS NULL OR discount = 0);
     `);
     if (discountResult && discountResult.changes !== void 0 && discountResult.changes > 0) {
       console.log(`[Database Healing] Backfilled discounts for ${discountResult.changes} invoices.`);
     }
+    await db2.run(`
+      UPDATE sales_invoices
+      SET discount = 0
+      WHERE discount IS NULL;
+    `);
   } catch (healErr) {
     console.warn("[Database Healing] Non-critical warning, failed to run database healing checks:", healErr);
   }
@@ -13641,6 +14275,36 @@ async function ensureSchema(dbPath) {
   } catch (colErr) {
     console.warn("[Database Schema] Column check warning for whatsapp_send_queue:", colErr);
   }
+  try {
+    const medCols2 = await db2.all("PRAGMA table_info(medicines)");
+    const medColNames = new Set(medCols2.map((c) => c.name));
+    if (!medColNames.has("therapeutic")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN therapeutic TEXT DEFAULT NULL").catch(() => {
+      });
+    }
+    if (!medColNames.has("sub_therapeutic")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN sub_therapeutic TEXT DEFAULT NULL").catch(() => {
+      });
+    }
+    if (!medColNames.has("short_code")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN short_code TEXT DEFAULT NULL").catch(() => {
+      });
+    }
+    if (!medColNames.has("ucode")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN ucode TEXT DEFAULT NULL").catch(() => {
+      });
+    }
+    if (!medColNames.has("disable_auto_barcode")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN disable_auto_barcode INTEGER DEFAULT 0").catch(() => {
+      });
+    }
+    if (!medColNames.has("tb_medicine")) {
+      await db2.run("ALTER TABLE medicines ADD COLUMN tb_medicine INTEGER DEFAULT 0").catch(() => {
+      });
+    }
+  } catch (medColErr) {
+    console.warn("[Database Schema] Column check warning for medicines:", medColErr);
+  }
   await db2.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_min', '5000')");
   await db2.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_max', '8000')");
   await db2.run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('whatsapp_delay_credit_bill', '0')");
@@ -13686,7 +14350,7 @@ var init_database = __esm({
   "src/database.ts"() {
     "use strict";
     init_connection();
-    CURRENT_SCHEMA_VERSION = 23;
+    CURRENT_SCHEMA_VERSION = 30;
     FTS_SHADOW_TABLES = ["medicines_fts_data", "medicines_fts_idx", "medicines_fts_docsize", "medicines_fts_config"];
     FTS_CREATE_SQL = `CREATE VIRTUAL TABLE medicines_fts USING fts5(name, content='medicines', content_rowid='id', tokenize='trigram')`;
     FTS_TRIGGER_SQL = `
@@ -13860,24 +14524,24 @@ async function createBackup(reason = "Manual") {
     console.log(`[Backup] Skipping ${reason} \u2014 server uptime ${Math.round(process.uptime())}s < 60s`);
     throw new Error("Backup deferred: server still starting up (retry after 60s)");
   }
-  if (!import_fs12.default.existsSync(BACKUP_DIR)) {
-    import_fs12.default.mkdirSync(BACKUP_DIR, { recursive: true });
+  if (!import_fs13.default.existsSync(BACKUP_DIR)) {
+    import_fs13.default.mkdirSync(BACKUP_DIR, { recursive: true });
   }
   const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const filename = `app_backup_${timestamp}.db.gz`;
-  const backupPath = import_path14.default.join(BACKUP_DIR, filename);
+  const backupPath = import_path15.default.join(BACKUP_DIR, filename);
   const tempDbPath = backupPath.replace(".gz", "");
   const tempDb = new import_better_sqlite3.default(DB_PATH5);
   await tempDb.backup(tempDbPath);
   tempDb.close();
   const gzip = import_zlib.default.createGzip();
-  const source = import_fs12.default.createReadStream(tempDbPath);
-  const destination = import_fs12.default.createWriteStream(backupPath);
+  const source = import_fs13.default.createReadStream(tempDbPath);
+  const destination = import_fs13.default.createWriteStream(backupPath);
   try {
     await (0, import_promises.pipeline)(source, gzip, destination);
   } finally {
-    if (import_fs12.default.existsSync(tempDbPath)) {
-      import_fs12.default.unlinkSync(tempDbPath);
+    if (import_fs13.default.existsSync(tempDbPath)) {
+      import_fs13.default.unlinkSync(tempDbPath);
     }
   }
   try {
@@ -13893,17 +14557,17 @@ async function createBackup(reason = "Manual") {
   return { filename };
 }
 function listBackups() {
-  if (!import_fs12.default.existsSync(BACKUP_DIR)) {
+  if (!import_fs13.default.existsSync(BACKUP_DIR)) {
     return [];
   }
   const results = [];
   const scanDir = (dir) => {
-    if (!import_fs12.default.existsSync(dir)) return;
-    const files = import_fs12.default.readdirSync(dir);
+    if (!import_fs13.default.existsSync(dir)) return;
+    const files = import_fs13.default.readdirSync(dir);
     for (const filename of files) {
-      const filePath = import_path14.default.join(dir, filename);
+      const filePath = import_path15.default.join(dir, filename);
       try {
-        const stats = import_fs12.default.statSync(filePath);
+        const stats = import_fs13.default.statSync(filePath);
         if (stats.isFile() && (filename.endsWith(".db") || filename.endsWith(".db.gz") || filename.endsWith(".zip"))) {
           if (!results.some((r) => r.filename === filename)) {
             results.push({
@@ -13918,51 +14582,51 @@ function listBackups() {
     }
   };
   scanDir(BACKUP_DIR);
-  scanDir(import_path14.default.join(BACKUP_DIR, "archives"));
-  scanDir(import_path14.default.join(BACKUP_DIR, "snapshots"));
+  scanDir(import_path15.default.join(BACKUP_DIR, "archives"));
+  scanDir(import_path15.default.join(BACKUP_DIR, "snapshots"));
   return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 function deleteBackup(filename) {
-  const sanitized = import_path14.default.basename(filename);
+  const sanitized = import_path15.default.basename(filename);
   if (!sanitized.endsWith(".db") && !sanitized.endsWith(".db.gz") && !sanitized.endsWith(".zip")) {
     throw new Error("Invalid backup filename");
   }
-  let filePath = import_path14.default.join(BACKUP_DIR, sanitized);
-  if (!import_fs12.default.existsSync(filePath)) {
-    const archivesPath = import_path14.default.join(BACKUP_DIR, "archives", sanitized);
-    const snapshotsPath = import_path14.default.join(BACKUP_DIR, "snapshots", sanitized);
-    if (import_fs12.default.existsSync(archivesPath)) filePath = archivesPath;
-    else if (import_fs12.default.existsSync(snapshotsPath)) filePath = snapshotsPath;
+  let filePath = import_path15.default.join(BACKUP_DIR, sanitized);
+  if (!import_fs13.default.existsSync(filePath)) {
+    const archivesPath = import_path15.default.join(BACKUP_DIR, "archives", sanitized);
+    const snapshotsPath = import_path15.default.join(BACKUP_DIR, "snapshots", sanitized);
+    if (import_fs13.default.existsSync(archivesPath)) filePath = archivesPath;
+    else if (import_fs13.default.existsSync(snapshotsPath)) filePath = snapshotsPath;
   }
-  const resolved = import_path14.default.resolve(filePath);
-  if (!resolved.startsWith(BACKUP_DIR + import_path14.default.sep) && resolved !== BACKUP_DIR) {
+  const resolved = import_path15.default.resolve(filePath);
+  if (!resolved.startsWith(BACKUP_DIR + import_path15.default.sep) && resolved !== BACKUP_DIR) {
     throw new Error("Invalid backup path");
   }
-  if (!import_fs12.default.existsSync(filePath)) {
+  if (!import_fs13.default.existsSync(filePath)) {
     throw new Error("Backup file not found");
   }
-  import_fs12.default.unlinkSync(filePath);
+  import_fs13.default.unlinkSync(filePath);
 }
 async function restoreBackup(filename) {
-  const sanitized = import_path14.default.basename(filename);
+  const sanitized = import_path15.default.basename(filename);
   if (!sanitized.endsWith(".db") && !sanitized.endsWith(".db.gz") && !sanitized.endsWith(".zip")) {
     throw new Error("Invalid backup filename. Must be .db, .db.gz, or .zip");
   }
-  let filePath = import_path14.default.join(BACKUP_DIR, sanitized);
-  if (!import_fs12.default.existsSync(filePath)) {
-    const archivesPath = import_path14.default.join(BACKUP_DIR, "archives", sanitized);
-    const snapshotsPath = import_path14.default.join(BACKUP_DIR, "snapshots", sanitized);
-    if (import_fs12.default.existsSync(archivesPath)) {
+  let filePath = import_path15.default.join(BACKUP_DIR, sanitized);
+  if (!import_fs13.default.existsSync(filePath)) {
+    const archivesPath = import_path15.default.join(BACKUP_DIR, "archives", sanitized);
+    const snapshotsPath = import_path15.default.join(BACKUP_DIR, "snapshots", sanitized);
+    if (import_fs13.default.existsSync(archivesPath)) {
       filePath = archivesPath;
-    } else if (import_fs12.default.existsSync(snapshotsPath)) {
+    } else if (import_fs13.default.existsSync(snapshotsPath)) {
       filePath = snapshotsPath;
     }
   }
-  const resolved = import_path14.default.resolve(filePath);
-  if (!resolved.startsWith(BACKUP_DIR + import_path14.default.sep) && resolved !== BACKUP_DIR) {
+  const resolved = import_path15.default.resolve(filePath);
+  if (!resolved.startsWith(BACKUP_DIR + import_path15.default.sep) && resolved !== BACKUP_DIR) {
     throw new Error("Invalid backup path");
   }
-  if (!import_fs12.default.existsSync(filePath)) {
+  if (!import_fs13.default.existsSync(filePath)) {
     throw new Error(`Backup file not found: ${sanitized}`);
   }
   const stagedPath = `${DB_PATH5}.restoring_${Date.now()}`;
@@ -13981,20 +14645,20 @@ async function restoreBackup(filename) {
     let dbSourcePath = filePath;
     if (sanitized.endsWith(".zip")) {
       const { default: AdmZip6 } = await import("adm-zip");
-      tempExtractDir = import_path14.default.join(BACKUP_DIR, `temp_restore_${Date.now()}`);
-      import_fs12.default.mkdirSync(tempExtractDir, { recursive: true });
+      tempExtractDir = import_path15.default.join(BACKUP_DIR, `temp_restore_${Date.now()}`);
+      import_fs13.default.mkdirSync(tempExtractDir, { recursive: true });
       const zip = new AdmZip6(filePath);
       zip.extractAllTo(tempExtractDir, true);
-      const dbFiles = import_fs12.default.readdirSync(tempExtractDir).filter((f) => f.endsWith(".db") || f.endsWith(".db.gz"));
+      const dbFiles = import_fs13.default.readdirSync(tempExtractDir).filter((f) => f.endsWith(".db") || f.endsWith(".db.gz"));
       if (dbFiles.length === 0) {
         throw new Error("No valid database file (.db or .db.gz) found inside the zip archive.");
       }
-      dbSourcePath = import_path14.default.join(tempExtractDir, dbFiles[0]);
+      dbSourcePath = import_path15.default.join(tempExtractDir, dbFiles[0]);
     }
     if (dbSourcePath.endsWith(".gz")) {
-      await (0, import_promises.pipeline)(import_fs12.default.createReadStream(dbSourcePath), import_zlib.default.createGunzip(), import_fs12.default.createWriteStream(stagedPath));
+      await (0, import_promises.pipeline)(import_fs13.default.createReadStream(dbSourcePath), import_zlib.default.createGunzip(), import_fs13.default.createWriteStream(stagedPath));
     } else {
-      import_fs12.default.copyFileSync(dbSourcePath, stagedPath);
+      import_fs13.default.copyFileSync(dbSourcePath, stagedPath);
     }
     const probe = new import_better_sqlite3.default(stagedPath, { readonly: true });
     try {
@@ -14013,42 +14677,42 @@ async function restoreBackup(filename) {
     await dbManager.close(true);
     for (const suffix of ["-wal", "-shm"]) {
       const sidecar = DB_PATH5 + suffix;
-      if (!import_fs12.default.existsSync(sidecar)) continue;
+      if (!import_fs13.default.existsSync(sidecar)) continue;
       try {
-        import_fs12.default.unlinkSync(sidecar);
+        import_fs13.default.unlinkSync(sidecar);
       } catch (err) {
-        throw new Error(`Could not clear ${import_path14.default.basename(sidecar)} before restore: ${err.message}`);
+        throw new Error(`Could not clear ${import_path15.default.basename(sidecar)} before restore: ${err.message}`);
       }
     }
     try {
-      import_fs12.default.renameSync(stagedPath, DB_PATH5);
+      import_fs13.default.renameSync(stagedPath, DB_PATH5);
     } catch (renameErr) {
       if (renameErr.code === "EPERM" || renameErr.code === "EBUSY" || renameErr.code === "EEXIST") {
-        import_fs12.default.copyFileSync(stagedPath, DB_PATH5);
+        import_fs13.default.copyFileSync(stagedPath, DB_PATH5);
         try {
-          import_fs12.default.unlinkSync(stagedPath);
+          import_fs13.default.unlinkSync(stagedPath);
         } catch (_) {
         }
       } else {
         throw renameErr;
       }
     } finally {
-      if (tempExtractDir && import_fs12.default.existsSync(tempExtractDir)) {
+      if (tempExtractDir && import_fs13.default.existsSync(tempExtractDir)) {
         try {
-          import_fs12.default.rmSync(tempExtractDir, { recursive: true, force: true });
+          import_fs13.default.rmSync(tempExtractDir, { recursive: true, force: true });
         } catch (_) {
         }
       }
     }
   } catch (err) {
-    if (tempExtractDir && import_fs12.default.existsSync(tempExtractDir)) {
+    if (tempExtractDir && import_fs13.default.existsSync(tempExtractDir)) {
       try {
-        import_fs12.default.rmSync(tempExtractDir, { recursive: true, force: true });
+        import_fs13.default.rmSync(tempExtractDir, { recursive: true, force: true });
       } catch (_) {
       }
     }
     try {
-      if (import_fs12.default.existsSync(stagedPath)) import_fs12.default.unlinkSync(stagedPath);
+      if (import_fs13.default.existsSync(stagedPath)) import_fs13.default.unlinkSync(stagedPath);
     } catch (_) {
     }
     try {
@@ -14157,9 +14821,9 @@ function enforceRetention() {
     if (backups.length > MAX_BACKUPS) {
       const toDelete = backups.slice(MAX_BACKUPS);
       for (const b of toDelete) {
-        const filePath = import_path14.default.join(BACKUP_DIR, b.filename);
-        if (import_fs12.default.existsSync(filePath)) {
-          import_fs12.default.unlinkSync(filePath);
+        const filePath = import_path15.default.join(BACKUP_DIR, b.filename);
+        if (import_fs13.default.existsSync(filePath)) {
+          import_fs13.default.unlinkSync(filePath);
           console.log(`[Backup] Retention cleanup: deleted ${b.filename}`);
         }
       }
@@ -14172,12 +14836,12 @@ async function initBackupScheduler() {
   const freq = await getScheduleConfig();
   startScheduler(freq);
 }
-var import_fs12, import_path14, import_url13, import_node_cron2, import_better_sqlite3, import_zlib, import_promises, __filename12, __dirname12, DB_PATH5, BACKUP_DIR, MAX_BACKUPS, scheduledTask;
+var import_fs13, import_path15, import_url13, import_node_cron2, import_better_sqlite3, import_zlib, import_promises, __filename12, __dirname12, DB_PATH5, BACKUP_DIR, MAX_BACKUPS, scheduledTask;
 var init_backupService = __esm({
   "src/services/backupService.ts"() {
     "use strict";
-    import_fs12 = __toESM(require("fs"), 1);
-    import_path14 = __toESM(require("path"), 1);
+    import_fs13 = __toESM(require("fs"), 1);
+    import_path15 = __toESM(require("path"), 1);
     import_url13 = require("url");
     import_node_cron2 = __toESM(require("node-cron"), 1);
     init_connection();
@@ -14186,7 +14850,7 @@ var init_backupService = __esm({
     import_promises = require("stream/promises");
     init_config();
     __filename12 = (0, import_url13.fileURLToPath)(import_meta_url);
-    __dirname12 = import_path14.default.dirname(__filename12);
+    __dirname12 = import_path15.default.dirname(__filename12);
     DB_PATH5 = config.dbPath;
     BACKUP_DIR = config.backupDir;
     MAX_BACKUPS = 20;
@@ -14200,12 +14864,12 @@ __export(backupRecoveryService_exports, {
   BackupRecoveryService: () => BackupRecoveryService,
   backupRecoveryService: () => backupRecoveryService
 });
-var import_fs13, import_path15, import_better_sqlite32, import_adm_zip2, import_axios, import_zlib2, import_promises2, getDbPath2, BACKUP_DIR2, SNAPSHOTS_DIR, ARCHIVES_DIR, BackupRecoveryService, backupRecoveryService;
+var import_fs14, import_path16, import_better_sqlite32, import_adm_zip2, import_axios, import_zlib2, import_promises2, getDbPath2, BACKUP_DIR2, SNAPSHOTS_DIR, ARCHIVES_DIR, BackupRecoveryService, backupRecoveryService;
 var init_backupRecoveryService = __esm({
   "src/services/backupRecoveryService.ts"() {
     "use strict";
-    import_fs13 = __toESM(require("fs"), 1);
-    import_path15 = __toESM(require("path"), 1);
+    import_fs14 = __toESM(require("fs"), 1);
+    import_path16 = __toESM(require("path"), 1);
     import_better_sqlite32 = __toESM(require("better-sqlite3"), 1);
     import_adm_zip2 = __toESM(require("adm-zip"), 1);
     import_axios = __toESM(require("axios"), 1);
@@ -14215,14 +14879,14 @@ var init_backupRecoveryService = __esm({
     import_promises2 = require("stream/promises");
     init_config();
     getDbPath2 = () => config.dbPath;
-    BACKUP_DIR2 = import_path15.default.join(getAppDataDir(), "backup");
-    SNAPSHOTS_DIR = import_path15.default.join(BACKUP_DIR2, "snapshots");
-    ARCHIVES_DIR = import_path15.default.join(BACKUP_DIR2, "archives");
-    if (!import_fs13.default.existsSync(SNAPSHOTS_DIR)) {
-      import_fs13.default.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
+    BACKUP_DIR2 = import_path16.default.join(getAppDataDir(), "backup");
+    SNAPSHOTS_DIR = import_path16.default.join(BACKUP_DIR2, "snapshots");
+    ARCHIVES_DIR = import_path16.default.join(BACKUP_DIR2, "archives");
+    if (!import_fs14.default.existsSync(SNAPSHOTS_DIR)) {
+      import_fs14.default.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
     }
-    if (!import_fs13.default.existsSync(ARCHIVES_DIR)) {
-      import_fs13.default.mkdirSync(ARCHIVES_DIR, { recursive: true });
+    if (!import_fs14.default.existsSync(ARCHIVES_DIR)) {
+      import_fs14.default.mkdirSync(ARCHIVES_DIR, { recursive: true });
     }
     BackupRecoveryService = class _BackupRecoveryService {
       static instance;
@@ -14279,23 +14943,23 @@ var init_backupRecoveryService = __esm({
         const dateStr = now.toISOString().split("T")[0];
         const timeStr = now.toTimeString().split(" ")[0].replace(/:/g, "-");
         const filename = `snapshot_${dateStr}_${timeStr}.db.gz`;
-        const destPath = import_path15.default.join(SNAPSHOTS_DIR, filename);
+        const destPath = import_path16.default.join(SNAPSHOTS_DIR, filename);
         console.log(`[Backup] Generating database snapshot: ${filename}...`);
-        if (!import_fs13.default.existsSync(SNAPSHOTS_DIR)) {
-          import_fs13.default.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
+        if (!import_fs14.default.existsSync(SNAPSHOTS_DIR)) {
+          import_fs14.default.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
         }
         const tempDbPath = destPath.replace(".gz", "");
         const tempDb = new import_better_sqlite32.default(getDbPath2());
         await tempDb.backup(tempDbPath);
         tempDb.close();
         const gzip = import_zlib2.default.createGzip();
-        const source = import_fs13.default.createReadStream(tempDbPath);
-        const destination = import_fs13.default.createWriteStream(destPath);
+        const source = import_fs14.default.createReadStream(tempDbPath);
+        const destination = import_fs14.default.createWriteStream(destPath);
         try {
           await (0, import_promises2.pipeline)(source, gzip, destination);
         } finally {
-          if (import_fs13.default.existsSync(tempDbPath)) {
-            import_fs13.default.unlinkSync(tempDbPath);
+          if (import_fs14.default.existsSync(tempDbPath)) {
+            import_fs14.default.unlinkSync(tempDbPath);
           }
         }
         try {
@@ -14308,16 +14972,16 @@ var init_backupRecoveryService = __esm({
         }
         try {
           const todayPrefix = `snapshot_${dateStr}_`;
-          const files = import_fs13.default.readdirSync(SNAPSHOTS_DIR).filter((f) => f.startsWith(todayPrefix) && (f.endsWith(".db") || f.endsWith(".db.gz"))).map((f) => {
-            const fp = import_path15.default.join(SNAPSHOTS_DIR, f);
-            return { name: f, path: fp, time: import_fs13.default.statSync(fp).mtime.getTime() };
+          const files = import_fs14.default.readdirSync(SNAPSHOTS_DIR).filter((f) => f.startsWith(todayPrefix) && (f.endsWith(".db") || f.endsWith(".db.gz"))).map((f) => {
+            const fp = import_path16.default.join(SNAPSHOTS_DIR, f);
+            return { name: f, path: fp, time: import_fs14.default.statSync(fp).mtime.getTime() };
           }).sort((a, b) => b.time - a.time);
           const MAX_TODAY_SNAPSHOTS = 5;
           if (files.length > MAX_TODAY_SNAPSHOTS) {
             const toDelete = files.slice(MAX_TODAY_SNAPSHOTS);
             for (const snap of toDelete) {
-              if (import_fs13.default.existsSync(snap.path)) {
-                import_fs13.default.unlinkSync(snap.path);
+              if (import_fs14.default.existsSync(snap.path)) {
+                import_fs14.default.unlinkSync(snap.path);
                 console.log(`[Backup] Same-day snapshot retention: deleted old snapshot ${snap.name}`);
               }
             }
@@ -14335,7 +14999,7 @@ var init_backupRecoveryService = __esm({
         const dailyCompressEnabled = await this.getSetting("backup_daily_compression", "true") === "true";
         if (!dailyCompressEnabled) return;
         try {
-          const files = import_fs13.default.readdirSync(SNAPSHOTS_DIR).filter((f) => f.startsWith("snapshot_") && (f.endsWith(".db") || f.endsWith(".db.gz")));
+          const files = import_fs14.default.readdirSync(SNAPSHOTS_DIR).filter((f) => f.startsWith("snapshot_") && (f.endsWith(".db") || f.endsWith(".db.gz")));
           if (files.length === 0) return;
           const todayStr2 = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           const dateGroups = {};
@@ -14353,19 +15017,19 @@ var init_backupRecoveryService = __esm({
           }
           for (const [datePart, snapshotFiles] of Object.entries(dateGroups)) {
             const archiveName = `archive_${datePart}.zip`;
-            const archivePath = import_path15.default.join(ARCHIVES_DIR, archiveName);
+            const archivePath = import_path16.default.join(ARCHIVES_DIR, archiveName);
             console.log(`[Backup] Compressing previous day snapshots for ${datePart} into ${archiveName}...`);
             const zip = new import_adm_zip2.default();
             for (const file of snapshotFiles) {
-              const filePath = import_path15.default.join(SNAPSHOTS_DIR, file);
-              if (import_fs13.default.existsSync(filePath)) {
+              const filePath = import_path16.default.join(SNAPSHOTS_DIR, file);
+              if (import_fs14.default.existsSync(filePath)) {
                 zip.addLocalFile(filePath);
               }
             }
             zip.writeZip(archivePath);
-            if (import_fs13.default.existsSync(archivePath)) {
+            if (import_fs14.default.existsSync(archivePath)) {
               for (const file of snapshotFiles) {
-                import_fs13.default.unlinkSync(import_path15.default.join(SNAPSHOTS_DIR, file));
+                import_fs14.default.unlinkSync(import_path16.default.join(SNAPSHOTS_DIR, file));
               }
               console.log(`[Backup] Compressed ${snapshotFiles.length} snapshots into ${archiveName}. Original snapshots cleaned.`);
               await this.uploadArchive(archiveName);
@@ -14380,8 +15044,8 @@ var init_backupRecoveryService = __esm({
        * Uploads the daily archive to Google Drive and Telegram if configured.
        */
       async uploadArchive(filename) {
-        const archivePath = import_path15.default.join(ARCHIVES_DIR, filename);
-        if (!import_fs13.default.existsSync(archivePath)) return;
+        const archivePath = import_path16.default.join(ARCHIVES_DIR, filename);
+        if (!import_fs14.default.existsSync(archivePath)) return;
         const gdriveEnabled = await this.getSetting("backup_gdrive_enabled", "false") === "true";
         const telegramEnabled = await this.getSetting("backup_telegram_enabled", "false") === "true";
         const notifsEnabled = await this.getSetting("backup_notifications_enabled", "true") === "true";
@@ -14435,7 +15099,7 @@ var init_backupRecoveryService = __esm({
        */
       async retryPendingUploads() {
         try {
-          const archives = import_fs13.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip"));
+          const archives = import_fs14.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip"));
           if (archives.length === 0) return;
           console.log("[Backup] Scanning archives for pending cloud uploads...");
           for (const archive of archives) {
@@ -14470,7 +15134,7 @@ var init_backupRecoveryService = __esm({
             console.error("[Backup] Failed to refresh Google access token.");
             return false;
           }
-          const fileBuffer = import_fs13.default.readFileSync(filePath);
+          const fileBuffer = import_fs14.default.readFileSync(filePath);
           const metadata = {
             name: filename,
             mimeType: "application/zip"
@@ -14516,7 +15180,7 @@ Content-Type: application/zip\r
             return false;
           }
           const form = new URLSearchParams();
-          const fileStream = import_fs13.default.createReadStream(filePath);
+          const fileStream = import_fs14.default.createReadStream(filePath);
           const { default: FormData2 } = await import("form-data");
           const formData = new FormData2();
           formData.append("chat_id", chatId);
@@ -14538,16 +15202,16 @@ Content-Type: application/zip\r
         const autoDelete = await this.getSetting("backup_auto_delete_old_archives", "true") === "true";
         if (!autoDelete) return;
         try {
-          const archives = import_fs13.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip")).map((f) => {
-            const filePath = import_path15.default.join(ARCHIVES_DIR, f);
-            const stats = import_fs13.default.statSync(filePath);
+          const archives = import_fs14.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip")).map((f) => {
+            const filePath = import_path16.default.join(ARCHIVES_DIR, f);
+            const stats = import_fs14.default.statSync(filePath);
             return { filename: f, path: filePath, mtime: stats.mtime };
           }).sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
           if (archives.length > 4) {
             const toDelete = archives.slice(4);
             for (const arch of toDelete) {
-              if (import_fs13.default.existsSync(arch.path)) {
-                import_fs13.default.unlinkSync(arch.path);
+              if (import_fs14.default.existsSync(arch.path)) {
+                import_fs14.default.unlinkSync(arch.path);
                 console.log(`[Backup] Retention cleanup: deleted old archive ${arch.filename}`);
               }
             }
@@ -14586,7 +15250,7 @@ Content-Type: application/zip\r
        * Lists all local backup archives.
        */
       listArchives(uploadLogMap) {
-        if (!import_fs13.default.existsSync(ARCHIVES_DIR)) return [];
+        if (!import_fs14.default.existsSync(ARCHIVES_DIR)) return [];
         let uploadLog = uploadLogMap || {};
         if (!uploadLogMap) {
           try {
@@ -14597,10 +15261,15 @@ Content-Type: application/zip\r
           } catch {
           }
         }
-        return import_fs13.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip")).map((filename) => {
-          const filePath = import_path15.default.join(ARCHIVES_DIR, filename);
-          const stats = import_fs13.default.statSync(filePath);
-          const date = filename.replace("archive_", "").replace(".zip", "");
+        return import_fs14.default.readdirSync(ARCHIVES_DIR).filter((f) => f.startsWith("archive_") && f.endsWith(".zip")).map((filename) => {
+          const filePath = import_path16.default.join(ARCHIVES_DIR, filename);
+          const stats = import_fs14.default.statSync(filePath);
+          let rawDate = filename.replace(/^archive_/, "").replace(/\.zip$/, "");
+          if (rawDate.startsWith("manual_")) {
+            rawDate = rawDate.replace(/^manual_/, "");
+          }
+          const dateMatch = rawDate.match(/^(\d{4}-\d{2}-\d{2})/);
+          const date = dateMatch ? dateMatch[1] : stats.mtime.toISOString().split("T")[0];
           const sources = ["Local"];
           if (uploadLog[filename]?.gdrive) sources.push("Google Drive");
           if (uploadLog[filename]?.telegram) sources.push("Telegram");
@@ -14610,7 +15279,7 @@ Content-Type: application/zip\r
             sizeBytes: stats.size,
             source: sources.join(", ")
           };
-        }).sort((a, b) => b.date.localeCompare(a.date));
+        }).sort((a, b) => b.filename.localeCompare(a.filename));
       }
       /**
        * Restores data from a compressed zip archive.
@@ -14618,23 +15287,23 @@ Content-Type: application/zip\r
       async restoreFromArchive(filename) {
         const { restoreBackup: restoreBackup2 } = await Promise.resolve().then(() => (init_backupService(), backupService_exports));
         await restoreBackup2(filename);
-        this.broadcastNotification("backup_restore_completed", `Database restore completed successfully: ${import_path15.default.basename(filename)}`);
+        this.broadcastNotification("backup_restore_completed", `Database restore completed successfully: ${import_path16.default.basename(filename)}`);
       }
       /**
        * Delete a specific archive.
        */
       deleteArchive(filename) {
-        const sanitized = import_path15.default.basename(filename);
+        const sanitized = import_path16.default.basename(filename);
         if (!sanitized.endsWith(".zip")) {
           throw new Error("Invalid archive filename");
         }
-        const filePath = import_path15.default.join(ARCHIVES_DIR, sanitized);
-        const resolvedPath = import_path15.default.resolve(filePath);
-        if (!resolvedPath.startsWith(ARCHIVES_DIR + import_path15.default.sep)) {
+        const filePath = import_path16.default.join(ARCHIVES_DIR, sanitized);
+        const resolvedPath = import_path16.default.resolve(filePath);
+        if (!resolvedPath.startsWith(ARCHIVES_DIR + import_path16.default.sep)) {
           throw new Error("Access denied");
         }
-        if (import_fs13.default.existsSync(filePath)) {
-          import_fs13.default.unlinkSync(filePath);
+        if (import_fs14.default.existsSync(filePath)) {
+          import_fs14.default.unlinkSync(filePath);
           console.log(`[Backup] Deleted archive: ${sanitized}`);
         }
       }
@@ -14682,19 +15351,12 @@ async function runExpiryScanAndAlert(days = 90) {
       console.log("[ExpiryScan] No near-expiry items found to report.");
       return true;
     }
-    const phoneRow = await db2.get("SELECT value FROM app_settings WHERE key = 'owner_phone'");
-    const nameRow = await db2.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-    const targetPhone = phoneRow?.value;
-    const medicalName = nameRow?.value || "AI Pharmacy";
+    const { getStoreMedicalName: getStoreMedicalName5, getStorePhone: getStorePhone2 } = await Promise.resolve().then(() => (init_storeSettingsService(), storeSettingsService_exports));
+    const medicalName = await getStoreMedicalName5(db2);
+    const targetPhone = await getStorePhone2(db2);
     if (!targetPhone) {
-      console.warn("[ExpiryScan] Expiry scan completed, but no `owner_phone` is configured in app_settings. WhatsApp alert skipped.");
-      const dbLog = await dbManager.getConnection();
-      await dbLog.run(
-        "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
-        "AUTOMATION_ALERT",
-        `\u274C Expiry Alert Failure: Owner WhatsApp number not configured. Expiring list contains ${rows.length} item(s).`
-      );
-      return false;
+      console.log("[ExpiryScan] Expiry scan completed successfully. WhatsApp notification skipped (no store phone configured in app_settings).");
+      return true;
     }
     const { sendMessage: sendMessage2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
     const cleanPhone = targetPhone.replace(/\D/g, "");
@@ -14794,60 +15456,73 @@ function getExpiryYearMonth(expiryDateStr) {
   return `${year}_${String(month).padStart(2, "0")}`;
 }
 async function rebuildAllExpiryCaches() {
-  console.log("[ExpiryCache] Rebuilding all month-wise expiry cache files...");
-  try {
-    const db2 = await dbManager.getConnection();
-    const rows = await db2.all(`
-      SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
-             pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
-             d.id as distributor_id, d.name as distributor_name
-      FROM inventory_master im
-      JOIN medicines m ON im.medicine_id = m.id
-      LEFT JOIN purchase_items pi ON pi.id = (
-        SELECT pi3.id 
-        FROM purchase_items pi3 
-        WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
-        ORDER BY pi3.id DESC 
-        LIMIT 1
-      )
-      LEFT JOIN purchases p ON pi.purchase_id = p.id
-      LEFT JOIN distributors d ON p.distributor_id = d.id
-      WHERE ${INVENTORY_ACTIVE_WHERE}
-      ORDER BY im.expiry_date ASC
-    `);
-    const cacheDir = import_path16.default.resolve(getAppDataDir(), "data", "cache", "expiry");
-    if (import_fs14.default.existsSync(cacheDir)) {
-      const files = await import_fs14.default.promises.readdir(cacheDir);
-      for (const file of files) {
-        if (file.startsWith("expiry_") && file.endsWith(".json")) {
-          await import_fs14.default.promises.unlink(import_path16.default.join(cacheDir, file));
+  if (activeRebuildPromise) {
+    return activeRebuildPromise;
+  }
+  activeRebuildPromise = (async () => {
+    console.log("[ExpiryCache] Rebuilding all month-wise expiry cache files...");
+    try {
+      const db2 = await dbManager.getConnection();
+      const rows = await db2.all(`
+        SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
+               pi.id as purchase_item_id, pi.cost_price as purchase_cost_price, p.invoice_no as purchase_invoice_no, p.id as purchase_id,
+               d.id as distributor_id, d.name as distributor_name
+        FROM inventory_master im
+        JOIN medicines m ON im.medicine_id = m.id
+        LEFT JOIN purchase_items pi ON pi.id = (
+          SELECT pi3.id 
+          FROM purchase_items pi3 
+          WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+          ORDER BY pi3.id DESC 
+          LIMIT 1
+        )
+        LEFT JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN distributors d ON p.distributor_id = d.id
+        WHERE ${INVENTORY_ACTIVE_WHERE}
+        ORDER BY im.expiry_date ASC
+      `);
+      const cacheDir = import_path17.default.resolve(getAppDataDir(), "data", "cache", "expiry");
+      if (!import_fs15.default.existsSync(cacheDir)) {
+        await import_fs15.default.promises.mkdir(cacheDir, { recursive: true });
+      }
+      const groups = {};
+      for (const r of rows) {
+        const ym = getExpiryYearMonth(r.expiry_date);
+        if (!groups[ym]) groups[ym] = [];
+        groups[ym].push(r);
+      }
+      const validMonthFiles = /* @__PURE__ */ new Set();
+      let written = 0;
+      for (const [ym, items] of Object.entries(groups)) {
+        if (ym === "unknown") continue;
+        const fileName = `expiry_${ym}.json`;
+        validMonthFiles.add(fileName);
+        const filePath = import_path17.default.join(cacheDir, fileName);
+        await import_fs15.default.promises.writeFile(filePath, JSON.stringify(items, null, 2), "utf-8");
+        written++;
+      }
+      const existingFiles = await import_fs15.default.promises.readdir(cacheDir);
+      for (const file of existingFiles) {
+        if (file.startsWith("expiry_") && file.endsWith(".json") && !validMonthFiles.has(file)) {
+          try {
+            await import_fs15.default.promises.unlink(import_path17.default.join(cacheDir, file));
+          } catch (_) {
+          }
         }
       }
-    } else {
-      await import_fs14.default.promises.mkdir(cacheDir, { recursive: true });
+      console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
+    } catch (err) {
+      console.error("[ExpiryCache] Error rebuilding expiry caches:", err);
+    } finally {
+      activeRebuildPromise = null;
     }
-    const groups = {};
-    for (const r of rows) {
-      const ym = getExpiryYearMonth(r.expiry_date);
-      if (!groups[ym]) groups[ym] = [];
-      groups[ym].push(r);
-    }
-    let written = 0;
-    for (const [ym, items] of Object.entries(groups)) {
-      if (ym === "unknown") continue;
-      const filePath = import_path16.default.join(cacheDir, `expiry_${ym}.json`);
-      await import_fs14.default.promises.writeFile(filePath, JSON.stringify(items, null, 2), "utf-8");
-      written++;
-    }
-    console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
-  } catch (err) {
-    console.error("[ExpiryCache] Error rebuilding expiry caches:", err);
-  }
+  })();
+  return activeRebuildPromise;
 }
 async function patchExpiryCacheForInventoryItem(inventoryId) {
   try {
-    const cacheDir = import_path16.default.resolve(getAppDataDir(), "data", "cache", "expiry");
-    if (!import_fs14.default.existsSync(cacheDir)) return;
+    const cacheDir = import_path17.default.resolve(getAppDataDir(), "data", "cache", "expiry");
+    if (!import_fs15.default.existsSync(cacheDir)) return;
     const db2 = await dbManager.getConnection();
     const item = await db2.get(`
       SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date,
@@ -14870,11 +15545,11 @@ async function patchExpiryCacheForInventoryItem(inventoryId) {
     if (!item) return;
     const ym = getExpiryYearMonth(item.expiry_date);
     if (ym === "unknown") return;
-    const filePath = import_path16.default.join(cacheDir, `expiry_${ym}.json`);
+    const filePath = import_path17.default.join(cacheDir, `expiry_${ym}.json`);
     let monthItems = [];
-    if (import_fs14.default.existsSync(filePath)) {
+    if (import_fs15.default.existsSync(filePath)) {
       try {
-        monthItems = JSON.parse(await import_fs14.default.promises.readFile(filePath, "utf-8"));
+        monthItems = JSON.parse(await import_fs15.default.promises.readFile(filePath, "utf-8"));
       } catch {
         monthItems = [];
       }
@@ -14887,12 +15562,12 @@ async function patchExpiryCacheForInventoryItem(inventoryId) {
       );
     }
     if (monthItems.length === 0) {
-      if (import_fs14.default.existsSync(filePath)) {
-        await import_fs14.default.promises.unlink(filePath);
+      if (import_fs15.default.existsSync(filePath)) {
+        await import_fs15.default.promises.unlink(filePath);
         console.log(`[ExpiryCache] Patch: ${ym} file deleted (all items sold/returned).`);
       }
     } else {
-      await import_fs14.default.promises.writeFile(filePath, JSON.stringify(monthItems, null, 2), "utf-8");
+      await import_fs15.default.promises.writeFile(filePath, JSON.stringify(monthItems, null, 2), "utf-8");
       console.log(`[ExpiryCache] Patch: ${ym} updated for inventory #${inventoryId} (qty=${item.quantity}).`);
     }
   } catch (err) {
@@ -14912,19 +15587,20 @@ function triggerExpiryCacheRebuildDebounced(inventoryIds) {
     }
   }, 800);
 }
-var import_path16, import_url14, import_fs14, __filename13, __dirname13, DB_PATH6, rebuildTimeout;
+var import_path17, import_url14, import_fs15, __filename13, __dirname13, DB_PATH6, activeRebuildPromise, rebuildTimeout;
 var init_expiryAlertService = __esm({
   "src/services/expiryAlertService.ts"() {
     "use strict";
     init_connection();
     init_inventoryActive();
-    import_path16 = __toESM(require("path"), 1);
+    import_path17 = __toESM(require("path"), 1);
     import_url14 = require("url");
-    import_fs14 = __toESM(require("fs"), 1);
+    import_fs15 = __toESM(require("fs"), 1);
     init_config();
     __filename13 = (0, import_url14.fileURLToPath)(import_meta_url);
-    __dirname13 = import_path16.default.dirname(__filename13);
-    DB_PATH6 = process.env.DB_PATH || import_path16.default.resolve(__dirname13, "..", "..", "data", "app.db");
+    __dirname13 = import_path17.default.dirname(__filename13);
+    DB_PATH6 = process.env.DB_PATH || import_path17.default.resolve(__dirname13, "..", "..", "data", "app.db");
+    activeRebuildPromise = null;
     rebuildTimeout = null;
   }
 });
@@ -14934,7 +15610,7 @@ var connection_exports = {};
 __export(connection_exports, {
   dbManager: () => dbManager
 });
-var import_sqlite, import_sqlite32, import_sqlite2, import_path17, import_fs15, import_zlib3, import_promises3, DB_PATH7, DatabaseManager, dbManager;
+var import_sqlite, import_sqlite32, import_sqlite2, import_path18, import_fs16, import_zlib3, import_promises3, DB_PATH7, DatabaseManager, dbManager;
 var init_connection = __esm({
   "src/database/connection.ts"() {
     "use strict";
@@ -14942,8 +15618,8 @@ var init_connection = __esm({
     import_sqlite = require("sqlite");
     import_sqlite32 = __toESM(require("sqlite3"), 1);
     import_sqlite2 = require("sqlite");
-    import_path17 = __toESM(require("path"), 1);
-    import_fs15 = __toESM(require("fs"), 1);
+    import_path18 = __toESM(require("path"), 1);
+    import_fs16 = __toESM(require("fs"), 1);
     import_zlib3 = __toESM(require("zlib"), 1);
     import_promises3 = require("stream/promises");
     init_config();
@@ -14952,6 +15628,14 @@ var init_connection = __esm({
       static instance;
       connection = null;
       currentDbPath = null;
+      // Gate against callers re-opening a connection while the underlying file is being
+      // replaced on disk (e.g. migration finalize's backup/swap). Every background timer
+      // in this process (messaging queue, device-connection poll, stock calculator, etc.)
+      // calls getConnection() on its own schedule; without this gate one of them can reopen
+      // a connection mid-swap, write a WAL against the old file layout, and corrupt the file
+      // fs.copyFileSync just replaced underneath it.
+      suspendedUntil = null;
+      resumeFn = null;
       constructor() {
       }
       static getInstance() {
@@ -14960,7 +15644,22 @@ var init_connection = __esm({
         }
         return _DatabaseManager.instance;
       }
+      /** Block new connections (existing callers already mid-call are unaffected) until resume(). */
+      suspend() {
+        if (this.suspendedUntil) return;
+        this.suspendedUntil = new Promise((resolve) => {
+          this.resumeFn = resolve;
+        });
+      }
+      resume() {
+        if (this.resumeFn) {
+          this.resumeFn();
+          this.resumeFn = null;
+        }
+        this.suspendedUntil = null;
+      }
       async getConnection() {
+        if (this.suspendedUntil) await this.suspendedUntil;
         const dbPath = config.dbPath;
         if (this.connection) {
           try {
@@ -15136,37 +15835,37 @@ var init_connection = __esm({
           }
         }
         console.error("[DB] Database load failed. Starting silent self-healing database restoration...");
-        const logPath = import_path17.default.join(import_path17.default.dirname(dbPath), "self_healing.log");
+        const logPath = import_path18.default.join(import_path18.default.dirname(dbPath), "self_healing.log");
         const appendLog = (msg) => {
           const timestamp = (/* @__PURE__ */ new Date()).toISOString();
-          import_fs15.default.appendFileSync(logPath, `[${timestamp}] ${msg}
+          import_fs16.default.appendFileSync(logPath, `[${timestamp}] ${msg}
 `);
         };
         appendLog(`[ERROR] DB_CORRUPT: ${initialErrorMsg}`);
         const backups = [];
-        const dataDir = import_path17.default.dirname(dbPath);
-        if (import_fs15.default.existsSync(dataDir)) {
-          import_fs15.default.readdirSync(dataDir).forEach((file) => {
+        const dataDir = import_path18.default.dirname(dbPath);
+        if (import_fs16.default.existsSync(dataDir)) {
+          import_fs16.default.readdirSync(dataDir).forEach((file) => {
             if (file.startsWith("app.db.bak_")) {
-              const fp = import_path17.default.join(dataDir, file);
+              const fp = import_path18.default.join(dataDir, file);
               backups.push({
                 path: fp,
                 name: file,
-                mtime: import_fs15.default.statSync(fp).mtime.getTime(),
+                mtime: import_fs16.default.statSync(fp).mtime.getTime(),
                 type: "bak"
               });
             }
           });
         }
-        const snapshotsDir = import_path17.default.join(getAppDataDir(), "backup", "snapshots");
-        if (import_fs15.default.existsSync(snapshotsDir)) {
-          import_fs15.default.readdirSync(snapshotsDir).forEach((file) => {
+        const snapshotsDir = import_path18.default.join(getAppDataDir(), "backup", "snapshots");
+        if (import_fs16.default.existsSync(snapshotsDir)) {
+          import_fs16.default.readdirSync(snapshotsDir).forEach((file) => {
             if (file.startsWith("snapshot_") && file.endsWith(".db.gz")) {
-              const fp = import_path17.default.join(snapshotsDir, file);
+              const fp = import_path18.default.join(snapshotsDir, file);
               backups.push({
                 path: fp,
                 name: file,
-                mtime: import_fs15.default.statSync(fp).mtime.getTime(),
+                mtime: import_fs16.default.statSync(fp).mtime.getTime(),
                 type: "gz"
               });
             }
@@ -15180,14 +15879,14 @@ var init_connection = __esm({
         const targetBackup = backups[0];
         appendLog(`[ACTION] RENAME: ${dbPath} -> ${dbPath}.corrupt`);
         try {
-          if (import_fs15.default.existsSync(dbPath)) {
-            if (import_fs15.default.existsSync(dbPath + ".corrupt")) {
-              import_fs15.default.unlinkSync(dbPath + ".corrupt");
+          if (import_fs16.default.existsSync(dbPath)) {
+            if (import_fs16.default.existsSync(dbPath + ".corrupt")) {
+              import_fs16.default.unlinkSync(dbPath + ".corrupt");
             }
-            import_fs15.default.renameSync(dbPath, dbPath + ".corrupt");
+            import_fs16.default.renameSync(dbPath, dbPath + ".corrupt");
           }
-          if (import_fs15.default.existsSync(dbPath + "-wal")) import_fs15.default.unlinkSync(dbPath + "-wal");
-          if (import_fs15.default.existsSync(dbPath + "-shm")) import_fs15.default.unlinkSync(dbPath + "-shm");
+          if (import_fs16.default.existsSync(dbPath + "-wal")) import_fs16.default.unlinkSync(dbPath + "-wal");
+          if (import_fs16.default.existsSync(dbPath + "-shm")) import_fs16.default.unlinkSync(dbPath + "-shm");
         } catch (err) {
           appendLog(`[ERROR] Failed to rename corrupt database or clean logs: ${err.message}`);
           throw new Error("DB_INTEGRITY_FAILURE");
@@ -15196,11 +15895,11 @@ var init_connection = __esm({
         try {
           if (targetBackup.type === "gz") {
             const gunzip = import_zlib3.default.createGunzip();
-            const source = import_fs15.default.createReadStream(targetBackup.path);
-            const destination = import_fs15.default.createWriteStream(dbPath);
+            const source = import_fs16.default.createReadStream(targetBackup.path);
+            const destination = import_fs16.default.createWriteStream(dbPath);
             await (0, import_promises3.pipeline)(source, gunzip, destination);
           } else {
-            import_fs15.default.copyFileSync(targetBackup.path, dbPath);
+            import_fs16.default.copyFileSync(targetBackup.path, dbPath);
           }
         } catch (err) {
           appendLog(`[ERROR] Failed to restore backup file: ${err.message}`);
@@ -15334,7 +16033,7 @@ function parseExtractedText(text, onProgress, progressStart = 10, progressEnd = 
   return extracted;
 }
 async function extractFromPdfViaOcr(filePath, pdfBuffer, onProgress) {
-  console.log(`[Extractor] PDF text extraction returned poor results for ${import_path18.default.basename(filePath)}. Falling back to OCR.`);
+  console.log(`[Extractor] PDF text extraction returned poor results for ${import_path19.default.basename(filePath)}. Falling back to OCR.`);
   if (onProgress) onProgress(5);
   let getDocument;
   try {
@@ -15356,8 +16055,8 @@ async function extractFromPdfViaOcr(filePath, pdfBuffer, onProgress) {
       const height = Math.floor(viewport.height);
       let imageBuffer;
       try {
-        const { createCanvas } = await import("canvas");
-        const canvas = createCanvas(width, height);
+        const { createCanvas: createCanvas2 } = await import("canvas");
+        const canvas = createCanvas2(width, height);
         const ctx = canvas.getContext("2d");
         await page.render({ canvasContext: ctx, viewport }).promise;
         imageBuffer = canvas.toBuffer("image/png");
@@ -15386,7 +16085,7 @@ async function extractFromPdfViaOcr(filePath, pdfBuffer, onProgress) {
   return parseExtractedText(allText, onProgress, 80, 100);
 }
 async function extractFromPdf(filePath, onProgress) {
-  const data = await import_fs16.default.promises.readFile(filePath);
+  const data = await import_fs17.default.promises.readFile(filePath);
   const pdfData = await (0, import_pdf_parse.default)(data);
   const text = pdfData.text;
   const cleanedText = text.replace(/\s+/g, "").trim();
@@ -15395,18 +16094,18 @@ async function extractFromPdf(filePath, onProgress) {
   }
   return parseExtractedText(text, onProgress);
 }
-var import_fs16, import_path18, import_pdf_parse, import_sync2, import_url15, __filename14, __dirname14, MIN_TEXT_CHARS_THRESHOLD;
+var import_fs17, import_path19, import_pdf_parse, import_sync2, import_url15, __filename14, __dirname14, MIN_TEXT_CHARS_THRESHOLD;
 var init_extractor = __esm({
   "src/extractor.ts"() {
     "use strict";
-    import_fs16 = __toESM(require("fs"), 1);
-    import_path18 = __toESM(require("path"), 1);
+    import_fs17 = __toESM(require("fs"), 1);
+    import_path19 = __toESM(require("path"), 1);
     import_pdf_parse = __toESM(require("pdf-parse"), 1);
     import_sync2 = require("csv-parse/sync");
     init_aiCameraService();
     import_url15 = require("url");
     __filename14 = (0, import_url15.fileURLToPath)(import_meta_url);
-    __dirname14 = import_path18.default.dirname(__filename14);
+    __dirname14 = import_path19.default.dirname(__filename14);
     MIN_TEXT_CHARS_THRESHOLD = 50;
   }
 });
@@ -15434,7 +16133,7 @@ async function preScanCsv(filePath, onProgress) {
   return new Promise((resolve, reject) => {
     let nameCol = "";
     let processedRows = 0;
-    const readStream = import_fs17.default.createReadStream(filePath);
+    const readStream = import_fs18.default.createReadStream(filePath);
     const parserStream = readStream.pipe((0, import_csv_parser.default)());
     parserStream.on("headers", (headers) => {
       nameCol = headers.find((c) => /name|brand/i.test(c)) || headers.find((c) => /product|item|inn|title/i.test(c)) || headers[0] || "";
@@ -15479,8 +16178,8 @@ async function readCsvPreview(filePath, maxRows = 10) {
   return new Promise((resolve, reject) => {
     const rows = [];
     let headers = [];
-    if (!import_fs17.default.existsSync(filePath)) return resolve({ headers, rows });
-    const stream = import_fs17.default.createReadStream(filePath).pipe((0, import_csv_parser.default)());
+    if (!import_fs18.default.existsSync(filePath)) return resolve({ headers, rows });
+    const stream = import_fs18.default.createReadStream(filePath).pipe((0, import_csv_parser.default)());
     stream.on("headers", (h) => {
       headers = h;
     });
@@ -15581,7 +16280,7 @@ async function runCatalogAnalysis(jobId) {
   }
   eventService.broadcast("catalog_job_update", { id: jobId, status: "processing", progress: 0 });
   try {
-    const ext = import_path19.default.extname(job.file_path).toLowerCase();
+    const ext = import_path20.default.extname(job.file_path).toLowerCase();
     let headers = [];
     let previewData = [];
     let totalCount = 0;
@@ -15873,7 +16572,7 @@ async function runCatalogImport(jobId) {
   }
   eventService.broadcast("catalog_job_update", { id: jobId, status: "processing", progress: 0 });
   try {
-    const ext = import_path19.default.extname(job.file_path).toLowerCase();
+    const ext = import_path20.default.extname(job.file_path).toLowerCase();
     const mapping = JSON.parse(job.mapping_config || "{}");
     if (ext === ".csv") {
       const preview = await readCsvPreview(job.file_path, 1);
@@ -15960,7 +16659,7 @@ async function runCatalogImport(jobId) {
     if (ext === ".csv") {
       totalToProcess = await new Promise((resolve) => {
         let count = 0;
-        const countStream = import_fs17.default.createReadStream(job.file_path);
+        const countStream = import_fs18.default.createReadStream(job.file_path);
         countStream.pipe((0, import_csv_parser.default)()).on("data", () => {
           count++;
         }).on("end", () => {
@@ -16053,6 +16752,22 @@ async function runCatalogImport(jobId) {
             updates.push("schedule_type = COALESCE(NULLIF(schedule_type, ''), ?)");
             params.push(item.schedule_type);
           }
+          if (item.therapeutic !== void 0) {
+            updates.push("therapeutic = COALESCE(NULLIF(therapeutic, ''), ?)");
+            params.push(item.therapeutic);
+          }
+          if (item.sub_therapeutic !== void 0) {
+            updates.push("sub_therapeutic = COALESCE(NULLIF(sub_therapeutic, ''), ?)");
+            params.push(item.sub_therapeutic);
+          }
+          if (item.short_code !== void 0) {
+            updates.push("short_code = COALESCE(NULLIF(short_code, ''), ?)");
+            params.push(item.short_code);
+          }
+          if (item.ucode !== void 0) {
+            updates.push("ucode = COALESCE(NULLIF(ucode, ''), ?)");
+            params.push(item.ucode);
+          }
           if (item.mrp !== void 0) {
             updates.push("mrp = COALESCE(NULLIF(mrp, 0), ?)");
             params.push(item.mrp);
@@ -16085,8 +16800,8 @@ async function runCatalogImport(jobId) {
           }
         } else {
           newCount++;
-          const columns = ["name", "api_reference", "packaging", "manufacturer", "marketed_by", "hsn_code", "schedule_type", "mrp", "cgst_per", "sgst_per", "rack", "metadata"];
-          const placeholders = ["?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?"];
+          const columns = ["name", "api_reference", "packaging", "manufacturer", "marketed_by", "hsn_code", "schedule_type", "therapeutic", "sub_therapeutic", "short_code", "ucode", "mrp", "cgst_per", "sgst_per", "rack", "metadata"];
+          const placeholders = ["?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?", "?"];
           const params = [
             item.name,
             item.api_reference || null,
@@ -16095,6 +16810,10 @@ async function runCatalogImport(jobId) {
             item.marketed_by || null,
             item.hsn_code || null,
             item.schedule_type || null,
+            item.therapeutic || null,
+            item.sub_therapeutic || null,
+            item.short_code || null,
+            item.ucode || null,
             item.mrp || 0,
             item.cgst || 0,
             item.sgst || 0,
@@ -16169,7 +16888,7 @@ async function runCatalogImport(jobId) {
     };
     let lastProgressTime = Date.now();
     if (ext === ".csv") {
-      const readStream = import_fs17.default.createReadStream(job.file_path);
+      const readStream = import_fs18.default.createReadStream(job.file_path);
       const csvStream = readStream.pipe((0, import_csv_parser.default)());
       readStream.on("error", (err) => {
         csvStream.destroy(new Error(`Failed to read stream for import: ${err.message}`));
@@ -16319,12 +17038,12 @@ async function startWorker() {
     }
   }, 1e4);
 }
-var import_fs17, import_path19, import_csv_parser, XLSX2, import_xlsx, import_sqlite33, import_sqlite4, import_url16, XLSX_import, __filename15, __dirname15, getDbPath3, isWorking, DISCOVERY_RETRY_DELAY_MS;
+var import_fs18, import_path20, import_csv_parser, XLSX2, import_xlsx, import_sqlite33, import_sqlite4, import_url16, XLSX_import, __filename15, __dirname15, getDbPath3, isWorking, DISCOVERY_RETRY_DELAY_MS;
 var init_catalogWorker = __esm({
   "src/worker/catalogWorker.ts"() {
     "use strict";
-    import_fs17 = __toESM(require("fs"), 1);
-    import_path19 = __toESM(require("path"), 1);
+    import_fs18 = __toESM(require("fs"), 1);
+    import_path20 = __toESM(require("path"), 1);
     init_connection();
     init_extractor();
     init_eventService();
@@ -16337,8 +17056,8 @@ var init_catalogWorker = __esm({
     import_url16 = require("url");
     XLSX_import = XLSX2.readFile ? XLSX2 : import_xlsx.default;
     __filename15 = (0, import_url16.fileURLToPath)(import_meta_url);
-    __dirname15 = import_path19.default.dirname(__filename15);
-    getDbPath3 = () => process.env.DB_PATH || import_path19.default.resolve(__dirname15, "..", "..", "data", "app.db");
+    __dirname15 = import_path20.default.dirname(__filename15);
+    getDbPath3 = () => process.env.DB_PATH || import_path20.default.resolve(__dirname15, "..", "..", "data", "app.db");
     isWorking = false;
     DISCOVERY_RETRY_DELAY_MS = 5 * 60 * 1e3;
   }
@@ -16398,9 +17117,9 @@ async function authenticateApiKey(req, res, next) {
     req.session = { token: "mock-dev-session-token", isValid: true };
     return next();
   }
-  const path56 = req.path;
+  const path57 = req.path;
   const originalUrl = req.originalUrl || "";
-  if (originalUrl.startsWith("/api/license") || path56.startsWith("/license") || originalUrl.startsWith("/api/migration") || path56.startsWith("/migration") || originalUrl.startsWith("/api/medicines/compact") || path56.startsWith("/medicines/compact") || path56 === "/medicines/compact" || originalUrl.startsWith("/api/notifications/stream") || path56.startsWith("/notifications/stream") || originalUrl.startsWith("/api/notifications/register-token") || path56.startsWith("/notifications/register-token") || originalUrl.startsWith("/api/health") || path56 === "/health" || originalUrl.startsWith("/api/auth/bootstrap-token") || path56 === "/auth/bootstrap-token" || originalUrl.startsWith("/api/security/admin/login") || path56.startsWith("/security/admin/login")) {
+  if (originalUrl.startsWith("/api/license") || path57.startsWith("/license") || originalUrl.startsWith("/api/migration") || path57.startsWith("/migration") || originalUrl.startsWith("/api/medicines/compact") || path57.startsWith("/medicines/compact") || path57 === "/medicines/compact" || originalUrl.startsWith("/api/notifications/stream") || path57.startsWith("/notifications/stream") || originalUrl.startsWith("/api/notifications/register-token") || path57.startsWith("/notifications/register-token") || originalUrl.startsWith("/api/health") || path57 === "/health" || originalUrl.startsWith("/api/auth/bootstrap-token") || path57 === "/auth/bootstrap-token" || originalUrl.startsWith("/api/security/admin/login") || path57.startsWith("/security/admin/login")) {
     return next();
   }
   const provided = req.headers["x-session-token"] || req.headers["x-api-key"] || req.query["api-key"] || req.query["apiKey"];
@@ -16521,7 +17240,7 @@ var whatsappBusiness_exports = {};
 __export(whatsappBusiness_exports, {
   default: () => whatsappBusiness_default
 });
-var import_express, import_path20, import_url17, __filename16, __dirname16, DB_PATH9, router, whatsappBusiness_default;
+var import_express, import_path21, import_url17, __filename16, __dirname16, DB_PATH9, router, whatsappBusiness_default;
 var init_whatsappBusiness = __esm({
   "src/routes/whatsappBusiness.ts"() {
     "use strict";
@@ -16529,12 +17248,12 @@ var init_whatsappBusiness = __esm({
     init_whatsappBusinessService();
     init_eventService();
     init_connection();
-    import_path20 = __toESM(require("path"), 1);
+    import_path21 = __toESM(require("path"), 1);
     import_url17 = require("url");
     init_whatsappIntentService();
     __filename16 = (0, import_url17.fileURLToPath)(import_meta_url);
-    __dirname16 = import_path20.default.dirname(__filename16);
-    DB_PATH9 = process.env.DB_PATH || import_path20.default.resolve(__dirname16, "..", "..", "data", "app.db");
+    __dirname16 = import_path21.default.dirname(__filename16);
+    DB_PATH9 = process.env.DB_PATH || import_path21.default.resolve(__dirname16, "..", "..", "data", "app.db");
     router = import_express.default.Router();
     router.get("/webhook", async (req, res) => {
       const mode = req.query["hub.mode"];
@@ -16846,23 +17565,86 @@ var init_doctorReportingService = __esm({
   }
 });
 
+// src/database/messageDAO.ts
+function getDb() {
+  if (!db) {
+    db = new import_better_sqlite33.default("./data/app.db", { readonly: false });
+  }
+  return db;
+}
+function closeMessageDAO() {
+  if (db) {
+    try {
+      db.close();
+    } catch (_) {
+    }
+    db = null;
+  }
+}
+function getTemplate(locale, key) {
+  const row = getDb().prepare("SELECT value FROM message_templates WHERE locale = ? AND key = ?").get(locale, key);
+  return row ? row.value : null;
+}
+var import_better_sqlite33, db;
+var init_messageDAO = __esm({
+  "src/database/messageDAO.ts"() {
+    "use strict";
+    import_better_sqlite33 = __toESM(require("better-sqlite3"), 1);
+    db = null;
+  }
+});
+
+// src/i18n/getMessage.ts
+function getMessage(lang, path57, values = {}) {
+  const dbValue = getTemplate(lang, path57);
+  let template = "";
+  if (dbValue !== null) {
+    template = dbValue;
+  } else {
+    const keys = path57.split(".");
+    let segment = ALL_MESSAGES[lang];
+    for (const k of keys) {
+      if (segment == null) return `[Missing: ${path57}]`;
+      segment = segment[k];
+    }
+    if (typeof segment !== "string") return `[Not a string: ${path57}]`;
+    template = segment;
+  }
+  return template.replace(/\{\{(\w+)\}\}/g, (_, placeholder) => {
+    return values[placeholder] ?? `{{${placeholder}}}`;
+  });
+}
+var import_fs19, import_path22, messagesPath, raw, ALL_MESSAGES;
+var init_getMessage = __esm({
+  "src/i18n/getMessage.ts"() {
+    "use strict";
+    import_fs19 = require("fs");
+    import_path22 = require("path");
+    init_messageDAO();
+    messagesPath = (0, import_path22.join)(process.cwd(), "src", "i18n", "messages.json");
+    raw = (0, import_fs19.readFileSync)(messagesPath, "utf8");
+    ALL_MESSAGES = JSON.parse(raw);
+  }
+});
+
 // src/routes/crm.ts
 var crm_exports = {};
 __export(crm_exports, {
   default: () => crm_default
 });
-var import_express2, import_path21, import_url18, __filename17, __dirname17, DB_PATH10, router2, crm_default;
+var import_express2, import_path23, import_url18, __filename17, __dirname17, DB_PATH10, router2, crm_default;
 var init_crm = __esm({
   "src/routes/crm.ts"() {
     "use strict";
     import_express2 = __toESM(require("express"), 1);
     init_connection();
-    import_path21 = __toESM(require("path"), 1);
+    import_path23 = __toESM(require("path"), 1);
     import_url18 = require("url");
     init_doctorReportingService();
+    init_getMessage();
     __filename17 = (0, import_url18.fileURLToPath)(import_meta_url);
-    __dirname17 = import_path21.default.dirname(__filename17);
-    DB_PATH10 = process.env.DB_PATH || import_path21.default.resolve(__dirname17, "..", "..", "data", "app.db");
+    __dirname17 = import_path23.default.dirname(__filename17);
+    DB_PATH10 = process.env.DB_PATH || import_path23.default.resolve(__dirname17, "..", "..", "data", "app.db");
     router2 = import_express2.default.Router();
     router2.get("/patients", async (req, res) => {
       const { q, limit } = req.query;
@@ -16890,13 +17672,13 @@ var init_crm = __esm({
       }
     });
     router2.post("/patients", async (req, res) => {
-      const { name, phone, address, notes } = req.body;
+      const { name, phone, address, notes, language } = req.body;
       if (!name) return res.status(400).json({ error: "Name is required" });
       try {
         const db2 = await dbManager.getConnection();
         const result = await db2.run(
-          "INSERT INTO customers (name, phone, address, notes) VALUES (?, ?, ?, ?)",
-          [name, phone || "", address || "", notes || ""]
+          "INSERT INTO customers (name, phone, address, notes, language) VALUES (?, ?, ?, ?, ?)",
+          [name, phone || "", address || "", notes || "", language || "en"]
         );
         const newPatient = await db2.get("SELECT * FROM customers WHERE id = ?", result.lastID);
         res.status(201).json(newPatient);
@@ -16907,12 +17689,12 @@ var init_crm = __esm({
     });
     router2.put("/patients/:id", async (req, res) => {
       const { id } = req.params;
-      const { name, phone, address, notes } = req.body;
+      const { name, phone, address, notes, language } = req.body;
       try {
         const db2 = await dbManager.getConnection();
         await db2.run(
-          "UPDATE customers SET name=?, phone=?, address=?, notes=? WHERE id=?",
-          [name, phone || "", address || "", notes || "", id]
+          "UPDATE customers SET name=?, phone=?, address=?, notes=?, language=? WHERE id=?",
+          [name, phone || "", address || "", notes || "", language || "en", id]
         );
         if (phone || name) {
           if (phone && name) {
@@ -17179,7 +17961,7 @@ var init_crm = __esm({
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all(
-          `SELECT c.id, c.name, c.phone, c.address, 
+          `SELECT c.id, c.name, c.phone, c.address, c.language, 
               COALESCE(c.credit_balance, (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID'), 0) as credit_balance,
               c.credit_due_date, c.credit_enabled,
               (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') as unpaid_bills_count,
@@ -17273,19 +18055,16 @@ var init_crm = __esm({
         const finalOutstanding = customer.credit_balance !== void 0 && customer.credit_balance !== null ? Number(customer.credit_balance) : computedTotal;
         let message = custom_message;
         if (!message) {
-          message = `Dear ${customer.name || "Customer"},
-
-\u{1F4CC} *Credit Outstanding Balance Reminder*
-
-` + (billsBreakdownStr ? billsBreakdownStr : "") + `\u{1F4CA} *Summary Calculation*
-Due Date: *${dueDateStr}*
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u{1F4B0} *Total Outstanding Balance: \u20B9${finalOutstanding.toFixed(2)}*
-
-Kindly arrange payment at your earliest convenience or visit our pharmacy.
-
-Thank you!
-\u2014 AI Pharmacy OS`;
+          const storeSetting = await db2.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+          const storeName = storeSetting?.value || "AI Pharmacy";
+          const lang = customer.language === "hi" || customer.language === "mr" ? customer.language : "en";
+          message = getMessage(lang, "whatsapp.creditReminder", {
+            name: customer.name || "Customer",
+            billsBreakdown: billsBreakdownStr ? billsBreakdownStr : "",
+            dueDate: dueDateStr,
+            total: finalOutstanding.toFixed(2),
+            storeName
+          });
         }
         await sendMessage2(customer.phone, void 0, message);
         await db2.run(
@@ -17328,7 +18107,7 @@ Thank you!
           remaining -= inv.total_amount || 0;
         }
         await db2.run("COMMIT");
-        const customer = await db2.get("SELECT name, phone, credit_balance FROM customers WHERE id = ?", [customer_id]);
+        const customer = await db2.get("SELECT name, phone, credit_balance, language FROM customers WHERE id = ?", [customer_id]);
         let whatsappSent = false;
         let whatsappError = "";
         if (customer && customer.phone) {
@@ -17336,15 +18115,16 @@ Thank you!
             const { sendMessage: sendMessage2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
             const remainingBal = customer.credit_balance || 0;
             const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-            const message = `Dear ${customer.name || "Customer"},
-
-\u2705 *Payment Received Receipt*
-Amount Received: *\u20B9${payAmt.toFixed(2)}*
-Remaining Dues: *\u20B9${remainingBal.toFixed(2)}*
-Date: *${dateStr}*
-
-Thank you for your payment!
-\u2014 AI Pharmacy OS`;
+            const storeSetting = await db2.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+            const storeName = storeSetting?.value || "AI Pharmacy";
+            const lang = customer.language === "hi" || customer.language === "mr" ? customer.language : "en";
+            const message = getMessage(lang, "whatsapp.paymentReceipt", {
+              name: customer.name || "Customer",
+              amount: payAmt.toFixed(2),
+              remaining: remainingBal.toFixed(2),
+              date: dateStr,
+              storeName
+            });
             await sendMessage2(customer.phone, void 0, message);
             await db2.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
@@ -17377,22 +18157,41 @@ Thank you for your payment!
   }
 });
 
-// src/database/messageDAO.ts
-function closeMessageDAO() {
-  if (db) {
-    try {
-      db.close();
-    } catch (_) {
-    }
-    db = null;
-  }
+// src/services/barcodeService.ts
+async function generateInvoiceBarcodeData(invoiceNo, dateStr) {
+  const cleanInvoiceNo = invoiceNo.trim();
+  const cleanDate = dateStr ? dateStr.split("T")[0] : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const barcodeText = `${cleanInvoiceNo}|${cleanDate}`;
+  const qrBuffer = await import_qrcode.default.toBuffer(barcodeText, { width: 160, margin: 1 });
+  const qrDataUrl = `data:image/png;base64,${qrBuffer.toString("base64")}`;
+  const canvas = (0, import_canvas.createCanvas)(320, 90);
+  (0, import_jsbarcode.default)(canvas, cleanInvoiceNo, {
+    format: "CODE128",
+    width: 2,
+    height: 50,
+    displayValue: true,
+    fontSize: 14,
+    margin: 8,
+    background: "#ffffff",
+    lineColor: "#000000"
+  });
+  const code128Buffer = canvas.toBuffer("image/png");
+  const code128DataUrl = `data:image/png;base64,${code128Buffer.toString("base64")}`;
+  return {
+    barcodeText,
+    qrBuffer,
+    qrDataUrl,
+    code128Buffer,
+    code128DataUrl
+  };
 }
-var import_better_sqlite33, db;
-var init_messageDAO = __esm({
-  "src/database/messageDAO.ts"() {
+var import_jsbarcode, import_canvas, import_qrcode;
+var init_barcodeService = __esm({
+  "src/services/barcodeService.ts"() {
     "use strict";
-    import_better_sqlite33 = __toESM(require("better-sqlite3"), 1);
-    db = null;
+    import_jsbarcode = __toESM(require("jsbarcode"), 1);
+    import_canvas = require("canvas");
+    import_qrcode = __toESM(require("qrcode"), 1);
   }
 });
 
@@ -17636,7 +18435,8 @@ var init_preMigrationIntelligence = __esm({
 var stockRebuild_exports = {};
 __export(stockRebuild_exports, {
   applyStockDelta: () => applyStockDelta,
-  rebuildStockFromLedger: () => rebuildStockFromLedger
+  rebuildStockFromLedger: () => rebuildStockFromLedger,
+  recordStockLedger: () => recordStockLedger
 });
 function rebuildStockFromLedger(rows, packSize) {
   const size = packSize > 0 ? packSize : 10;
@@ -17655,6 +18455,17 @@ function applyStockDelta(current, deltaQuantity, deltaLoose, packSize) {
   const quantity = Math.floor(newTotal / size);
   const loose_quantity = newTotal - quantity * size;
   return { quantity, loose_quantity };
+}
+async function recordStockLedger(db2, entry) {
+  try {
+    await db2.run(
+      `INSERT INTO stock_ledger (medicine_id, batch_no, quantity, loose_quantity, transaction_type, transaction_id, business_date)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [entry.medicine_id, entry.batch_no, entry.quantity, entry.loose_quantity, entry.transaction_type, entry.transaction_id != null ? String(entry.transaction_id) : null]
+    );
+  } catch (err) {
+    console.warn("[Stock Ledger] Failed to record entry:", err);
+  }
 }
 var init_stockRebuild = __esm({
   "src/utils/stockRebuild.ts"() {
@@ -17905,27 +18716,58 @@ var init_migrationMeta = __esm({
 async function validateStagingDatabaseFile(dbPath) {
   const errors = [];
   const tableCounts = {};
-  if (!import_fs18.default.existsSync(dbPath)) {
+  if (!import_fs20.default.existsSync(dbPath)) {
     return { valid: false, errors: ["Database file does not exist"], tableCounts };
   }
-  const stat = import_fs18.default.statSync(dbPath);
+  const stat = import_fs20.default.statSync(dbPath);
   if (stat.size < 1024) {
     errors.push("Database file is too small to be a valid SQLite backup");
   }
   try {
     const Database6 = (await import("better-sqlite3")).default;
-    const checkDb = new Database6(dbPath, { readonly: true });
-    const integrity = checkDb.pragma("integrity_check");
-    if (!integrity?.[0] || integrity[0].integrity_check !== "ok") {
-      errors.push(`Integrity check failed: ${JSON.stringify(integrity)}`);
-    }
-    for (const table of REQUIRED_TABLES) {
-      const exists = checkDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table);
-      if (!exists) {
-        errors.push(`Missing required table: ${table}`);
+    let checkDb = new Database6(dbPath, { readonly: true });
+    let integrityCheckPassed = false;
+    try {
+      const integrity = checkDb.pragma("integrity_check");
+      if (integrity?.[0] && integrity[0].integrity_check === "ok") {
+        integrityCheckPassed = true;
       } else {
-        const row = checkDb.prepare(`SELECT COUNT(*) as cnt FROM ${table}`).get();
-        tableCounts[table] = row?.cnt ?? 0;
+        errors.push(`Integrity check failed: ${JSON.stringify(integrity)}`);
+      }
+    } catch (checkErr) {
+      if (String(checkErr?.message).includes("vtable constructor failed")) {
+        checkDb.close();
+        console.warn("[Validation] Database file has a damaged search index; purging index for integrity validation...");
+        const sqlite37 = (await import("sqlite3")).default;
+        const { open: open6 } = await import("sqlite");
+        const repairDb = await open6({ filename: dbPath, driver: sqlite37.Database });
+        try {
+          const { purgeMedicinesFts: purgeMedicinesFts2, dropFtsTriggers: dropFtsTriggers2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+          await dropFtsTriggers2(repairDb);
+          await purgeMedicinesFts2(repairDb);
+        } finally {
+          await repairDb.close();
+        }
+        checkDb = new Database6(dbPath, { readonly: true });
+        const recheck = checkDb.pragma("integrity_check");
+        if (recheck?.[0] && recheck[0].integrity_check === "ok") {
+          integrityCheckPassed = true;
+        } else {
+          errors.push(`Integrity check failed after index purge: ${JSON.stringify(recheck)}`);
+        }
+      } else {
+        errors.push(`Could not check database integrity: ${checkErr.message}`);
+      }
+    }
+    if (integrityCheckPassed) {
+      for (const table of REQUIRED_TABLES) {
+        const exists = checkDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table);
+        if (!exists) {
+          errors.push(`Missing required table: ${table}`);
+        } else {
+          const row = checkDb.prepare(`SELECT COUNT(*) as cnt FROM ${table}`).get();
+          tableCounts[table] = row?.cnt ?? 0;
+        }
       }
     }
     checkDb.close();
@@ -17934,11 +18776,11 @@ async function validateStagingDatabaseFile(dbPath) {
   }
   return { valid: errors.length === 0, errors, tableCounts };
 }
-var import_fs18, REQUIRED_TABLES;
+var import_fs20, REQUIRED_TABLES;
 var init_validateStagingDatabase = __esm({
   "src/utils/validateStagingDatabase.ts"() {
     "use strict";
-    import_fs18 = __toESM(require("fs"), 1);
+    import_fs20 = __toESM(require("fs"), 1);
     REQUIRED_TABLES = ["medicines", "inventory_master", "sales_invoices", "purchases"];
   }
 });
@@ -18036,6 +18878,16 @@ function parsePackSizeFromPackaging(packaging) {
   if (/\b\d+\s*x\s*\d+\b/i.test(trimmed)) {
     const parts = trimmed.split(/x/i);
     return (parseInt(parts[0], 10) || 1) * (parseInt(parts[1], 10) || 1);
+  }
+  const stripOfMatch = trimmed.match(/^\s*(?:STRIP|PACK|BOX|BLISTER)\s+OF\s+(\d+)/i);
+  if (stripOfMatch) {
+    const size2 = parseInt(stripOfMatch[1], 10);
+    if (size2 > 0) return size2;
+  }
+  const bottleOfMatch = trimmed.match(/^\s*BOTTLE\s+OF\s+(\d+)\s*ML\b/i);
+  if (bottleOfMatch) {
+    const size2 = parseInt(bottleOfMatch[1], 10);
+    if (size2 > 0) return size2;
   }
   const match = trimmed.match(COUNTABLE_UNIT_PATTERN);
   if (!match) return null;
@@ -18323,7 +19175,11 @@ async function importMedicine(row, db2) {
     igst: parseFloat(row["igst"] || "0") || 0,
     rack: row["rack"] || row["rack_no"] || row["rack_location"] || row["batch_rack"] || null,
     marketed_by: row["marketer_name"] || null,
-    schedule_type: row["therapeutic"] || "None",
+    schedule_type: row["schedule_type"] || row["schedule"] || row["schedule_class"] || "None",
+    therapeutic: row["therapeutic"] || row["therapeutic_class"] || null,
+    sub_therapeutic: row["sub_therapeutic"] || row["sub_therapeutic_class"] || null,
+    short_code: row["medicine_short_code"] || row["short_code"] || null,
+    ucode: row["ucode"] || row["mdm_itemcode"] || null,
     api_reference: apiReference,
     generic_name: apiReference,
     // generic_name mirrors composition from genericMap
@@ -18341,9 +19197,9 @@ async function flushMedicines(db2) {
     for (const m of medicineBatch) {
       try {
         const result = await db2.run(
-          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, rack, marketed_by, schedule_type, api_reference, generic_name, item_code, metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.rack, m.marketed_by, m.schedule_type, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
+          `INSERT INTO medicines (name, legacy_id, hsn_code, manufacturer, category, packaging, pack_size, item_type, rack, marketed_by, schedule_type, therapeutic, sub_therapeutic, short_code, ucode, api_reference, generic_name, item_code, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [m.name, m.legacy_id, m.hsn_code, m.manufacturer, m.category, m.packaging, m.pack_size, m.item_type, m.rack, m.marketed_by, m.schedule_type, m.therapeutic || null, m.sub_therapeutic || null, m.short_code || null, m.ucode || null, m.api_reference || null, m.generic_name || null, m.item_code || null, m.metadata || null]
         );
         medicineMap.set(m.legacy_id, result.lastID);
         medicineImportResult.inserted++;
@@ -19873,8 +20729,8 @@ async function runManualMigrationQueue(tasks) {
         const task = migrationQueue.shift();
         const taskIndex = completedTasks;
         currentMsgPrefix = `[File ${taskIndex + 1}/${totalTasks}] `;
-        const filePath = import_path22.default.join(MIGRATION_DIR, task.fileName);
-        if (!import_fs19.default.existsSync(filePath)) {
+        const filePath = import_path24.default.join(MIGRATION_DIR, task.fileName);
+        if (!import_fs21.default.existsSync(filePath)) {
           throw new Error(`File ${task.fileName} does not exist in MIGRATION SAMPEL folder.`);
         }
         const lowerFileName = task.fileName.toLowerCase();
@@ -19941,29 +20797,29 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
   let tempCsvPath = "";
   let tempProcessingPath = "";
   try {
-    const ext = import_path22.default.extname(originalFilePath).toLowerCase();
-    const basename = import_path22.default.basename(originalFilePath);
-    tempProcessingPath = import_path22.default.join(TEMP_DIR2, `proc_${Date.now()}_${basename}`);
-    import_fs19.default.copyFileSync(originalFilePath, tempProcessingPath);
+    const ext = import_path24.default.extname(originalFilePath).toLowerCase();
+    const basename = import_path24.default.basename(originalFilePath);
+    tempProcessingPath = import_path24.default.join(TEMP_DIR2, `proc_${Date.now()}_${basename}`);
+    import_fs21.default.copyFileSync(originalFilePath, tempProcessingPath);
     Object.assign(migrationStatus, { active: true, progress: 0, message: "Processing migration file...", file: basename, errorCount: 0 });
-    const archiveDir = import_path22.default.join(getAppDataDir(), "data", "archived_migrations");
-    if (!import_fs19.default.existsSync(archiveDir)) import_fs19.default.mkdirSync(archiveDir, { recursive: true });
-    if (import_fs19.default.existsSync(STAGING_DB_PATH)) {
+    const archiveDir = import_path24.default.join(getAppDataDir(), "data", "archived_migrations");
+    if (!import_fs21.default.existsSync(archiveDir)) import_fs21.default.mkdirSync(archiveDir, { recursive: true });
+    if (import_fs21.default.existsSync(STAGING_DB_PATH)) {
       try {
-        import_fs19.default.unlinkSync(STAGING_DB_PATH);
+        import_fs21.default.unlinkSync(STAGING_DB_PATH);
       } catch (_) {
       }
       try {
-        import_fs19.default.unlinkSync(STAGING_DB_PATH + "-wal");
+        import_fs21.default.unlinkSync(STAGING_DB_PATH + "-wal");
       } catch (_) {
       }
       try {
-        import_fs19.default.unlinkSync(STAGING_DB_PATH + "-shm");
+        import_fs21.default.unlinkSync(STAGING_DB_PATH + "-shm");
       } catch (_) {
       }
     }
     migrationStatus.message = "Creating staging database...";
-    if (import_fs19.default.existsSync(DB_PATH11)) {
+    if (import_fs21.default.existsSync(DB_PATH11)) {
       try {
         const Database6 = (await import("better-sqlite3")).default;
         const appDb = new Database6(DB_PATH11);
@@ -19972,7 +20828,7 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
       } catch (checkpointErr) {
         console.warn("[Migration Worker] Failed to checkpoint app.db WAL before copy:", checkpointErr);
       }
-      await import_fs19.default.promises.copyFile(DB_PATH11, STAGING_DB_PATH);
+      await import_fs21.default.promises.copyFile(DB_PATH11, STAGING_DB_PATH);
       migrationStatus.message = "Verifying staging database...";
       const stagingDb = await (0, import_sqlite6.open)({ filename: STAGING_DB_PATH, driver: import_sqlite35.default.Database });
       try {
@@ -19989,18 +20845,37 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
           throw new Error(`Integrity check result not ok: ${JSON.stringify(checkResult)}`);
         }
       } catch (integrityErr) {
-        throw new Error(`Failed to copy staging database securely: ${integrityErr.message}`);
+        if (String(integrityErr?.message).includes("vtable constructor failed")) {
+          console.warn("[Migration Worker] Staging DB has a damaged search index; purging index and re-verifying...");
+          const repairDb = await (0, import_sqlite6.open)({ filename: STAGING_DB_PATH, driver: import_sqlite35.default.Database });
+          try {
+            const { purgeMedicinesFts: purgeMedicinesFts2, dropFtsTriggers: dropFtsTriggers2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+            await dropFtsTriggers2(repairDb);
+            await purgeMedicinesFts2(repairDb);
+          } finally {
+            await repairDb.close();
+          }
+          const Database6 = (await import("better-sqlite3")).default;
+          const checkDb = new Database6(STAGING_DB_PATH, { readonly: true });
+          const checkResult = checkDb.pragma("integrity_check");
+          checkDb.close();
+          if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== "ok") {
+            throw new Error(`Integrity check result not ok after FTS purge: ${JSON.stringify(checkResult)}`);
+          }
+        } else {
+          throw new Error(`Failed to copy staging database securely: ${integrityErr.message}`);
+        }
       }
     }
     let actualFilePath = tempProcessingPath;
     let sqlFilePath = tempProcessingPath;
     if (ext === ".db") {
       migrationStatus.message = "Database backup detected \u2014 validating and loading into staging...";
-      import_fs19.default.copyFileSync(tempProcessingPath, STAGING_DB_PATH);
+      import_fs21.default.copyFileSync(tempProcessingPath, STAGING_DB_PATH);
       const validation = await validateStagingDatabaseFile(STAGING_DB_PATH);
       if (!validation.valid) {
         try {
-          import_fs19.default.unlinkSync(STAGING_DB_PATH);
+          import_fs21.default.unlinkSync(STAGING_DB_PATH);
         } catch (_) {
         }
         throw new Error(`Invalid database backup: ${validation.errors.join("; ")}`);
@@ -20014,7 +20889,7 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
       });
       if (!originalFilePath.includes("archived_migrations")) {
         try {
-          import_fs19.default.copyFileSync(tempProcessingPath, import_path22.default.join(archiveDir, basename));
+          import_fs21.default.copyFileSync(tempProcessingPath, import_path24.default.join(archiveDir, basename));
         } catch (archiveErr) {
           console.warn("Failed to archive migration file:", archiveErr);
         }
@@ -20027,8 +20902,8 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
       const sheetName = workbook.SheetNames[sheetIndex] || workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       const csvContent = XLSX3.utils.sheet_to_csv(worksheet);
-      tempCsvPath = import_path22.default.join(TEMP_DIR2, `converted_${Date.now()}.csv`);
-      import_fs19.default.writeFileSync(tempCsvPath, csvContent);
+      tempCsvPath = import_path24.default.join(TEMP_DIR2, `converted_${Date.now()}.csv`);
+      import_fs21.default.writeFileSync(tempCsvPath, csvContent);
       actualFilePath = tempCsvPath;
     }
     if (ext === ".csv" || ext === ".xlsx" || ext === ".xls") {
@@ -20039,13 +20914,13 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
       }
       if (!originalFilePath.includes("archived_migrations")) {
         try {
-          import_fs19.default.copyFileSync(tempProcessingPath, import_path22.default.join(archiveDir, basename));
+          import_fs21.default.copyFileSync(tempProcessingPath, import_path24.default.join(archiveDir, basename));
         } catch (archiveErr) {
           console.warn("Failed to archive migration file:", archiveErr);
         }
       }
-      if (tempCsvPath && import_fs19.default.existsSync(tempCsvPath)) {
-        import_fs19.default.unlinkSync(tempCsvPath);
+      if (tempCsvPath && import_fs21.default.existsSync(tempCsvPath)) {
+        import_fs21.default.unlinkSync(tempCsvPath);
       }
       return;
     } else if (ext === ".sql") {
@@ -20053,23 +20928,23 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
     } else if (ext === ".gz" || tempProcessingPath.toLowerCase().endsWith(".sql.gz") || tempProcessingPath.toLowerCase().endsWith(".db.gz")) {
       const isDb = tempProcessingPath.toLowerCase().endsWith(".db.gz");
       migrationStatus.message = isDb ? "Decompressing database backup snapshot..." : "Decompressing GZIP file...";
-      extractPath = import_path22.default.join(TEMP_DIR2, `extract_${Date.now()}`);
-      import_fs19.default.mkdirSync(extractPath, { recursive: true });
-      sqlFilePath = isDb ? STAGING_DB_PATH : import_path22.default.join(extractPath, "decompressed_backup.sql");
+      extractPath = import_path24.default.join(TEMP_DIR2, `extract_${Date.now()}`);
+      import_fs21.default.mkdirSync(extractPath, { recursive: true });
+      sqlFilePath = isDb ? STAGING_DB_PATH : import_path24.default.join(extractPath, "decompressed_backup.sql");
       await new Promise((resolve, reject) => {
         const gzStream = import_zlib4.default.createGunzip();
         gzStream.on("error", reject);
-        const writeStream = import_fs19.default.createWriteStream(sqlFilePath);
+        const writeStream = import_fs21.default.createWriteStream(sqlFilePath);
         writeStream.on("close", resolve);
         writeStream.on("finish", resolve);
         writeStream.on("error", reject);
-        import_fs19.default.createReadStream(tempProcessingPath).pipe(gzStream).pipe(writeStream);
+        import_fs21.default.createReadStream(tempProcessingPath).pipe(gzStream).pipe(writeStream);
       });
       if (isDb) {
         const validation = await validateStagingDatabaseFile(STAGING_DB_PATH);
         if (!validation.valid) {
           try {
-            import_fs19.default.unlinkSync(STAGING_DB_PATH);
+            import_fs21.default.unlinkSync(STAGING_DB_PATH);
           } catch (_) {
           }
           throw new Error(`Invalid database backup: ${validation.errors.join("; ")}`);
@@ -20083,7 +20958,7 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
         });
         if (!originalFilePath.includes("archived_migrations")) {
           try {
-            import_fs19.default.copyFileSync(tempProcessingPath, import_path22.default.join(archiveDir, basename));
+            import_fs21.default.copyFileSync(tempProcessingPath, import_path24.default.join(archiveDir, basename));
           } catch (archiveErr) {
             console.warn("Failed to archive migration file:", archiveErr);
           }
@@ -20091,54 +20966,74 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
         return;
       }
     } else if (ext === ".zip") {
-      extractPath = import_path22.default.join(TEMP_DIR2, `extract_${Date.now()}`);
-      import_fs19.default.mkdirSync(extractPath, { recursive: true });
+      extractPath = import_path24.default.join(TEMP_DIR2, `extract_${Date.now()}`);
+      import_fs21.default.mkdirSync(extractPath, { recursive: true });
       const headerBuf = Buffer.alloc(2);
-      const fdCheck = import_fs19.default.openSync(tempProcessingPath, "r");
-      import_fs19.default.readSync(fdCheck, headerBuf, 0, 2, 0);
-      import_fs19.default.closeSync(fdCheck);
+      const fdCheck = import_fs21.default.openSync(tempProcessingPath, "r");
+      import_fs21.default.readSync(fdCheck, headerBuf, 0, 2, 0);
+      import_fs21.default.closeSync(fdCheck);
       const isActuallyGzip = headerBuf[0] === 31 && headerBuf[1] === 139;
       if (isActuallyGzip) {
         migrationStatus.message = "Decompressing GZIP backup (detected inside .zip container)...";
-        sqlFilePath = import_path22.default.join(extractPath, "decompressed_backup.sql");
+        sqlFilePath = import_path24.default.join(extractPath, "decompressed_backup.sql");
         await new Promise((resolve, reject) => {
           const gzStream = import_zlib4.default.createGunzip();
           gzStream.on("error", reject);
-          const writeStream = import_fs19.default.createWriteStream(sqlFilePath);
+          const writeStream = import_fs21.default.createWriteStream(sqlFilePath);
           writeStream.on("close", resolve);
           writeStream.on("finish", resolve);
           writeStream.on("error", reject);
-          import_fs19.default.createReadStream(tempProcessingPath).pipe(gzStream).pipe(writeStream);
+          import_fs21.default.createReadStream(tempProcessingPath).pipe(gzStream).pipe(writeStream);
         });
       } else {
         try {
-          await import_fs19.default.createReadStream(tempProcessingPath).pipe(import_unzipper.default.Extract({ path: extractPath })).promise();
+          await import_fs21.default.createReadStream(tempProcessingPath).pipe(import_unzipper.default.Extract({ path: extractPath })).promise();
         } catch (unzipError) {
-          throw new Error(`Failed to extract ZIP file: ${unzipError.message}`);
+          try {
+            const { execSync: execSync4 } = await import("child_process");
+            execSync4(`tar -xf "${tempProcessingPath}" -C "${extractPath}"`);
+          } catch (_) {
+            throw new Error(`Failed to extract ZIP file: ${unzipError.message}`);
+          }
         }
         migrationStatus.message = "Scanning extracted files...";
-        const files = import_fs19.default.readdirSync(extractPath);
-        const dbFile = files.find((f) => f.toLowerCase().endsWith(".db") || f.toLowerCase().endsWith(".db.gz"));
-        if (dbFile) {
+        const findFileInDir = (dir, matcher) => {
+          try {
+            const list = import_fs21.default.readdirSync(dir);
+            for (const item of list) {
+              const fullPath = import_path24.default.join(dir, item);
+              const stat = import_fs21.default.statSync(fullPath);
+              if (stat.isDirectory()) {
+                const found = findFileInDir(fullPath, matcher);
+                if (found) return found;
+              } else if (matcher(item)) {
+                return fullPath;
+              }
+            }
+          } catch (_) {
+          }
+          return null;
+        };
+        const dbFilePath = findFileInDir(extractPath, (f) => f.toLowerCase().endsWith(".db") || f.toLowerCase().endsWith(".db.gz"));
+        if (dbFilePath) {
           migrationStatus.message = "Database file detected in ZIP. Loading database directly...";
-          const dbFilePath = import_path22.default.join(extractPath, dbFile);
-          if (dbFile.endsWith(".gz")) {
+          if (dbFilePath.toLowerCase().endsWith(".gz")) {
             await new Promise((resolve, reject) => {
               const gzStream = import_zlib4.default.createGunzip();
               gzStream.on("error", reject);
-              const writeStream = import_fs19.default.createWriteStream(STAGING_DB_PATH);
+              const writeStream = import_fs21.default.createWriteStream(STAGING_DB_PATH);
               writeStream.on("close", resolve);
               writeStream.on("finish", resolve);
               writeStream.on("error", reject);
-              import_fs19.default.createReadStream(dbFilePath).pipe(gzStream).pipe(writeStream);
+              import_fs21.default.createReadStream(dbFilePath).pipe(gzStream).pipe(writeStream);
             });
           } else {
-            import_fs19.default.copyFileSync(dbFilePath, STAGING_DB_PATH);
+            import_fs21.default.copyFileSync(dbFilePath, STAGING_DB_PATH);
           }
           const zipDbValidation = await validateStagingDatabaseFile(STAGING_DB_PATH);
           if (!zipDbValidation.valid) {
             try {
-              import_fs19.default.unlinkSync(STAGING_DB_PATH);
+              import_fs21.default.unlinkSync(STAGING_DB_PATH);
             } catch (_) {
             }
             throw new Error(`Invalid database backup in ZIP: ${zipDbValidation.errors.join("; ")}`);
@@ -20152,23 +21047,37 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
           });
           if (!originalFilePath.includes("archived_migrations")) {
             try {
-              import_fs19.default.copyFileSync(tempProcessingPath, import_path22.default.join(archiveDir, basename));
+              import_fs21.default.copyFileSync(tempProcessingPath, import_path24.default.join(archiveDir, basename));
             } catch (archiveErr) {
               console.warn("Failed to archive migration file:", archiveErr);
             }
           }
           return;
         }
-        const sqlFile = files.find((f) => f.toLowerCase().endsWith(".sql"));
-        if (!sqlFile) {
-          throw new Error("No .sql or .db file found in the ZIP archive");
+        const foundSql = findFileInDir(extractPath, (f) => f.toLowerCase().endsWith(".sql") || f.toLowerCase().endsWith(".sql.gz"));
+        if (!foundSql) {
+          throw new Error("No .sql or .db file found inside the ZIP archive");
         }
-        sqlFilePath = import_path22.default.join(extractPath, sqlFile);
+        if (foundSql.toLowerCase().endsWith(".gz")) {
+          migrationStatus.message = "Decompressing .sql.gz found inside ZIP archive...";
+          sqlFilePath = import_path24.default.join(extractPath, "decompressed_nested_backup.sql");
+          await new Promise((resolve, reject) => {
+            const gzStream = import_zlib4.default.createGunzip();
+            gzStream.on("error", reject);
+            const writeStream = import_fs21.default.createWriteStream(sqlFilePath);
+            writeStream.on("close", resolve);
+            writeStream.on("finish", resolve);
+            writeStream.on("error", reject);
+            import_fs21.default.createReadStream(foundSql).pipe(gzStream).pipe(writeStream);
+          });
+        } else {
+          sqlFilePath = foundSql;
+        }
       }
     } else if (ext === ".tar" || ext === ".tgz" || tempProcessingPath.toLowerCase().endsWith(".tar.gz")) {
       migrationStatus.message = "Extracting TAR archive...";
-      extractPath = import_path22.default.join(TEMP_DIR2, `extract_${Date.now()}`);
-      import_fs19.default.mkdirSync(extractPath, { recursive: true });
+      extractPath = import_path24.default.join(TEMP_DIR2, `extract_${Date.now()}`);
+      import_fs21.default.mkdirSync(extractPath, { recursive: true });
       const { execSync: execSync4 } = await import("child_process");
       try {
         execSync4(`tar -xf "${tempProcessingPath}" -C "${extractPath}"`);
@@ -20176,10 +21085,10 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
         throw new Error(`Failed to extract TAR archive: ${tarError.message}`);
       }
       const findSqlFile = (dir) => {
-        const list = import_fs19.default.readdirSync(dir);
+        const list = import_fs21.default.readdirSync(dir);
         for (const item of list) {
-          const fullPath = import_path22.default.join(dir, item);
-          const stat = import_fs19.default.statSync(fullPath);
+          const fullPath = import_path24.default.join(dir, item);
+          const stat = import_fs21.default.statSync(fullPath);
           if (stat.isDirectory()) {
             const found = findSqlFile(fullPath);
             if (found) return found;
@@ -20211,7 +21120,7 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
     }
     if (!originalFilePath.includes("archived_migrations")) {
       try {
-        import_fs19.default.copyFileSync(tempProcessingPath, import_path22.default.join(archiveDir, basename));
+        import_fs21.default.copyFileSync(tempProcessingPath, import_path24.default.join(archiveDir, basename));
       } catch (archiveErr) {
         console.warn("Failed to archive migration file:", archiveErr);
       }
@@ -20221,16 +21130,16 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
     Object.assign(migrationStatus, { active: false, progress: 0, message: `Failed: ${err.message}`, file: null });
     throw err;
   } finally {
-    if (tempProcessingPath && import_fs19.default.existsSync(tempProcessingPath)) {
+    if (tempProcessingPath && import_fs21.default.existsSync(tempProcessingPath)) {
       try {
-        import_fs19.default.unlinkSync(tempProcessingPath);
+        import_fs21.default.unlinkSync(tempProcessingPath);
       } catch (cleanupError) {
         console.warn("Failed to cleanup temp copy:", cleanupError);
       }
     }
-    if (extractPath && import_fs19.default.existsSync(extractPath)) {
+    if (extractPath && import_fs21.default.existsSync(extractPath)) {
       try {
-        import_fs19.default.rmSync(extractPath, { recursive: true, force: true });
+        import_fs21.default.rmSync(extractPath, { recursive: true, force: true });
       } catch (cleanupError) {
         console.warn("Failed to cleanup extraction directory:", cleanupError);
       }
@@ -20238,7 +21147,7 @@ async function processMigrationFile(originalFilePath, dataType, mapping, skipLin
   }
 }
 async function detectDumpFormat(sqlPath) {
-  const fileStream = import_fs19.default.createReadStream(sqlPath, { encoding: "utf8" });
+  const fileStream = import_fs21.default.createReadStream(sqlPath, { encoding: "utf8" });
   const rl = import_readline.default.createInterface({ input: fileStream, crlfDelay: Infinity });
   const headerLines = [];
   for await (const line of rl) {
@@ -20593,7 +21502,7 @@ async function parseAndImportPgDump(sqlPath, targetDbPath) {
   }
 }
 async function streamPgDump(sqlPath, handlers, db2) {
-  const fileStream = import_fs19.default.createReadStream(sqlPath, { encoding: "utf8" });
+  const fileStream = import_fs21.default.createReadStream(sqlPath, { encoding: "utf8" });
   const rl = import_readline.default.createInterface({ input: fileStream, crlfDelay: Infinity });
   let currentTable = null;
   let currentColumns = [];
@@ -20669,8 +21578,8 @@ async function streamPgDump(sqlPath, handlers, db2) {
   fileStream.destroy();
 }
 async function generateMigrationReport(db2, stats) {
-  const reportsDir = import_path22.default.join(getAppDataDir(), "data", "migration_reports");
-  if (!import_fs19.default.existsSync(reportsDir)) import_fs19.default.mkdirSync(reportsDir, { recursive: true });
+  const reportsDir = import_path24.default.join(getAppDataDir(), "data", "migration_reports");
+  if (!import_fs21.default.existsSync(reportsDir)) import_fs21.default.mkdirSync(reportsDir, { recursive: true });
   const summary = {
     migration_date: (/* @__PURE__ */ new Date()).toISOString(),
     source_format: "PostgreSQL pg_dump",
@@ -20689,8 +21598,8 @@ async function generateMigrationReport(db2, stats) {
       purchase_orders: purchaseOrderMap.size
     }
   };
-  import_fs19.default.writeFileSync(
-    import_path22.default.join(reportsDir, "migration_summary.json"),
+  import_fs21.default.writeFileSync(
+    import_path24.default.join(reportsDir, "migration_summary.json"),
     JSON.stringify(summary, null, 2)
   );
   const counts = {};
@@ -20703,8 +21612,8 @@ async function generateMigrationReport(db2, stats) {
       counts[tbl] = -1;
     }
   }
-  import_fs19.default.writeFileSync(
-    import_path22.default.join(reportsDir, "row_counts.json"),
+  import_fs21.default.writeFileSync(
+    import_path24.default.join(reportsDir, "row_counts.json"),
     JSON.stringify(counts, null, 2)
   );
   console.log("Migration reports saved to:", reportsDir);
@@ -20716,7 +21625,7 @@ async function parseAndImportLegacySQL(sqlPath, targetDbPath) {
     await db2.run("PRAGMA busy_timeout = 30000");
     await ensureStagingFts(db2);
     await ensureMigrationErrorsTable(db2);
-    const fileStream = import_fs19.default.createReadStream(sqlPath);
+    const fileStream = import_fs21.default.createReadStream(sqlPath);
     const rl = import_readline.default.createInterface({
       input: fileStream,
       crlfDelay: Infinity
@@ -20750,7 +21659,7 @@ async function parseAndImportLegacySQL(sqlPath, targetDbPath) {
         const errMsg = err.message || "Unknown processing error";
         await db2.run(
           "INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)",
-          [import_path22.default.basename(sqlPath), linesProcessed2, trimmedLine.slice(0, 1e3), errMsg]
+          [import_path24.default.basename(sqlPath), linesProcessed2, trimmedLine.slice(0, 1e3), errMsg]
         );
       }
       if (migrated) {
@@ -20775,14 +21684,14 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
     await ensureMigrationErrorsTable(db2);
     if (skipLines > 0) {
       try {
-        const content = import_fs19.default.readFileSync(csvPath, "utf8");
+        const content = import_fs21.default.readFileSync(csvPath, "utf8");
         const lines = content.split(/\r?\n/).slice(0, skipLines);
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i].trim();
           if (line) {
             await db2.run(
               "INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)",
-              [import_path22.default.basename(csvPath), i + 1, line, "Skipped Row (Header)"]
+              [import_path24.default.basename(csvPath), i + 1, line, "Skipped Row (Header)"]
             );
           }
         }
@@ -20862,7 +21771,7 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
         const errorMsg = validation.errors.join("; ");
         await db2.run(
           "INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)",
-          [import_path22.default.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), errorMsg]
+          [import_path24.default.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), errorMsg]
         );
         insertCount++;
         return;
@@ -21497,7 +22406,7 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
       }
     };
     await new Promise((resolve, reject) => {
-      const stream = import_fs19.default.createReadStream(csvPath).pipe((0, import_csv_parser2.default)({ skipLines })).on("headers", async (headers) => {
+      const stream = import_fs21.default.createReadStream(csvPath).pipe((0, import_csv_parser2.default)({ skipLines })).on("headers", async (headers) => {
         if (dataType === "inventory" || dataType === "combined") {
           for (const rawHeader of headers) {
             const rawColName = rawHeader.trim();
@@ -21589,12 +22498,12 @@ async function parseAndImportCSV(csvPath, targetDbPath, dataType, mapping, skipL
     await db2.close();
   }
 }
-var import_fs19, import_path22, import_url19, import_unzipper, import_zlib4, import_sqlite6, import_sqlite35, import_readline, import_csv_parser2, XLSX3, __filename18, __dirname18, MIGRATION_DIR, TEMP_DIR2, DB_PATH11, STAGING_DB_PATH, currentMsgPrefix, migrationStatus, isQueueRunning, migrationQueue;
+var import_fs21, import_path24, import_url19, import_unzipper, import_zlib4, import_sqlite6, import_sqlite35, import_readline, import_csv_parser2, XLSX3, __filename18, __dirname18, MIGRATION_DIR, TEMP_DIR2, DB_PATH11, STAGING_DB_PATH, currentMsgPrefix, migrationStatus, isQueueRunning, migrationQueue;
 var init_migrationWorker = __esm({
   "src/worker/migrationWorker.ts"() {
     "use strict";
-    import_fs19 = __toESM(require("fs"), 1);
-    import_path22 = __toESM(require("path"), 1);
+    import_fs21 = __toESM(require("fs"), 1);
+    import_path24 = __toESM(require("path"), 1);
     import_url19 = require("url");
     import_unzipper = __toESM(require("unzipper"), 1);
     import_zlib4 = __toESM(require("zlib"), 1);
@@ -21626,11 +22535,11 @@ var init_migrationWorker = __esm({
     init_inventoryParser();
     init_salesParser();
     __filename18 = (0, import_url19.fileURLToPath)(import_meta_url);
-    __dirname18 = import_path22.default.dirname(__filename18);
-    MIGRATION_DIR = import_path22.default.join(getAppDataDir(), "MIGRATION SAMPEL");
-    TEMP_DIR2 = import_path22.default.join(getAppDataDir(), "data", "temp_migration");
+    __dirname18 = import_path24.default.dirname(__filename18);
+    MIGRATION_DIR = import_path24.default.join(getAppDataDir(), "MIGRATION SAMPEL");
+    TEMP_DIR2 = import_path24.default.join(getAppDataDir(), "data", "temp_migration");
     DB_PATH11 = config.dbPath;
-    STAGING_DB_PATH = import_path22.default.join(import_path22.default.dirname(DB_PATH11), "staging.db");
+    STAGING_DB_PATH = import_path24.default.join(import_path24.default.dirname(DB_PATH11), "staging.db");
     currentMsgPrefix = "";
     migrationStatus = new Proxy({
       active: false,
@@ -21652,8 +22561,8 @@ var init_migrationWorker = __esm({
         return true;
       }
     });
-    if (!import_fs19.default.existsSync(MIGRATION_DIR)) import_fs19.default.mkdirSync(MIGRATION_DIR, { recursive: true });
-    if (!import_fs19.default.existsSync(TEMP_DIR2)) import_fs19.default.mkdirSync(TEMP_DIR2, { recursive: true });
+    if (!import_fs21.default.existsSync(MIGRATION_DIR)) import_fs21.default.mkdirSync(MIGRATION_DIR, { recursive: true });
+    if (!import_fs21.default.existsSync(TEMP_DIR2)) import_fs21.default.mkdirSync(TEMP_DIR2, { recursive: true });
     isQueueRunning = false;
     migrationQueue = [];
   }
@@ -21682,6 +22591,18 @@ __export(stockCalculatorWorker_exports, {
 async function recalculateStockLimits() {
   const db2 = await dbManager.getConnection();
   try {
+    await db2.run(`
+      CREATE TABLE IF NOT EXISTS stock_config (
+        medicine_id INTEGER PRIMARY KEY,
+        avg_daily_sales REAL DEFAULT 0,
+        lead_time_days INTEGER DEFAULT 7,
+        safety_factor REAL DEFAULT 1.5,
+        min_stock_level INTEGER DEFAULT 10,
+        max_stock_level INTEGER DEFAULT 30,
+        reorder_level INTEGER DEFAULT 12,
+        last_calculated DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
     const medicines = await db2.all(
       `SELECT id, name FROM medicines WHERE id IN (
          SELECT DISTINCT medicine_id FROM inventory_master
@@ -21722,8 +22643,8 @@ async function recalculateStockLimits() {
       );
     }
     console.log("[StockCalculatorWorker] Stock limits recalculated successfully");
-  } finally {
-    await dbManager.close();
+  } catch (err) {
+    console.error("[StockCalculatorWorker] Recalculation error:", err);
   }
 }
 function startStockCalculatorWorker(intervalMs = 864e5) {
@@ -21734,9 +22655,38 @@ function startStockCalculatorWorker(intervalMs = 864e5) {
   }
   if (intervalId) return;
   console.log(`[StockCalculatorWorker] Starting with interval ${intervalMs}ms`);
-  recalculateStockLimits().catch(
-    (err) => console.error("[StockCalculatorWorker] Initial calculation failed:", err)
-  );
+  (async () => {
+    try {
+      const db2 = await dbManager.getConnection();
+      await db2.run(`
+        CREATE TABLE IF NOT EXISTS stock_config (
+          medicine_id INTEGER PRIMARY KEY,
+          avg_daily_sales REAL DEFAULT 0,
+          lead_time_days INTEGER DEFAULT 7,
+          safety_factor REAL DEFAULT 1.5,
+          min_stock_level INTEGER DEFAULT 10,
+          max_stock_level INTEGER DEFAULT 30,
+          reorder_level INTEGER DEFAULT 12,
+          last_calculated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      const row = await db2.get(
+        `SELECT MAX(last_calculated) as last_calc FROM stock_config`
+      );
+      if (row && row.last_calc) {
+        const lastTime = new Date(row.last_calc).getTime();
+        const now = Date.now();
+        const diffMs = now - lastTime;
+        if (diffMs < intervalMs) {
+          console.log(`[StockCalculatorWorker] Stock limits were calculated ${(diffMs / 36e5).toFixed(1)}h ago. Skipping boot recalculation.`);
+          return;
+        }
+      }
+      await recalculateStockLimits();
+    } catch (err) {
+      console.error("[StockCalculatorWorker] Initial calculation check failed:", err);
+    }
+  })();
   intervalId = setInterval(() => {
     recalculateStockLimits().catch(
       (err) => console.error("[StockCalculatorWorker] Periodic calculation failed:", err)
@@ -21841,7 +22791,7 @@ async function readCsvHeaders(filePath, skipLines = 0) {
   const samples = [];
   let totalRows = 0;
   await new Promise((resolve, reject) => {
-    import_fs20.default.createReadStream(filePath).pipe((0, import_csv_parser3.default)({ skipLines })).on("headers", (h) => headers.push(...h)).on("data", (row) => {
+    import_fs22.default.createReadStream(filePath).pipe((0, import_csv_parser3.default)({ skipLines })).on("headers", (h) => headers.push(...h)).on("data", (row) => {
       totalRows++;
       if (samples.length < 100) samples.push(row);
     }).on("end", resolve).on("error", reject);
@@ -21869,7 +22819,7 @@ function readExcelHeaders(filePath, skipLines = 0, sheetIdx = 0) {
   }
   return { headers, samples, sheetNames: wb.SheetNames, totalRows };
 }
-var import_express3, import_sqlite7, import_sqlite36, import_path23, import_url20, import_fs20, import_multer, XLSX4, import_csv_parser3, __filename19, __dirname19, DB_PATH12, MIGRATION_DIR2, STAGING_DB_PATH2, openConnections, stagingDbLocked, ALLOWED_MIGRATION_EXTENSIONS, MAX_MIGRATION_SIZE, storage, upload, router3, migration_default;
+var import_express3, import_sqlite7, import_sqlite36, import_path25, import_url20, import_fs22, import_multer, XLSX4, import_csv_parser3, __filename19, __dirname19, DB_PATH12, MIGRATION_DIR2, STAGING_DB_PATH2, openConnections, stagingDbLocked, ALLOWED_MIGRATION_EXTENSIONS, MAX_MIGRATION_SIZE, storage, upload, router3, migration_default;
 var init_migration = __esm({
   "src/routes/migration.ts"() {
     "use strict";
@@ -21877,9 +22827,9 @@ var init_migration = __esm({
     import_sqlite7 = require("sqlite");
     import_sqlite36 = __toESM(require("sqlite3"), 1);
     init_connection();
-    import_path23 = __toESM(require("path"), 1);
+    import_path25 = __toESM(require("path"), 1);
     import_url20 = require("url");
-    import_fs20 = __toESM(require("fs"), 1);
+    import_fs22 = __toESM(require("fs"), 1);
     import_multer = __toESM(require("multer"), 1);
     XLSX4 = __toESM(require("xlsx"), 1);
     init_migrationWorker();
@@ -21891,11 +22841,11 @@ var init_migration = __esm({
     init_reportCutover();
     init_config();
     __filename19 = (0, import_url20.fileURLToPath)(import_meta_url);
-    __dirname19 = import_path23.default.dirname(__filename19);
+    __dirname19 = import_path25.default.dirname(__filename19);
     DB_PATH12 = config.dbPath;
-    MIGRATION_DIR2 = import_path23.default.join(getAppDataDir(), "MIGRATION SAMPEL");
-    STAGING_DB_PATH2 = import_path23.default.join(import_path23.default.dirname(DB_PATH12), "staging.db");
-    if (!import_fs20.default.existsSync(MIGRATION_DIR2)) import_fs20.default.mkdirSync(MIGRATION_DIR2, { recursive: true });
+    MIGRATION_DIR2 = import_path25.default.join(getAppDataDir(), "MIGRATION SAMPEL");
+    STAGING_DB_PATH2 = import_path25.default.join(import_path25.default.dirname(DB_PATH12), "staging.db");
+    if (!import_fs22.default.existsSync(MIGRATION_DIR2)) import_fs22.default.mkdirSync(MIGRATION_DIR2, { recursive: true });
     openConnections = /* @__PURE__ */ new Set();
     stagingDbLocked = false;
     ALLOWED_MIGRATION_EXTENSIONS = /\.(zip|sql|gz|tgz|csv|xlsx|xls|db)$/i;
@@ -21905,7 +22855,7 @@ var init_migration = __esm({
         cb(null, MIGRATION_DIR2);
       },
       filename: (_req, file, cb) => {
-        const sanitized = import_path23.default.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, "_");
+        const sanitized = import_path25.default.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, "_");
         cb(null, `${Date.now()}-${sanitized}`);
       }
     });
@@ -21967,9 +22917,9 @@ var init_migration = __esm({
     router3.post("/analyze", async (req, res) => {
       const { fileName, skipLines } = req.body;
       if (!fileName) return res.status(400).json({ error: "fileName required" });
-      const filePath = import_path23.default.join(MIGRATION_DIR2, fileName);
-      if (!import_fs20.default.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
-      const ext = import_path23.default.extname(fileName).toLowerCase();
+      const filePath = import_path25.default.join(MIGRATION_DIR2, fileName);
+      if (!import_fs22.default.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+      const ext = import_path25.default.extname(fileName).toLowerCase();
       const skipCount = parseInt(skipLines) || 0;
       try {
         let headers = [];
@@ -21992,7 +22942,7 @@ var init_migration = __esm({
           sheetNames = r.sheetNames;
           totalRows = r.totalRows;
         }
-        const stat = import_fs20.default.statSync(filePath);
+        const stat = import_fs22.default.statSync(filePath);
         const lowercaseHeaders = headers.map((h) => h.toLowerCase().trim());
         const detected = detectDataModules(headers);
         res.json({
@@ -22013,10 +22963,10 @@ var init_migration = __esm({
     router3.post("/pre-migration-analyze", async (req, res) => {
       const { fileName, skipLines, sheetIndex, userMapping } = req.body;
       if (!fileName) return res.status(400).json({ error: "fileName required" });
-      const filePath = import_path23.default.join(MIGRATION_DIR2, fileName);
-      if (!import_fs20.default.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+      const filePath = import_path25.default.join(MIGRATION_DIR2, fileName);
+      if (!import_fs22.default.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
       try {
-        const ext = import_path23.default.extname(fileName).toLowerCase().replace(".", "");
+        const ext = import_path25.default.extname(fileName).toLowerCase().replace(".", "");
         const skipCount = parseInt(skipLines) || 0;
         const sheetIdx = parseInt(sheetIndex) || 0;
         let headers = [];
@@ -22172,7 +23122,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/errors", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 5e3);
       const offset = parseInt(String(req.query.offset || "0"), 10) || 0;
       try {
@@ -22190,7 +23140,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/inventory", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 5e3);
       const offset = parseInt(String(req.query.offset || "0"), 10) || 0;
       try {
@@ -22210,7 +23160,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/sales", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 5e3);
       const offset = parseInt(String(req.query.offset || "0"), 10) || 0;
       try {
@@ -22230,7 +23180,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/purchases", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 5e3);
       const offset = parseInt(String(req.query.offset || "0"), 10) || 0;
       try {
@@ -22249,7 +23199,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/returns", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json({ rows: [], total: 0 });
       const limit = Math.min(parseInt(String(req.query.limit || "500"), 10) || 500, 5e3);
       const offset = parseInt(String(req.query.offset || "0"), 10) || 0;
       try {
@@ -22269,8 +23219,8 @@ var init_migration = __esm({
     });
     router3.delete("/staging/rollback", async (_req, res) => {
       try {
-        if (import_fs20.default.existsSync(STAGING_DB_PATH2)) {
-          import_fs20.default.unlinkSync(STAGING_DB_PATH2);
+        if (import_fs22.default.existsSync(STAGING_DB_PATH2)) {
+          import_fs22.default.unlinkSync(STAGING_DB_PATH2);
         }
         Object.assign(migrationStatus, { active: false, progress: 0, message: "Idle", file: null, isStagingReady: false, errorCount: 0 });
         res.json({ success: true, message: "Staging cleared. Ready for a fresh migration." });
@@ -22279,7 +23229,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/summary", async (_req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) {
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) {
         return res.json({ success: true, ready: false, stats: {}, errorCount: 0, conflictCount: 0 });
       }
       try {
@@ -22323,7 +23273,7 @@ var init_migration = __esm({
       }
     });
     router3.get("/staging/conflicts", async (_req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.json([]);
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.json([]);
       try {
         const db2 = await openStagingDb();
         const rows = await db2.all(`
@@ -22347,7 +23297,7 @@ var init_migration = __esm({
       if (!conflictId || !resolution) {
         return res.status(400).json({ error: "conflictId and resolution are required" });
       }
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) {
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) {
         return res.status(400).json({ error: "No staging database found" });
       }
       const allowed = ["merge", "overwrite", "skip"];
@@ -22418,7 +23368,7 @@ var init_migration = __esm({
       try {
         const db2 = await dbManager.getConnection();
         const snap = await db2.get("SELECT * FROM migration_snapshots WHERE id = ?", [snapshotId]);
-        if (!snap?.backup_path || !import_fs20.default.existsSync(snap.backup_path)) {
+        if (!snap?.backup_path || !import_fs22.default.existsSync(snap.backup_path)) {
           return res.status(404).json({ error: "Snapshot backup file not found on disk" });
         }
         try {
@@ -22428,16 +23378,16 @@ var init_migration = __esm({
         }
         await closeAllStagingConnections();
         await dbManager.close(true);
-        if (import_fs20.default.existsSync(DB_PATH12)) {
+        if (import_fs22.default.existsSync(DB_PATH12)) {
           const emergency = DB_PATH12 + ".pre_restore_" + Date.now();
-          import_fs20.default.copyFileSync(DB_PATH12, emergency);
+          import_fs22.default.copyFileSync(DB_PATH12, emergency);
         }
-        import_fs20.default.copyFileSync(snap.backup_path, DB_PATH12);
+        import_fs22.default.copyFileSync(snap.backup_path, DB_PATH12);
         ["app.db-wal", "app.db-shm"].forEach((f) => {
-          const p = import_path23.default.join(import_path23.default.dirname(DB_PATH12), f);
-          if (import_fs20.default.existsSync(p)) {
+          const p = import_path25.default.join(import_path25.default.dirname(DB_PATH12), f);
+          if (import_fs22.default.existsSync(p)) {
             try {
-              import_fs20.default.unlinkSync(p);
+              import_fs22.default.unlinkSync(p);
             } catch (_) {
             }
           }
@@ -22466,7 +23416,7 @@ var init_migration = __esm({
       }
     });
     router3.post("/staging/finalize", async (req, res) => {
-      if (!import_fs20.default.existsSync(STAGING_DB_PATH2)) return res.status(400).json({ error: "No staging DB found" });
+      if (!import_fs22.default.existsSync(STAGING_DB_PATH2)) return res.status(400).json({ error: "No staging DB found" });
       const { regenerateInvoices, reportCutoverDate } = req.body;
       let backupPath = null;
       try {
@@ -22507,25 +23457,53 @@ var init_migration = __esm({
         } catch (ftsErr) {
           console.warn("[Migration Finalize] Could not verify staging medicines_fts:", ftsErr.message);
         }
-        try {
+        {
           const Database6 = (await import("better-sqlite3")).default;
-          const tempStagingDb = new Database6(STAGING_DB_PATH2);
-          tempStagingDb.pragma("wal_checkpoint(TRUNCATE)");
-          tempStagingDb.pragma("journal_mode = DELETE");
-          tempStagingDb.close();
-        } catch (checkpointErr) {
-          console.warn("[Migration Finalize] Staging DB checkpoint warning:", checkpointErr);
+          let tempStagingDb = null;
+          try {
+            tempStagingDb = new Database6(STAGING_DB_PATH2);
+            tempStagingDb.pragma("wal_checkpoint(TRUNCATE)");
+            tempStagingDb.pragma("journal_mode = DELETE");
+          } catch (checkpointErr) {
+            console.warn("[Migration Finalize] Staging DB checkpoint warning:", checkpointErr);
+          } finally {
+            try {
+              tempStagingDb?.close();
+            } catch (_) {
+            }
+          }
         }
         try {
           const Database6 = (await import("better-sqlite3")).default;
           const checkDb = new Database6(STAGING_DB_PATH2, { readonly: true });
-          const checkResult = checkDb.pragma("integrity_check");
-          checkDb.close();
+          let checkResult;
+          try {
+            checkResult = checkDb.pragma("integrity_check");
+          } finally {
+            try {
+              checkDb.close();
+            } catch (_) {
+            }
+          }
           if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== "ok") {
             return res.status(400).json({ error: `Staging database integrity validation failed: ${JSON.stringify(checkResult)}` });
           }
         } catch (integrityErr) {
-          return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
+          if (String(integrityErr?.message).includes("vtable constructor failed")) {
+            console.warn("[Migration Finalize] Staging DB has damaged search index; purging index before final swap...");
+            const sqlite37 = (await import("sqlite3")).default;
+            const { open: open6 } = await import("sqlite");
+            const repairDb = await open6({ filename: STAGING_DB_PATH2, driver: sqlite37.Database });
+            try {
+              const { purgeMedicinesFts: purgeMedicinesFts2, dropFtsTriggers: dropFtsTriggers2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+              await dropFtsTriggers2(repairDb);
+              await purgeMedicinesFts2(repairDb);
+            } finally {
+              await repairDb.close();
+            }
+          } else {
+            return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
+          }
         }
         try {
           await closeAllStagingConnections();
@@ -22535,51 +23513,73 @@ var init_migration = __esm({
           console.warn("Failed to stop workers or close staging connections:", err);
         }
         await dbManager.close(true);
-        if (import_fs20.default.existsSync(DB_PATH12)) {
+        dbManager.suspend();
+        if (import_fs22.default.existsSync(DB_PATH12)) {
+          const Database6 = (await import("better-sqlite3")).default;
+          let tempAppDb = null;
           try {
-            const Database6 = (await import("better-sqlite3")).default;
-            const tempAppDb = new Database6(DB_PATH12, { timeout: 1e4 });
+            tempAppDb = new Database6(DB_PATH12, { timeout: 1e4 });
             tempAppDb.pragma("wal_checkpoint(TRUNCATE)");
             tempAppDb.pragma("journal_mode = DELETE");
-            tempAppDb.close();
           } catch (checkpointErr) {
             console.warn("[Migration Finalize] Active DB checkpoint warning:", checkpointErr);
+          } finally {
+            try {
+              tempAppDb?.close();
+            } catch (_) {
+            }
           }
         }
         const timestamp = Date.now();
         backupPath = DB_PATH12 + ".bak_" + timestamp;
-        if (import_fs20.default.existsSync(DB_PATH12)) {
-          import_fs20.default.copyFileSync(DB_PATH12, backupPath);
+        if (import_fs22.default.existsSync(DB_PATH12)) {
+          import_fs22.default.copyFileSync(DB_PATH12, backupPath);
         }
         ["app.db-wal", "app.db-shm", "staging.db-wal", "staging.db-shm"].forEach((f) => {
-          const p = import_path23.default.join(import_path23.default.dirname(DB_PATH12), f);
-          if (import_fs20.default.existsSync(p)) {
+          const p = import_path25.default.join(import_path25.default.dirname(DB_PATH12), f);
+          if (import_fs22.default.existsSync(p)) {
             try {
-              import_fs20.default.unlinkSync(p);
+              import_fs22.default.unlinkSync(p);
             } catch (_) {
             }
           }
         });
-        import_fs20.default.copyFileSync(STAGING_DB_PATH2, DB_PATH12);
+        import_fs22.default.copyFileSync(STAGING_DB_PATH2, DB_PATH12);
         try {
           const Database6 = (await import("better-sqlite3")).default;
           const checkDb = new Database6(DB_PATH12, { readonly: true });
-          const checkResult = checkDb.pragma("integrity_check");
-          checkDb.close();
+          let checkResult;
+          try {
+            checkResult = checkDb.pragma("integrity_check");
+          } finally {
+            try {
+              checkDb.close();
+            } catch (_) {
+            }
+          }
           if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== "ok") {
             throw new Error(`Integrity check failed: ${JSON.stringify(checkResult)}`);
           }
           try {
-            import_fs20.default.unlinkSync(STAGING_DB_PATH2);
+            import_fs22.default.unlinkSync(STAGING_DB_PATH2);
           } catch (_) {
           }
         } catch (integrityErr) {
-          console.error("[Migration Finalize] Swapped app.db integrity check failed:", integrityErr);
-          if (backupPath && import_fs20.default.existsSync(backupPath)) {
-            import_fs20.default.copyFileSync(backupPath, DB_PATH12);
+          if (String(integrityErr?.message).includes("vtable constructor failed")) {
+            console.warn("[Migration Finalize] Swapped app.db has a damaged search index; will rebuild index on connection boot.");
+            try {
+              import_fs22.default.unlinkSync(STAGING_DB_PATH2);
+            } catch (_) {
+            }
+          } else {
+            console.error("[Migration Finalize] Swapped app.db integrity check failed:", integrityErr);
+            if (backupPath && import_fs22.default.existsSync(backupPath)) {
+              import_fs22.default.copyFileSync(backupPath, DB_PATH12);
+            }
+            throw new Error(`Swapped database integrity check failed. Restored from backup. Details: ${integrityErr.message}`);
           }
-          throw new Error(`Swapped database integrity check failed. Restored from backup. Details: ${integrityErr.message}`);
         }
+        dbManager.resume();
         const activeDb = await dbManager.getConnection();
         try {
           const { ensureMedicinesFts: ensureMedicinesFts2 } = await Promise.resolve().then(() => (init_database(), database_exports));
@@ -22650,9 +23650,10 @@ var init_migration = __esm({
         res.json({ success: true, message: "Migration finalized and live!", stats, requiresReload: true });
       } catch (e) {
         console.error("[Migration Finalize] Error during finalize:", e);
+        dbManager.resume();
         try {
-          if (backupPath && import_fs20.default.existsSync(backupPath) && !import_fs20.default.existsSync(DB_PATH12)) {
-            import_fs20.default.copyFileSync(backupPath, DB_PATH12);
+          if (backupPath && import_fs22.default.existsSync(backupPath) && !import_fs22.default.existsSync(DB_PATH12)) {
+            import_fs22.default.copyFileSync(backupPath, DB_PATH12);
           }
           await dbManager.getConnection();
         } catch (restoreErr) {
@@ -22672,19 +23673,19 @@ var init_migration = __esm({
           { path: "D:\\redbook\\DGH_Backup", label: "DGH Backup Folder" },
           { path: "D:\\redbook", label: "RedBook Root" },
           { path: MIGRATION_DIR2, label: "Migration Sample Folder" },
-          { path: import_path23.default.resolve(getAppDataDir(), "data", "archived_migrations"), label: "Archived Migrations" }
+          { path: import_path25.default.resolve(getAppDataDir(), "data", "archived_migrations"), label: "Archived Migrations" }
         ];
         const backups = [];
         const ALLOWED_BACKUP_EXT = /\.(zip|sql|gz|tgz|db)$/i;
         for (const dirObj of backupDirs) {
-          if (import_fs20.default.existsSync(dirObj.path)) {
+          if (import_fs22.default.existsSync(dirObj.path)) {
             try {
-              const files = import_fs20.default.readdirSync(dirObj.path);
+              const files = import_fs22.default.readdirSync(dirObj.path);
               for (const f of files) {
                 if (ALLOWED_BACKUP_EXT.test(f)) {
-                  const fullPath = import_path23.default.join(dirObj.path, f);
+                  const fullPath = import_path25.default.join(dirObj.path, f);
                   try {
-                    const stat = import_fs20.default.statSync(fullPath);
+                    const stat = import_fs22.default.statSync(fullPath);
                     if (stat.isFile()) {
                       backups.push({
                         name: f,
@@ -22692,7 +23693,7 @@ var init_migration = __esm({
                         sourceLabel: dirObj.label,
                         sizeBytes: stat.size,
                         lastModified: stat.mtime.toISOString(),
-                        ext: import_path23.default.extname(f).toLowerCase().replace(".", ""),
+                        ext: import_path25.default.extname(f).toLowerCase().replace(".", ""),
                         isDbDump: true
                       });
                     }
@@ -22716,15 +23717,15 @@ var init_migration = __esm({
         let targetPath = fullPath;
         let targetName = fileName;
         if (!targetPath && targetName) {
-          targetPath = import_path23.default.join(MIGRATION_DIR2, targetName);
+          targetPath = import_path25.default.join(MIGRATION_DIR2, targetName);
         }
-        if (!targetPath || !import_fs20.default.existsSync(targetPath)) {
+        if (!targetPath || !import_fs22.default.existsSync(targetPath)) {
           return res.status(404).json({ error: "Local backup file not found at: " + targetPath });
         }
-        targetName = import_path23.default.basename(targetPath);
-        const destPath = import_path23.default.join(MIGRATION_DIR2, targetName);
-        if (import_path23.default.resolve(targetPath) !== import_path23.default.resolve(destPath)) {
-          import_fs20.default.copyFileSync(targetPath, destPath);
+        targetName = import_path25.default.basename(targetPath);
+        const destPath = import_path25.default.join(MIGRATION_DIR2, targetName);
+        if (import_path25.default.resolve(targetPath) !== import_path25.default.resolve(destPath)) {
+          import_fs22.default.copyFileSync(targetPath, destPath);
         }
         runManualMigration(targetName, "inventory").catch((err) => {
           console.error("Local backup background migration error:", err);
@@ -22816,30 +23817,108 @@ var init_migration = __esm({
   }
 });
 
+// src/services/inventoryCache.ts
+var inventoryCache_exports = {};
+__export(inventoryCache_exports, {
+  inventoryCache: () => inventoryCache2
+});
+var InventoryCache, inventoryCache2;
+var init_inventoryCache = __esm({
+  "src/services/inventoryCache.ts"() {
+    "use strict";
+    init_inventoryActive();
+    init_connection();
+    InventoryCache = class {
+      cache = null;
+      lastUpdated = 0;
+      refreshInterval = null;
+      rebuildPromise = null;
+      initialize(db2) {
+        if (this.refreshInterval) {
+          clearInterval(this.refreshInterval);
+        }
+        this.refreshInterval = setInterval(() => {
+          this.rebuild().catch((err) => console.error("[InventoryCache] Background rebuild failed:", err));
+        }, 10 * 60 * 1e3);
+      }
+      async get(db2) {
+        if (!this.cache) {
+          await this.rebuild(db2);
+        }
+        return this.cache || [];
+      }
+      rebuild(db2) {
+        if (this.rebuildPromise) return this.rebuildPromise;
+        this.rebuildPromise = (async () => {
+          try {
+            const activeDb = db2 || await dbManager.getConnection();
+            const items = await activeDb.all(
+              `SELECT
+            m.id AS medicine_id,
+            im.id AS inventory_id,
+            m.name,
+            im.batch_no,
+            im.expiry_date,
+            COALESCE(im.mrp, m.mrp, 0) AS mrp,
+            m.sell_price,
+            im.quantity AS stock_qty,
+            im.loose_quantity,
+            im.unit_price,
+            COALESCE(im.cost_price, 0) AS cost_price,
+            m.item_code,
+            m.manufacturer,
+            m.packaging,
+            m.pack_size
+           FROM inventory_master im
+           JOIN medicines m ON im.medicine_id = m.id
+           WHERE ${INVENTORY_ACTIVE_WHERE}
+           ORDER BY m.name ASC, im.expiry_date ASC`
+            );
+            this.cache = items;
+            this.lastUpdated = Date.now();
+          } catch (err) {
+            console.error("[InventoryCache] Error rebuilding cache:", err);
+          } finally {
+            this.rebuildPromise = null;
+          }
+        })();
+        return this.rebuildPromise;
+      }
+      invalidate() {
+        this.cache = null;
+        this.lastUpdated = 0;
+        this.rebuild().catch((err) => console.error("[InventoryCache] On-demand rebuild failed:", err));
+      }
+    };
+    inventoryCache2 = new InventoryCache();
+  }
+});
+
 // src/routes/utilities.ts
 var utilities_exports = {};
 __export(utilities_exports, {
   default: () => utilities_default
 });
-var import_express4, import_path24, import_url21, import_fs21, import_pdfkit, import_qrcode, import_better_sqlite34, import_adm_zip3, __filename20, __dirname20, getDbPath4, router4, utilities_default;
+var import_express4, import_path26, import_url21, import_fs23, import_pdfkit, import_qrcode2, import_better_sqlite34, import_adm_zip3, __filename20, __dirname20, getDbPath4, router4, utilities_default;
 var init_utilities = __esm({
   "src/routes/utilities.ts"() {
     "use strict";
     import_express4 = __toESM(require("express"), 1);
     init_connection();
-    import_path24 = __toESM(require("path"), 1);
+    import_path26 = __toESM(require("path"), 1);
     import_url21 = require("url");
     init_config();
-    import_fs21 = __toESM(require("fs"), 1);
+    import_fs23 = __toESM(require("fs"), 1);
     import_pdfkit = __toESM(require("pdfkit"), 1);
-    import_qrcode = __toESM(require("qrcode"), 1);
+    import_qrcode2 = __toESM(require("qrcode"), 1);
+    init_barcodeService();
     init_backupService();
     init_backupRecoveryService();
     init_messageDAO();
     import_better_sqlite34 = __toESM(require("better-sqlite3"), 1);
     import_adm_zip3 = __toESM(require("adm-zip"), 1);
     __filename20 = (0, import_url21.fileURLToPath)(import_meta_url);
-    __dirname20 = import_path24.default.dirname(__filename20);
+    __dirname20 = import_path26.default.dirname(__filename20);
     getDbPath4 = () => config.dbPath;
     router4 = import_express4.default.Router();
     router4.post("/backup", async (_req, res) => {
@@ -22897,13 +23976,13 @@ var init_utilities = __esm({
         return res.status(400).json({ error: "Items array is required" });
       }
       try {
-        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
-        if (!import_fs21.default.existsSync(uploadsDir)) {
-          import_fs21.default.mkdirSync(uploadsDir, { recursive: true });
+        const uploadsDir = import_path26.default.resolve(getAppDataDir(), "uploads");
+        if (!import_fs23.default.existsSync(uploadsDir)) {
+          import_fs23.default.mkdirSync(uploadsDir, { recursive: true });
         }
         const doc = new import_pdfkit.default({ margin: 30 });
-        const pdfPath = import_path24.default.join(uploadsDir, `barcodes_${Date.now()}.pdf`);
-        const stream = import_fs21.default.createWriteStream(pdfPath);
+        const pdfPath = import_path26.default.join(uploadsDir, `barcodes_${Date.now()}.pdf`);
+        const stream = import_fs23.default.createWriteStream(pdfPath);
         doc.pipe(stream);
         doc.fontSize(18).text("Medicine QR Code Labels", { align: "center", underline: true });
         doc.moveDown(1.5);
@@ -22915,7 +23994,7 @@ var init_utilities = __esm({
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           const qrText = `PRODUCT:${item.name || "Unknown"}|BATCH:${item.batch || "N/A"}`;
-          const qrBuffer = await import_qrcode.default.toBuffer(qrText, { width: 120, margin: 1 });
+          const qrBuffer = await import_qrcode2.default.toBuffer(qrText, { width: 120, margin: 1 });
           doc.rect(x, y, labelWidth, labelHeight).strokeColor("#e2e8f0").stroke();
           doc.fillColor("#1e293b").fontSize(10).text(item.name || "Unknown", x + 10, y + 10, { width: labelWidth - 20, height: 25, ellipsis: true });
           doc.fillColor("#64748b").fontSize(8).text(`Batch: ${item.batch || "N/A"}`, x + 10, y + 35);
@@ -22933,7 +24012,7 @@ var init_utilities = __esm({
         }
         doc.end();
         stream.on("finish", () => {
-          res.json({ success: true, pdfUrl: `/uploads/${import_path24.default.basename(pdfPath)}` });
+          res.json({ success: true, pdfUrl: `/uploads/${import_path26.default.basename(pdfPath)}` });
         });
       } catch (error) {
         console.error("Barcode generation failed:", error);
@@ -22943,15 +24022,15 @@ var init_utilities = __esm({
     router4.get("/barcode/:code", async (req, res) => {
       const { code } = req.params;
       try {
-        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
-        if (!import_fs21.default.existsSync(uploadsDir)) {
-          import_fs21.default.mkdirSync(uploadsDir, { recursive: true });
+        const uploadsDir = import_path26.default.resolve(getAppDataDir(), "uploads");
+        if (!import_fs23.default.existsSync(uploadsDir)) {
+          import_fs23.default.mkdirSync(uploadsDir, { recursive: true });
         }
         const doc = new import_pdfkit.default();
-        const pdfPath = import_path24.default.join(uploadsDir, `barcode_${code}_${Date.now()}.pdf`);
-        const stream = import_fs21.default.createWriteStream(pdfPath);
+        const pdfPath = import_path26.default.join(uploadsDir, `barcode_${code}_${Date.now()}.pdf`);
+        const stream = import_fs23.default.createWriteStream(pdfPath);
         doc.pipe(stream);
-        const qrBuffer = await import_qrcode.default.toBuffer(code, { width: 200, margin: 1 });
+        const qrBuffer = await import_qrcode2.default.toBuffer(code, { width: 200, margin: 1 });
         doc.fontSize(20).text("Invoice / Bill Barcode Label", { align: "center", underline: true });
         doc.moveDown();
         doc.fontSize(14).text(`Bill Reference: ${code}`, { align: "center" });
@@ -22961,7 +24040,7 @@ var init_utilities = __esm({
         doc.image(qrBuffer, xPos, doc.y, { width: imageWidth, height: imageWidth });
         doc.end();
         stream.on("finish", () => {
-          res.json({ success: true, pdfUrl: `/uploads/${import_path24.default.basename(pdfPath)}` });
+          res.json({ success: true, pdfUrl: `/uploads/${import_path26.default.basename(pdfPath)}` });
         });
       } catch (error) {
         console.error("Barcode generation failed:", error);
@@ -22974,7 +24053,7 @@ var init_utilities = __esm({
         const s3 = new AWS.S3();
         const bucketName = process.env.S3_BUCKET_NAME || "ai-pharmacy-backups";
         const key = `backups/app_${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.db`;
-        const fileStream = import_fs21.default.createReadStream(getDbPath4());
+        const fileStream = import_fs23.default.createReadStream(getDbPath4());
         const uploadParams = {
           Bucket: bucketName,
           Key: key,
@@ -23053,14 +24132,14 @@ var init_utilities = __esm({
           }
         }
         const BACKUP_DIR3 = config.backupDir;
-        const SNAPSHOTS_DIR2 = import_path24.default.join(BACKUP_DIR3, "snapshots");
-        const ARCHIVES_DIR2 = import_path24.default.join(BACKUP_DIR3, "archives");
+        const SNAPSHOTS_DIR2 = import_path26.default.join(BACKUP_DIR3, "snapshots");
+        const ARCHIVES_DIR2 = import_path26.default.join(BACKUP_DIR3, "archives");
         let totalSize = 0;
         const calculateFolderSize = (dir) => {
-          if (import_fs21.default.existsSync(dir)) {
-            import_fs21.default.readdirSync(dir).forEach((f) => {
+          if (import_fs23.default.existsSync(dir)) {
+            import_fs23.default.readdirSync(dir).forEach((f) => {
               try {
-                const stats = import_fs21.default.statSync(import_path24.default.join(dir, f));
+                const stats = import_fs23.default.statSync(import_path26.default.join(dir, f));
                 if (stats.isFile()) {
                   totalSize += stats.size;
                 }
@@ -23132,29 +24211,29 @@ var init_utilities = __esm({
     router4.post("/backup/manual", async (req, res) => {
       try {
         const BACKUP_DIR3 = config.backupDir;
-        const SNAPSHOTS_DIR2 = import_path24.default.join(BACKUP_DIR3, "snapshots");
-        const ARCHIVES_DIR2 = import_path24.default.join(BACKUP_DIR3, "archives");
+        const SNAPSHOTS_DIR2 = import_path26.default.join(BACKUP_DIR3, "snapshots");
+        const ARCHIVES_DIR2 = import_path26.default.join(BACKUP_DIR3, "archives");
         const archiveName = `archive_manual_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}_${Date.now()}.zip`;
-        const archivePath = import_path24.default.join(ARCHIVES_DIR2, archiveName);
+        const archivePath = import_path26.default.join(ARCHIVES_DIR2, archiveName);
         const snapshotFile = await backupRecoveryService.createSnapshot();
-        const files = import_fs21.default.readdirSync(SNAPSHOTS_DIR2).filter((f) => f.startsWith("snapshot_") && (f.endsWith(".db") || f.endsWith(".db.gz")));
+        const files = import_fs23.default.readdirSync(SNAPSHOTS_DIR2).filter((f) => f.startsWith("snapshot_") && (f.endsWith(".db") || f.endsWith(".db.gz")));
         if (files.length > 0) {
           const zip = new import_adm_zip3.default();
-          files.forEach((f) => zip.addLocalFile(import_path24.default.join(SNAPSHOTS_DIR2, f)));
+          files.forEach((f) => zip.addLocalFile(import_path26.default.join(SNAPSHOTS_DIR2, f)));
           zip.writeZip(archivePath);
-          files.forEach((f) => import_fs21.default.unlinkSync(import_path24.default.join(SNAPSHOTS_DIR2, f)));
+          files.forEach((f) => import_fs23.default.unlinkSync(import_path26.default.join(SNAPSHOTS_DIR2, f)));
           await backupRecoveryService.uploadArchive(archiveName);
           await backupRecoveryService.enforceRetention();
         } else {
           const tempDbFile = `snapshot_manual_${Date.now()}.db`;
-          const tempDbPath = import_path24.default.join(SNAPSHOTS_DIR2, tempDbFile);
+          const tempDbPath = import_path26.default.join(SNAPSHOTS_DIR2, tempDbFile);
           const tempDb = new import_better_sqlite34.default(getDbPath4());
           await tempDb.backup(tempDbPath);
           tempDb.close();
           const zip = new import_adm_zip3.default();
           zip.addLocalFile(tempDbPath);
           zip.writeZip(archivePath);
-          import_fs21.default.unlinkSync(tempDbPath);
+          import_fs23.default.unlinkSync(tempDbPath);
           await backupRecoveryService.uploadArchive(archiveName);
           await backupRecoveryService.enforceRetention();
         }
@@ -23329,6 +24408,16 @@ var init_utilities = __esm({
         await ensureSchema2(getDbPath4());
         try {
           const freshDb = await dbManager.getConnection();
+          await freshDb.run("DELETE FROM sqlite_sequence");
+        } catch (_) {
+        }
+        try {
+          const { inventoryCache: inventoryCache3 } = await Promise.resolve().then(() => (init_inventoryCache(), inventoryCache_exports));
+          inventoryCache3.invalidate();
+        } catch (_) {
+        }
+        try {
+          const freshDb = await dbManager.getConnection();
           await freshDb.run("VACUUM");
         } catch (_) {
         }
@@ -23372,28 +24461,33 @@ var init_utilities = __esm({
           } catch (_) {
           }
         }
-        const uploadsDir = import_path24.default.resolve(getAppDataDir(), "uploads");
-        const rawDir = import_path24.default.resolve(getAppDataDir(), "catalogue", "raw");
-        const migrationReportsDir = import_path24.default.resolve(getAppDataDir(), "data", "migration_reports");
-        const auditImagesDir = import_path24.default.resolve(getAppDataDir(), "data", "audit_images");
+        const uploadsDir = import_path26.default.resolve(getAppDataDir(), "uploads");
+        const attachmentsDir = import_path26.default.resolve(getAppDataDir(), "attachments");
+        const reportsDir = import_path26.default.resolve(getAppDataDir(), "reports");
+        const dataUploadsDir = import_path26.default.resolve(getAppDataDir(), "data", "uploads");
+        const dataAttachmentsDir = import_path26.default.resolve(getAppDataDir(), "data", "attachments");
+        const dataReportsDir = import_path26.default.resolve(getAppDataDir(), "data", "reports");
+        const rawDir = import_path26.default.resolve(getAppDataDir(), "catalogue", "raw");
+        const migrationReportsDir = import_path26.default.resolve(getAppDataDir(), "data", "migration_reports");
+        const auditImagesDir = import_path26.default.resolve(getAppDataDir(), "data", "audit_images");
         const clearDir = (dirPath, preserveFiles = []) => {
-          if (!import_fs21.default.existsSync(dirPath)) return;
-          const files = import_fs21.default.readdirSync(dirPath);
+          if (!import_fs23.default.existsSync(dirPath)) return;
+          const files = import_fs23.default.readdirSync(dirPath);
           for (const file of files) {
-            const filePath = import_path24.default.join(dirPath, file);
-            const stat = import_fs21.default.statSync(filePath);
+            const filePath = import_path26.default.join(dirPath, file);
+            const stat = import_fs23.default.statSync(filePath);
             if (stat.isDirectory()) {
               clearDir(filePath, preserveFiles);
               try {
-                if (import_fs21.default.readdirSync(filePath).length === 0) {
-                  import_fs21.default.rmdirSync(filePath);
+                if (import_fs23.default.readdirSync(filePath).length === 0) {
+                  import_fs23.default.rmdirSync(filePath);
                 }
               } catch (_) {
               }
             } else {
               if (!preserveFiles.includes(file)) {
                 try {
-                  import_fs21.default.unlinkSync(filePath);
+                  import_fs23.default.unlinkSync(filePath);
                 } catch (_) {
                 }
               }
@@ -23401,22 +24495,34 @@ var init_utilities = __esm({
           }
         };
         clearDir(uploadsDir, wipeAll ? [] : ["custom_stamp.png", "custom_signature.png"]);
+        clearDir(attachmentsDir);
+        clearDir(reportsDir);
+        clearDir(dataUploadsDir, wipeAll ? [] : ["custom_stamp.png", "custom_signature.png"]);
+        clearDir(dataAttachmentsDir);
+        clearDir(dataReportsDir);
         clearDir(rawDir);
         clearDir(migrationReportsDir);
         clearDir(auditImagesDir);
         if (wipeAll) {
           const backupDir = config.backupDir;
           clearDir(backupDir);
-          const dataDir = import_path24.default.resolve(getAppDataDir(), "data");
-          const stagingDbPath = import_path24.default.join(dataDir, "staging.db");
-          if (import_fs21.default.existsSync(stagingDbPath)) {
+          const dataDir = import_path26.default.resolve(getAppDataDir(), "data");
+          const stagingDbPath = import_path26.default.join(dataDir, "staging.db");
+          if (import_fs23.default.existsSync(stagingDbPath)) {
             try {
               const { open: open6 } = await import("sqlite");
               const { default: sqlite37 } = await import("sqlite3");
               const stagingDb = await open6({ filename: stagingDbPath, driver: sqlite37.Database });
               await stagingDb.run("PRAGMA foreign_keys = OFF");
+              try {
+                await stagingDb.exec("DROP TABLE IF EXISTS medicines_fts");
+              } catch (_) {
+                const { purgeMedicinesFts: purgeMedicinesFts2, dropFtsTriggers: dropFtsTriggers2 } = await Promise.resolve().then(() => (init_database(), database_exports));
+                await dropFtsTriggers2(stagingDb);
+                await purgeMedicinesFts2(stagingDb);
+              }
               const stagingTables = await stagingDb.all(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'medicines_fts%'"
               );
               for (const { name } of stagingTables) {
                 await stagingDb.run(`DROP TABLE IF EXISTS "${name}"`);
@@ -23430,7 +24536,7 @@ var init_utilities = __esm({
           const stagingDbFiles = ["staging.db", "staging.db-wal", "staging.db-shm"];
           for (const f of stagingDbFiles) {
             try {
-              if (import_fs21.default.existsSync(import_path24.default.join(dataDir, f))) import_fs21.default.unlinkSync(import_path24.default.join(dataDir, f));
+              if (import_fs23.default.existsSync(import_path26.default.join(dataDir, f))) import_fs23.default.unlinkSync(import_path26.default.join(dataDir, f));
             } catch (_) {
             }
           }
@@ -23439,55 +24545,76 @@ var init_utilities = __esm({
             unlockStagingDb2();
           } catch (_) {
           }
-          const migrationSampelDir = import_path24.default.resolve(getAppDataDir(), "MIGRATION SAMPEL");
+          const migrationSampelDir = import_path26.default.resolve(getAppDataDir(), "MIGRATION SAMPEL");
           clearDir(migrationSampelDir);
           const tempDirs = [
-            import_path24.default.resolve(getAppDataDir(), "data", "temp_migration"),
-            import_path24.default.resolve(getAppDataDir(), "data", "temp_ocr"),
-            import_path24.default.resolve(getAppDataDir(), "data", "search_screenshots"),
-            import_path24.default.resolve(getAppDataDir(), "data", "archived_migrations")
+            import_path26.default.resolve(getAppDataDir(), "data", "temp_migration"),
+            import_path26.default.resolve(getAppDataDir(), "data", "temp_ocr"),
+            import_path26.default.resolve(getAppDataDir(), "data", "search_screenshots"),
+            import_path26.default.resolve(getAppDataDir(), "data", "archived_migrations")
           ];
           for (const d of tempDirs) clearDir(d);
           const runtimeDataFiles = ["audit_queue.json", "ocr_corrections.json", "suggested_names.json"];
-          if (import_fs21.default.existsSync(dataDir)) {
-            for (const f of import_fs21.default.readdirSync(dataDir)) {
+          if (import_fs23.default.existsSync(dataDir)) {
+            for (const f of import_fs23.default.readdirSync(dataDir)) {
               if (f === "app.db" || f === "app.db-wal" || f === "app.db-shm") continue;
               if (f === "models" || f === "reference_medicines.csv" || f === "medicines_list.txt" || f === "medicine_dict.txt" || f === "medicine_patterns.txt") continue;
-              const fullPath = import_path24.default.join(dataDir, f);
-              const stat = import_fs21.default.statSync(fullPath);
+              const fullPath = import_path26.default.join(dataDir, f);
+              const stat = import_fs23.default.statSync(fullPath);
               if (stat.isDirectory()) continue;
               try {
-                import_fs21.default.unlinkSync(fullPath);
+                import_fs23.default.unlinkSync(fullPath);
               } catch (_) {
               }
             }
           }
-          const wwwebAuthDir = import_path24.default.resolve(getAppDataDir(), ".wwebjs_auth");
-          const wwwebCacheDir = import_path24.default.resolve(getAppDataDir(), ".wwebjs_cache");
-          clearDir(wwwebAuthDir);
-          clearDir(wwwebCacheDir);
-          const pharmarackProfilePath = import_path24.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
-          if (import_fs21.default.existsSync(pharmarackProfilePath)) {
+          try {
+            const { destroyClient: destroyClient2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
+            await destroyClient2();
+          } catch (err) {
+            console.warn("[Reset] Failed to destroy WhatsApp client before wipe:", err.message);
+          }
+          const wwwebAuthDir = import_path26.default.resolve(getAppDataDir(), ".wwebjs_auth");
+          const wwwebCacheDir = import_path26.default.resolve(getAppDataDir(), ".wwebjs_cache");
+          const removeDirWithRetry = async (dirPath, attempts = 3) => {
+            if (!import_fs23.default.existsSync(dirPath)) return;
+            for (let i = 0; i < attempts; i++) {
+              try {
+                import_fs23.default.rmSync(dirPath, { recursive: true, force: true });
+                return;
+              } catch (err) {
+                if (i === attempts - 1) {
+                  console.warn(`[Reset] Failed to remove ${dirPath} after ${attempts} attempts:`, err.message);
+                } else {
+                  await new Promise((resolve) => setTimeout(resolve, 300));
+                }
+              }
+            }
+          };
+          await removeDirWithRetry(wwwebAuthDir);
+          await removeDirWithRetry(wwwebCacheDir);
+          const pharmarackProfilePath = import_path26.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+          if (import_fs23.default.existsSync(pharmarackProfilePath)) {
             try {
-              import_fs21.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
+              import_fs23.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
             } catch (err) {
               console.warn("[Reset] Failed to delete pharmarack_profile:", err);
             }
           }
-          const cachePath = import_path24.default.resolve(getAppDataDir(), "data", "cache");
-          if (import_fs21.default.existsSync(cachePath)) {
+          const cachePath = import_path26.default.resolve(getAppDataDir(), "data", "cache");
+          if (import_fs23.default.existsSync(cachePath)) {
             try {
-              import_fs21.default.rmSync(cachePath, { recursive: true, force: true });
+              import_fs23.default.rmSync(cachePath, { recursive: true, force: true });
             } catch (err) {
               console.warn("[Reset] Failed to delete cache directory:", err);
             }
           }
           const accidentalDirs = ["PHARMACY", "WORKING", "ON", "PROJECT"];
           for (const d of accidentalDirs) {
-            const fullPath = import_path24.default.resolve(__dirname20, "..", "..", d);
-            if (import_fs21.default.existsSync(fullPath)) {
+            const fullPath = import_path26.default.resolve(__dirname20, "..", "..", d);
+            if (import_fs23.default.existsSync(fullPath)) {
               try {
-                import_fs21.default.rmSync(fullPath, { recursive: true, force: true });
+                import_fs23.default.rmSync(fullPath, { recursive: true, force: true });
               } catch (_) {
               }
             }
@@ -23506,27 +24633,27 @@ var init_utilities = __esm({
     });
     router4.post("/clear-cache", async (req, res) => {
       try {
-        const dataDir = import_path24.default.resolve(getAppDataDir(), "data");
-        const cachePath = import_path24.default.join(dataDir, "cache");
-        if (import_fs21.default.existsSync(cachePath)) {
+        const dataDir = import_path26.default.resolve(getAppDataDir(), "data");
+        const cachePath = import_path26.default.join(dataDir, "cache");
+        if (import_fs23.default.existsSync(cachePath)) {
           try {
-            import_fs21.default.rmSync(cachePath, { recursive: true, force: true });
+            import_fs23.default.rmSync(cachePath, { recursive: true, force: true });
           } catch (err) {
             console.warn("[Clear Cache] Failed to delete cache directory:", err);
           }
         }
         const tempDirs = [
-          import_path24.default.join(dataDir, "temp_migration"),
-          import_path24.default.join(dataDir, "temp_ocr"),
-          import_path24.default.join(dataDir, "search_screenshots")
+          import_path26.default.join(dataDir, "temp_migration"),
+          import_path26.default.join(dataDir, "temp_ocr"),
+          import_path26.default.join(dataDir, "search_screenshots")
         ];
         for (const d of tempDirs) {
-          if (import_fs21.default.existsSync(d)) {
+          if (import_fs23.default.existsSync(d)) {
             try {
-              const files = import_fs21.default.readdirSync(d);
+              const files = import_fs23.default.readdirSync(d);
               for (const file of files) {
                 try {
-                  import_fs21.default.unlinkSync(import_path24.default.join(d, file));
+                  import_fs23.default.unlinkSync(import_path26.default.join(d, file));
                 } catch (_) {
                 }
               }
@@ -23555,6 +24682,71 @@ var init_utilities = __esm({
         }
       }
     });
+    router4.get("/sale-invoice-barcode/:invoiceNo", async (req, res) => {
+      const { invoiceNo } = req.params;
+      if (!invoiceNo) {
+        return res.status(400).json({ error: "Invoice number is required" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        const invoice = await db2.get(
+          `SELECT si.invoice_no, si.date, si.total_amount, c.name as customer_name, c.phone as customer_phone
+       FROM sales_invoices si
+       LEFT JOIN customers c ON si.customer_id = c.id
+       WHERE si.invoice_no = ? OR si.id = ?`,
+          [invoiceNo, invoiceNo]
+        );
+        const actualInvoiceNo = invoice ? invoice.invoice_no : invoiceNo;
+        const invoiceDate = invoice ? invoice.date : void 0;
+        const barcodeData = await generateInvoiceBarcodeData(actualInvoiceNo, invoiceDate);
+        const settingsRows = await db2.all("SELECT key, value FROM app_settings");
+        const settings = {};
+        settingsRows.forEach((r) => {
+          settings[r.key] = r.value;
+        });
+        const shopName = settings.shop_name || "AI PHARMACY OS";
+        const shopPhone = settings.shop_phone || "";
+        const uploadsDir = import_path26.default.resolve(getAppDataDir(), "uploads");
+        if (!import_fs23.default.existsSync(uploadsDir)) {
+          import_fs23.default.mkdirSync(uploadsDir, { recursive: true });
+        }
+        const doc = new import_pdfkit.default({ size: [350, 220], margin: 15 });
+        const sanitizeNo = actualInvoiceNo.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const pdfPath = import_path26.default.join(uploadsDir, `barcode_invoice_${sanitizeNo}_${Date.now()}.pdf`);
+        const stream = import_fs23.default.createWriteStream(pdfPath);
+        doc.pipe(stream);
+        doc.font("Helvetica-Bold").fontSize(14).fillColor("#0284c7").text(shopName, { align: "center" });
+        if (shopPhone) {
+          doc.font("Helvetica").fontSize(8).fillColor("#64748b").text(`Ph: ${shopPhone}`, { align: "center" });
+        }
+        doc.moveDown(0.5);
+        doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text(`Invoice: ${actualInvoiceNo}`, { align: "center" });
+        if (invoice) {
+          const formattedDate = new Date(invoice.date).toLocaleDateString();
+          const custText = invoice.customer_name ? `Customer: ${invoice.customer_name}` : "Walk-in Customer";
+          doc.font("Helvetica").fontSize(8).fillColor("#475569").text(`Date: ${formattedDate} | ${custText} | Total: \u20B9${Number(invoice.total_amount || 0).toFixed(2)}`, { align: "center" });
+        }
+        doc.moveDown(0.5);
+        const startY = doc.y;
+        doc.image(barcodeData.qrBuffer, 25, startY, { width: 85, height: 85 });
+        doc.image(barcodeData.code128Buffer, 125, startY + 10, { width: 200, height: 60 });
+        doc.fontSize(7).fillColor("#94a3b8").text(`Scan Code128 or QR for return lookup (${barcodeData.barcodeText})`, 15, 195, { align: "center" });
+        doc.end();
+        stream.on("finish", () => {
+          res.json({
+            success: true,
+            invoiceNo: actualInvoiceNo,
+            barcodeText: barcodeData.barcodeText,
+            qrDataUrl: barcodeData.qrDataUrl,
+            code128DataUrl: barcodeData.code128DataUrl,
+            pdfUrl: `/uploads/${import_path26.default.basename(pdfPath)}`
+          });
+        });
+      } catch (error) {
+        console.error("Sale invoice barcode generation error:", error);
+        res.status(500).json({ error: "Failed to generate sale invoice barcode: " + error.message });
+      }
+    });
     utilities_default = router4;
   }
 });
@@ -23564,17 +24756,17 @@ var security_exports = {};
 __export(security_exports, {
   default: () => security_default
 });
-var import_express5, import_path25, import_url22, __filename21, __dirname21, DB_PATH13, router5, security_default;
+var import_express5, import_path27, import_url22, __filename21, __dirname21, DB_PATH13, router5, security_default;
 var init_security = __esm({
   "src/routes/security.ts"() {
     "use strict";
     import_express5 = __toESM(require("express"), 1);
-    import_path25 = __toESM(require("path"), 1);
+    import_path27 = __toESM(require("path"), 1);
     import_url22 = require("url");
     init_connection();
     __filename21 = (0, import_url22.fileURLToPath)(import_meta_url);
-    __dirname21 = import_path25.default.dirname(__filename21);
-    DB_PATH13 = process.env.DB_PATH || import_path25.default.resolve(__dirname21, "..", "..", "data", "app.db");
+    __dirname21 = import_path27.default.dirname(__filename21);
+    DB_PATH13 = process.env.DB_PATH || import_path27.default.resolve(__dirname21, "..", "..", "data", "app.db");
     router5 = import_express5.default.Router();
     router5.post("/rotate-key", async (req, res) => {
       try {
@@ -23656,21 +24848,21 @@ var email_exports = {};
 __export(email_exports, {
   default: () => email_default
 });
-var import_express6, import_path26, import_url23, import_fs22, __filename22, __dirname22, getUploadsDir2, router6, email_default;
+var import_express6, import_path28, import_url23, import_fs24, __filename22, __dirname22, getUploadsDir2, router6, email_default;
 var init_email = __esm({
   "src/routes/email.ts"() {
     "use strict";
     import_express6 = __toESM(require("express"), 1);
     init_connection();
-    import_path26 = __toESM(require("path"), 1);
+    import_path28 = __toESM(require("path"), 1);
     import_url23 = require("url");
     init_emailService();
     init_eventService();
     init_config();
-    import_fs22 = __toESM(require("fs"), 1);
+    import_fs24 = __toESM(require("fs"), 1);
     __filename22 = (0, import_url23.fileURLToPath)(import_meta_url);
-    __dirname22 = import_path26.default.dirname(__filename22);
-    getUploadsDir2 = () => process.env.UPLOADS_DIR || import_path26.default.resolve(getAppDataDir(), "uploads");
+    __dirname22 = import_path28.default.dirname(__filename22);
+    getUploadsDir2 = () => process.env.UPLOADS_DIR || import_path28.default.resolve(getAppDataDir(), "uploads");
     router6 = import_express6.default.Router();
     router6.post("/", async (req, res) => {
       const { subject, from, body, attachments } = req.body;
@@ -23716,6 +24908,14 @@ var init_email = __esm({
       } catch (error) {
         console.error("Fetch inbox error:", error);
         res.status(500).json({ error: "Failed to fetch email inbox" });
+      }
+    });
+    router6.get("/status", async (_req, res) => {
+      try {
+        const status = await emailService.getImapStatus();
+        res.json(status);
+      } catch (error) {
+        res.status(500).json({ error: error.message || "Failed to check email status" });
       }
     });
     router6.post("/:id/seen", async (req, res) => {
@@ -23788,13 +24988,13 @@ var init_email = __esm({
     router6.get("/attachments", async (req, res) => {
       try {
         const uploadsDir = getUploadsDir2();
-        if (!import_fs22.default.existsSync(uploadsDir)) {
-          import_fs22.default.mkdirSync(uploadsDir, { recursive: true });
+        if (!import_fs24.default.existsSync(uploadsDir)) {
+          import_fs24.default.mkdirSync(uploadsDir, { recursive: true });
         }
-        const files = import_fs22.default.readdirSync(uploadsDir);
+        const files = import_fs24.default.readdirSync(uploadsDir);
         const attachments = files.map((filename) => {
-          const filePath = import_path26.default.join(uploadsDir, filename);
-          const stats = import_fs22.default.statSync(filePath);
+          const filePath = import_path28.default.join(uploadsDir, filename);
+          const stats = import_fs24.default.statSync(filePath);
           return {
             filename,
             size: stats.size,
@@ -23828,25 +25028,25 @@ var init_email = __esm({
       }
       try {
         const uploadsDir = getUploadsDir2();
-        const filePath = import_path26.default.resolve(uploadsDir, filename);
+        const filePath = import_path28.default.resolve(uploadsDir, filename);
         if (!filePath.startsWith(uploadsDir)) {
           return res.status(403).json({ error: "Access denied" });
         }
-        if (!import_fs22.default.existsSync(filePath)) {
+        if (!import_fs24.default.existsSync(filePath)) {
           return res.status(404).json({ error: "Attachment file not found" });
         }
-        const ext = import_path26.default.extname(filename).toLowerCase();
+        const ext = import_path28.default.extname(filename).toLowerCase();
         if (ext === ".txt" || ext === ".csv") {
-          const text = await import_fs22.default.promises.readFile(filePath, "utf-8");
+          const text = await import_fs24.default.promises.readFile(filePath, "utf-8");
           res.json({ success: true, type: "text", content: text.substring(0, 5e4) });
         } else if (ext === ".pdf") {
           const { default: pdfParse3 } = await import("pdf-parse");
-          const dataBuffer = await import_fs22.default.promises.readFile(filePath);
+          const dataBuffer = await import_fs24.default.promises.readFile(filePath);
           const data = await pdfParse3(dataBuffer);
           res.json({ success: true, type: "text", content: data.text });
         } else if (ext === ".xlsx" || ext === ".xls") {
           const { default: XLSX8 } = await import("xlsx");
-          const dataBuffer = await import_fs22.default.promises.readFile(filePath);
+          const dataBuffer = await import_fs24.default.promises.readFile(filePath);
           const workbook = XLSX8.read(dataBuffer, { type: "buffer" });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
@@ -23866,14 +25066,14 @@ var init_email = __esm({
         return res.status(400).json({ error: "filename is required" });
       }
       try {
-        let filePath = import_path26.default.resolve(getUploadsDir2(), filename);
-        if (!import_fs22.default.existsSync(filePath)) {
+        let filePath = import_path28.default.resolve(getUploadsDir2(), filename);
+        if (!import_fs24.default.existsSync(filePath)) {
           const db2 = await dbManager.getConnection();
           const att = await db2.get(
             "SELECT local_path FROM email_attachments WHERE filename = ? OR filename LIKE ? OR local_path LIKE ?",
             [filename, `%${filename}%`, `%${filename}%`]
           );
-          if (att && att.local_path && import_fs22.default.existsSync(att.local_path)) {
+          if (att && att.local_path && import_fs24.default.existsSync(att.local_path)) {
             filePath = att.local_path;
           } else {
             return res.status(404).json({ error: "Attachment file not found" });
@@ -23891,15 +25091,15 @@ var init_email = __esm({
     router6.delete("/attachments/cache", async (req, res) => {
       try {
         const uploadsDir = getUploadsDir2();
-        if (!import_fs22.default.existsSync(uploadsDir)) {
+        if (!import_fs24.default.existsSync(uploadsDir)) {
           return res.json({ success: true, count: 0, message: "Uploads directory does not exist" });
         }
-        const files = import_fs22.default.readdirSync(uploadsDir);
+        const files = import_fs24.default.readdirSync(uploadsDir);
         let count = 0;
         for (const filename of files) {
           if (filename.startsWith("att-")) {
-            const filePath = import_path26.default.join(uploadsDir, filename);
-            import_fs22.default.unlinkSync(filePath);
+            const filePath = import_path28.default.join(uploadsDir, filename);
+            import_fs24.default.unlinkSync(filePath);
             count++;
           }
         }
@@ -24407,27 +25607,277 @@ var init_verification = __esm({
   }
 });
 
+// src/utils/distributorSyncHelper.ts
+async function syncDistributorPhoneAcrossTables(db2, params) {
+  const distName = (params.name || params.store_name || "").trim();
+  const phoneInput = params.phone !== void 0 && params.phone !== null && String(params.phone).trim() !== "" ? params.phone : params.contact !== void 0 && params.contact !== null && String(params.contact).trim() !== "" ? params.contact : params.whatsapp;
+  const rawPhone = phoneInput !== void 0 && phoneInput !== null ? String(phoneInput).trim() : "";
+  let cleanPhone = rawPhone && !rawPhone.includes("@") && !rawPhone.includes("<") ? rawPhone.replace(/\D/g, "") : "";
+  if (cleanPhone.length === 12 && cleanPhone.startsWith("91")) {
+    cleanPhone = cleanPhone.slice(2);
+  }
+  const cleanEmail = extractCleanEmail(params.email);
+  let targetId = params.id && !isNaN(Number(params.id)) ? Number(params.id) : null;
+  let existingDist = null;
+  if (targetId) {
+    existingDist = await db2.get("SELECT * FROM distributors WHERE id = ?", [targetId]);
+  }
+  if (!existingDist && distName) {
+    existingDist = await db2.get("SELECT * FROM distributors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [distName]);
+    if (existingDist) {
+      targetId = existingDist.id;
+    }
+  }
+  if (existingDist) {
+    let nameToUpdate = distName;
+    if (distName && distName.toLowerCase().trim() !== (existingDist.name || "").toLowerCase().trim()) {
+      const duplicate = await db2.get(
+        "SELECT id FROM distributors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND id != ?",
+        [distName, existingDist.id]
+      );
+      if (duplicate) {
+        nameToUpdate = existingDist.name;
+      }
+    }
+    try {
+      await db2.run(
+        `UPDATE distributors 
+         SET name = CASE WHEN ? != '' THEN ? ELSE name END,
+             phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+             contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+             email = CASE WHEN ? != '' THEN ? ELSE email END,
+             address = CASE WHEN ? != '' THEN ? ELSE address END,
+             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+             state_code = CASE WHEN ? != '' THEN ? ELSE state_code END,
+             preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END
+         WHERE id = ?`,
+        [
+          nameToUpdate,
+          nameToUpdate,
+          cleanPhone,
+          cleanPhone,
+          cleanPhone,
+          cleanPhone,
+          cleanEmail,
+          cleanEmail,
+          params.address || "",
+          params.address || "",
+          params.gstin || "",
+          params.gstin || "",
+          params.state_code || "",
+          params.state_code || "",
+          params.preferred_file_format || "",
+          params.preferred_file_format || "",
+          existingDist.id
+        ]
+      );
+    } catch (updateErr) {
+      if (updateErr?.message?.includes("UNIQUE") || updateErr?.code === "SQLITE_CONSTRAINT") {
+        await db2.run(
+          `UPDATE distributors 
+           SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+               contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+               email = CASE WHEN ? != '' THEN ? ELSE email END,
+               address = CASE WHEN ? != '' THEN ? ELSE address END,
+               gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+               state_code = CASE WHEN ? != '' THEN ? ELSE state_code END,
+               preferred_file_format = CASE WHEN ? != '' THEN ? ELSE preferred_file_format END
+           WHERE id = ?`,
+          [
+            cleanPhone,
+            cleanPhone,
+            cleanPhone,
+            cleanPhone,
+            cleanEmail,
+            cleanEmail,
+            params.address || "",
+            params.address || "",
+            params.gstin || "",
+            params.gstin || "",
+            params.state_code || "",
+            params.state_code || "",
+            params.preferred_file_format || "",
+            params.preferred_file_format || "",
+            existingDist.id
+          ]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
+    targetId = existingDist.id;
+  } else if (distName) {
+    try {
+      const result = await db2.run(
+        `INSERT INTO distributors (name, phone, contact, email, address, gstin, state_code, preferred_file_format)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          distName,
+          cleanPhone,
+          cleanPhone,
+          cleanEmail,
+          params.address || "",
+          params.gstin || "",
+          params.state_code || "",
+          params.preferred_file_format || ""
+        ]
+      );
+      targetId = result.lastID || 0;
+    } catch (insertErr) {
+      if (insertErr?.message?.includes("UNIQUE") || insertErr?.code === "SQLITE_CONSTRAINT") {
+        const matched = await db2.get("SELECT id FROM distributors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [distName]);
+        if (matched) {
+          targetId = matched.id;
+          await db2.run(
+            `UPDATE distributors 
+             SET phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                 contact = CASE WHEN ? != '' THEN ? ELSE contact END,
+                 email = CASE WHEN ? != '' THEN ? ELSE email END
+             WHERE id = ?`,
+            [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, matched.id]
+          );
+        } else {
+          throw insertErr;
+        }
+      } else {
+        throw insertErr;
+      }
+    }
+  }
+  if (!targetId) {
+    throw new Error("Unable to create or locate distributor record.");
+  }
+  try {
+    await db2.run(
+      "INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)",
+      [targetId]
+    );
+  } catch (_) {
+  }
+  const finalDistributor = await db2.get("SELECT * FROM distributors WHERE id = ?", [targetId]);
+  const effectiveName = finalDistributor?.name || distName;
+  const effectivePhone = finalDistributor?.phone || finalDistributor?.contact || cleanPhone;
+  try {
+    await db2.run(`
+      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
+        store_name TEXT PRIMARY KEY,
+        distributor_id INTEGER,
+        phone TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    if (effectiveName) {
+      await db2.run(
+        `INSERT INTO pharmarack_distributor_mappings (store_name, distributor_id, phone, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(store_name) DO UPDATE SET
+           distributor_id = COALESCE(EXCLUDED.distributor_id, pharmarack_distributor_mappings.distributor_id),
+           phone = CASE WHEN EXCLUDED.phone != '' THEN EXCLUDED.phone ELSE pharmarack_distributor_mappings.phone END,
+           updated_at = CURRENT_TIMESTAMP`,
+        [effectiveName.trim(), targetId, effectivePhone || ""]
+      );
+      if (effectivePhone) {
+        await db2.run(
+          `UPDATE pharmarack_distributor_mappings
+           SET phone = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE distributor_id = ? AND (phone IS NULL OR phone = '' OR phone != ?)`,
+          [effectivePhone, targetId, effectivePhone]
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[distributorSync] Failed to sync pharmarack_distributor_mappings:", err);
+  }
+  try {
+    await db2.run(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT 'general',
+        phone TEXT,
+        email TEXT,
+        address TEXT,
+        gstin TEXT,
+        notes TEXT,
+        alias_names TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    let existingContact;
+    if (effectivePhone) {
+      existingContact = await db2.get("SELECT id FROM contacts WHERE phone = ? AND type = ?", [effectivePhone, "distributor"]);
+    }
+    if (!existingContact && effectiveName) {
+      existingContact = await db2.get("SELECT id FROM contacts WHERE LOWER(name) = LOWER(?) AND type = ?", [effectiveName.trim(), "distributor"]);
+    }
+    if (existingContact) {
+      await db2.run(
+        `UPDATE contacts
+         SET name = ?,
+             phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+             email = CASE WHEN ? != '' THEN ? ELSE email END,
+             address = CASE WHEN ? != '' THEN ? ELSE address END,
+             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+             notes = CASE WHEN ? != '' THEN ? ELSE notes END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          effectiveName.trim(),
+          effectivePhone,
+          effectivePhone,
+          cleanEmail,
+          cleanEmail,
+          params.address || "",
+          params.address || "",
+          params.gstin || "",
+          params.gstin || "",
+          params.notes || "",
+          params.notes || "",
+          existingContact.id
+        ]
+      );
+    } else if (effectiveName) {
+      await db2.run(
+        `INSERT INTO contacts (name, type, phone, email, address, gstin, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [effectiveName.trim(), "distributor", effectivePhone, cleanEmail, params.address || "", params.gstin || "", params.notes || ""]
+      );
+    }
+  } catch (err) {
+    console.warn("[distributorSync] Failed to sync contacts:", err);
+  }
+  return finalDistributor;
+}
+var init_distributorSyncHelper = __esm({
+  "src/utils/distributorSyncHelper.ts"() {
+    "use strict";
+    init_emailSanitizer();
+  }
+});
+
 // src/routes/settings.ts
 var settings_exports = {};
 __export(settings_exports, {
   default: () => settings_default
 });
-var import_express8, import_path27, import_fs23, import_url24, __filename23, __dirname23, DB_PATH14, UPLOADS_DIR2, router8, settings_default;
+var import_express8, import_path29, import_fs25, import_url24, __filename23, __dirname23, DB_PATH14, UPLOADS_DIR2, router8, settings_default;
 var init_settings = __esm({
   "src/routes/settings.ts"() {
     "use strict";
     import_express8 = __toESM(require("express"), 1);
-    import_path27 = __toESM(require("path"), 1);
-    import_fs23 = __toESM(require("fs"), 1);
+    import_path29 = __toESM(require("path"), 1);
+    import_fs25 = __toESM(require("fs"), 1);
     import_url24 = require("url");
     init_connection();
     init_telegramBot();
     init_emailSanitizer();
     init_config();
+    init_distributorSyncHelper();
     __filename23 = (0, import_url24.fileURLToPath)(import_meta_url);
-    __dirname23 = import_path27.default.dirname(__filename23);
-    DB_PATH14 = process.env.DB_PATH || import_path27.default.resolve(__dirname23, "..", "..", "data", "app.db");
-    UPLOADS_DIR2 = import_path27.default.resolve(getAppDataDir(), "uploads");
+    __dirname23 = import_path29.default.dirname(__filename23);
+    DB_PATH14 = process.env.DB_PATH || import_path29.default.resolve(__dirname23, "..", "..", "data", "app.db");
+    UPLOADS_DIR2 = import_path29.default.resolve(getAppDataDir(), "uploads");
     router8 = import_express8.default.Router();
     router8.get("/", async (_req, res) => {
       try {
@@ -24472,7 +25922,19 @@ var init_settings = __esm({
         const db2 = await dbManager.getConnection();
         const saveValue = key === "pharmarack_mode" ? "Live" : value ?? "";
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", [key, saveValue]);
-        res.json({ success: true, message: "Setting saved" });
+        const nameKeys = ["shop_name", "pharmacy_name", "store_name", "medical_name"];
+        if (nameKeys.includes(key) && saveValue) {
+          for (const nk of nameKeys) {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", [nk, saveValue]);
+          }
+        }
+        const phoneKeys = ["shop_phone", "pharmacy_phone", "store_phone", "phone"];
+        if (phoneKeys.includes(key) && saveValue) {
+          for (const pk of phoneKeys) {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", [pk, saveValue]);
+          }
+        }
+        res.json({ success: true, key, value: saveValue });
       } catch (error) {
         console.error("Settings save error:", error);
         res.status(500).json({ error: "Failed to save setting" });
@@ -24498,6 +25960,26 @@ var init_settings = __esm({
           }
           await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", [k, v ?? ""]);
         }
+        const pharmacyNameVal = payload["shop_name"] || payload["pharmacy_name"] || payload["store_name"] || payload["medical_name"];
+        if (pharmacyNameVal) {
+          const val = String(pharmacyNameVal).trim();
+          if (val) {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_name', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_name', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_name', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('medical_name', ?)", [val]);
+          }
+        }
+        const pharmacyPhoneVal = payload["shop_phone"] || payload["phone"] || payload["store_phone"] || payload["pharmacy_phone"];
+        if (pharmacyPhoneVal) {
+          const val = String(pharmacyPhoneVal).trim();
+          if (val) {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_phone', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_phone', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_phone', ?)", [val]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('phone', ?)", [val]);
+          }
+        }
         if (payload["email_retention_limit"] !== void 0) {
           try {
             const { emailService: emailService2 } = await Promise.resolve().then(() => (init_emailService(), emailService_exports));
@@ -24508,7 +25990,7 @@ var init_settings = __esm({
         const keys = Object.keys(payload);
         const boy1Name = payload["delivery_boy_name"] || payload["delivery_boy_1_name"];
         const boy1Phone = payload["delivery_boy_whatsapp"] || payload["delivery_boy_phone"];
-        if (boy1Phone !== void 0) {
+        if (boy1Phone !== void 0 && String(boy1Phone).trim() !== "") {
           const nameToUse = String(boy1Name || "").trim() || "Delivery Staff 1";
           const phoneStr = String(boy1Phone || "").trim();
           const existing1 = await db2.get(
@@ -24527,13 +26009,11 @@ var init_settings = __esm({
                 [nameToUse, phoneStr]
               );
             }
-          } else if (existing1) {
-            await db2.run("UPDATE delivery_boys SET is_active = 0 WHERE id = ?", [existing1.id]);
           }
         }
         const boy2Name = payload["delivery_boy_name_2"] || payload["delivery_boy_2_name"];
         const boy2Phone = payload["delivery_boy_whatsapp_2"];
-        if (boy2Phone !== void 0) {
+        if (boy2Phone !== void 0 && String(boy2Phone).trim() !== "") {
           const nameToUse = String(boy2Name || "").trim() || "Delivery Staff 2";
           const phoneStr = String(boy2Phone || "").trim();
           const existing2 = await db2.get(
@@ -24552,8 +26032,6 @@ var init_settings = __esm({
                 [nameToUse, phoneStr]
               );
             }
-          } else if (existing2) {
-            await db2.run("UPDATE delivery_boys SET is_active = 0 WHERE id = ?", [existing2.id]);
           }
         }
         const hasTelegramKey = keys.some((k) => k === "telegram_enabled" || k === "telegram_token" || k === "telegram_chat_id");
@@ -24593,11 +26071,11 @@ var init_settings = __esm({
         if (!image) return res.status(400).json({ error: "Image data required" });
         const base64Data = image.replace(/^data:image\/png;base64,/, "");
         const buffer = Buffer.from(base64Data, "base64");
-        if (!import_fs23.default.existsSync(UPLOADS_DIR2)) {
-          import_fs23.default.mkdirSync(UPLOADS_DIR2, { recursive: true });
+        if (!import_fs25.default.existsSync(UPLOADS_DIR2)) {
+          import_fs25.default.mkdirSync(UPLOADS_DIR2, { recursive: true });
         }
-        const stampPath = import_path27.default.join(UPLOADS_DIR2, "custom_stamp.png");
-        import_fs23.default.writeFileSync(stampPath, buffer);
+        const stampPath = import_path29.default.join(UPLOADS_DIR2, "custom_stamp.png");
+        import_fs25.default.writeFileSync(stampPath, buffer);
         const db2 = await dbManager.getConnection();
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('use_custom_stamp', 'true')");
         res.json({ success: true, message: "Custom stamp uploaded and enabled" });
@@ -24612,11 +26090,11 @@ var init_settings = __esm({
         if (!image) return res.status(400).json({ error: "Image data required" });
         const base64Data = image.replace(/^data:image\/png;base64,/, "");
         const buffer = Buffer.from(base64Data, "base64");
-        if (!import_fs23.default.existsSync(UPLOADS_DIR2)) {
-          import_fs23.default.mkdirSync(UPLOADS_DIR2, { recursive: true });
+        if (!import_fs25.default.existsSync(UPLOADS_DIR2)) {
+          import_fs25.default.mkdirSync(UPLOADS_DIR2, { recursive: true });
         }
-        const sigPath = import_path27.default.join(UPLOADS_DIR2, "custom_signature.png");
-        import_fs23.default.writeFileSync(sigPath, buffer);
+        const sigPath = import_path29.default.join(UPLOADS_DIR2, "custom_signature.png");
+        import_fs25.default.writeFileSync(sigPath, buffer);
         const db2 = await dbManager.getConnection();
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('use_custom_signature', 'true')");
         res.json({ success: true, message: "Custom signature uploaded and enabled" });
@@ -24660,7 +26138,19 @@ var init_settings = __esm({
           const ids = existing.map((e) => e.id);
           targetId = ids[0];
           const placeholders = ids.map(() => "?").join(",");
-          const cleanPhone = phone ? String(phone).replace(/\D/g, "") : "";
+          const sanitizePhoneDigits = (raw2) => {
+            const str = raw2 && typeof raw2 === "string" && !raw2.includes("@") && !raw2.includes("<") ? raw2.trim() : typeof raw2 === "number" ? String(raw2) : "";
+            let digits = str ? str.replace(/\D/g, "") : "";
+            if (digits.length === 12 && digits.startsWith("91")) {
+              digits = digits.slice(2);
+            } else if (digits.length > 10 && digits.startsWith("91")) {
+              digits = digits.slice(2, 12);
+            } else if (digits.length > 10) {
+              digits = digits.slice(-10);
+            }
+            return digits;
+          };
+          const cleanPhone = sanitizePhoneDigits(phone);
           await db2.run(
             `UPDATE distributors SET 
           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
@@ -24672,7 +26162,19 @@ var init_settings = __esm({
             [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || "", address || "", state_code || "", state_code || "", ...ids]
           );
         } else {
-          const cleanPhone = phone ? String(phone).replace(/\D/g, "") : "";
+          const sanitizePhoneDigits = (raw2) => {
+            const str = raw2 && typeof raw2 === "string" && !raw2.includes("@") && !raw2.includes("<") ? raw2.trim() : typeof raw2 === "number" ? String(raw2) : "";
+            let digits = str ? str.replace(/\D/g, "") : "";
+            if (digits.length === 12 && digits.startsWith("91")) {
+              digits = digits.slice(2);
+            } else if (digits.length > 10 && digits.startsWith("91")) {
+              digits = digits.slice(2, 12);
+            } else if (digits.length > 10) {
+              digits = digits.slice(-10);
+            }
+            return digits;
+          };
+          const cleanPhone = sanitizePhoneDigits(phone);
           const result = await db2.run(
             `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
             [cleanName, cleanPhone, cleanPhone, cleanEmail, address || "", state_code || ""]
@@ -24697,37 +26199,17 @@ var init_settings = __esm({
       const { id } = req.params;
       const { name, phone, email, address, state_code } = req.body;
       if (!name) return res.status(400).json({ error: "Distributor name is required" });
-      const cleanPhone = phone ? String(phone).replace(/\D/g, "") : "";
-      const cleanEmail = extractCleanEmail(email);
       try {
         const db2 = await dbManager.getConnection();
-        await db2.run(
-          `UPDATE distributors SET 
-        name = ?, 
-        phone = ?, 
-        contact = ?,
-        email = CASE WHEN ? != '' THEN ? ELSE email END, 
-        address = CASE WHEN ? != '' THEN ? ELSE address END, 
-        state_code = CASE WHEN ? != '' THEN ? ELSE state_code END 
-       WHERE id = ?`,
-          [name, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || "", address || "", state_code || "", state_code || "", id]
-        );
-        try {
-          await db2.run(
-            "INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)",
-            [id]
-          );
-        } catch (_) {
-        }
-        const updated = await db2.get("SELECT * FROM distributors WHERE id = ?", [id]);
+        const updated = await syncDistributorPhoneAcrossTables(db2, {
+          id: Number(id),
+          name,
+          phone,
+          email,
+          address,
+          state_code
+        });
         if (!updated) return res.status(404).json({ error: "Distributor not found" });
-        try {
-          await db2.run(
-            "UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?",
-            [cleanPhone, `%${name.toLowerCase().trim()}%`]
-          );
-        } catch (_) {
-        }
         res.json({ success: true, data: updated });
       } catch (error) {
         console.error("Failed to update distributor:", error);
@@ -24802,11 +26284,74 @@ var init_settings = __esm({
         res.status(500).json({ error: "Failed to disconnect Google account" });
       }
     });
+    router8.get("/registered-devices", async (_req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run(`
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        token TEXT PRIMARY KEY,
+        device_name TEXT,
+        os TEXT,
+        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        const rows = await db2.all(`
+      SELECT 
+        push_tokens.token, 
+        push_tokens.device_name, 
+        push_tokens.os, 
+        push_tokens.last_seen,
+        CASE 
+          WHEN (strftime('%s', 'now') - strftime('%s', push_tokens.last_seen)) <= 40 THEN 1 
+          ELSE 0 
+        END as is_online
+      FROM push_tokens
+      INNER JOIN (
+        SELECT MAX(last_seen) as max_last_seen, device_name, os
+        FROM push_tokens
+        GROUP BY device_name, os
+      ) p2 ON p2.max_last_seen = push_tokens.last_seen 
+        AND p2.device_name = push_tokens.device_name 
+        AND p2.os = push_tokens.os
+      ORDER BY is_online DESC, push_tokens.last_seen DESC
+    `);
+        res.json({ success: true, devices: rows || [] });
+      } catch (err) {
+        console.error("Failed to fetch registered devices:", err);
+        res.json({ success: true, devices: [] });
+      }
+    });
+    router8.put("/registered-devices/rename", async (req, res) => {
+      const { token, device_name } = req.body;
+      if (!token || !device_name) {
+        return res.status(400).json({ error: "Token and device_name are required" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run("UPDATE push_tokens SET device_name = ? WHERE token = ?", [device_name.trim(), token]);
+        res.json({ success: true, message: "Device renamed successfully" });
+      } catch (err) {
+        console.error("Failed to rename registered device:", err);
+        res.status(500).json({ error: err.message || "Failed to rename device" });
+      }
+    });
     router8.get("/storage-locations", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
+        await db2.run(`
+      CREATE TABLE IF NOT EXISTS storage_locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        code TEXT UNIQUE,
+        type TEXT DEFAULT 'rack',
+        description TEXT,
+        is_default INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
         const locations = await db2.all("SELECT * FROM storage_locations ORDER BY is_default DESC, name ASC");
-        res.json(locations);
+        res.json(locations || []);
       } catch (error) {
         console.error("Failed to fetch storage locations:", error);
         res.status(500).json({ error: "Failed to fetch storage locations" });
@@ -24973,19 +26518,19 @@ function findChromePath2() {
   const paths = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    process.env.LOCALAPPDATA ? import_path28.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null
+    process.env.LOCALAPPDATA ? import_path30.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null
   ].filter(Boolean);
   for (const p of paths) {
-    if (import_fs24.default.existsSync(p)) {
+    if (import_fs26.default.existsSync(p)) {
       return p;
     }
   }
   return null;
 }
 function copyProfileFolder(src, dest) {
-  if (!import_fs24.default.existsSync(src)) return;
-  import_fs24.default.mkdirSync(dest, { recursive: true });
-  const entries = import_fs24.default.readdirSync(src, { withFileTypes: true });
+  if (!import_fs26.default.existsSync(src)) return;
+  import_fs26.default.mkdirSync(dest, { recursive: true });
+  const entries = import_fs26.default.readdirSync(src, { withFileTypes: true });
   const skippedNames = /* @__PURE__ */ new Set([
     "cache",
     "code cache",
@@ -25008,13 +26553,13 @@ function copyProfileFolder(src, dest) {
     if (skippedNames.has(lowerName)) {
       continue;
     }
-    const srcPath = import_path28.default.join(src, entry.name);
-    const destPath = import_path28.default.join(dest, entry.name);
+    const srcPath = import_path30.default.join(src, entry.name);
+    const destPath = import_path30.default.join(dest, entry.name);
     if (entry.isDirectory()) {
       copyProfileFolder(srcPath, destPath);
     } else {
       try {
-        import_fs24.default.copyFileSync(srcPath, destPath);
+        import_fs26.default.copyFileSync(srcPath, destPath);
       } catch (err) {
         console.warn(`[TokenRefreshScheduler] Warning: Could not copy file ${srcPath}: ${err.message}`);
       }
@@ -25049,14 +26594,14 @@ async function killOrphanChromeProcesses(keyword = "pharmarack_profile") {
 }
 function cleanTempProfileFolders() {
   try {
-    const dataDir = import_path28.default.resolve(getAppDataDir(), "data");
-    if (!import_fs24.default.existsSync(dataDir)) return;
-    const entries = import_fs24.default.readdirSync(dataDir);
+    const dataDir = import_path30.default.resolve(getAppDataDir(), "data");
+    if (!import_fs26.default.existsSync(dataDir)) return;
+    const entries = import_fs26.default.readdirSync(dataDir);
     for (const entry of entries) {
       if (entry.startsWith("pharmarack_profile_temp_")) {
-        const fullPath = import_path28.default.join(dataDir, entry);
+        const fullPath = import_path30.default.join(dataDir, entry);
         try {
-          import_fs24.default.rmSync(fullPath, { recursive: true, force: true });
+          import_fs26.default.rmSync(fullPath, { recursive: true, force: true });
           console.log(`[TokenRefreshScheduler] Removed orphaned temp profile folder: ${entry}`);
         } catch (_) {
         }
@@ -25067,7 +26612,7 @@ function cleanTempProfileFolders() {
   }
 }
 function cleanProfileLockFiles(profilePath) {
-  if (!import_fs24.default.existsSync(profilePath)) return;
+  if (!import_fs26.default.existsSync(profilePath)) return;
   const lockFiles = [
     "SingletonLock",
     "lockfile",
@@ -25078,10 +26623,10 @@ function cleanProfileLockFiles(profilePath) {
     "devtoolsactiveport"
   ];
   for (const file of lockFiles) {
-    const filePath = import_path28.default.join(profilePath, file);
-    if (import_fs24.default.existsSync(filePath)) {
+    const filePath = import_path30.default.join(profilePath, file);
+    if (import_fs26.default.existsSync(filePath)) {
       try {
-        import_fs24.default.unlinkSync(filePath);
+        import_fs26.default.unlinkSync(filePath);
         console.log(`[TokenRefreshScheduler] Removed stale lock file: ${filePath}`);
       } catch (err) {
         console.warn(`[TokenRefreshScheduler] Could not remove lock file ${filePath}: ${err.message}`);
@@ -25089,12 +26634,12 @@ function cleanProfileLockFiles(profilePath) {
     }
   }
 }
-var import_fs24, import_path28, import_url25, import_child_process4, import_util, execAsync, __filename24, __dirname24, TokenRefreshScheduler, tokenRefreshScheduler;
+var import_fs26, import_path30, import_url25, import_child_process4, import_util, execAsync, __filename24, __dirname24, TokenRefreshScheduler, tokenRefreshScheduler;
 var init_tokenRefreshScheduler = __esm({
   "src/services/tokenRefreshScheduler.ts"() {
     "use strict";
-    import_fs24 = __toESM(require("fs"), 1);
-    import_path28 = __toESM(require("path"), 1);
+    import_fs26 = __toESM(require("fs"), 1);
+    import_path30 = __toESM(require("path"), 1);
     import_url25 = require("url");
     import_child_process4 = require("child_process");
     import_util = require("util");
@@ -25103,7 +26648,7 @@ var init_tokenRefreshScheduler = __esm({
     init_config();
     execAsync = (0, import_util.promisify)(import_child_process4.exec);
     __filename24 = (0, import_url25.fileURLToPath)(import_meta_url);
-    __dirname24 = import_path28.default.dirname(__filename24);
+    __dirname24 = import_path30.default.dirname(__filename24);
     TokenRefreshScheduler = class _TokenRefreshScheduler {
       static instance;
       intervalId = null;
@@ -25230,8 +26775,8 @@ var init_tokenRefreshScheduler = __esm({
           console.error("[TokenRefreshScheduler] Chrome path not found.");
           return null;
         }
-        const mainProfilePath = import_path28.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
-        if (!import_fs24.default.existsSync(mainProfilePath)) {
+        const mainProfilePath = import_path30.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+        if (!import_fs26.default.existsSync(mainProfilePath)) {
           console.error("[TokenRefreshScheduler] Main profile folder does not exist.");
           return null;
         }
@@ -25265,7 +26810,7 @@ var init_tokenRefreshScheduler = __esm({
           } catch (launchErr) {
             console.log("[TokenRefreshScheduler] Main profile is locked. Copying to temp profile...", launchErr.message);
             const randomSuffix = Math.floor(Math.random() * 1e6);
-            const tempProfilePath = import_path28.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            const tempProfilePath = import_path30.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
             copyProfileFolder(mainProfilePath, tempProfilePath);
             cleanProfileLockFiles(tempProfilePath);
             browser = await puppeteer.launch({
@@ -25342,8 +26887,8 @@ var init_tokenRefreshScheduler = __esm({
               console.warn("[TokenRefreshScheduler] Could not copy temp profile back to main profile:", copyBackErr.message);
             }
             try {
-              if (import_fs24.default.existsSync(tempProfilePathToDelete)) {
-                import_fs24.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
+              if (import_fs26.default.existsSync(tempProfilePathToDelete)) {
+                import_fs26.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
                 console.log(`[TokenRefreshScheduler] Cleared temp profile directory at ${tempProfilePathToDelete}`);
               }
             } catch (rmErr) {
@@ -25366,14 +26911,14 @@ function findChromePath3() {
   const paths = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    process.env.LOCALAPPDATA ? import_path29.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null,
-    process.env.PROGRAMFILES ? import_path29.default.join(process.env.PROGRAMFILES, "Google\\Chrome\\Application\\chrome.exe") : null,
+    process.env.LOCALAPPDATA ? import_path31.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null,
+    process.env.PROGRAMFILES ? import_path31.default.join(process.env.PROGRAMFILES, "Google\\Chrome\\Application\\chrome.exe") : null,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-    process.env.LOCALAPPDATA ? import_path29.default.join(process.env.LOCALAPPDATA, "Microsoft\\Edge\\Application\\msedge.exe") : null
+    process.env.LOCALAPPDATA ? import_path31.default.join(process.env.LOCALAPPDATA, "Microsoft\\Edge\\Application\\msedge.exe") : null
   ].filter(Boolean);
   for (const p of paths) {
-    if (import_fs25.default.existsSync(p)) {
+    if (import_fs27.default.existsSync(p)) {
       return p;
     }
   }
@@ -25390,9 +26935,9 @@ async function getPharmarackSettings() {
   return settings;
 }
 function copyProfileFolder2(src, dest) {
-  if (!import_fs25.default.existsSync(src)) return;
-  import_fs25.default.mkdirSync(dest, { recursive: true });
-  const entries = import_fs25.default.readdirSync(src, { withFileTypes: true });
+  if (!import_fs27.default.existsSync(src)) return;
+  import_fs27.default.mkdirSync(dest, { recursive: true });
+  const entries = import_fs27.default.readdirSync(src, { withFileTypes: true });
   const skippedNames = /* @__PURE__ */ new Set([
     "cache",
     "code cache",
@@ -25415,13 +26960,13 @@ function copyProfileFolder2(src, dest) {
     if (skippedNames.has(lowerName)) {
       continue;
     }
-    const srcPath = import_path29.default.join(src, entry.name);
-    const destPath = import_path29.default.join(dest, entry.name);
+    const srcPath = import_path31.default.join(src, entry.name);
+    const destPath = import_path31.default.join(dest, entry.name);
     if (entry.isDirectory()) {
       copyProfileFolder2(srcPath, destPath);
     } else {
       try {
-        import_fs25.default.copyFileSync(srcPath, destPath);
+        import_fs27.default.copyFileSync(srcPath, destPath);
       } catch (err) {
         console.warn(`[Pharmarack Sync] Warning: Could not copy file ${srcPath}: ${err.message}`);
       }
@@ -25540,6 +27085,34 @@ function cleanSearchQuery(query) {
   }
   return { cleaned: cleaned.replace(/\s+/g, " ").trim(), detectedForms };
 }
+async function searchOfflineCatalogFallback(q, storeId, isMapped) {
+  try {
+    const offlineResults = await pharmarackCatalogCache.searchCatalog(q);
+    const combined = [...offlineResults.mapped, ...offlineResults.nonMapped];
+    let filtered = combined;
+    if (storeId !== null && storeId !== void 0 && !isNaN(storeId)) {
+      filtered = combined.filter((p) => p.storeId === storeId && (isMapped === void 0 || p.isMapped === isMapped));
+    }
+    return filtered.map((p) => ({
+      name: p.name,
+      shortName: p.name,
+      fullName: p.name,
+      packaging: p.packaging || "",
+      distributor: p.distributor || "",
+      rate: p.distributorPrice,
+      mrp: p.mrp,
+      mapped: p.isMapped,
+      stock: p.availability || "High",
+      scheme: "",
+      productId: 0,
+      productCode: "",
+      company: p.manufacturer || "",
+      storeId: p.storeId
+    }));
+  } catch (e) {
+    return [];
+  }
+}
 async function verifyOrderPlacedInPharmarack(storeId) {
   try {
     const today = /* @__PURE__ */ new Date();
@@ -25577,14 +27150,14 @@ async function verifyOrderPlacedInPharmarack(storeId) {
   }
   return false;
 }
-var import_express9, import_path29, import_url26, import_fs25, import_child_process5, import_util2, execAsync2, __filename25, __dirname25, DB_PATH15, router9, pharmarack_default;
+var import_express9, import_path31, import_url26, import_fs27, import_child_process5, import_util2, execAsync2, __filename25, __dirname25, DB_PATH15, router9, pharmarack_default;
 var init_pharmarack = __esm({
   "src/routes/pharmarack.ts"() {
     "use strict";
     import_express9 = __toESM(require("express"), 1);
-    import_path29 = __toESM(require("path"), 1);
+    import_path31 = __toESM(require("path"), 1);
     import_url26 = require("url");
-    import_fs25 = __toESM(require("fs"), 1);
+    import_fs27 = __toESM(require("fs"), 1);
     init_lazyPuppeteer();
     init_connection();
     init_notificationService();
@@ -25593,10 +27166,12 @@ var init_pharmarack = __esm({
     import_child_process5 = require("child_process");
     import_util2 = require("util");
     init_config();
+    init_distributorSyncHelper();
+    init_pharmarackCatalogCache();
     execAsync2 = (0, import_util2.promisify)(import_child_process5.exec);
     __filename25 = (0, import_url26.fileURLToPath)(import_meta_url);
-    __dirname25 = import_path29.default.dirname(__filename25);
-    DB_PATH15 = process.env.DB_PATH || import_path29.default.resolve(__dirname25, "..", "..", "data", "app.db");
+    __dirname25 = import_path31.default.dirname(__filename25);
+    DB_PATH15 = process.env.DB_PATH || import_path31.default.resolve(__dirname25, "..", "..", "data", "app.db");
     router9 = import_express9.default.Router();
     router9.get("/search", async (req, res) => {
       const qRaw = (req.query.q || "").trim();
@@ -25610,10 +27185,14 @@ var init_pharmarack = __esm({
         const settings = await getPharmarackSettings();
         const token = settings["pharmarack_session_token"] || "";
         if (!token) {
+          const offline2 = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+          if (offline2.length > 0) {
+            return res.json(offline2);
+          }
           return res.status(401).json({ error: "Need to login", code: "NEED_LOGIN" });
         }
-        const payload = {
-          SearchKeyword: qRaw,
+        const buildPayload = (keyword) => ({
+          SearchKeyword: keyword,
           StoreId: hasStoreFilter && isMapped ? [storeId] : [],
           NonMappedStoreId: hasStoreFilter && !isMapped ? [storeId] : [],
           Count: 50,
@@ -25623,40 +27202,57 @@ var init_pharmarack = __esm({
           IsScheme: 2,
           IsSort: 1,
           CartSource: "MOVP"
-        };
-        const response = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
+        });
+        let response = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(buildPayload(qRaw)),
           signal: AbortSignal.timeout(3500)
         });
-        if (response.ok) {
-          const data = await response.json();
-          if (data && Array.isArray(data.data)) {
-            const results = data.data.map((p) => {
-              const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || "";
-              return {
-                name: rawName,
-                shortName: rawName,
-                fullName: rawName,
-                packaging: p.Packing || "",
-                distributor: p.StoreName || "",
-                rate: p.PTR !== void 0 ? p.PTR : null,
-                mrp: p.MRP !== void 0 ? p.MRP : null,
-                mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === "1" || String(p.Ismapped) === "1",
-                stock: p.Stock !== void 0 ? String(p.Stock) : "High",
-                scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || "",
-                productId: p.ProductId || p.PrProductId || p.ProductCode,
-                productCode: p.ProductCode || "",
-                company: p.Company || "",
-                storeId: p.StoreId
-              };
-            });
-            return res.json(results);
+        let data = response.ok ? await response.json().catch(() => null) : null;
+        const cleanedTerm = qRaw.replace(/[-_/]/g, " ").replace(/\s+/g, " ").trim();
+        if ((!data || !Array.isArray(data.data) || data.data.length === 0) && cleanedTerm !== qRaw && cleanedTerm.length >= 2) {
+          response = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
+            method: "POST",
+            body: JSON.stringify(buildPayload(cleanedTerm)),
+            signal: AbortSignal.timeout(3e3)
+          });
+          if (response.ok) {
+            data = await response.json().catch(() => null);
           }
         }
-        return res.json([]);
+        if (data && Array.isArray(data.data) && data.data.length > 0) {
+          const results = data.data.map((p) => {
+            const rawName = p.ProductFullName || p.MasterProductName || p.BrandName || p.ProductName || "";
+            return {
+              name: rawName,
+              shortName: rawName,
+              fullName: rawName,
+              packaging: p.Packing || "",
+              distributor: p.StoreName || "",
+              rate: p.PTR !== void 0 ? p.PTR : null,
+              mrp: p.MRP !== void 0 ? p.MRP : null,
+              mapped: p.IsMapped === 1 || p.Ismapped === 1 || p.isMapped === true || p.isMapped === 1 || String(p.IsMapped) === "1" || String(p.Ismapped) === "1",
+              stock: p.Stock !== void 0 ? String(p.Stock) : "High",
+              scheme: p.Scheme || p.SchemeDescription || p.ProductScheme || "",
+              productId: p.ProductId || p.PrProductId || p.ProductCode,
+              productCode: p.ProductCode || "",
+              company: p.Company || "",
+              storeId: p.StoreId
+            };
+          });
+          return res.json(results);
+        }
+        const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+        return res.json(offline);
       } catch (err) {
         console.error("Pharmarack direct live API search failed:", err.message);
+        try {
+          const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+          if (offline.length > 0) {
+            return res.json(offline);
+          }
+        } catch (_) {
+        }
         return res.status(503).json({ error: "Connection error, please check internet or reconnect", code: "CONNECTION_ERROR" });
       }
     });
@@ -25673,7 +27269,7 @@ var init_pharmarack = __esm({
         COALESCE(d.gstin, '') as partyCode,
         p.distributor_id as profileId
       FROM distributors d
-      INNER JOIN distributor_learning_profiles p ON d.id = p.distributor_id
+      LEFT JOIN distributor_learning_profiles p ON d.id = p.distributor_id
       ORDER BY d.name ASC
     `);
         const stores = rows.map((s) => {
@@ -25713,9 +27309,26 @@ var init_pharmarack = __esm({
       )
     `);
         const rows = await db2.all(`
-      SELECT m.store_name, m.distributor_id, m.phone, d.name as distributor_name, COALESCE(d.phone, d.contact, m.phone) as distributor_phone
+      SELECT 
+        m.store_name, 
+        COALESCE(m.distributor_id, d.id) as distributor_id, 
+        COALESCE(d.phone, d.contact, m.phone) as phone, 
+        COALESCE(d.name, m.store_name) as distributor_name, 
+        COALESCE(d.phone, d.contact, m.phone) as distributor_phone
       FROM pharmarack_distributor_mappings m
-      LEFT JOIN distributors d ON m.distributor_id = d.id
+      LEFT JOIN distributors d ON (m.distributor_id = d.id OR LOWER(TRIM(m.store_name)) = LOWER(TRIM(d.name)))
+      UNION
+      SELECT 
+        d.name as store_name, 
+        d.id as distributor_id, 
+        COALESCE(d.phone, d.contact) as phone, 
+        d.name as distributor_name, 
+        COALESCE(d.phone, d.contact) as distributor_phone
+      FROM distributors d
+      WHERE ((d.phone IS NOT NULL AND d.phone != '') OR (d.contact IS NOT NULL AND d.contact != ''))
+        AND LOWER(TRIM(d.name)) NOT IN (
+          SELECT LOWER(TRIM(store_name)) FROM pharmarack_distributor_mappings WHERE store_name IS NOT NULL
+        )
     `);
         res.json({ success: true, mappings: rows || [] });
       } catch (error) {
@@ -25730,27 +27343,15 @@ var init_pharmarack = __esm({
       }
       try {
         const db2 = await dbManager.getConnection();
-        await db2.run(`
-      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
-        store_name TEXT PRIMARY KEY,
-        distributor_id INTEGER,
-        phone TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-        await db2.run(
-          `INSERT INTO pharmarack_distributor_mappings (store_name, distributor_id, phone, updated_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(store_name) DO UPDATE SET
-         distributor_id = EXCLUDED.distributor_id,
-         phone = EXCLUDED.phone,
-         updated_at = CURRENT_TIMESTAMP`,
-          [store_name.trim(), distributor_id || null, phone || ""]
-        );
+        await syncDistributorPhoneAcrossTables(db2, {
+          id: distributor_id ? Number(distributor_id) : void 0,
+          store_name,
+          phone
+        });
         res.json({ success: true, message: "Store mapping saved successfully" });
       } catch (error) {
         console.error("Failed to save distributor mapping:", error);
-        res.status(500).json({ error: "Failed to save distributor mapping" });
+        res.status(500).json({ error: "Failed to save distributor mapping: " + error.message });
       }
     });
     router9.post("/catalog/sync", async (_req, res) => {
@@ -25781,7 +27382,7 @@ var init_pharmarack = __esm({
       (async () => {
         let browser;
         let tempProfilePathToDelete = "";
-        const mainProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+        const mainProfilePath = import_path31.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
         const puppeteer = await getPuppeteer();
         try {
           console.log("Killing any orphan Chrome processes holding locks on pharmarack_profile...");
@@ -25799,7 +27400,7 @@ var init_pharmarack = __esm({
           } catch (launchErr) {
             console.warn("Failed to launch Chrome with main profile, attempting temp profile fallback...", launchErr.message);
             const randomSuffix = Math.floor(Math.random() * 1e6);
-            const tempProfilePath = import_path29.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            const tempProfilePath = import_path31.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
             copyProfileFolder2(mainProfilePath, tempProfilePath);
             cleanProfileLockFiles(tempProfilePath);
             browser = await puppeteer.launch({
@@ -25999,8 +27600,8 @@ var init_pharmarack = __esm({
               console.warn("[Pharmarack Login Window] Could not copy temp profile back to main profile:", copyBackErr.message);
             }
             try {
-              if (import_fs25.default.existsSync(tempProfilePathToDelete)) {
-                import_fs25.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
+              if (import_fs27.default.existsSync(tempProfilePathToDelete)) {
+                import_fs27.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
                 console.log(`[Pharmarack Login Window] Cleared temp profile directory at ${tempProfilePathToDelete}`);
               }
             } catch (rmErr) {
@@ -26036,40 +27637,46 @@ var init_pharmarack = __esm({
               }
             }
           }
-          if (!item.productCode && token) {
+          const hasValidId = Boolean(item.productId) && Number(item.productId) > 0;
+          const hasValidCode = Boolean(item.productCode);
+          if ((!hasValidId || !hasValidCode) && token) {
             try {
               let cleanKeyword = (item.productName || item.product || item.name || "").trim();
               cleanKeyword = cleanKeyword.replace(/\s*\([^)]*\)\s*$/, "").trim();
-              const searchPayload = {
-                SearchKeyword: cleanKeyword,
-                StoreId: [],
-                NonMappedStoreId: [],
-                Count: 10,
-                SkipCount: 0,
-                isMappedSearch: null,
-                IsStock: 2,
-                IsScheme: 2,
-                IsSort: 1,
-                CartSource: "MOVP"
-              };
-              const searchRes = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
-                method: "POST",
-                body: JSON.stringify(searchPayload),
-                signal: AbortSignal.timeout(4e3)
-              });
-              if (searchRes.ok) {
-                const searchData = await searchRes.json();
-                if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
-                  const matched = searchData.data.find((p) => p.PrProductId === item.productId && p.StoreId === item.storeId) || searchData.data[0];
-                  if (matched) {
-                    item.productId = matched.PrProductId || item.productId || 0;
-                    item.storeId = matched.StoreId || item.storeId || 0;
-                    item.productCode = matched.ProductCode || "";
-                    item.productName = matched.ProductName || matched.ProductFullName || item.productName || item.product || "";
-                    item.storeName = matched.StoreName || item.storeName || "";
-                    item.company = matched.Company || item.company || "";
-                    item.mrp = matched.MRP || item.mrp || 0;
-                    item.rate = matched.PTR || item.rate || 0;
+              if (cleanKeyword) {
+                const searchPayload = {
+                  SearchKeyword: cleanKeyword,
+                  StoreId: item.storeId ? [Number(item.storeId)] : [],
+                  NonMappedStoreId: [],
+                  Count: 10,
+                  SkipCount: 0,
+                  isMappedSearch: null,
+                  IsStock: 2,
+                  IsScheme: 2,
+                  IsSort: 1,
+                  CartSource: "MOVP"
+                };
+                const searchRes = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
+                  method: "POST",
+                  body: JSON.stringify(searchPayload),
+                  signal: AbortSignal.timeout(4e3)
+                });
+                if (searchRes.ok) {
+                  const searchData = await searchRes.json().catch(() => null);
+                  if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
+                    const matched = searchData.data.find(
+                      (p) => (p.PrProductId === item.productId || String(p.ProductCode).toLowerCase() === String(item.productCode).toLowerCase()) && Number(p.StoreId) === Number(item.storeId)
+                    ) || searchData.data.find((p) => Number(p.StoreId) === Number(item.storeId)) || searchData.data[0];
+                    if (matched) {
+                      item.productId = Number(matched.PrProductId || matched.ProductId || item.productId || 0);
+                      item.storeId = Number(matched.StoreId || item.storeId || 0);
+                      item.productCode = matched.ProductCode || item.productCode || "";
+                      item.productName = matched.ProductName || matched.ProductFullName || item.productName || item.product || "";
+                      item.storeName = matched.StoreName || item.storeName || "";
+                      item.company = matched.Company || item.company || "";
+                      item.mrp = Number(matched.MRP || item.mrp || 0);
+                      item.rate = Number(matched.PTR || item.rate || 0);
+                    }
                   }
                 }
               }
@@ -26198,7 +27805,7 @@ var init_pharmarack = __esm({
           const chromePath = findChromePath3();
           if (chromePath) {
             console.log("[Pharmarack] Initiating browser UI automation fallback...");
-            const pharmarackProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+            const pharmarackProfilePath = import_path31.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
             let browser;
             let tempProfilePathToDelete = "";
             const puppeteer = await getPuppeteer();
@@ -26226,7 +27833,7 @@ var init_pharmarack = __esm({
               } catch (launchErr) {
                 console.log("[Pharmarack Fallback] Main profile is locked. Copying to temp profile...", launchErr.message);
                 const randomSuffix = Math.floor(Math.random() * 1e6);
-                const tempProfilePath = import_path29.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+                const tempProfilePath = import_path31.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
                 copyProfileFolder2(pharmarackProfilePath, tempProfilePath);
                 cleanProfileLockFiles(tempProfilePath);
                 browser = await puppeteer.launch({
@@ -26432,8 +28039,8 @@ var init_pharmarack = __esm({
                   console.warn("[Pharmarack Fallback] Could not copy temp profile back to main profile:", copyBackErr.message);
                 }
                 try {
-                  if (import_fs25.default.existsSync(tempProfilePathToDelete)) {
-                    import_fs25.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
+                  if (import_fs27.default.existsSync(tempProfilePathToDelete)) {
+                    import_fs27.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
                     console.log(`[Pharmarack Fallback] Cleared temp profile directory at ${tempProfilePathToDelete}`);
                   }
                 } catch (rmErr) {
@@ -26450,6 +28057,312 @@ var init_pharmarack = __esm({
       } catch (err) {
         console.error("Pharmarack cart route error:", err);
         res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    router9.post("/delete-cart-item", async (req, res) => {
+      const { storeId, productId, productCode, productName, company, packaging, ptr, mrp, storeName } = req.body;
+      if (!storeId || !productId && !productCode && !productName) {
+        return res.status(400).json({ error: "Missing required item details for cart deletion" });
+      }
+      try {
+        const settings = await getPharmarackSettings();
+        let token = settings["pharmarack_session_token"] || "";
+        let deleteSuccess = false;
+        let lastError = "";
+        let resolvedProductId = (() => {
+          if (!productId) return 0;
+          const n = Number(productId);
+          if (!isNaN(n) && n > 0) return n;
+          const stripped = String(productId).replace(/^PR/i, "");
+          const sn = Number(stripped);
+          return !isNaN(sn) && sn > 0 ? sn : 0;
+        })();
+        let resolvedProductCode = productCode || "";
+        let resolvedCompany = company || "";
+        let resolvedPtr = Number(ptr || 0);
+        let resolvedMrp = Number(mrp || resolvedPtr);
+        if ((!resolvedProductId || !resolvedProductCode) && token) {
+          try {
+            let cleanKeyword = (productName || "").trim().replace(/\s*\([^)]*\)\s*$/, "").trim();
+            if (cleanKeyword) {
+              const searchPayload = {
+                SearchKeyword: cleanKeyword,
+                StoreId: storeId ? [Number(storeId)] : [],
+                NonMappedStoreId: [],
+                Count: 10,
+                SkipCount: 0,
+                isMappedSearch: null,
+                IsStock: 2,
+                IsScheme: 2,
+                IsSort: 1,
+                CartSource: "MOVP"
+              };
+              const searchRes = await fetchPharmarack("https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search", {
+                method: "POST",
+                body: JSON.stringify(searchPayload),
+                signal: AbortSignal.timeout(3500)
+              });
+              if (searchRes.ok) {
+                const searchData = await searchRes.json().catch(() => null);
+                if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
+                  const matched = searchData.data.find((p) => Number(p.StoreId) === Number(storeId)) || searchData.data[0];
+                  if (matched) {
+                    resolvedProductId = Number(matched.PrProductId || matched.ProductId || resolvedProductId);
+                    resolvedProductCode = matched.ProductCode || resolvedProductCode;
+                    resolvedCompany = matched.Company || resolvedCompany;
+                    resolvedPtr = Number(matched.PTR || resolvedPtr);
+                    resolvedMrp = Number(matched.MRP || resolvedMrp);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("[Pharmarack Delete] Search enrichment warning:", e);
+          }
+        }
+        if (token) {
+          try {
+            const fullDeletePayload = {
+              StoreId: Number(storeId) || 0,
+              StoreName: storeName || "",
+              ProductCode: resolvedProductCode || "",
+              Quantity: 0,
+              PTR: resolvedPtr,
+              Free: 0,
+              HiddenPTR: resolvedPtr,
+              NetRate: resolvedPtr,
+              Scheme: "",
+              SchemeType: "",
+              GSTPercentage: 0,
+              ItemGSTValue: 0,
+              CartSource: "MOVP",
+              DeliveryOption: "",
+              RemarkForStore: "",
+              ProductAddedBy: 0,
+              Priority: "",
+              OrderPlaced: 0,
+              OrderPlacedBy: 0,
+              CreatedBy: 0,
+              ProductName: productName || "",
+              StoreProductName: productName || "",
+              StoreWiseAmount: 0,
+              StoreWiseGSTAmount: 0,
+              IsDeleted: 1,
+              AllowMinQty: 0,
+              AllowMaxQty: 0,
+              StepUpValue: 1,
+              AllowMOQ: true,
+              MinItemLimit: 0,
+              MaxItemLimit: 0,
+              MinAmountLimit: 0,
+              MaxAmountLimit: 0,
+              DODIsPrefenceSet: 0,
+              IsDODPreferenceSet: 0,
+              DisplayHalfSchemeOn: "",
+              DisplayHalfScheme: "0",
+              RetailerSchemePreference: 1,
+              HalfSchemeValueToRetailer: 0,
+              RoundOffDisplayHS: "",
+              MinOrderQuantity: 0,
+              MaxOrderQuantity: 0,
+              IsDODProduct: 0,
+              IsDODProductCheck: 0,
+              IsDODProductSelected: 0,
+              OrderDeliveryModeStatus: 1,
+              OrderRemarks: 1,
+              SpecialRate: 0,
+              Stock: 999,
+              RShowPtr: 1,
+              IsPartyLocked: 0,
+              RewardSchemeId: 0,
+              IsProductChecked: 0,
+              DeliveryPerson: "",
+              DeliveryPersonCode: "",
+              RShowPtrForAllCompanies: 1,
+              Company: resolvedCompany || company || "",
+              IsGroupWisePTR: 0,
+              IsGroupWisePTRRetailer: 0,
+              RateValidity: null,
+              IsShowNonMappedOrderStock: 1,
+              RStockVisibility: 0,
+              IsMapped: 1,
+              ProductId: resolvedProductId,
+              MRP: String(resolvedMrp || resolvedPtr),
+              ProductWiseAmount: 0,
+              ProductWiseGSTAmount: 0,
+              ProductWiseSchemeAmount: 0,
+              ProductWiseSchemeGSTAmount: 0,
+              StoreWiseSchemeAmount: 0,
+              StoreWiseSchemeGSTAmount: 0,
+              ProductLock: 0,
+              BoxPacking: "0",
+              CasePacking: packaging || "1 strip",
+              Packing: packaging || "1 strip"
+            };
+            const response = await fetchPharmarack("https://pharmretail-api.pharmarack.com/cart/api/v1/AddUserProductCartDetail", {
+              method: "POST",
+              body: JSON.stringify(fullDeletePayload),
+              signal: AbortSignal.timeout(6e3)
+            });
+            if (response.ok) {
+              const resJson = await response.json().catch(() => ({}));
+              const isOk = resJson && (resJson.StatusCode === 200 || resJson.statusCode === 200 || String(resJson.StatusCode) === "200" || resJson.status === 200 || resJson.status === "success" || resJson.success === true || resJson.Message && String(resJson.Message).toLowerCase().includes("success") || resJson.message && String(resJson.message).toLowerCase().includes("success"));
+              if (isOk) {
+                deleteSuccess = true;
+              } else {
+                lastError = `AddUserProductCartDetail response: ${resJson.message || resJson.Message || JSON.stringify(resJson)}`;
+              }
+            } else {
+              const errText = await response.text().catch(() => "");
+              lastError = `AddUserProductCartDetail status: ${response.status}. Details: ${errText}`;
+            }
+            if (!deleteSuccess) {
+              const secEndpoints = [
+                "https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartProductDetail",
+                "https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteUserProductCartDetail",
+                "https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartDetail"
+              ];
+              for (const ep of secEndpoints) {
+                try {
+                  const secRes = await fetchPharmarack(ep, {
+                    method: "POST",
+                    body: JSON.stringify({
+                      StoreId: Number(storeId),
+                      ProductId: resolvedProductId,
+                      ProductCode: resolvedProductCode || "",
+                      CartSource: "MOVP"
+                    }),
+                    signal: AbortSignal.timeout(4e3)
+                  });
+                  if (secRes.ok) {
+                    deleteSuccess = true;
+                    break;
+                  }
+                } catch (_) {
+                }
+              }
+            }
+          } catch (err) {
+            lastError = err.message;
+          }
+        }
+        if (!deleteSuccess) {
+          const chromePath = findChromePath3();
+          if (chromePath) {
+            console.log("[Pharmarack Delete] Initiating Puppeteer UI automation fallback on official website cart...");
+            const pharmarackProfilePath = import_path31.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+            let browser;
+            let tempProfilePathToDelete = "";
+            const puppeteer = await getPuppeteer();
+            try {
+              try {
+                await killOrphanChromeProcesses("pharmarack_profile");
+                cleanProfileLockFiles(pharmarackProfilePath);
+                browser = await puppeteer.launch({
+                  executablePath: chromePath,
+                  headless: true,
+                  userDataDir: pharmarackProfilePath,
+                  args: [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-default-apps",
+                    "--no-first-run",
+                    "--mute-audio",
+                    "--window-position=-10000,-10000"
+                  ]
+                });
+              } catch (launchErr) {
+                console.log("[Pharmarack Fallback] Main profile locked. Copying temp profile...", launchErr.message);
+                const randomSuffix = Math.floor(Math.random() * 1e6);
+                const tempProfilePath = import_path31.default.resolve(getAppDataDir(), "data", `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+                copyProfileFolder2(pharmarackProfilePath, tempProfilePath);
+                cleanProfileLockFiles(tempProfilePath);
+                browser = await puppeteer.launch({
+                  executablePath: chromePath,
+                  headless: true,
+                  userDataDir: tempProfilePath,
+                  args: [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-dev-shm-usage",
+                    "--disable-extensions",
+                    "--disable-default-apps",
+                    "--no-first-run",
+                    "--mute-audio",
+                    "--window-position=-10000,-10000"
+                  ]
+                });
+                tempProfilePathToDelete = tempProfilePath;
+              }
+              const [page] = await browser.pages();
+              await page.goto("https://retailers.pharmarack.com/cart", { waitUntil: "domcontentloaded", timeout: 25e3 }).catch(() => {
+              });
+              await new Promise((r) => setTimeout(r, 2e3));
+              const clicked = await page.evaluate(async (targetName, targetCode) => {
+                const rows = Array.from(document.querySelectorAll("tr, .cart-item, .product-row, .cart-product, .item-row, div.row"));
+                for (const row of rows) {
+                  const text = (row.textContent || "").toLowerCase();
+                  const matchName = targetName && text.includes(targetName.toLowerCase());
+                  const matchCode = targetCode && text.includes(targetCode.toLowerCase());
+                  if (matchName || matchCode) {
+                    const btn = row.querySelector('button[title*="delete" i], button[title*="remove" i], .delete-icon, .icon-delete, .fa-trash, .fa-trash-alt, svg.lucide-trash, button.btn-danger, a.delete, [class*="trash" i], [id*="delete" i]');
+                    if (btn) {
+                      btn.click();
+                      return true;
+                    }
+                  }
+                }
+                const globalTrashBtns = Array.from(document.querySelectorAll('button[title*="delete" i], .fa-trash, .fa-trash-alt, .delete-icon, [class*="trash" i]'));
+                for (const btn of globalTrashBtns) {
+                  const parentText = (btn.parentElement?.parentElement?.textContent || "").toLowerCase();
+                  if (targetName && parentText.includes(targetName.toLowerCase())) {
+                    btn.click();
+                    return true;
+                  }
+                }
+                return false;
+              }, productName || "", resolvedProductCode || productCode || "");
+              if (clicked) {
+                console.log("[Pharmarack Fallback] Clicked trash delete button on retailers.pharmarack.com/cart page!");
+                await new Promise((r) => setTimeout(r, 2e3));
+                deleteSuccess = true;
+              }
+            } catch (pwErr) {
+              console.error("Headless browser deletion fallback error:", pwErr.message);
+            } finally {
+              if (browser) {
+                try {
+                  await browser.close();
+                } catch (_) {
+                }
+              }
+              if (tempProfilePathToDelete) {
+                try {
+                  if (deleteSuccess) copyProfileFolder2(tempProfilePathToDelete, pharmarackProfilePath);
+                } catch (_) {
+                }
+                try {
+                  if (import_fs27.default.existsSync(tempProfilePathToDelete)) import_fs27.default.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
+                } catch (_) {
+                }
+              }
+            }
+          }
+        }
+        if (deleteSuccess) {
+          return res.json({ success: true, message: "Successfully removed item from Pharmarack live cart!" });
+        } else {
+          return res.status(500).json({ error: "Failed to delete item from Pharmarack live cart", details: lastError });
+        }
+      } catch (err) {
+        console.error("Error in /api/pharmarack/delete-cart-item:", err);
+        res.status(500).json({ error: "Failed to delete cart item: " + err.message });
       }
     });
     router9.post("/cart/notify-manual", async (req, res) => {
@@ -26505,33 +28418,130 @@ var init_pharmarack = __esm({
           return res.status(503).json({ error: `Pharmarack API returned ${response.status}` });
         }
         const cartData = await response.json().catch(() => null);
-        const rawList = Array.isArray(cartData?.IList) ? cartData.IList : Array.isArray(cartData?.ilist) ? cartData.ilist : Array.isArray(cartData?.data) ? cartData.data : Array.isArray(cartData?.Data) ? cartData.Data : cartData?.data && Array.isArray(cartData.data.Stores) ? cartData.data.Stores : cartData?.Data && Array.isArray(cartData.Data.Stores) ? cartData.Data.Stores : cartData?.data && Array.isArray(cartData.data.stores) ? cartData.data.stores : Array.isArray(cartData?.items) ? cartData.items : Array.isArray(cartData?.Items) ? cartData.Items : Array.isArray(cartData) ? cartData : [];
-        const distributors = rawList.map((store) => ({
-          storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
-          storeName: store.StoreName || store.storeName || store.Name || store.name || "Unknown Distributor",
-          lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || 0,
-          deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d) => ({
-            name: d.SalesmanName || d.name || d.Salesman || "",
-            code: d.SalesmanCode || d.code || ""
-          })),
-          items: (store.lineItems || store.items || store.LineItems || store.Products || store.products || []).map((item) => ({
-            productId: item.ProductId || item.productId || item.Id || item.id,
-            storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
-            productCode: item.ProductCode || item.productCode || "",
-            productName: item.ProductName || item.productName || item.Name || item.name || "Unknown Product",
-            company: item.Company || item.company || "",
-            packaging: item.Packing || item.packaging || item.CasePacking || "",
-            qty: item.Quantity || item.qty || item.quantity || 1,
-            ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
-            mrp: item.MRP ? parseFloat(item.MRP) : item.mrp || 0,
-            scheme: item.Scheme || item.scheme || "",
-            stock: item.Stock ?? item.stock ?? null,
-            amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
-            cartSource: item.CartSource || item.cartSource || "",
-            isChecked: item.IsProductChecked === 1 || item.isChecked === true,
-            createdDate: item.CreatedDate || item.createdDate || ""
-          }))
-        }));
+        let rawList = [];
+        if (cartData) {
+          if (Array.isArray(cartData)) {
+            rawList = cartData;
+          } else {
+            const targetObj = cartData.data || cartData.Data || cartData;
+            if (Array.isArray(targetObj)) {
+              rawList = targetObj;
+            } else if (typeof targetObj === "object") {
+              const keysToTry = [
+                "IList",
+                "ilist",
+                "StoreWiseCartDetails",
+                "storeWiseCartDetails",
+                "CartDetails",
+                "cartDetails",
+                "Stores",
+                "stores",
+                "StoreList",
+                "storeList",
+                "CartList",
+                "cartList",
+                "Items",
+                "items",
+                "Products",
+                "products"
+              ];
+              for (const k of keysToTry) {
+                if (Array.isArray(targetObj[k])) {
+                  rawList = targetObj[k];
+                  break;
+                }
+              }
+              if (rawList.length === 0 && typeof cartData === "object") {
+                for (const k of keysToTry) {
+                  if (Array.isArray(cartData[k])) {
+                    rawList = cartData[k];
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        let distributors = [];
+        if (rawList.length > 0) {
+          const firstEntry = rawList[0];
+          const hasNestedItems = Boolean(
+            firstEntry.lineItems && Array.isArray(firstEntry.lineItems) || firstEntry.LineItems && Array.isArray(firstEntry.LineItems) || firstEntry.items && Array.isArray(firstEntry.items) || firstEntry.Items && Array.isArray(firstEntry.Items) || firstEntry.products && Array.isArray(firstEntry.products) || firstEntry.Products && Array.isArray(firstEntry.Products) || firstEntry.ProductList && Array.isArray(firstEntry.ProductList) || firstEntry.productList && Array.isArray(firstEntry.productList) || firstEntry.CartItemList && Array.isArray(firstEntry.CartItemList) || firstEntry.cartItemList && Array.isArray(firstEntry.cartItemList)
+          );
+          if (hasNestedItems) {
+            distributors = rawList.map((store) => {
+              const rawItems = store.lineItems || store.LineItems || store.items || store.Items || store.products || store.Products || store.ProductList || store.productList || store.CartItemList || store.cartItemList || [];
+              return {
+                storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
+                storeName: store.StoreName || store.storeName || store.Name || store.name || "Unknown Distributor",
+                lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || store.TotalAmount || 0,
+                deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d) => ({
+                  name: d.SalesmanName || d.name || d.Salesman || "",
+                  code: d.SalesmanCode || d.code || ""
+                })),
+                items: rawItems.map((item) => ({
+                  productId: item.ProductId || item.productId || item.Id || item.id,
+                  storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
+                  productCode: item.ProductCode || item.productCode || "",
+                  productName: item.ProductName || item.productName || item.Name || item.name || "Unknown Product",
+                  company: item.Company || item.company || "",
+                  packaging: item.Packing || item.packaging || item.CasePacking || "",
+                  qty: item.Quantity || item.qty || item.quantity || 1,
+                  ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
+                  mrp: item.MRP ? parseFloat(item.MRP) : item.mrp || 0,
+                  scheme: item.Scheme || item.scheme || "",
+                  stock: item.Stock ?? item.stock ?? null,
+                  amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
+                  cartSource: item.CartSource || item.cartSource || "",
+                  isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                  createdDate: item.CreatedDate || item.createdDate || ""
+                }))
+              };
+            });
+          } else {
+            const storeMap = /* @__PURE__ */ new Map();
+            for (const item of rawList) {
+              const storeId = item.StoreId || item.storeId || item.Id || item.id || 0;
+              const storeName = item.StoreName || item.storeName || item.Name || item.name || "Unknown Distributor";
+              const storeKey = `${storeId}_${storeName}`;
+              if (!storeMap.has(storeKey)) {
+                storeMap.set(storeKey, {
+                  storeId,
+                  storeName,
+                  lineTotal: 0,
+                  deliveryPersons: (item.DeliveryPersonList || item.deliveryPersons || []).map((d) => ({
+                    name: d.SalesmanName || d.name || "",
+                    code: d.SalesmanCode || d.code || ""
+                  })),
+                  items: []
+                });
+              }
+              const storeObj = storeMap.get(storeKey);
+              const itemQty = item.Quantity || item.qty || item.quantity || 1;
+              const itemPtr = item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0;
+              const itemAmt = item.ProductWiseAmount || item.amount || item.LineTotal || itemPtr * itemQty;
+              storeObj.lineTotal += itemAmt;
+              storeObj.items.push({
+                productId: item.ProductId || item.productId || item.Id || item.id,
+                storeId,
+                productCode: item.ProductCode || item.productCode || "",
+                productName: item.ProductName || item.productName || item.Name || item.name || "Unknown Product",
+                company: item.Company || item.company || "",
+                packaging: item.Packing || item.packaging || item.CasePacking || "",
+                qty: itemQty,
+                ptr: itemPtr,
+                mrp: item.MRP ? parseFloat(item.MRP) : item.mrp || 0,
+                scheme: item.Scheme || item.scheme || "",
+                stock: item.Stock ?? item.stock ?? null,
+                amount: itemAmt,
+                cartSource: item.CartSource || item.cartSource || "",
+                isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                createdDate: item.CreatedDate || item.createdDate || ""
+              });
+            }
+            distributors = Array.from(storeMap.values());
+          }
+        }
         const totalItems = distributors.reduce((s, d) => s + d.items.length, 0);
         try {
           const db2 = await dbManager.getConnection();
@@ -26566,6 +28576,160 @@ var init_pharmarack = __esm({
       } catch (err) {
         console.error("Pharmarack cart fetch error:", err);
         res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    router9.get("/live-cart-summary", async (req, res) => {
+      try {
+        const settings = await getPharmarackSettings();
+        const token = settings["pharmarack_session_token"] || "";
+        let cartDistributors = [];
+        if (token) {
+          try {
+            const response = await fetchPharmarack("https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails", {
+              method: "GET",
+              signal: AbortSignal.timeout(1e4)
+            });
+            if (response.ok) {
+              const cartData = await response.json().catch(() => null);
+              let rawList = [];
+              if (cartData) {
+                if (Array.isArray(cartData)) {
+                  rawList = cartData;
+                } else {
+                  const targetObj = cartData.data || cartData.Data || cartData;
+                  if (Array.isArray(targetObj)) {
+                    rawList = targetObj;
+                  } else if (typeof targetObj === "object") {
+                    const keysToTry = [
+                      "IList",
+                      "ilist",
+                      "StoreWiseCartDetails",
+                      "storeWiseCartDetails",
+                      "CartDetails",
+                      "cartDetails",
+                      "Stores",
+                      "stores",
+                      "StoreList",
+                      "storeList",
+                      "CartList",
+                      "cartList",
+                      "Items",
+                      "items",
+                      "Products",
+                      "products"
+                    ];
+                    for (const k of keysToTry) {
+                      if (Array.isArray(targetObj[k])) {
+                        rawList = targetObj[k];
+                        break;
+                      }
+                    }
+                    if (rawList.length === 0 && typeof cartData === "object") {
+                      for (const k of keysToTry) {
+                        if (Array.isArray(cartData[k])) {
+                          rawList = cartData[k];
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              if (rawList.length > 0) {
+                const firstEntry = rawList[0];
+                const hasNestedItems = Boolean(
+                  firstEntry.lineItems && Array.isArray(firstEntry.lineItems) || firstEntry.LineItems && Array.isArray(firstEntry.LineItems) || firstEntry.items && Array.isArray(firstEntry.items) || firstEntry.Items && Array.isArray(firstEntry.Items) || firstEntry.products && Array.isArray(firstEntry.products) || firstEntry.Products && Array.isArray(firstEntry.Products) || firstEntry.ProductList && Array.isArray(firstEntry.ProductList) || firstEntry.productList && Array.isArray(firstEntry.productList) || firstEntry.CartItemList && Array.isArray(firstEntry.CartItemList) || firstEntry.cartItemList && Array.isArray(firstEntry.cartItemList)
+                );
+                if (hasNestedItems) {
+                  cartDistributors = rawList.map((store) => {
+                    const rawItems = store.lineItems || store.LineItems || store.items || store.Items || store.products || store.Products || store.ProductList || store.productList || store.CartItemList || store.cartItemList || [];
+                    return {
+                      storeId: store.StoreId || store.storeId || store.Id || store.id || 0,
+                      storeName: store.StoreName || store.storeName || store.Name || store.name || "Unknown Distributor",
+                      lineTotal: store.lineTotal || store.LineTotal || store.totalAmount || store.TotalAmount || 0,
+                      deliveryPersons: (store.DeliveryPersonList || store.deliveryPersons || store.deliveryPersonList || []).map((d) => ({
+                        name: d.SalesmanName || d.name || d.Salesman || "",
+                        code: d.SalesmanCode || d.code || ""
+                      })),
+                      items: rawItems.map((item) => ({
+                        productId: item.ProductId || item.productId || item.Id || item.id,
+                        storeId: item.StoreId || item.storeId || store.StoreId || store.storeId,
+                        productCode: item.ProductCode || item.productCode || "",
+                        productName: item.ProductName || item.productName || item.Name || item.name || "Unknown Product",
+                        company: item.Company || item.company || "",
+                        packaging: item.Packing || item.packaging || item.CasePacking || "",
+                        qty: item.Quantity || item.qty || item.quantity || 1,
+                        ptr: item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0,
+                        mrp: item.MRP ? parseFloat(item.MRP) : item.mrp || 0,
+                        scheme: item.Scheme || item.scheme || "",
+                        stock: item.Stock ?? item.stock ?? null,
+                        amount: item.ProductWiseAmount || item.amount || item.LineTotal || 0,
+                        cartSource: item.CartSource || item.cartSource || "",
+                        isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                        createdDate: item.CreatedDate || item.createdDate || ""
+                      }))
+                    };
+                  });
+                } else {
+                  const storeMap = /* @__PURE__ */ new Map();
+                  for (const item of rawList) {
+                    const storeId = item.StoreId || item.storeId || item.Id || item.id || 0;
+                    const storeName = item.StoreName || item.storeName || item.Name || item.name || "Unknown Distributor";
+                    const storeKey = `${storeId}_${storeName}`;
+                    if (!storeMap.has(storeKey)) {
+                      storeMap.set(storeKey, {
+                        storeId,
+                        storeName,
+                        lineTotal: 0,
+                        deliveryPersons: (item.DeliveryPersonList || item.deliveryPersons || []).map((d) => ({
+                          name: d.SalesmanName || d.name || "",
+                          code: d.SalesmanCode || d.code || ""
+                        })),
+                        items: []
+                      });
+                    }
+                    const storeObj = storeMap.get(storeKey);
+                    const itemQty = item.Quantity || item.qty || item.quantity || 1;
+                    const itemPtr = item.PTR || item.ptr || item.HiddenPTR || item.NetRate || 0;
+                    const itemAmt = item.ProductWiseAmount || item.amount || item.LineTotal || itemPtr * itemQty;
+                    storeObj.lineTotal += itemAmt;
+                    storeObj.items.push({
+                      productId: item.ProductId || item.productId || item.Id || item.id,
+                      storeId,
+                      productCode: item.ProductCode || item.productCode || "",
+                      productName: item.ProductName || item.productName || item.Name || item.name || "Unknown Product",
+                      company: item.Company || item.company || "",
+                      packaging: item.Packing || item.packaging || item.CasePacking || "",
+                      qty: itemQty,
+                      ptr: itemPtr,
+                      mrp: item.MRP ? parseFloat(item.MRP) : item.mrp || 0,
+                      scheme: item.Scheme || item.scheme || "",
+                      stock: item.Stock ?? item.stock ?? null,
+                      amount: itemAmt,
+                      cartSource: item.CartSource || item.cartSource || "",
+                      isChecked: item.IsProductChecked === 1 || item.isChecked === true,
+                      createdDate: item.CreatedDate || item.createdDate || ""
+                    });
+                  }
+                  cartDistributors = Array.from(storeMap.values());
+                }
+              }
+            }
+          } catch (err) {
+            console.warn("Live cart details fetch error in summary route:", err.message);
+          }
+        }
+        const db2 = await dbManager.getConnection();
+        const pendingOrders = await db2.all("SELECT * FROM special_orders WHERE status = 'Pending' OR status = 'Ordered' ORDER BY id DESC");
+        return res.json({
+          success: true,
+          cart: { distributors: cartDistributors },
+          orders: pendingOrders || [],
+          autoRefills: []
+        });
+      } catch (err) {
+        console.error("Error in /api/pharmarack/live-cart-summary:", err);
+        return res.status(500).json({ error: "Failed to fetch live cart summary: " + err.message });
       }
     });
     router9.get("/auto-verify", async (req, res) => {
@@ -26686,9 +28850,9 @@ var init_pharmarack = __esm({
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_password', '')");
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
         await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
-        const pharmarackProfilePath = import_path29.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
-        if (import_fs25.default.existsSync(pharmarackProfilePath)) {
-          import_fs25.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
+        const pharmarackProfilePath = import_path31.default.resolve(getAppDataDir(), "data", "pharmarack_profile");
+        if (import_fs27.default.existsSync(pharmarackProfilePath)) {
+          import_fs27.default.rmSync(pharmarackProfilePath, { recursive: true, force: true });
           console.log("Cleared Pharmarack Puppeteer profile directory.");
         }
         res.json({ success: true, message: "Logged out and cleared Pharmarack session successfully" });
@@ -27094,14 +29258,68 @@ var init_pharmarack = __esm({
         res.status(500).json({ success: false, error: err.message });
       }
     });
-    router9.post("/trigger-reauth", async (_req, res) => {
+    router9.get("/live-cart-summary", async (_req, res) => {
       try {
-        tokenRefreshScheduler.triggerImmediateCheck("manual_reauth").catch(() => {
+        const db2 = await dbManager.getConnection();
+        const [cartRow, specialOrders, autoRefillRows] = await Promise.all([
+          db2.get("SELECT value FROM app_settings WHERE key = 'pharmarack_cart_cache'"),
+          db2.all("SELECT * FROM special_orders WHERE status IN ('Pending', 'Ordered') ORDER BY id DESC"),
+          db2.all(`
+        SELECT 
+          m.id as medicine_id,
+          m.name as medicine_name,
+          m.manufacturer,
+          m.packaging,
+          COALESCE(SUM(inv.quantity), 0) as current_stock,
+          MAX(inv.reorder_level) as reorder_level,
+          MAX(m.max_stock_level) as max_stock_level,
+          (
+            SELECT COALESCE(SUM(si.quantity), 0)
+            FROM sale_items si
+            JOIN sales_invoices sinv ON si.invoice_id = sinv.id
+            WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = m.id)
+            AND sinv.date >= datetime('now', '-30 days')
+          ) as sales_30d
+        FROM medicines m
+        LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
+        GROUP BY m.id
+        HAVING (current_stock <= COALESCE(reorder_level, 5) OR current_stock = 0) AND sales_30d > 0
+        ORDER BY sales_30d DESC
+        LIMIT 25
+      `)
+        ]);
+        let distributors = [];
+        if (cartRow && cartRow.value) {
+          try {
+            const parsed = JSON.parse(cartRow.value);
+            distributors = Array.isArray(parsed) ? parsed : parsed.distributors || [];
+          } catch (_) {
+          }
+        }
+        const autoRefills = (autoRefillRows || []).map((r) => {
+          const sales30d = Number(r.sales_30d || 0);
+          const stock = Number(r.current_stock || 0);
+          const cap = r.max_stock_level ? Number(r.max_stock_level) : Math.max(10, Math.ceil(sales30d * 1.25));
+          return {
+            medicine_id: r.medicine_id,
+            medicine_name: r.medicine_name,
+            manufacturer: r.manufacturer || "",
+            packaging: r.packaging || "",
+            current_stock: stock,
+            sales_30d: sales30d,
+            reorder_level: r.reorder_level || 5,
+            recommended_qty: Math.max(1, cap - stock)
+          };
         });
-        res.json({ success: true, message: "Manual re-authentication refresh initiated." });
+        res.json({
+          success: true,
+          cart: { distributors },
+          orders: Array.isArray(specialOrders) ? specialOrders : [],
+          autoRefills
+        });
       } catch (err) {
-        console.error("Error triggering re-auth:", err);
-        res.status(500).json({ success: false, error: err.message });
+        console.error("Error fetching live cart summary:", err);
+        res.status(500).json({ error: "Failed to fetch live cart summary: " + err.message });
       }
     });
     pharmarack_default = router9;
@@ -27113,18 +29331,18 @@ var dispatch_exports = {};
 __export(dispatch_exports, {
   default: () => dispatch_default
 });
-var import_express10, import_path30, import_url27, __filename26, __dirname26, DB_PATH16, router10, dispatch_default;
+var import_express10, import_path32, import_url27, __filename26, __dirname26, DB_PATH16, router10, ensureDeliveryBoysTable, dispatch_default;
 var init_dispatch = __esm({
   "src/routes/dispatch.ts"() {
     "use strict";
     import_express10 = __toESM(require("express"), 1);
     init_connection();
-    import_path30 = __toESM(require("path"), 1);
+    import_path32 = __toESM(require("path"), 1);
     import_url27 = require("url");
     init_notificationService();
     __filename26 = (0, import_url27.fileURLToPath)(import_meta_url);
-    __dirname26 = import_path30.default.dirname(__filename26);
-    DB_PATH16 = process.env.DB_PATH || import_path30.default.resolve(__dirname26, "..", "..", "data", "app.db");
+    __dirname26 = import_path32.default.dirname(__filename26);
+    DB_PATH16 = process.env.DB_PATH || import_path32.default.resolve(__dirname26, "..", "..", "data", "app.db");
     router10 = import_express10.default.Router();
     router10.get("/orders", async (_req, res) => {
       try {
@@ -27215,11 +29433,23 @@ var init_dispatch = __esm({
         res.status(500).json({ error: "Failed to delete dispatch order" });
       }
     });
+    ensureDeliveryBoysTable = async (db2) => {
+      await db2.run(`
+    CREATE TABLE IF NOT EXISTS delivery_boys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      whatsapp_number TEXT,
+      telegram_chat_id TEXT,
+      is_active INTEGER DEFAULT 1
+    )
+  `);
+    };
     router10.get("/delivery-boys", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
+        await ensureDeliveryBoysTable(db2);
         const boys = await db2.all("SELECT * FROM delivery_boys ORDER BY name");
-        res.json(boys);
+        res.json(boys || []);
       } catch (error) {
         console.error("Fetch delivery boys error:", error);
         res.status(500).json({ error: "Failed to fetch delivery boys" });
@@ -27230,14 +29460,37 @@ var init_dispatch = __esm({
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Delivery boy name is required" });
       const rawDigits = whatsapp_number ? String(whatsapp_number).replace(/\D/g, "") : "";
       const cleanPhone = rawDigits ? rawDigits : null;
+      const cleanName = String(name).trim();
       try {
         const db2 = await dbManager.getConnection();
-        const result = await db2.run(
-          "INSERT INTO delivery_boys (name, whatsapp_number, telegram_chat_id, is_active) VALUES (?, ?, ?, ?)",
-          [String(name).trim(), cleanPhone, telegram_chat_id || null, is_active !== void 0 ? is_active : 1]
+        await ensureDeliveryBoysTable(db2);
+        const existing = await db2.get(
+          'SELECT id FROM delivery_boys WHERE LOWER(name) = LOWER(?) OR (whatsapp_number IS NOT NULL AND whatsapp_number != "" AND whatsapp_number = ?)',
+          [cleanName, cleanPhone]
         );
-        const newBoy = await db2.get("SELECT * FROM delivery_boys WHERE id = ?", result.lastID);
-        res.status(201).json(newBoy);
+        let targetId;
+        if (existing) {
+          targetId = existing.id;
+          await db2.run(
+            "UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?",
+            [cleanName, cleanPhone, existing.id]
+          );
+        } else {
+          const result = await db2.run(
+            "INSERT INTO delivery_boys (name, whatsapp_number, telegram_chat_id, is_active) VALUES (?, ?, ?, ?)",
+            [cleanName, cleanPhone, telegram_chat_id || null, is_active !== void 0 ? is_active : 1]
+          );
+          targetId = result.lastID || 0;
+        }
+        const savedBoy = await db2.get("SELECT * FROM delivery_boys WHERE id = ?", targetId);
+        if (cleanPhone) {
+          try {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_phone', ?)", [cleanPhone]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_whatsapp', ?)", [cleanPhone]);
+          } catch (_) {
+          }
+        }
+        res.status(201).json(savedBoy);
       } catch (error) {
         console.error("Add delivery boy error:", error);
         res.status(500).json({ error: error?.message || "Failed to add delivery boy" });
@@ -27248,6 +29501,7 @@ var init_dispatch = __esm({
       const { name, whatsapp_number, telegram_chat_id, is_active } = req.body;
       try {
         const db2 = await dbManager.getConnection();
+        await ensureDeliveryBoysTable(db2);
         const existing = await db2.get("SELECT * FROM delivery_boys WHERE id = ?", id);
         if (!existing) {
           return res.status(404).json({ error: "Delivery boy not found" });
@@ -27265,6 +29519,13 @@ var init_dispatch = __esm({
           ]
         );
         const updated = await db2.get("SELECT * FROM delivery_boys WHERE id = ?", id);
+        if (cleanPhone) {
+          try {
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_phone', ?)", [cleanPhone]);
+            await db2.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('delivery_boy_whatsapp', ?)", [cleanPhone]);
+          } catch (_) {
+          }
+        }
         res.json(updated);
       } catch (error) {
         console.error("Update delivery boy error:", error);
@@ -27346,23 +29607,23 @@ var archive_exports = {};
 __export(archive_exports, {
   default: () => archive_default
 });
-var import_express11, import_path31, import_fs26, import_url28, import_adm_zip4, __filename27, __dirname27, DB_PATH17, ARCHIVE_DIR, router11, archive_default;
+var import_express11, import_path33, import_fs28, import_url28, import_adm_zip4, __filename27, __dirname27, DB_PATH17, ARCHIVE_DIR, router11, archive_default;
 var init_archive = __esm({
   "src/routes/archive.ts"() {
     "use strict";
     import_express11 = __toESM(require("express"), 1);
     init_connection();
-    import_path31 = __toESM(require("path"), 1);
-    import_fs26 = __toESM(require("fs"), 1);
+    import_path33 = __toESM(require("path"), 1);
+    import_fs28 = __toESM(require("fs"), 1);
     import_url28 = require("url");
     import_adm_zip4 = __toESM(require("adm-zip"), 1);
     init_config();
     __filename27 = (0, import_url28.fileURLToPath)(import_meta_url);
-    __dirname27 = import_path31.default.dirname(__filename27);
-    DB_PATH17 = process.env.DB_PATH || import_path31.default.resolve(__dirname27, "..", "..", "data", "app.db");
-    ARCHIVE_DIR = import_path31.default.resolve(getAppDataDir(), "data", "archived_migrations");
-    if (!import_fs26.default.existsSync(ARCHIVE_DIR)) {
-      import_fs26.default.mkdirSync(ARCHIVE_DIR, { recursive: true });
+    __dirname27 = import_path33.default.dirname(__filename27);
+    DB_PATH17 = process.env.DB_PATH || import_path33.default.resolve(__dirname27, "..", "..", "data", "app.db");
+    ARCHIVE_DIR = import_path33.default.resolve(getAppDataDir(), "data", "archived_migrations");
+    if (!import_fs28.default.existsSync(ARCHIVE_DIR)) {
+      import_fs28.default.mkdirSync(ARCHIVE_DIR, { recursive: true });
     }
     router11 = import_express11.default.Router();
     router11.post("/purge", async (req, res) => {
@@ -27461,7 +29722,7 @@ var init_archive = __esm({
         const jsonContent = JSON.stringify(archivePayload, null, 2);
         const filenameBase = `archive_5yr_${Date.now()}`;
         zip.addFile(`${filenameBase}.json`, Buffer.from(jsonContent, "utf-8"));
-        const zipPath = import_path31.default.join(ARCHIVE_DIR, `${filenameBase}.zip`);
+        const zipPath = import_path33.default.join(ARCHIVE_DIR, `${filenameBase}.zip`);
         zip.writeZip(zipPath);
         if (saleInvoiceIds.length > 0) {
           await db2.run(`DELETE FROM sale_items WHERE invoice_id IN (${saleInvoiceIds.join(",")})`);
@@ -27498,23 +29759,104 @@ var init_archive = __esm({
   }
 });
 
+// src/services/summaryCacheService.ts
+async function getSummaryCache(key) {
+  try {
+    const db2 = await dbManager.getConnection();
+    const row = await db2.get("SELECT cache_value FROM summary_cache WHERE cache_key = ?", [key]);
+    if (!row || !row.cache_value) return null;
+    return JSON.parse(row.cache_value);
+  } catch (err) {
+    console.error(`[SummaryCacheService] Failed to read cache key "${key}":`, err);
+    return null;
+  }
+}
+async function setSummaryCache(key, value) {
+  try {
+    const db2 = await dbManager.getConnection();
+    await db2.run(
+      `INSERT INTO summary_cache (cache_key, cache_value, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(cache_key) DO UPDATE SET
+         cache_value = excluded.cache_value,
+         updated_at = CURRENT_TIMESTAMP`,
+      [key, JSON.stringify(value)]
+    );
+  } catch (err) {
+    console.error(`[SummaryCacheService] Failed to set cache key "${key}":`, err);
+  }
+}
+async function rebuildPurchaseSummaryCache() {
+  try {
+    const db2 = await dbManager.getConnection();
+    const row = await db2.get(
+      "SELECT COALESCE(SUM(total_amount), 0) AS total_amount, COUNT(*) AS total_invoices FROM purchases"
+    );
+    const taxRow = await db2.get(
+      "SELECT COALESCE(SUM((cgst_per + sgst_per + igst_per) * (COALESCE(cost_price, 0) * quantity) / 100), 0) AS total_gst FROM purchase_items"
+    );
+    const summary = {
+      totalAmount: Math.round(row?.total_amount || 0),
+      totalInvoices: row?.total_invoices || 0,
+      totalGst: Math.round(taxRow?.total_gst || 0)
+    };
+    await setSummaryCache("purchase_summary", summary);
+    return summary;
+  } catch (err) {
+    console.error("[SummaryCacheService] Failed to rebuild purchase summary cache:", err);
+    return { totalAmount: 0, totalInvoices: 0, totalGst: 0 };
+  }
+}
+async function rebuildLearningStatsCache() {
+  try {
+    const db2 = await dbManager.getConnection();
+    const ocrRow = await db2.get("SELECT COUNT(*) as cnt FROM ocr_corrections");
+    const aliasRow = await db2.get("SELECT COUNT(*) as cnt FROM medicine_aliases");
+    const stats = {
+      activeOcrCorrections: ocrRow?.cnt || 0,
+      learnedRxCombos: aliasRow?.cnt || 0,
+      lastRetrainedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    await setSummaryCache("learning_stats", stats);
+    return stats;
+  } catch (err) {
+    console.error("[SummaryCacheService] Failed to rebuild learning stats cache:", err);
+    return { activeOcrCorrections: 0, learnedRxCombos: 0, lastRetrainedAt: null };
+  }
+}
+function triggerBackgroundSummaryRebuild() {
+  queueMicrotask(() => {
+    Promise.all([
+      rebuildPurchaseSummaryCache(),
+      rebuildLearningStatsCache()
+    ]).catch((err) => console.error("[SummaryCacheService] Background rebuild failed:", err));
+  });
+}
+var init_summaryCacheService = __esm({
+  "src/services/summaryCacheService.ts"() {
+    "use strict";
+    init_connection();
+  }
+});
+
 // src/routes/learning.ts
 var learning_exports = {};
 __export(learning_exports, {
   default: () => learning_default
 });
-var import_express12, import_path32, import_url29, import_fs27, __filename28, __dirname28, DB_PATH18, router12, learning_default;
+var import_express12, import_path34, import_url29, import_fs29, __filename28, __dirname28, DB_PATH18, router12, learning_default;
 var init_learning = __esm({
   "src/routes/learning.ts"() {
     "use strict";
     import_express12 = __toESM(require("express"), 1);
     init_connection();
-    import_path32 = __toESM(require("path"), 1);
+    import_path34 = __toESM(require("path"), 1);
     import_url29 = require("url");
-    import_fs27 = __toESM(require("fs"), 1);
+    import_fs29 = __toESM(require("fs"), 1);
+    init_summaryCacheService();
     __filename28 = (0, import_url29.fileURLToPath)(import_meta_url);
-    __dirname28 = import_path32.default.dirname(__filename28);
-    DB_PATH18 = process.env.DB_PATH || import_path32.default.resolve(__dirname28, "..", "..", "data", "app.db");
+    __dirname28 = import_path34.default.dirname(__filename28);
+    DB_PATH18 = process.env.DB_PATH || import_path34.default.resolve(__dirname28, "..", "..", "data", "app.db");
     router12 = import_express12.default.Router();
     router12.post("/", async (req, res) => {
       const { payload } = req.body;
@@ -27634,17 +29976,12 @@ var init_learning = __esm({
     });
     router12.get("/stats", async (_req, res) => {
       try {
-        const db2 = await dbManager.getConnection();
-        const ocrRow = await db2.get("SELECT COUNT(*) as count FROM ocr_corrections");
-        const aliasRow = await db2.get("SELECT COUNT(*) as count FROM medicine_aliases");
-        const lastRetrain = await db2.get(
-          "SELECT created_at FROM action_logs WHERE action_type = 'REFRESH_MODEL' ORDER BY created_at DESC LIMIT 1"
-        );
-        res.json({
-          activeOcrCorrections: ocrRow?.count || 0,
-          learnedRxCombos: aliasRow?.count || 0,
-          lastRetrainedAt: lastRetrain?.created_at || null
-        });
+        const cached = await getSummaryCache("learning_stats");
+        if (cached) {
+          return res.json(cached);
+        }
+        const fresh = await rebuildLearningStatsCache();
+        res.json(fresh);
       } catch (error) {
         console.error("Learning stats fetch error:", error);
         res.status(500).json({ error: "Failed to fetch learning stats" });
@@ -27714,15 +30051,17 @@ var init_learning = __esm({
       let db2;
       try {
         db2 = await dbManager.getConnection();
-        const distributor = await db2.get("SELECT * FROM distributors WHERE id = ?", [distId]);
+        const [distributor, profile, files] = await Promise.all([
+          db2.get("SELECT * FROM distributors WHERE id = ?", [distId]),
+          db2.get("SELECT * FROM distributor_learning_profiles WHERE distributor_id = ?", [distId]),
+          db2.all(
+            "SELECT id, distributor_id, filename, file_path, file_type, file_headers, mapping_config, status, created_at FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC",
+            [distId]
+          )
+        ]);
         if (!distributor) {
           return res.status(404).json({ error: "Distributor not found" });
         }
-        const profile = await db2.get("SELECT * FROM distributor_learning_profiles WHERE distributor_id = ?", [distId]);
-        const files = await db2.all(
-          "SELECT id, distributor_id, filename, file_path, file_type, file_headers, mapping_config, status, created_at FROM distributor_historical_files WHERE distributor_id = ? ORDER BY id DESC",
-          [distId]
-        );
         res.json({
           success: true,
           distributor,
@@ -27763,9 +30102,9 @@ var init_learning = __esm({
         db2 = await dbManager.getConnection();
         const files = await db2.all("SELECT file_path FROM distributor_historical_files WHERE distributor_id = ?", [distId]);
         for (const f of files) {
-          if (f.file_path && import_fs27.default.existsSync(f.file_path)) {
+          if (f.file_path && import_fs29.default.existsSync(f.file_path)) {
             try {
-              import_fs27.default.unlinkSync(f.file_path);
+              import_fs29.default.unlinkSync(f.file_path);
             } catch (e) {
               console.warn("Failed to delete file:", f.file_path, e);
             }
@@ -27848,9 +30187,9 @@ var init_learning = __esm({
         db2 = await dbManager.getConnection();
         const fileRecord = await db2.get("SELECT file_path FROM distributor_historical_files WHERE id = ?", [fileId]);
         if (fileRecord) {
-          if (fileRecord.file_path && import_fs27.default.existsSync(fileRecord.file_path)) {
+          if (fileRecord.file_path && import_fs29.default.existsSync(fileRecord.file_path)) {
             try {
-              import_fs27.default.unlinkSync(fileRecord.file_path);
+              import_fs29.default.unlinkSync(fileRecord.file_path);
             } catch (e) {
               console.warn("Failed to delete file from disk:", fileRecord.file_path, e);
             }
@@ -27861,6 +30200,34 @@ var init_learning = __esm({
       } catch (error) {
         console.error("Failed to delete historical file:", error);
         res.status(500).json({ error: "Failed to delete historical file" });
+      }
+    });
+    router12.get("/dashboard-stats", async (req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const [ocrCount, aliasCount, distAliasCount, pharmCount, totalMedicines] = await Promise.all([
+          db2.get("SELECT COUNT(*) as count FROM ocr_corrections").catch(() => ({ count: 0 })),
+          db2.get("SELECT COUNT(*) as count FROM medicine_aliases").catch(() => ({ count: 0 })),
+          db2.get("SELECT COUNT(*) as count FROM distributor_medicine_aliases").catch(() => ({ count: 0 })),
+          db2.get("SELECT COUNT(*) as count FROM pharmacist_corrections").catch(() => ({ count: 0 })),
+          db2.get("SELECT COUNT(*) as count FROM medicines").catch(() => ({ count: 0 }))
+        ]);
+        const recentOcr = await db2.all("SELECT raw_ocr_text as ocr, correct_medicine_name as correct, success_count as count, updated_at FROM ocr_corrections ORDER BY updated_at DESC LIMIT 10").catch(() => []);
+        const recentAliases = await db2.all("SELECT alias_name, medicine_id, created_at FROM medicine_aliases ORDER BY id DESC LIMIT 10").catch(() => []);
+        res.json({
+          success: true,
+          stats: {
+            ocr_corrections: ocrCount?.count || 0,
+            medicine_aliases: aliasCount?.count || 0,
+            distributor_aliases: distAliasCount?.count || 0,
+            pharmacist_corrections: pharmCount?.count || 0,
+            total_medicines: totalMedicines?.count || 0
+          },
+          recent_ocr: recentOcr,
+          recent_aliases: recentAliases
+        });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch learning stats", details: err?.message });
       }
     });
     learning_default = router12;
@@ -27876,35 +30243,35 @@ function findChromePath4() {
   const paths = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    process.env.LOCALAPPDATA ? import_path33.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null,
-    process.env.PROGRAMFILES ? import_path33.default.join(process.env.PROGRAMFILES, "Google\\Chrome\\Application\\chrome.exe") : null,
+    process.env.LOCALAPPDATA ? import_path35.default.join(process.env.LOCALAPPDATA, "Google\\Chrome\\Application\\chrome.exe") : null,
+    process.env.PROGRAMFILES ? import_path35.default.join(process.env.PROGRAMFILES, "Google\\Chrome\\Application\\chrome.exe") : null,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-    process.env.LOCALAPPDATA ? import_path33.default.join(process.env.LOCALAPPDATA, "Microsoft\\Edge\\Application\\msedge.exe") : null
+    process.env.LOCALAPPDATA ? import_path35.default.join(process.env.LOCALAPPDATA, "Microsoft\\Edge\\Application\\msedge.exe") : null
   ].filter(Boolean);
   for (const p of paths) {
-    if (import_fs28.default.existsSync(p)) {
+    if (import_fs30.default.existsSync(p)) {
       return p;
     }
   }
   return null;
 }
-var import_express13, import_qrcode2, import_fs28, import_path33, import_url30, __filename29, __dirname29, router13, isLoginWindowActive, messaging_default;
+var import_express13, import_qrcode3, import_fs30, import_path35, import_url30, __filename29, __dirname29, router13, isLoginWindowActive, messaging_default;
 var init_messaging = __esm({
   "src/routes/messaging.ts"() {
     "use strict";
     import_express13 = __toESM(require("express"), 1);
     init_whatsappClient();
-    import_qrcode2 = __toESM(require("qrcode"), 1);
+    import_qrcode3 = __toESM(require("qrcode"), 1);
     init_connection();
     init_eventService();
-    import_fs28 = __toESM(require("fs"), 1);
-    import_path33 = __toESM(require("path"), 1);
+    import_fs30 = __toESM(require("fs"), 1);
+    import_path35 = __toESM(require("path"), 1);
     init_lazyPuppeteer();
     init_config();
     import_url30 = require("url");
     __filename29 = (0, import_url30.fileURLToPath)(import_meta_url);
-    __dirname29 = import_path33.default.dirname(__filename29);
+    __dirname29 = import_path35.default.dirname(__filename29);
     router13 = import_express13.default.Router();
     isLoginWindowActive = false;
     router13.get("/qr", async (req, res) => {
@@ -27920,7 +30287,7 @@ var init_messaging = __esm({
           return res.json({ isReady: true, qrUrl: null });
         }
         if (currentQr) {
-          const qrUrl = await import_qrcode2.default.toDataURL(currentQr);
+          const qrUrl = await import_qrcode3.default.toDataURL(currentQr);
           return res.json({ isReady: false, qrUrl });
         }
         initClient().catch(console.error);
@@ -27946,13 +30313,13 @@ var init_messaging = __esm({
           await destroyClient();
           await new Promise((resolve) => setTimeout(resolve, 2500));
           console.log("[WhatsApp] Launching Chrome for WhatsApp login from:", chromePath);
-          const authPath = import_path33.default.resolve(process.cwd(), ".wwebjs_auth", "session");
+          const authPath = import_path35.default.resolve(process.cwd(), ".wwebjs_auth", "session");
           const lockFiles = ["lockfile", "SingletonLock", "DevToolsActivePort"];
           for (const lf of lockFiles) {
-            const p = import_path33.default.join(authPath, lf);
-            if (import_fs28.default.existsSync(p)) {
+            const p = import_path35.default.join(authPath, lf);
+            if (import_fs30.default.existsSync(p)) {
               try {
-                import_fs28.default.unlinkSync(p);
+                import_fs30.default.unlinkSync(p);
               } catch (e) {
               }
             }
@@ -27972,6 +30339,8 @@ var init_messaging = __esm({
           });
           const [page] = await browser.pages();
           await page.goto("https://web.whatsapp.com/", { waitUntil: "domcontentloaded" });
+          const launchTime = Date.now();
+          const MIN_WINDOW_MS = 12e4;
           for (let i = 0; i < 360; i++) {
             await new Promise((resolve) => setTimeout(resolve, 1e3));
             const isClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
@@ -28002,9 +30371,14 @@ var init_messaging = __esm({
             if (loginState.isLoggedIn) {
               console.log(`[WhatsApp] Login detected! Chats count: ${loginState.chatsCount}, downloading: ${loginState.isDownloadingChats}`);
               let readyWaitAttempts = 0;
-              while ((loginState.isDownloadingChats || loginState.chatsCount === 0) && readyWaitAttempts < 15) {
+              while ((loginState.isDownloadingChats || loginState.chatsCount === 0) && readyWaitAttempts < 60) {
                 await new Promise((resolve) => setTimeout(resolve, 1e3));
                 readyWaitAttempts++;
+                const isUserClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
+                if (isUserClosed) {
+                  console.log("[WhatsApp] Login window closed by user during chat download.");
+                  break;
+                }
                 const updateState = await page.evaluate(() => {
                   const paneSide = document.querySelector("#pane-side");
                   let chatsCount = 0;
@@ -28019,7 +30393,6 @@ var init_messaging = __esm({
                   break;
                 }
               }
-              console.log("[WhatsApp] Login complete & all chats loaded on screen. Saving session & auto-closing login window...");
               try {
                 const db2 = await dbManager.getConnection();
                 await db2.run(
@@ -28028,7 +30401,22 @@ var init_messaging = __esm({
               } catch (e) {
                 console.warn("[WhatsApp] Could not set whatsapp_preferred_system setting:", e);
               }
-              await new Promise((resolve) => setTimeout(resolve, 4e3));
+              const elapsedMs = Date.now() - launchTime;
+              if (elapsedMs < MIN_WINDOW_MS) {
+                const remainingMs = MIN_WINDOW_MS - elapsedMs;
+                console.log(`[WhatsApp] Login complete & chats loaded. Holding window open for remaining ${Math.round(remainingMs / 1e3)}s of minimum 2-minute duration...`);
+                for (let waitSec = 0; waitSec < Math.ceil(remainingMs / 1e3); waitSec++) {
+                  await new Promise((resolve) => setTimeout(resolve, 1e3));
+                  const isUserClosed = !browser.connected || (await browser.pages().catch(() => [])).length === 0;
+                  if (isUserClosed) {
+                    console.log("[WhatsApp] Login window closed manually by user during wait window.");
+                    break;
+                  }
+                }
+              } else {
+                await new Promise((resolve) => setTimeout(resolve, 4e3));
+              }
+              console.log("[WhatsApp] Auto-closing login window after 2+ minute window completion.");
               break;
             }
           }
@@ -28250,13 +30638,13 @@ var init_messaging = __esm({
           id: row.id,
           hasMedia: !!row.has_media,
           downloadMedia: async () => {
-            const uploadsDir = import_path33.default.resolve(getAppDataDir(), "uploads");
-            if (import_fs28.default.existsSync(uploadsDir)) {
-              const files = import_fs28.default.readdirSync(uploadsDir);
+            const uploadsDir = import_path35.default.resolve(getAppDataDir(), "uploads");
+            if (import_fs30.default.existsSync(uploadsDir)) {
+              const files = import_fs30.default.readdirSync(uploadsDir);
               const matched = files.find((f) => f.startsWith(messageId));
               if (matched) {
-                const ext = import_path33.default.extname(matched).toLowerCase();
-                const data = import_fs28.default.readFileSync(import_path33.default.join(uploadsDir, matched)).toString("base64");
+                const ext = import_path35.default.extname(matched).toLowerCase();
+                const data = import_fs30.default.readFileSync(import_path35.default.join(uploadsDir, matched)).toString("base64");
                 let mimetype = "image/jpeg";
                 if (ext === ".png") mimetype = "image/png";
                 else if (ext === ".pdf") mimetype = "application/pdf";
@@ -28518,7 +30906,7 @@ async function loadReferenceData({ force } = {}) {
   } else {
     await db2.run("DELETE FROM medicine_reference");
   }
-  if (!import_fs29.default.existsSync(REFERENCE_CSV)) {
+  if (!import_fs31.default.existsSync(REFERENCE_CSV)) {
     await dbManager.close();
     console.warn("Reference CSV not found at:", REFERENCE_CSV);
     return { loaded: 0, skipped: 0 };
@@ -28526,7 +30914,7 @@ async function loadReferenceData({ force } = {}) {
   console.log("Loading medicine reference data from CSV...");
   const rows = [];
   await new Promise((resolve, reject) => {
-    import_fs29.default.createReadStream(REFERENCE_CSV).pipe((0, import_csv_parser4.default)()).on("data", (row) => {
+    import_fs31.default.createReadStream(REFERENCE_CSV).pipe((0, import_csv_parser4.default)()).on("data", (row) => {
       const name = (row["name"] || "").trim();
       const comp1 = (row["short_composition1"] || row["composition1"] || "").trim();
       const comp2 = (row["short_composition2"] || row["composition2"] || "").trim();
@@ -28576,7 +30964,7 @@ async function loadApiSubstances({ force } = {}) {
   } else {
     await db2.run("DELETE FROM api_substances");
   }
-  if (!import_fs29.default.existsSync(REFERENCE_CSV)) {
+  if (!import_fs31.default.existsSync(REFERENCE_CSV)) {
     await dbManager.close();
     console.warn("Reference CSV not found at:", REFERENCE_CSV);
     return { loaded: 0, skipped: 0 };
@@ -28584,7 +30972,7 @@ async function loadApiSubstances({ force } = {}) {
   console.log("Loading API substances from CSV...");
   const substanceSet = /* @__PURE__ */ new Set();
   await new Promise((resolve, reject) => {
-    import_fs29.default.createReadStream(REFERENCE_CSV).pipe((0, import_csv_parser4.default)()).on("data", (row) => {
+    import_fs31.default.createReadStream(REFERENCE_CSV).pipe((0, import_csv_parser4.default)()).on("data", (row) => {
       const comp1 = (row["short_composition1"] || row["composition1"] || "").trim();
       const comp2 = (row["short_composition2"] || row["composition2"] || "").trim();
       if (comp1) {
@@ -28635,9 +31023,9 @@ async function seedBundledReference(force = false) {
       if (count && count.c > 0) return { loaded: 0 };
     }
     let rows = [];
-    if (import_fs29.default.existsSync(BUNDLED_SEED)) {
+    if (import_fs31.default.existsSync(BUNDLED_SEED)) {
       try {
-        rows = JSON.parse(import_fs29.default.readFileSync(BUNDLED_SEED, "utf8"));
+        rows = JSON.parse(import_fs31.default.readFileSync(BUNDLED_SEED, "utf8"));
       } catch (err) {
         console.warn("[Seed] Failed to parse seed JSON file, using fallback array:", err);
         rows = DEFAULT_SEED_ROWS;
@@ -28715,7 +31103,7 @@ async function getEnrichmentStatus() {
   return { total, enriched, needsReview, unmatched, nonPharma, pending, isRunning: isEnrichmentRunning };
 }
 async function buildReferenceIndex(db2) {
-  const refs = await db2.all("SELECT name, composition1, composition2, manufacturer FROM medicine_reference");
+  const refs = await db2.all("SELECT name, composition1, composition2, manufacturer, therapeutic FROM medicine_reference");
   const refsWithCleanName = refs.map((ref) => {
     const cleaned = cleanMedicineName2(ref.name);
     const tokens = cleaned.split(/\s+/).filter(Boolean);
@@ -28915,9 +31303,10 @@ async function runEnrichment(onProgress, opts) {
         if (bestRef && bestScore >= 0.85) {
           const composition = formatComposition(bestRef);
           await db2.run(
-            "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = ? WHERE id = ?",
+            "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = ?, therapeutic = COALESCE(therapeutic, ?) WHERE id = ?",
             composition,
             bestScore,
+            bestRef.therapeutic || null,
             med.id
           );
           matched++;
@@ -28984,21 +31373,21 @@ async function recordApiSubstance(apiReference) {
     await dbManager.close();
   }
 }
-var import_path34, import_fs29, import_url31, import_csv_parser4, __filename30, __dirname30, DATA_DIR, REFERENCE_CSV, DOSAGE_FORMS, DOSAGE_FORM_SET, NON_PHARMA_KEYWORDS, BUNDLED_SEED, DEFAULT_SEED_ROWS, isEnrichmentRunning, enrichmentStopRequested, autoEnrichedDate, autoEnrichedTodayCount;
+var import_path36, import_fs31, import_url31, import_csv_parser4, __filename30, __dirname30, DATA_DIR, REFERENCE_CSV, DOSAGE_FORMS, DOSAGE_FORM_SET, NON_PHARMA_KEYWORDS, BUNDLED_SEED, DEFAULT_SEED_ROWS, isEnrichmentRunning, enrichmentStopRequested, autoEnrichedDate, autoEnrichedTodayCount;
 var init_compositionEnricher = __esm({
   "src/worker/compositionEnricher.ts"() {
     "use strict";
-    import_path34 = __toESM(require("path"), 1);
-    import_fs29 = __toESM(require("fs"), 1);
+    import_path36 = __toESM(require("path"), 1);
+    import_fs31 = __toESM(require("fs"), 1);
     import_url31 = require("url");
     init_connection();
     import_csv_parser4 = __toESM(require("csv-parser"), 1);
     init_activityTracker();
     init_config();
     __filename30 = (0, import_url31.fileURLToPath)(import_meta_url);
-    __dirname30 = import_path34.default.dirname(__filename30);
-    DATA_DIR = import_path34.default.resolve(getAppDataDir(), "data");
-    REFERENCE_CSV = import_path34.default.join(DATA_DIR, "reference_medicines.csv");
+    __dirname30 = import_path36.default.dirname(__filename30);
+    DATA_DIR = import_path36.default.resolve(getAppDataDir(), "data");
+    REFERENCE_CSV = import_path36.default.join(DATA_DIR, "reference_medicines.csv");
     DOSAGE_FORMS = [
       "TABLET",
       "TAB",
@@ -29082,7 +31471,7 @@ var init_compositionEnricher = __esm({
       "VETERIN",
       "DENTAL PREPARATION"
     ];
-    BUNDLED_SEED = import_path34.default.join(DATA_DIR, "medicine_reference_seed.json");
+    BUNDLED_SEED = import_path36.default.join(DATA_DIR, "medicine_reference_seed.json");
     DEFAULT_SEED_ROWS = [
       { name: "PARACETAMOL 650 MG TABLET", composition1: "PARACETAMOL", manufacturer: "MICRO LABS" },
       { name: "DOLO 650 TABLET", composition1: "PARACETAMOL", manufacturer: "MICRO LABS" },
@@ -29162,8 +31551,8 @@ var init_medicineService = __esm({
             `INSERT INTO medicines (
           name, api_reference, mrp, hsn_code, schedule_type, manufacturer,
           category, marketed_by, legacy_id, packaging,
-          item_type, cgst_per, sgst_per, igst_per, rack, source, possible_duplicate_of
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          item_type, cgst_per, sgst_per, igst_per, rack, therapeutic, sub_therapeutic, short_code, ucode, disable_auto_barcode, tb_medicine, source, possible_duplicate_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               data.name,
               data.apiReference ?? null,
@@ -29180,6 +31569,12 @@ var init_medicineService = __esm({
               data.sgst_per ?? 0,
               data.igst_per ?? 0,
               data.rack ?? null,
+              data.therapeutic ?? null,
+              data.subTherapeutic ?? null,
+              data.shortCode ?? null,
+              data.ucode ?? null,
+              data.disableAutoBarcode ?? 0,
+              data.tbMedicine ?? 0,
               data.source ?? "manual",
               data.possibleDuplicateOf ?? null
             ]
@@ -29268,6 +31663,30 @@ var init_medicineService = __esm({
             fields.push("rack = ?");
             values.push(data.rack);
           }
+          if (data.therapeutic !== void 0) {
+            fields.push("therapeutic = ?");
+            values.push(data.therapeutic);
+          }
+          if (data.subTherapeutic !== void 0) {
+            fields.push("sub_therapeutic = ?");
+            values.push(data.subTherapeutic);
+          }
+          if (data.shortCode !== void 0) {
+            fields.push("short_code = ?");
+            values.push(data.shortCode);
+          }
+          if (data.ucode !== void 0) {
+            fields.push("ucode = ?");
+            values.push(data.ucode);
+          }
+          if (data.disableAutoBarcode !== void 0) {
+            fields.push("disable_auto_barcode = ?");
+            values.push(data.disableAutoBarcode ? 1 : 0);
+          }
+          if (data.tbMedicine !== void 0) {
+            fields.push("tb_medicine = ?");
+            values.push(data.tbMedicine ? 1 : 0);
+          }
           if (data.source !== void 0) {
             fields.push("source = ?");
             values.push(data.source);
@@ -29331,9 +31750,19 @@ var init_medicineService = __esm({
             possibleDuplicateOf: "possible_duplicate_of"
           };
           for (const [jsKey, dbKey] of Object.entries(fieldMappings)) {
-            if (data[jsKey] !== void 0) {
-              fields.push(`${dbKey} = ?`);
-              values.push(data[jsKey]);
+            const newVal = data[jsKey];
+            if (newVal !== void 0 && newVal !== null && String(newVal).trim() !== "") {
+              const currentVal = existing[dbKey];
+              const isEmptyCurrent = currentVal === void 0 || currentVal === null || String(currentVal).trim() === "";
+              if (options.choice === "merge") {
+                if (isEmptyCurrent) {
+                  fields.push(`${dbKey} = ?`);
+                  values.push(newVal);
+                }
+              } else {
+                fields.push(`${dbKey} = ?`);
+                values.push(newVal);
+              }
             }
           }
           if (fields.length > 0) {
@@ -29534,29 +31963,29 @@ var aiCamera_exports = {};
 __export(aiCamera_exports, {
   default: () => aiCamera_default
 });
-var import_express14, import_path35, import_fs30, import_url32, __filename31, __dirname31, DB_PATH19, AUDIT_QUEUE_PATH, router14, aiCamera_default;
+var import_express14, import_path37, import_fs32, import_url32, __filename31, __dirname31, DB_PATH19, AUDIT_QUEUE_PATH, router14, aiCamera_default;
 var init_aiCamera = __esm({
   "src/routes/aiCamera.ts"() {
     "use strict";
     import_express14 = __toESM(require("express"), 1);
     init_connection();
-    import_path35 = __toESM(require("path"), 1);
-    import_fs30 = __toESM(require("fs"), 1);
+    import_path37 = __toESM(require("path"), 1);
+    import_fs32 = __toESM(require("fs"), 1);
     import_url32 = require("url");
     init_aiCameraService();
     init_productNameFilterService();
     init_config();
     __filename31 = (0, import_url32.fileURLToPath)(import_meta_url);
-    __dirname31 = import_path35.default.dirname(__filename31);
-    DB_PATH19 = process.env.DB_PATH || import_path35.default.resolve(__dirname31, "..", "..", "data", "app.db");
-    AUDIT_QUEUE_PATH = import_path35.default.resolve(getAppDataDir(), "data", "audit_queue.json");
+    __dirname31 = import_path37.default.dirname(__filename31);
+    DB_PATH19 = process.env.DB_PATH || import_path37.default.resolve(__dirname31, "..", "..", "data", "app.db");
+    AUDIT_QUEUE_PATH = import_path37.default.resolve(getAppDataDir(), "data", "audit_queue.json");
     router14 = import_express14.default.Router();
     router14.get("/audit/queue", async (req, res) => {
       try {
-        if (!import_fs30.default.existsSync(AUDIT_QUEUE_PATH)) {
+        if (!import_fs32.default.existsSync(AUDIT_QUEUE_PATH)) {
           return res.json([]);
         }
-        const data = await import_fs30.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
+        const data = await import_fs32.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
         const queue2 = JSON.parse(data || "[]");
         const pending = queue2.filter((item) => item.status === "pending_human_review");
         res.json(pending);
@@ -29566,15 +31995,15 @@ var init_aiCamera = __esm({
       }
     });
     router14.post("/audit/resolve", async (req, res) => {
-      const { id, name, strength, batchNumber, expiryDate, mrp, action } = req.body;
+      const { id, name, strength, batchNumber, expiryDate, mrp, action, manufacturer, packaging, dosageForm } = req.body;
       if (!id) {
         return res.status(400).json({ error: "Queue entry ID is required" });
       }
       try {
-        if (!import_fs30.default.existsSync(AUDIT_QUEUE_PATH)) {
+        if (!import_fs32.default.existsSync(AUDIT_QUEUE_PATH)) {
           return res.status(404).json({ error: "Audit queue not found" });
         }
-        const data = await import_fs30.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
+        const data = await import_fs32.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
         const queue2 = JSON.parse(data || "[]");
         const index = queue2.findIndex((item) => item.id === id);
         if (index === -1) {
@@ -29590,7 +32019,11 @@ var init_aiCamera = __esm({
           const { medicineService: medicineService2 } = await Promise.resolve().then(() => (init_medicineService(), medicineService_exports));
           const writeResult = await medicineService2.addOrUpdateMedicine(db2, {
             name: adjustedName,
-            mrp: mrp || void 0
+            mrp: mrp || void 0,
+            manufacturer: manufacturer || void 0,
+            packaging: packaging || void 0,
+            itemType: dosageForm || void 0,
+            strength: strength || void 0
           }, { skipSimilarityCheck: true });
           const medicineId = writeResult.medicine.id;
           if (batchNumber && batchNumber.trim() !== "") {
@@ -29600,8 +32033,8 @@ var init_aiCamera = __esm({
             );
           }
           try {
-            if (import_fs30.default.existsSync(AUDIT_QUEUE_PATH)) {
-              const auditData = await import_fs30.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
+            if (import_fs32.default.existsSync(AUDIT_QUEUE_PATH)) {
+              const auditData = await import_fs32.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
               const auditQueue = JSON.parse(auditData || "[]");
               const auditEntry = auditQueue.find((item) => item.id === id);
               if (auditEntry && auditEntry.rawOcrText) {
@@ -29619,7 +32052,7 @@ var init_aiCamera = __esm({
         queue2[index].status = action === "dismiss" ? "dismissed" : "resolved";
         queue2[index].resolvedAt = (/* @__PURE__ */ new Date()).toISOString();
         queue2[index].resolvedWith = name || "";
-        await import_fs30.default.promises.writeFile(AUDIT_QUEUE_PATH, JSON.stringify(queue2, null, 2));
+        await import_fs32.default.promises.writeFile(AUDIT_QUEUE_PATH, JSON.stringify(queue2, null, 2));
         res.json({
           success: true,
           message: `Queue entry ${id} successfully ${queue2[index].status}`
@@ -29632,17 +32065,17 @@ var init_aiCamera = __esm({
     router14.delete("/audit/:id", async (req, res) => {
       const { id } = req.params;
       try {
-        if (!import_fs30.default.existsSync(AUDIT_QUEUE_PATH)) {
+        if (!import_fs32.default.existsSync(AUDIT_QUEUE_PATH)) {
           return res.status(404).json({ error: "Audit queue not found" });
         }
-        const data = await import_fs30.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
+        const data = await import_fs32.default.promises.readFile(AUDIT_QUEUE_PATH, "utf8");
         let queue2 = JSON.parse(data || "[]");
         const initialLen = queue2.length;
         queue2 = queue2.filter((item) => item.id !== id);
         if (queue2.length === initialLen) {
           return res.status(404).json({ error: "Queue entry not found" });
         }
-        await import_fs30.default.promises.writeFile(AUDIT_QUEUE_PATH, JSON.stringify(queue2, null, 2));
+        await import_fs32.default.promises.writeFile(AUDIT_QUEUE_PATH, JSON.stringify(queue2, null, 2));
         res.json({ success: true, message: `Queue entry ${id} deleted` });
       } catch (err) {
         res.status(500).json({ error: "Failed to delete entry" });
@@ -29679,19 +32112,20 @@ var init_aiCamera = __esm({
 });
 
 // src/services/pdfInvoiceService.ts
-var import_pdfkit2, import_path36, import_fs31, import_url33, __filename32, __dirname32, DB_PATH20, PdfInvoiceService, pdfInvoiceService;
+var import_pdfkit2, import_path38, import_fs33, import_url33, __filename32, __dirname32, DB_PATH20, PdfInvoiceService, pdfInvoiceService;
 var init_pdfInvoiceService = __esm({
   "src/services/pdfInvoiceService.ts"() {
     "use strict";
     import_pdfkit2 = __toESM(require("pdfkit"), 1);
     init_connection();
-    import_path36 = __toESM(require("path"), 1);
-    import_fs31 = __toESM(require("fs"), 1);
+    import_path38 = __toESM(require("path"), 1);
+    import_fs33 = __toESM(require("fs"), 1);
     import_url33 = require("url");
     init_config();
+    init_barcodeService();
     __filename32 = (0, import_url33.fileURLToPath)(import_meta_url);
-    __dirname32 = import_path36.default.dirname(__filename32);
-    DB_PATH20 = process.env.DB_PATH || import_path36.default.resolve(__dirname32, "..", "..", "data", "app.db");
+    __dirname32 = import_path38.default.dirname(__filename32);
+    DB_PATH20 = process.env.DB_PATH || import_path38.default.resolve(__dirname32, "..", "..", "data", "app.db");
     PdfInvoiceService = class {
       async generateInvoicePdf(invoiceId, outPath, includeStampAndSig = true) {
         const db2 = await dbManager.getConnection();
@@ -29724,10 +32158,11 @@ var init_pdfInvoiceService = __esm({
         const shopAddress = settings.shop_address || "123 Health Ave, Medical District, Tech City";
         const shopPhone = settings.shop_phone || "+91 99999 99999";
         const shopLicence = settings.shop_licence || "N/A";
+        const barcodeData = await generateInvoiceBarcodeData(invoice.invoice_no, invoice.date);
         return new Promise((resolve, reject) => {
           try {
             const doc = new import_pdfkit2.default({ margin: 40 });
-            const stream = import_fs31.default.createWriteStream(outPath);
+            const stream = import_fs33.default.createWriteStream(outPath);
             stream.on("error", reject);
             stream.on("finish", resolve);
             doc.pipe(stream);
@@ -29807,11 +32242,19 @@ var init_pdfInvoiceService = __esm({
             doc.fontSize(12).fillColor("#0f172a").font("Helvetica-Bold");
             doc.text("Grand Total:", 360, doc.y, { width: 100, align: "right" });
             doc.text(`\u20B9${total.toFixed(2)}`, 480, doc.y - 12, { width: 70, align: "right" });
-            const uploadsDir = import_path36.default.resolve(getAppDataDir(), "uploads");
-            const customStampPath = import_path36.default.join(uploadsDir, "custom_stamp.png");
-            const customSigPath = import_path36.default.join(uploadsDir, "custom_signature.png");
+            try {
+              const barcodeY = Math.max(doc.y - 50, 620);
+              doc.image(barcodeData.qrBuffer, 40, barcodeY, { width: 55, height: 55 });
+              doc.image(barcodeData.code128Buffer, 102, barcodeY + 5, { width: 140, height: 45 });
+              doc.fontSize(7).font("Helvetica").fillColor("#64748b").text(`Scannable Bill Barcode: ${barcodeData.barcodeText}`, 40, barcodeY + 57);
+            } catch (bcErr) {
+              console.warn("[PdfInvoice] Failed to embed barcode image in PDF:", bcErr);
+            }
+            const uploadsDir = import_path38.default.resolve(getAppDataDir(), "uploads");
+            const customStampPath = import_path38.default.join(uploadsDir, "custom_stamp.png");
+            const customSigPath = import_path38.default.join(uploadsDir, "custom_signature.png");
             if (includeStampAndSig) {
-              if (import_fs31.default.existsSync(customStampPath)) {
+              if (import_fs33.default.existsSync(customStampPath)) {
                 doc.image(customStampPath, 140, doc.y - 20, { width: 80 });
               } else {
                 doc.save();
@@ -29833,7 +32276,7 @@ var init_pdfInvoiceService = __esm({
                 }
                 doc.restore();
               }
-              if (import_fs31.default.existsSync(customSigPath)) {
+              if (import_fs33.default.existsSync(customSigPath)) {
                 doc.image(customSigPath, 380, doc.y - 30, { width: 80 });
               }
               doc.fontSize(8).fillColor("#94a3b8").text("This is a computer generated document. Stamped digitally.", 40, 750, { align: "center" });
@@ -29857,28 +32300,28 @@ __export(whatsappInvoiceService_exports, {
   WhatsappInvoiceService: () => WhatsappInvoiceService,
   whatsappInvoiceService: () => whatsappInvoiceService
 });
-var import_path37, import_fs32, import_url34, __filename33, __dirname33, DB_PATH21, UPLOADS_DIR3, WhatsappInvoiceService, whatsappInvoiceService;
+var import_path39, import_fs34, import_url34, __filename33, __dirname33, DB_PATH21, UPLOADS_DIR3, WhatsappInvoiceService, whatsappInvoiceService;
 var init_whatsappInvoiceService = __esm({
   "src/services/whatsappInvoiceService.ts"() {
     "use strict";
     init_connection();
-    import_path37 = __toESM(require("path"), 1);
-    import_fs32 = __toESM(require("fs"), 1);
+    import_path39 = __toESM(require("path"), 1);
+    import_fs34 = __toESM(require("fs"), 1);
     import_url34 = require("url");
     init_pdfInvoiceService();
     init_whatsappClient();
     init_config();
     __filename33 = (0, import_url34.fileURLToPath)(import_meta_url);
-    __dirname33 = import_path37.default.dirname(__filename33);
-    DB_PATH21 = process.env.DB_PATH || import_path37.default.resolve(__dirname33, "..", "..", "data", "app.db");
-    UPLOADS_DIR3 = import_path37.default.resolve(getAppDataDir(), "uploads");
+    __dirname33 = import_path39.default.dirname(__filename33);
+    DB_PATH21 = process.env.DB_PATH || import_path39.default.resolve(__dirname33, "..", "..", "data", "app.db");
+    UPLOADS_DIR3 = import_path39.default.resolve(getAppDataDir(), "uploads");
     WhatsappInvoiceService = class {
       async sendInvoiceViaWhatsApp(invoiceId) {
         let db2;
         try {
           db2 = await dbManager.getConnection();
           const invoice = await db2.get(
-            `SELECT si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
+            `SELECT si.invoice_no, si.date, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
                 c.name as customer_name, c.phone as customer_phone, c.credit_balance
          FROM sales_invoices si
          LEFT JOIN customers c ON si.customer_id = c.id
@@ -29898,6 +32341,8 @@ var init_whatsappInvoiceService = __esm({
             console.warn(`No phone number available for customer in Invoice ID ${invoiceId}. Skipping WhatsApp.`);
             return false;
           }
+          const invoiceDate = invoice.date ? invoice.date.split("T")[0] : (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+          const barcodeText = `${invoice.invoice_no}|${invoiceDate}`;
           let caption = `Dear ${invoice.customer_name || "Customer"},
 
 `;
@@ -29908,6 +32353,8 @@ var init_whatsappInvoiceService = __esm({
             caption += `Bill Amount: *\u20B9${(invoice.total_amount || 0).toFixed(2)}*
 `;
             caption += `Total Outstanding Dues: *\u20B9${totalDues.toFixed(2)}*
+`;
+            caption += `\u{1F50D} Scannable Bill Barcode: *${barcodeText}*
 
 `;
             caption += `This bill has been posted to your credit ledger account.
@@ -29917,6 +32364,8 @@ var init_whatsappInvoiceService = __esm({
             caption += `\u{1F4C4} *Sale Invoice: #${invoice.invoice_no}*
 `;
             caption += `Bill Amount Paid: *\u20B9${(invoice.total_amount || 0).toFixed(2)}*
+`;
+            caption += `\u{1F50D} Scannable Bill Barcode: *${barcodeText}*
 
 `;
             caption += `Thank you for your purchase!
@@ -29938,11 +32387,11 @@ var init_whatsappInvoiceService = __esm({
             console.error(`Failed to send instant text WhatsApp notification for invoice ${invoice.invoice_no}:`, textErr);
           }
           try {
-            if (!import_fs32.default.existsSync(UPLOADS_DIR3)) {
-              import_fs32.default.mkdirSync(UPLOADS_DIR3, { recursive: true });
+            if (!import_fs34.default.existsSync(UPLOADS_DIR3)) {
+              import_fs34.default.mkdirSync(UPLOADS_DIR3, { recursive: true });
             }
             const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, "_")}_${Date.now()}.pdf`;
-            const pdfPath = import_path37.default.join(UPLOADS_DIR3, pdfFilename);
+            const pdfPath = import_path39.default.join(UPLOADS_DIR3, pdfFilename);
             await pdfInvoiceService.generateInvoicePdf(invoiceId, pdfPath);
             const pdfCaption = `\u{1F4C4} Attached PDF Bill for Invoice #${invoice.invoice_no}`;
             await sendMessage(phone, pdfPath, pdfCaption);
@@ -29966,18 +32415,18 @@ var telegramPrescription_exports = {};
 __export(telegramPrescription_exports, {
   default: () => telegramPrescription_default
 });
-var import_express15, import_path38, import_url35, __filename34, __dirname34, DB_PATH22, router15, telegramPrescription_default;
+var import_express15, import_path40, import_url35, __filename34, __dirname34, DB_PATH22, router15, telegramPrescription_default;
 var init_telegramPrescription = __esm({
   "src/routes/telegramPrescription.ts"() {
     "use strict";
     import_express15 = __toESM(require("express"), 1);
     init_connection();
-    import_path38 = __toESM(require("path"), 1);
+    import_path40 = __toESM(require("path"), 1);
     import_url35 = require("url");
     init_telegramPrescriptionService();
     __filename34 = (0, import_url35.fileURLToPath)(import_meta_url);
-    __dirname34 = import_path38.default.dirname(__filename34);
-    DB_PATH22 = process.env.DB_PATH || import_path38.default.resolve(__dirname34, "..", "..", "data", "app.db");
+    __dirname34 = import_path40.default.dirname(__filename34);
+    DB_PATH22 = process.env.DB_PATH || import_path40.default.resolve(__dirname34, "..", "..", "data", "app.db");
     router15 = import_express15.default.Router();
     router15.get("/cart/:chatId", async (req, res) => {
       try {
@@ -30161,19 +32610,20 @@ function parseIntervalDays(val) {
   if (typeof val === "number") return val;
   return 30;
 }
-var import_express16, import_path39, import_url36, __filename35, __dirname35, DB_PATH23, router16, refills_default;
+var import_express16, import_path41, import_url36, __filename35, __dirname35, DB_PATH23, router16, refills_default;
 var init_refills = __esm({
   "src/routes/refills.ts"() {
     "use strict";
     import_express16 = __toESM(require("express"), 1);
     init_connection();
-    import_path39 = __toESM(require("path"), 1);
+    import_path41 = __toESM(require("path"), 1);
     import_url36 = require("url");
     init_refillService();
     init_whatsappClient();
+    init_getMessage();
     __filename35 = (0, import_url36.fileURLToPath)(import_meta_url);
-    __dirname35 = import_path39.default.dirname(__filename35);
-    DB_PATH23 = process.env.DB_PATH || import_path39.default.resolve(__dirname35, "..", "..", "data", "app.db");
+    __dirname35 = import_path41.default.dirname(__filename35);
+    DB_PATH23 = process.env.DB_PATH || import_path41.default.resolve(__dirname35, "..", "..", "data", "app.db");
     router16 = import_express16.default.Router();
     router16.post("/", async (req, res) => {
       const { patient_name, patient_phone, medicine_id, refill_interval_days = 30 } = req.body;
@@ -30280,15 +32730,27 @@ var init_refills = __esm({
       try {
         db2 = await dbManager.getConnection();
         const refill = await db2.get(
-          `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+          `SELECT pr.*, m.name as medicine_name, c.language 
+       FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
+       LEFT JOIN customers c ON (pr.customer_id = c.id OR pr.patient_phone = c.phone)
        WHERE pr.id = ?`,
           [id]
         );
         if (!refill) {
           return res.status(404).json({ error: "Refill schedule not found" });
         }
-        const message = `Hello ${refill.patient_name}, your prescription refill for ${refill.medicine_name} is now ready and in stock! Please visit the pharmacy to collect it.`;
+        const storeSetting = await db2.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+        const storeName = storeSetting?.value || "AI Pharmacy";
+        const lang = refill.language === "hi" || refill.language === "mr" ? refill.language : "en";
+        const message = getMessage(lang, "whatsapp.refillReminder", {
+          pharmacyName: storeName,
+          patientName: refill.patient_name || "Patient",
+          medicineName: refill.medicine_name || "Medicine",
+          dueDate: refill.next_refill_date || "today",
+          quantityLeft: String(refill.quantity || 1),
+          unit: "unit(s)"
+        });
         try {
           await sendMessage(refill.patient_phone, void 0, message);
           await db2.run(
@@ -30371,7 +32833,7 @@ var init_refills = __esm({
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
        LEFT JOIN (
-         SELECT medicine_id, SUM(quantity) as in_stock_qty 
+         SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
          FROM inventory_master 
          GROUP BY medicine_id
        ) inv ON inv.medicine_id = pr.medicine_id
@@ -30845,82 +33307,6 @@ var init_serviceStatus = __esm({
   }
 });
 
-// src/services/inventoryCache.ts
-var inventoryCache_exports = {};
-__export(inventoryCache_exports, {
-  inventoryCache: () => inventoryCache2
-});
-var InventoryCache, inventoryCache2;
-var init_inventoryCache = __esm({
-  "src/services/inventoryCache.ts"() {
-    "use strict";
-    init_inventoryActive();
-    init_connection();
-    InventoryCache = class {
-      cache = null;
-      lastUpdated = 0;
-      refreshInterval = null;
-      rebuildPromise = null;
-      initialize(db2) {
-        if (this.refreshInterval) {
-          clearInterval(this.refreshInterval);
-        }
-        this.refreshInterval = setInterval(() => {
-          this.rebuild().catch((err) => console.error("[InventoryCache] Background rebuild failed:", err));
-        }, 10 * 60 * 1e3);
-      }
-      async get(db2) {
-        if (!this.cache) {
-          await this.rebuild(db2);
-        }
-        return this.cache || [];
-      }
-      rebuild(db2) {
-        if (this.rebuildPromise) return this.rebuildPromise;
-        this.rebuildPromise = (async () => {
-          try {
-            const activeDb = db2 || await dbManager.getConnection();
-            const items = await activeDb.all(
-              `SELECT
-            m.id AS medicine_id,
-            im.id AS inventory_id,
-            m.name,
-            im.batch_no,
-            im.expiry_date,
-            COALESCE(im.mrp, m.mrp, 0) AS mrp,
-            im.quantity AS stock_qty,
-            im.loose_quantity,
-            im.unit_price,
-            COALESCE(im.cost_price, 0) AS cost_price,
-            m.item_code,
-            m.manufacturer,
-            m.packaging,
-            m.pack_size
-           FROM inventory_master im
-           JOIN medicines m ON im.medicine_id = m.id
-           WHERE ${INVENTORY_ACTIVE_WHERE}
-           ORDER BY m.name ASC, im.expiry_date ASC`
-            );
-            this.cache = items;
-            this.lastUpdated = Date.now();
-          } catch (err) {
-            console.error("[InventoryCache] Error rebuilding cache:", err);
-          } finally {
-            this.rebuildPromise = null;
-          }
-        })();
-        return this.rebuildPromise;
-      }
-      invalidate() {
-        this.cache = null;
-        this.lastUpdated = 0;
-        this.rebuild().catch((err) => console.error("[InventoryCache] On-demand rebuild failed:", err));
-      }
-    };
-    inventoryCache2 = new InventoryCache();
-  }
-});
-
 // src/routes/sales.ts
 var sales_exports = {};
 __export(sales_exports, {
@@ -30973,7 +33359,7 @@ function computeLevenshteinSim(s1, s2) {
   const distance = matrix[a.length][b.length];
   return 1 - distance / maxLen;
 }
-var import_express19, import_path40, import_url37, __filename36, __dirname36, DB_PATH24, router19, normalizeNumericSearch, DEFAULT_LIMIT, MAX_LIMIT, MAX_ITEMS_IN_BATCH, SQLITE_BUSY_RETRIES, SQLITE_BUSY_BASE_DELAY_MS, generateInvoiceNo, calculateSalesGstAndTotals, sales_default;
+var import_express19, import_path42, import_url37, __filename36, __dirname36, DB_PATH24, router19, normalizeNumericSearch, DEFAULT_LIMIT, MAX_LIMIT, MAX_ITEMS_IN_BATCH, SQLITE_BUSY_RETRIES, SQLITE_BUSY_BASE_DELAY_MS, generateInvoiceNo, calculateSalesGstAndTotals, sales_default;
 var init_sales = __esm({
   "src/routes/sales.ts"() {
     "use strict";
@@ -30984,11 +33370,11 @@ var init_sales = __esm({
     init_stockRebuild();
     init_inventoryCache();
     init_verificationService();
-    import_path40 = __toESM(require("path"), 1);
+    import_path42 = __toESM(require("path"), 1);
     import_url37 = require("url");
     __filename36 = (0, import_url37.fileURLToPath)(import_meta_url);
-    __dirname36 = import_path40.default.dirname(__filename36);
-    DB_PATH24 = process.env.DB_PATH || import_path40.default.resolve(__dirname36, "..", "..", "data", "app.db");
+    __dirname36 = import_path42.default.dirname(__filename36);
+    DB_PATH24 = process.env.DB_PATH || import_path42.default.resolve(__dirname36, "..", "..", "data", "app.db");
     router19 = import_express19.default.Router();
     normalizeNumericSearch = (val) => {
       const cleaned = val.trim();
@@ -31213,7 +33599,7 @@ var init_sales = __esm({
             inventory_id = invRow.id;
           }
           const currentStock = await db2.get(
-            `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+            `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
             [inventory_id]
           );
@@ -31254,6 +33640,14 @@ var init_sales = __esm({
             throw new Error(`Failed to decrement stock for inventory ID ${inventory_id}`);
           }
           await refreshInventoryActiveStatus2(db2, inventory_id);
+          await recordStockLedger(db2, {
+            medicine_id: currentStock.medicine_id,
+            batch_no: currentStock.batch_no,
+            quantity: -soldQty,
+            loose_quantity: -soldLoose,
+            transaction_type: "sale",
+            transaction_id: invoiceId
+          });
           if (refillEnabled && inventory_id) {
             const invRecord = await db2.get("SELECT medicine_id FROM inventory_master WHERE id = ?", [inventory_id]);
             if (invRecord && invRecord.medicine_id) {
@@ -31303,10 +33697,34 @@ var init_sales = __esm({
         }
         await db2.run("COMMIT");
         inventoryCache2.invalidate();
+        (async () => {
+          try {
+            for (const item of items) {
+              const rawOcr = item.rawOcrText || item.raw_ocr_text;
+              const medName = item.medicine_name || item.name;
+              if (rawOcr && typeof rawOcr === "string" && rawOcr.trim() && medName) {
+                const cleanOcr = rawOcr.toLowerCase().trim();
+                await db2.run(
+                  `INSERT INTO ocr_corrections (raw_ocr_text, correct_medicine_name, success_count)
+               VALUES (?, ?, 1)
+               ON CONFLICT(raw_ocr_text) DO UPDATE SET
+                 correct_medicine_name = excluded.correct_medicine_name,
+                 success_count = success_count + 1,
+                 updated_at = CURRENT_TIMESTAMP`,
+                  [cleanOcr, medName.trim()]
+                ).catch(() => {
+                });
+              }
+            }
+          } catch (learnErr) {
+            console.warn("[Sales Learning] Failed to record bill learning feedback:", learnErr);
+          }
+        })();
         if (sendWhatsApp || paymentMedium?.toUpperCase() === "CREDIT" || paymentStatus?.toUpperCase() === "UNPAID") {
-          const phoneForWA = (patient_phone || "").trim();
+          const rawDigits = (patient_phone || "").replace(/\D/g, "");
+          const phoneForWA = rawDigits.length === 12 && rawDigits.startsWith("91") ? rawDigits.slice(2) : rawDigits.length > 10 ? rawDigits.slice(-10) : rawDigits;
           const nameForWA = (patient_name || "Customer").trim();
-          if (phoneForWA) {
+          if (phoneForWA && phoneForWA.length === 10) {
             (async () => {
               try {
                 const { sendMessage: sendMessage2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
@@ -31319,6 +33737,21 @@ var init_sales = __esm({
                     return dStr || "";
                   }
                 };
+                let itemLines = "";
+                if (items && Array.isArray(items) && items.length > 0) {
+                  itemLines += `\u{1F4E6} *Items Purchased:*
+`;
+                  items.forEach((it, idx) => {
+                    const med = it.medicine_name || it.name || "Medicine";
+                    const q = Number(it.quantity || it.qty || 1);
+                    const m = Number(it.mrp || 0);
+                    const itemTot = Number(it.total || m * q);
+                    itemLines += `${idx + 1}. *${med}* x ${q} strip(s) = \u20B9${itemTot.toFixed(2)}
+`;
+                  });
+                  itemLines += `
+`;
+                }
                 const isCredit = paymentMedium?.toUpperCase() === "CREDIT" || paymentStatus?.toUpperCase() === "UNPAID";
                 let waMsg = `Dear ${nameForWA},
 
@@ -31336,42 +33769,41 @@ var init_sales = __esm({
                     const amt = Number(inv.total_amount || 0);
                     oldDuesSum += amt;
                     const dFormatted = formatDate(inv.date);
-                    oldBillsListStr += `\xE2\u20AC\xA2 Bill #${inv.invoice_no} (${dFormatted}): \xE2\u201A\xB9${amt.toFixed(2)}
+                    oldBillsListStr += `\u2022 Bill #${inv.invoice_no} (${dFormatted}): \u20B9${amt.toFixed(2)}
 `;
                   }
                   const currentBillAmt = Number(total);
                   const finalOutstanding = oldDuesSum + currentBillAmt;
                   const todayStr2 = formatDate(invoiceDateValue);
-                  waMsg += `\xF0\u0178\u201C\u0152 *Credit Purchase Bill & Account Summary*
+                  waMsg += `\u{1F4CC} *Credit Purchase Bill & Account Summary*
 
 `;
-                  waMsg += `\xF0\u0178\xA7\xBE *Current Bill (New)*
+                  waMsg += `\u{1F9FE} *Current Bill (#${invoice_no})*
 `;
-                  waMsg += `\xE2\u20AC\xA2 Bill No: *#${invoice_no}*
+                  waMsg += `\u2022 Date: *${todayStr2}*
 `;
-                  waMsg += `\xE2\u20AC\xA2 Date: *${todayStr2}*
-`;
-                  waMsg += `\xE2\u20AC\xA2 Amount: *\xE2\u201A\xB9${currentBillAmt.toFixed(2)}*
+                  waMsg += `\u2022 Amount: *\u20B9${currentBillAmt.toFixed(2)}*
 
 `;
+                  waMsg += itemLines;
                   if (oldInvoices.length > 0) {
-                    waMsg += `\xF0\u0178\u201C\u0153 *Previous Unpaid Bills (${oldInvoices.length})*
+                    waMsg += `\u{1F4DC} *Previous Unpaid Bills (${oldInvoices.length})*
 `;
                     waMsg += `${oldBillsListStr}
 `;
-                    waMsg += `\xF0\u0178\u201C\u0160 *Total Calculation Summary*
+                    waMsg += `\u{1F4CA} *Total Calculation Summary*
 `;
-                    waMsg += `Previous Dues: \xE2\u201A\xB9${oldDuesSum.toFixed(2)}
+                    waMsg += `Previous Dues: \u20B9${oldDuesSum.toFixed(2)}
 `;
-                    waMsg += `Current Bill:  \xE2\u201A\xB9${currentBillAmt.toFixed(2)}
+                    waMsg += `Current Bill:  \u20B9${currentBillAmt.toFixed(2)}
 `;
-                    waMsg += `\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81\xE2\u201D\x81
+                    waMsg += `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 `;
-                    waMsg += `\xF0\u0178\u2019\xB0 *Final Total Outstanding Balance: \xE2\u201A\xB9${finalOutstanding.toFixed(2)}*
+                    waMsg += `\u{1F4B0} *Final Total Outstanding Balance: \u20B9${finalOutstanding.toFixed(2)}*
 
 `;
                   } else {
-                    waMsg += `\xF0\u0178\u2019\xB0 *Total Outstanding Balance: \xE2\u201A\xB9${finalOutstanding.toFixed(2)}*
+                    waMsg += `\u{1F4B0} *Total Outstanding Balance: \u20B9${finalOutstanding.toFixed(2)}*
 
 `;
                   }
@@ -31381,18 +33813,19 @@ var init_sales = __esm({
 
 `;
                 } else {
-                  waMsg += `\xF0\u0178\u201C\u201E *Sale Invoice: #${invoice_no}*
+                  waMsg += `\u{1F9FE} *Sale Invoice: #${invoice_no}*
 `;
-                  waMsg += `Bill Amount Paid: *\xE2\u201A\xB9${total.toFixed(2)}*
+                  waMsg += itemLines;
+                  waMsg += `Bill Amount Paid: *\u20B9${total.toFixed(2)}*
 
 `;
                   waMsg += `Thank you for your purchase!
 
 `;
                 }
-                waMsg += `\xE2\u20AC\u201D AI Pharmacy OS`;
+                waMsg += `\u2014 AI Pharmacy OS`;
                 await sendMessage2(phoneForWA, void 0, waMsg);
-                console.log(`[POS WhatsApp] Sent credit bill notification for ${invoice_no} to ${phoneForWA}`);
+                console.log(`[POS WhatsApp] Sent bill notification for ${invoice_no} to ${phoneForWA}`);
                 await db2.run(
                   `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
@@ -31400,10 +33833,19 @@ var init_sales = __esm({
                 );
               } catch (waErr) {
                 console.error(`[POS WhatsApp] Failed to send notification for ${invoice_no}:`, waErr);
+                try {
+                  await db2.run(
+                    `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                    ["pos_invoice_failed", nameForWA, phoneForWA, `Failed to send WhatsApp: ${waErr?.message || String(waErr)}`, "failed", `invoice_${invoiceId}`]
+                  );
+                } catch (logErr) {
+                  console.error("[POS WhatsApp] Failed to log failure:", logErr);
+                }
               }
             })();
           } else {
-            console.warn(`[POS WhatsApp] No phone number for invoice ${invoice_no} \xE2\u20AC\u201D skipping WhatsApp dispatch.`);
+            console.warn(`[POS WhatsApp] Invalid/missing 10-digit phone number for invoice ${invoice_no} \u2014 skipping WhatsApp dispatch.`);
           }
         }
         const matchedSpecialOrders = [];
@@ -31419,13 +33861,30 @@ var init_sales = __esm({
                 [medName, medName]
               );
               if (matching && matching.length > 0) {
-                matching.forEach((m) => {
+                for (const m of matching) {
+                  const specMsg = `Hi ${m.requester || "Customer"}, your special order for *${m.medicine}* (Qty: ${item.quantity || 1}) has been billed & fulfilled. Thank you!`;
                   matchedSpecialOrders.push({
                     ...m,
                     qty_sold: Number(item.quantity) || 1,
-                    whatsapp_template: `Hi ${m.requester || "Customer"}, your special order for ${m.medicine} (Qty: ${item.quantity || 1}) has been billed/fulfilled. Thank you!`
+                    whatsapp_template: specMsg
                   });
-                });
+                  if (m.customer_phone) {
+                    try {
+                      const { sendMessage: sendMessage2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
+                      const specPhone = m.customer_phone.replace(/\D/g, "").slice(-10);
+                      if (specPhone.length === 10) {
+                        await sendMessage2(specPhone, void 0, specMsg);
+                        await db2.run(
+                          `UPDATE special_orders SET status = 'FULFILLED' WHERE id = ?`,
+                          [m.order_id]
+                        );
+                        console.log(`[Special Order WA] Dispatched fulfillment alert for order #${m.order_id} to ${specPhone}`);
+                      }
+                    } catch (specWaErr) {
+                      console.warn(`[Special Order WA] Failed dispatch for order #${m.order_id}:`, specWaErr);
+                    }
+                  }
+                }
               }
             }
           }
@@ -31894,6 +34353,7 @@ var init_sales = __esm({
             im.quantity AS quantity, 
             im.loose_quantity AS loose_quantity,
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            m.sell_price,
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
             m.cgst_per, 
@@ -31938,6 +34398,7 @@ var init_sales = __esm({
             im.quantity AS quantity, 
             im.loose_quantity AS loose_quantity,
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            m.sell_price,
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
             m.cgst_per, 
@@ -31981,6 +34442,7 @@ var init_sales = __esm({
           im.quantity AS quantity, 
           im.loose_quantity AS loose_quantity,
           COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+          m.sell_price,
           im.unit_price, 
           COALESCE(im.cost_price, 0) AS cost_price,
           m.cgst_per, 
@@ -32021,6 +34483,7 @@ var init_sales = __esm({
             im.quantity AS quantity, 
             im.loose_quantity AS loose_quantity,
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            m.sell_price,
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
             m.cgst_per, 
@@ -32070,6 +34533,7 @@ var init_sales = __esm({
             im.quantity AS quantity, 
             im.loose_quantity AS loose_quantity,
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            m.sell_price,
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
             m.cgst_per, 
@@ -32108,6 +34572,7 @@ var init_sales = __esm({
             im.quantity AS quantity, 
             im.loose_quantity AS loose_quantity,
             COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+            m.sell_price,
             im.unit_price, 
             COALESCE(im.cost_price, 0) AS cost_price,
             m.cgst_per, 
@@ -32452,7 +34917,7 @@ var init_sales = __esm({
           const oldItems = await db2.all("SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?", [id]);
           for (const oi of oldItems) {
             const oldStock = await db2.get(
-              `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+              `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
               [oi.inventory_id]
             );
@@ -32464,6 +34929,14 @@ var init_sales = __esm({
               oldStock.pack_size
             );
             await db2.run("UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?", [restored.quantity, restored.loose_quantity, oi.inventory_id]);
+            await recordStockLedger(db2, {
+              medicine_id: oldStock.medicine_id,
+              batch_no: oldStock.batch_no,
+              quantity: Number(oi.quantity),
+              loose_quantity: Number(oi.loose_qty || 0),
+              transaction_type: "sale_edit_restore",
+              transaction_id: id
+            });
           }
           await db2.run("DELETE FROM sale_items WHERE invoice_id = ?", [id]);
           const gstCalc = await calculateSalesGstAndTotals(db2, items, Number(discount || 0));
@@ -32471,7 +34944,7 @@ var init_sales = __esm({
           for (const item of items) {
             const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, discount_per = 0 } = item;
             const currentStock = await db2.get(
-              `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+              `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
               [inventory_id]
             );
@@ -32507,6 +34980,14 @@ var init_sales = __esm({
               pSize
             );
             await db2.run("UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?", [newStock.quantity, newStock.loose_quantity, inventory_id]);
+            await recordStockLedger(db2, {
+              medicine_id: currentStock.medicine_id,
+              batch_no: currentStock.batch_no,
+              quantity: -Number(quantity),
+              loose_quantity: -Number(loose_qty),
+              transaction_type: "sale_edit",
+              transaction_id: id
+            });
           }
           await db2.run(
             "UPDATE sales_invoices SET customer_id = ?, total_amount = ?, tax_amount = ?, cgst_value = ?, sgst_value = ?, payment_medium = COALESCE(?, payment_medium), payment_status = COALESCE(?, payment_status), discount = ?, subtotal = ?, doctor_id = ?, roff = ? WHERE id = ?",
@@ -32542,7 +35023,7 @@ var init_sales = __esm({
         const items = await db2.all("SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?", [id]);
         for (const item of items) {
           const stock = await db2.get(
-            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+            `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
             [item.inventory_id]
           );
@@ -32554,6 +35035,14 @@ var init_sales = __esm({
             stock.pack_size
           );
           await db2.run("UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?", [restored.quantity, restored.loose_quantity, item.inventory_id]);
+          await recordStockLedger(db2, {
+            medicine_id: stock.medicine_id,
+            batch_no: stock.batch_no,
+            quantity: Number(item.quantity),
+            loose_quantity: Number(item.loose_qty || 0),
+            transaction_type: "sale_delete_restore",
+            transaction_id: id
+          });
         }
         await db2.run("DELETE FROM sale_items WHERE invoice_id = ?", [id]);
         await db2.run("DELETE FROM sales_invoices WHERE id = ?", [id]);
@@ -32946,7 +35435,7 @@ var inventory_exports = {};
 __export(inventory_exports, {
   default: () => inventory_default
 });
-var import_express20, import_path41, import_url38, import_qrcode3, router20, __filename37, __dirname37, DB_PATH25, inventory_default;
+var import_express20, import_path43, import_url38, import_qrcode4, router20, __filename37, __dirname37, DB_PATH25, inventory_default;
 var init_inventory = __esm({
   "src/routes/inventory.ts"() {
     "use strict";
@@ -32956,13 +35445,13 @@ var init_inventory = __esm({
     init_connection();
     init_cacheService();
     init_packaging();
-    import_path41 = __toESM(require("path"), 1);
+    import_path43 = __toESM(require("path"), 1);
     import_url38 = require("url");
-    import_qrcode3 = __toESM(require("qrcode"), 1);
+    import_qrcode4 = __toESM(require("qrcode"), 1);
     router20 = import_express20.default.Router();
     __filename37 = (0, import_url38.fileURLToPath)(import_meta_url);
-    __dirname37 = import_path41.default.dirname(__filename37);
-    DB_PATH25 = process.env.DB_PATH || import_path41.default.resolve(__dirname37, "..", "..", "data", "app.db");
+    __dirname37 = import_path43.default.dirname(__filename37);
+    DB_PATH25 = process.env.DB_PATH || import_path43.default.resolve(__dirname37, "..", "..", "data", "app.db");
     router20.get("/", async (req, res) => {
       let db2;
       const page = parseInt(req.query.page) || 1;
@@ -33048,7 +35537,8 @@ var init_inventory = __esm({
                COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
                im.batch_no as batch_number, 
                im.quantity as stock_quantity, 
-               m.item_code as item_code
+               m.item_code as item_code,
+               m.sell_price as sell_price
         ${baseQuery}
         ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       `, params);
@@ -33064,7 +35554,8 @@ var init_inventory = __esm({
              COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
              im.batch_no as batch_number, 
              im.quantity as stock_quantity, 
-             m.item_code as item_code
+             m.item_code as item_code,
+             m.sell_price as sell_price
       ${baseQuery}
       ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       LIMIT ? OFFSET ?
@@ -33149,7 +35640,7 @@ var init_inventory = __esm({
     router20.put("/:id", async (req, res) => {
       let db2;
       const { id } = req.params;
-      const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity, pack_size } = req.body;
+      const { quantity, rack_location, batch_no, expiry_date, reorder_level, name, mrp, loose_quantity, pack_size, sell_price } = req.body;
       const qtyVal = quantity !== void 0 ? quantity : req.body.stock_quantity;
       const batchNoVal = batch_no !== void 0 ? batch_no : req.body.batch_number;
       try {
@@ -33221,7 +35712,7 @@ var init_inventory = __esm({
           }
         }
         if (oldInv.medicine_id) {
-          if (name !== void 0 || mrp !== void 0 || pack_size !== void 0) {
+          if (name !== void 0 || mrp !== void 0 || pack_size !== void 0 || sell_price !== void 0) {
             const medUpdates = [];
             const medParams = [];
             if (name !== void 0) {
@@ -33235,6 +35726,11 @@ var init_inventory = __esm({
             if (pack_size !== void 0) {
               medUpdates.push("pack_size = ?");
               medParams.push(parseInt(pack_size, 10) || null);
+            }
+            if (sell_price !== void 0) {
+              const parsedPrice = sell_price !== null && sell_price !== "" && !isNaN(Number(sell_price)) ? parseFloat(sell_price) : null;
+              medUpdates.push("sell_price = ?");
+              medParams.push(parsedPrice);
             }
             if (medUpdates.length > 0) {
               medParams.push(oldInv.medicine_id);
@@ -33255,6 +35751,35 @@ var init_inventory = __esm({
         }
         console.error("Inventory update error:", error);
         res.status(500).json({ error: error.message || "Internal server error" });
+      }
+    });
+    router20.post("/bulk-sell-prices", async (req, res) => {
+      let db2;
+      try {
+        const { items = [] } = req.body;
+        if (!Array.isArray(items) || items.length === 0) {
+          return res.status(400).json({ error: "items array is required" });
+        }
+        db2 = await dbManager.getConnection();
+        await db2.run("BEGIN TRANSACTION");
+        for (const item of items) {
+          const { medicine_id, sell_price } = item;
+          if (!medicine_id) continue;
+          const parsedPrice = sell_price !== null && sell_price !== "" && sell_price !== void 0 && !isNaN(Number(sell_price)) ? parseFloat(sell_price) : null;
+          await db2.run("UPDATE medicines SET sell_price = ? WHERE id = ?", [parsedPrice, medicine_id]);
+        }
+        await db2.run("COMMIT");
+        inventoryCache2.invalidate();
+        res.json({ success: true, message: "Bulk sell prices updated successfully" });
+      } catch (error) {
+        if (db2) {
+          try {
+            await db2.run("ROLLBACK");
+          } catch (_) {
+          }
+        }
+        console.error("Bulk sell prices update error:", error);
+        res.status(500).json({ error: error.message || "Failed to update sell prices" });
       }
     });
     router20.delete("/:id", async (req, res) => {
@@ -33545,7 +36070,7 @@ var init_inventory = __esm({
           exp: item.expiry_date,
           mrp: item.mrp
         });
-        const qrImage = await import_qrcode3.default.toDataURL(qrData, { width: 150, margin: 1 });
+        const qrImage = await import_qrcode4.default.toDataURL(qrData, { width: 150, margin: 1 });
         res.json({
           success: true,
           qrCodeUrl: qrImage,
@@ -33596,17 +36121,19 @@ var init_inventory = __esm({
       const { id } = req.params;
       try {
         db2 = await dbManager.getConnection();
-        const medicine = await db2.get("SELECT * FROM medicines WHERE id = ?", [id]);
+        const [medicine, invPrimary, stockRow] = await Promise.all([
+          db2.get("SELECT * FROM medicines WHERE id = ?", [id]),
+          db2.get(`
+        SELECT id as inventory_id, quantity, rack_location, batch_no, expiry_date 
+        FROM inventory_master 
+        WHERE medicine_id = ? 
+        ORDER BY quantity DESC LIMIT 1
+      `, [id]),
+          db2.get(`SELECT SUM(quantity) as total_stock FROM inventory_master WHERE medicine_id = ?`, [id])
+        ]);
         if (!medicine) {
           return res.status(404).json({ error: "Medicine not found" });
         }
-        const invPrimary = await db2.get(`
-      SELECT id as inventory_id, quantity, rack_location, batch_no, expiry_date 
-      FROM inventory_master 
-      WHERE medicine_id = ? 
-      ORDER BY quantity DESC LIMIT 1
-    `, [id]);
-        const stockRow = await db2.get(`SELECT SUM(quantity) as total_stock FROM inventory_master WHERE medicine_id = ?`, [id]);
         const total_stock = stockRow?.total_stock || 0;
         res.json({
           success: true,
@@ -33635,7 +36162,23 @@ var init_inventory = __esm({
         inventory_id,
         quantity,
         rack_location,
-        hsn_code
+        hsn_code,
+        item_type,
+        therapeutic,
+        sub_therapeutic,
+        schedule_type,
+        short_code,
+        ucode,
+        cgst_per,
+        sgst_per,
+        igst_per,
+        reorder_level,
+        max_stock_level,
+        rack,
+        disable_auto_barcode,
+        tb_medicine,
+        sell_price,
+        metadata
       } = req.body;
       try {
         if (!id) {
@@ -33690,6 +36233,67 @@ var init_inventory = __esm({
           updates.push("hsn_code = ?");
           params.push(hsn_code);
         }
+        if (item_type !== void 0) {
+          updates.push("item_type = ?");
+          params.push(item_type);
+        }
+        if (therapeutic !== void 0) {
+          updates.push("therapeutic = ?");
+          params.push(therapeutic);
+        }
+        if (sub_therapeutic !== void 0) {
+          updates.push("sub_therapeutic = ?");
+          params.push(sub_therapeutic);
+        }
+        if (schedule_type !== void 0) {
+          updates.push("schedule_type = ?");
+          params.push(schedule_type);
+        }
+        if (short_code !== void 0) {
+          updates.push("short_code = ?");
+          params.push(short_code);
+        }
+        if (ucode !== void 0) {
+          updates.push("ucode = ?");
+          params.push(ucode);
+        }
+        if (cgst_per !== void 0) {
+          updates.push("cgst_per = ?");
+          params.push(parseFloat(cgst_per) || 0);
+        }
+        if (sgst_per !== void 0) {
+          updates.push("sgst_per = ?");
+          params.push(parseFloat(sgst_per) || 0);
+        }
+        if (igst_per !== void 0) {
+          updates.push("igst_per = ?");
+          params.push(parseFloat(igst_per) || 0);
+        }
+        if (max_stock_level !== void 0) {
+          updates.push("max_stock_level = ?");
+          params.push(parseInt(max_stock_level, 10) || null);
+        }
+        if (rack !== void 0) {
+          updates.push("rack = ?");
+          params.push(rack);
+        }
+        if (disable_auto_barcode !== void 0) {
+          updates.push("disable_auto_barcode = ?");
+          params.push(disable_auto_barcode ? 1 : 0);
+        }
+        if (tb_medicine !== void 0) {
+          updates.push("tb_medicine = ?");
+          params.push(tb_medicine ? 1 : 0);
+        }
+        if (sell_price !== void 0) {
+          const parsedPrice = sell_price !== null && sell_price !== "" && !isNaN(Number(sell_price)) ? parseFloat(sell_price) : null;
+          updates.push("sell_price = ?");
+          params.push(parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null);
+        }
+        if (metadata !== void 0) {
+          updates.push("metadata = ?");
+          params.push(typeof metadata === "string" ? metadata : JSON.stringify(metadata));
+        }
         if (updates.length > 0) {
           params.push(id);
           await db2.run(`UPDATE medicines SET ${updates.join(", ")} WHERE id = ?`, params);
@@ -33701,9 +36305,13 @@ var init_inventory = __esm({
             invUpdates.push("quantity = ?");
             invParams.push(quantity);
           }
-          if (rack_location !== void 0) {
+          if (rack_location !== void 0 || rack !== void 0) {
             invUpdates.push("rack_location = ?");
-            invParams.push(rack_location);
+            invParams.push(rack_location !== void 0 ? rack_location : rack);
+          }
+          if (reorder_level !== void 0) {
+            invUpdates.push("reorder_level = ?");
+            invParams.push(parseInt(reorder_level, 10) || 10);
           }
           if (invUpdates.length > 0) {
             invParams.push(inventory_id);
@@ -33712,7 +36320,7 @@ var init_inventory = __esm({
         }
         await db2.run("COMMIT");
         inventoryCache2.invalidate();
-        res.json({ success: true, message: "Medicine universally updated" });
+        res.json({ success: true, message: "Medicine universally updated across 26 fields" });
       } catch (error) {
         if (db2) {
           try {
@@ -33753,14 +36361,29 @@ var init_inventory = __esm({
         await db2.run("COMMIT");
         res.json({ success: true, message: `Successfully synced ${count} stock override(s).`, count });
       } catch (error) {
-        if (db2) {
-          try {
-            await db2.run("ROLLBACK");
-          } catch (_) {
-          }
-        }
         console.error("Failed to sync stock overrides:", error);
         res.status(500).json({ error: error.message || "Internal server error during stock sync" });
+      }
+    });
+    router20.get("/therapeutic-search", async (req, res) => {
+      const { query } = req.query;
+      if (!query || typeof query !== "string") {
+        return res.json([]);
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        const results = await db2.all(
+          `SELECT m.*, i.id as inventory_id, i.quantity, i.batch_no, i.expiry_date, i.mrp, i.rate, i.rack_location
+       FROM medicines m
+       LEFT JOIN inventory_master i ON i.medicine_id = m.id AND i.is_active = 1
+       WHERE m.therapeutic LIKE ? OR m.sub_therapeutic LIKE ?
+       ORDER BY m.name ASC LIMIT 30`,
+          [`%${query.trim()}%`, `%${query.trim()}%`]
+        );
+        res.json(results);
+      } catch (err) {
+        console.error("Error searching by therapeutic class:", err);
+        res.status(500).json({ error: "Failed to search by therapeutic class" });
       }
     });
     inventory_default = router20;
@@ -33772,17 +36395,17 @@ var dashboard_exports = {};
 __export(dashboard_exports, {
   default: () => dashboard_default
 });
-var import_express21, import_path42, import_url39, __filename38, __dirname38, DB_PATH26, router21, dashboard_default;
+var import_express21, import_path44, import_url39, __filename38, __dirname38, DB_PATH26, router21, dashboard_default;
 var init_dashboard = __esm({
   "src/routes/dashboard.ts"() {
     "use strict";
     import_express21 = __toESM(require("express"), 1);
     init_connection();
-    import_path42 = __toESM(require("path"), 1);
+    import_path44 = __toESM(require("path"), 1);
     import_url39 = require("url");
     __filename38 = (0, import_url39.fileURLToPath)(import_meta_url);
-    __dirname38 = import_path42.default.dirname(__filename38);
-    DB_PATH26 = process.env.DB_PATH || import_path42.default.resolve(__dirname38, "..", "..", "data", "app.db");
+    __dirname38 = import_path44.default.dirname(__filename38);
+    DB_PATH26 = process.env.DB_PATH || import_path44.default.resolve(__dirname38, "..", "..", "data", "app.db");
     router21 = import_express21.default.Router();
     router21.get("/", async (_req, res) => {
       try {
@@ -33867,12 +36490,12 @@ async function seedMasterMedicines(force = false) {
         return { loaded: 0 };
       }
     }
-    const csvPath = import_path43.default.join(process.cwd(), "data", "reference_medicines.csv");
-    if (!import_fs33.default.existsSync(csvPath)) {
+    const csvPath = import_path45.default.join(process.cwd(), "data", "reference_medicines.csv");
+    if (!import_fs35.default.existsSync(csvPath)) {
       console.warn("[MasterSeed] Reference CSV not found at:", csvPath);
       return { loaded: 0 };
     }
-    const fileStream = import_fs33.default.createReadStream(csvPath, { encoding: "utf8" });
+    const fileStream = import_fs35.default.createReadStream(csvPath, { encoding: "utf8" });
     const rl = import_readline2.default.createInterface({
       input: fileStream,
       crlfDelay: Infinity
@@ -34010,12 +36633,12 @@ async function upsertMasterMedicine(item) {
     console.warn("[MasterSeed] Failed to upsert master medicine:", cleanName, err.message);
   }
 }
-var import_fs33, import_path43, import_readline2;
+var import_fs35, import_path45, import_readline2;
 var init_masterMedicinesSeedService = __esm({
   "src/services/masterMedicinesSeedService.ts"() {
     "use strict";
-    import_fs33 = __toESM(require("fs"), 1);
-    import_path43 = __toESM(require("path"), 1);
+    import_fs35 = __toESM(require("fs"), 1);
+    import_path45 = __toESM(require("path"), 1);
     import_readline2 = __toESM(require("readline"), 1);
     init_connection();
   }
@@ -34206,6 +36829,9 @@ var init_whatsappQueueWorker = __esm({
         const db2 = await dbManager.getConnection();
         const cleanPhone = number.replace(/[^0-9]/g, "");
         const now = Date.now();
+        const startOfDay = /* @__PURE__ */ new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const startOfDayMs = startOfDay.getTime();
         let resolvedTargetName = targetName?.trim() || "";
         if (!resolvedTargetName && cleanPhone.length >= 7) {
           try {
@@ -34255,9 +36881,23 @@ var init_whatsappQueueWorker = __esm({
         }
         const result = await db2.run(
           `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name)
-       VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
-          [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null]
+       SELECT ?, ?, ?, 'pending', 0, ?, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM whatsapp_send_queue WHERE number = ? AND message = ? AND created_at >= ?
+       )`,
+          [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, cleanPhone, message, startOfDayMs]
         );
+        if (!result.changes) {
+          const existingToday = await db2.get(
+            `SELECT id, status FROM whatsapp_send_queue
+         WHERE number = ? AND message = ? AND created_at >= ? LIMIT 1`,
+            [cleanPhone, message, startOfDayMs]
+          );
+          if (existingToday?.id) {
+            console.log(`[Queue Safeguard] Suppressed duplicate enqueue for ${cleanPhone} today (status: ${existingToday.status}, queue ID: ${existingToday.id}).`);
+            return existingToday.id;
+          }
+        }
         if (scheduledAt <= now) {
           this.triggerProcessing();
         }
@@ -34686,14 +37326,14 @@ __export(bouncedAlertService_exports, {
   BouncedAlertService: () => BouncedAlertService,
   bouncedAlertService: () => bouncedAlertService
 });
-var import_fs34, BouncedAlertService, bouncedAlertService;
+var import_fs36, BouncedAlertService, bouncedAlertService;
 var init_bouncedAlertService = __esm({
   "src/services/bouncedAlertService.ts"() {
     "use strict";
     init_connection();
     init_emailService();
     init_whatsappClient();
-    import_fs34 = __toESM(require("fs"), 1);
+    import_fs36 = __toESM(require("fs"), 1);
     BouncedAlertService = class {
       /**
        * Run the bounced products check for order emails received in the last 30 hours,
@@ -34748,7 +37388,7 @@ var init_bouncedAlertService = __esm({
             );
             let attachmentParsed = false;
             for (const att of attachments) {
-              if (att.local_path && import_fs34.default.existsSync(att.local_path)) {
+              if (att.local_path && import_fs36.default.existsSync(att.local_path)) {
                 try {
                   const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
                   if (resParse && resParse.success && resParse.items && resParse.items.length > 0) {
@@ -34808,7 +37448,7 @@ var init_bouncedAlertService = __esm({
             const receivedMap = /* @__PURE__ */ new Map();
             for (const item of receivedItems) {
               const norm = normalizeName(item.medicine_name);
-              const totalQty = (Number(item.quantity) || 0) + (Number(item.free_qty) || 0);
+              const totalQty = (Number(item.quantity) || 0) + (Number(item.free_qty) || 0) + (Number(item.loose_quantity) || 0);
               receivedMap.set(norm, (receivedMap.get(norm) || 0) + totalQty);
             }
             for (const expected of expectedItems) {
@@ -34965,13 +37605,14 @@ function tokensMatchFuzzy(term1, term2, aliasMap) {
   const overlap = commonCount / Math.min(tokens1.size, tokens2.size);
   return overlap >= 0.5 || commonCount >= 2;
 }
-var import_express22, import_path44, import_url40, import_multer2, import_pdf_parse2, import_sync3, XLSX5, import_adm_zip5, import_fs35, __filename39, __dirname39, DB_PATH27, router22, upload2, purchases_default;
+var import_express22, import_path46, import_url40, import_multer2, import_pdf_parse2, import_sync3, XLSX5, import_adm_zip5, import_fs37, __filename39, __dirname39, DB_PATH27, router22, upload2, purchases_default;
 var init_purchases = __esm({
   "src/routes/purchases.ts"() {
     "use strict";
     import_express22 = __toESM(require("express"), 1);
+    init_stockRebuild();
     init_connection();
-    import_path44 = __toESM(require("path"), 1);
+    import_path46 = __toESM(require("path"), 1);
     import_url40 = require("url");
     import_multer2 = __toESM(require("multer"), 1);
     import_pdf_parse2 = __toESM(require("pdf-parse"), 1);
@@ -34981,33 +37622,49 @@ var init_purchases = __esm({
     init_aiCameraService();
     init_productNameFilterService();
     init_emailService();
+    init_onlineDataEnricher();
+    init_activityTracker();
     init_config();
     init_inventoryActive();
     init_inventoryCache();
-    import_fs35 = __toESM(require("fs"), 1);
+    import_fs37 = __toESM(require("fs"), 1);
     init_medicineService();
     init_orderFulfillmentService();
+    init_summaryCacheService();
     __filename39 = (0, import_url40.fileURLToPath)(import_meta_url);
-    __dirname39 = import_path44.default.dirname(__filename39);
-    DB_PATH27 = process.env.DB_PATH || import_path44.default.resolve(__dirname39, "..", "..", "data", "app.db");
+    __dirname39 = import_path46.default.dirname(__filename39);
+    DB_PATH27 = process.env.DB_PATH || import_path46.default.resolve(__dirname39, "..", "..", "data", "app.db");
     router22 = import_express22.default.Router();
     upload2 = (0, import_multer2.default)({ storage: import_multer2.default.memoryStorage() });
+    router22.get("/summary", async (_req, res) => {
+      try {
+        const cached = await getSummaryCache("purchase_summary");
+        if (cached) {
+          return res.json(cached);
+        }
+        const fresh = await rebuildPurchaseSummaryCache();
+        res.json(fresh);
+      } catch (err) {
+        console.error("Failed to fetch purchase summary cache:", err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
     router22.post("/upload", upload2.single("file"), async (req, res) => {
       try {
         if (!req.file) {
           return res.status(400).json({ error: "No file uploaded" });
         }
-        const uploadsDir = process.env.UPLOADS_DIR || import_path44.default.join(getAppDataDir(), "uploads");
-        if (!import_fs35.default.existsSync(uploadsDir)) {
-          import_fs35.default.mkdirSync(uploadsDir, { recursive: true });
+        const uploadsDir = process.env.UPLOADS_DIR || import_path46.default.join(getAppDataDir(), "uploads");
+        if (!import_fs37.default.existsSync(uploadsDir)) {
+          import_fs37.default.mkdirSync(uploadsDir, { recursive: true });
         }
-        const sanitizedFilename = import_path44.default.basename(req.file.originalname).replace(/[^a-zA-Z0-9._-]/g, "_");
-        const tempPath = import_path44.default.join(uploadsDir, `upload-${Date.now()}-${sanitizedFilename}`);
-        import_fs35.default.writeFileSync(tempPath, req.file.buffer);
+        const sanitizedFilename = import_path46.default.basename(req.file.originalname).replace(/[^a-zA-Z0-9._-]/g, "_");
+        const tempPath = import_path46.default.join(uploadsDir, `upload-${Date.now()}-${sanitizedFilename}`);
+        import_fs37.default.writeFileSync(tempPath, req.file.buffer);
         const result = await emailService.parseAndImportAttachment(tempPath, false);
         if (!result.success) {
           try {
-            import_fs35.default.unlinkSync(tempPath);
+            import_fs37.default.unlinkSync(tempPath);
           } catch {
           }
           return res.status(400).json({ error: "Failed to parse invoice file" });
@@ -35092,7 +37749,7 @@ var init_purchases = __esm({
         FROM purchases p
         LEFT JOIN distributors d ON p.distributor_id = d.id
         ${filterQuery}
-        ORDER BY p.date DESC
+        ORDER BY p.id DESC
         LIMIT ? OFFSET ?
       `, [...params, limit, offset]);
           res.json({
@@ -35111,7 +37768,7 @@ var init_purchases = __esm({
         FROM purchases p 
         LEFT JOIN distributors d ON p.distributor_id = d.id 
         ${filterQuery}
-        ORDER BY p.date DESC 
+        ORDER BY p.id DESC 
         LIMIT ?
       `, [...params, limit]);
           res.json(purchases);
@@ -35219,7 +37876,10 @@ var init_purchases = __esm({
           }
         }
         const appInvoiceNo = `P-${nextSeq.toString().padStart(3, "0")}`;
-        const purchaseDate = date && date.trim() ? date.trim() : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+        const nowLocal = /* @__PURE__ */ new Date();
+        const localTimeStr = `${String(nowLocal.getHours()).padStart(2, "0")}:${String(nowLocal.getMinutes()).padStart(2, "0")}:${String(nowLocal.getSeconds()).padStart(2, "0")}`;
+        const rawDateStr = date && date.trim() ? date.trim() : `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, "0")}-${String(nowLocal.getDate()).padStart(2, "0")}`;
+        const purchaseDate = rawDateStr.includes(":") ? rawDateStr : `${rawDateStr} ${localTimeStr}`;
         const purchRes = await db2.run(
           `INSERT INTO purchases (distributor_id, invoice_no, app_invoice_no, date, total_amount, cgst_value, sgst_value, cn_amount, cn_number, original_amount) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -35236,6 +37896,7 @@ var init_purchases = __esm({
           );
         }
         const uniqueMedicineIds = /* @__PURE__ */ new Set();
+        const savedItems = [];
         for (const item of items) {
           const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
           const medInputName = medicine || item.medicine_name;
@@ -35285,8 +37946,24 @@ var init_purchases = __esm({
               }
               if (!medId) {
                 const insMed = await db2.run(
-                  "INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  [cleanName, item.manufacturer || "", mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || ""]
+                  "INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name, packaging, category, marketed_by, schedule_type, pack_unit, pack_size, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  [
+                    cleanName,
+                    item.manufacturer || "",
+                    mrp || 0,
+                    rawRate || 0,
+                    rawCgst || 0,
+                    rawSgst || 0,
+                    item.hsn_code || "",
+                    item.generic_name || null,
+                    item.packaging || null,
+                    item.category || null,
+                    item.marketed_by || null,
+                    item.schedule_type || null,
+                    item.pack_unit || null,
+                    item.pack_size || null,
+                    item.item_type || null
+                  ]
                 );
                 medId = insMed.lastID;
               }
@@ -35315,6 +37992,15 @@ var init_purchases = __esm({
         (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+          const medRow = await db2.get("SELECT sell_price FROM medicines WHERE id = ?", [medId]);
+          savedItems.push({
+            medicine_id: medId,
+            name: medName,
+            medicine_name: medName,
+            rate: rawRate,
+            mrp: mrp || 0,
+            sell_price: medRow?.sell_price ?? null
+          });
           const totalQty = rawQty + rawFreeQty;
           const invRow = await db2.get("SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))", [medId, rawBatch, rawBatch]);
           if (invRow) {
@@ -35330,6 +38016,14 @@ var init_purchases = __esm({
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
             await refreshInventoryActiveByBatch(db2, medId, rawBatch);
           }
+          await recordStockLedger(db2, {
+            medicine_id: medId,
+            batch_no: rawBatch,
+            quantity: totalQty,
+            loose_quantity: 0,
+            transaction_type: "purchase",
+            transaction_id: purchaseId
+          });
           if (mrp && mrp > 0) {
             await db2.run("UPDATE medicines SET mrp = ?, rate = ?, cgst_per = COALESCE(NULLIF(?, 0), cgst_per), sgst_per = COALESCE(NULLIF(?, 0), sgst_per) WHERE id = ?", [mrp, rawRate, rawCgst, rawSgst, medId]);
           } else {
@@ -35345,7 +38039,14 @@ var init_purchases = __esm({
         }
         await db2.run("COMMIT");
         inventoryCache2.invalidate();
-        res.json({ success: true, message: "Purchase saved successfully", app_invoice_no: appInvoiceNo });
+        res.json({
+          success: true,
+          message: "Purchase saved successfully",
+          app_invoice_no: appInvoiceNo,
+          purchase_id: purchaseId,
+          saved_items: savedItems,
+          saved_medicines: savedItems
+        });
         setImmediate(async () => {
           try {
             const { inventoryService: inventoryService2 } = await Promise.resolve().then(() => (init_inventoryService(), inventoryService_exports));
@@ -35515,6 +38216,7 @@ var init_purchases = __esm({
             [cnAmountVal, nowStr, id, reconcile_expiry_return_id]
           );
         }
+        const savedItems = [];
         for (const item of items) {
           const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
           const medInputName = medicine || item.medicine_name;
@@ -35577,6 +38279,15 @@ var init_purchases = __esm({
         (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+          const medRow = await db2.get("SELECT sell_price FROM medicines WHERE id = ?", [medId]);
+          savedItems.push({
+            medicine_id: medId,
+            name: medName,
+            medicine_name: medName,
+            rate: rawRate,
+            mrp: mrp || 0,
+            sell_price: medRow?.sell_price ?? null
+          });
           const totalQty = rawQty + rawFreeQty;
           const invRow = await db2.get("SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))", [medId, rawBatch, rawBatch]);
           if (invRow) {
@@ -35598,8 +38309,28 @@ var init_purchases = __esm({
         }
         await db2.run("COMMIT");
         inventoryCache2.invalidate();
+        triggerBackgroundSummaryRebuild();
         const medicineNamesToEnrich = items.map((item) => item.medicine || item.medicine_name).filter((name) => typeof name === "string" && name.trim().length > 0);
-        res.json({ success: true, message: "Purchase updated successfully" });
+        if (medicineNamesToEnrich.length > 0) {
+          (async () => {
+            for (const name of medicineNamesToEnrich) {
+              try {
+                await activityTracker.waitUntilIdle();
+                await onlineDataEnricher.enrichMedicineByName(name);
+              } catch (e) {
+                console.error("[Background Enrichment] Error enriching:", name, e);
+              }
+            }
+          })();
+        }
+        res.json({
+          success: true,
+          message: "Purchase updated successfully",
+          app_invoice_no: invoice_no,
+          purchase_id: Number(id),
+          saved_items: savedItems,
+          saved_medicines: savedItems
+        });
       } catch (error) {
         console.error("Full purchase update error:", error);
         if (db2) {
@@ -35682,19 +38413,32 @@ var init_purchases = __esm({
       let db2;
       try {
         const name = req.query.name;
+        const medicineIdParam = req.query.medicine_id;
         const distributorId = req.query.distributor_id;
-        if (!name) {
-          return res.status(400).json({ error: "Medicine name query is required" });
+        if (!name && !medicineIdParam) {
+          return res.status(400).json({ error: "Medicine name or id is required" });
         }
         db2 = await dbManager.getConnection();
-        const medicines = await db2.all(
-          "SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 5",
-          [`%${name}%`]
-        );
-        if (medicines.length === 0) {
-          return res.json({ found: false });
+        let medicineIds;
+        if (medicineIdParam) {
+          medicineIds = [parseInt(medicineIdParam, 10)];
+        } else {
+          const prefixRows = await db2.all(
+            "SELECT id FROM medicines WHERE name LIKE ? LIMIT 5",
+            [`${name}%`]
+          );
+          medicineIds = prefixRows.map((m) => m.id);
+          if (medicineIds.length === 0) {
+            const infixRows = await db2.all(
+              "SELECT id FROM medicines WHERE name LIKE ? LIMIT 5",
+              [`%${name}%`]
+            );
+            medicineIds = infixRows.map((m) => m.id);
+          }
+          if (medicineIds.length === 0) {
+            return res.json({ found: false });
+          }
         }
-        const medicineIds = medicines.map((m) => m.id);
         const placeholders = medicineIds.map(() => "?").join(",");
         let query = `
       SELECT pi.*, m.name as medicine_name, m.id as medicine_id,
@@ -35723,6 +38467,7 @@ var init_purchases = __esm({
           batch_no: lastPurchase.batch_no,
           expiry_date: lastPurchase.expiry_date,
           cost_price: lastPurchase.cost_price,
+          rate: lastPurchase.cost_price,
           mrp: lastPurchase.mrp,
           cgst_per: lastPurchase.cgst_per,
           sgst_per: lastPurchase.sgst_per,
@@ -36029,7 +38774,7 @@ var init_purchases = __esm({
          OR LOWER(subject) LIKE '%dispatch%'
          OR LOWER(subject) LIKE '%tax%')
       ORDER BY uid DESC
-      LIMIT 50
+      LIMIT 200
     `);
         const uids = orderEmails.map((e) => e.uid);
         const attachmentsMap = /* @__PURE__ */ new Map();
@@ -36084,13 +38829,14 @@ var init_purchases = __esm({
           if (medNames.length === 0 && !email.medicine_names) {
             const parsedItems = [];
             for (const att of attachments) {
-              if (att.local_path && import_fs35.default.existsSync(att.local_path)) {
+              if (att.local_path && import_fs37.default.existsSync(att.local_path)) {
                 try {
                   const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
                   if (resParse && resParse.success && resParse.items) {
                     parsedItems.push(...resParse.items);
                   }
                 } catch (pe) {
+                  console.error("[Email Reconciliation] Attachment parse failed:", pe);
                 }
               }
             }
@@ -36326,7 +39072,7 @@ var init_purchases = __esm({
         let parsedTotalAmount = 0;
         let parsedGlobalCdPer = 0;
         for (const att of dbAttachments) {
-          if (att.local_path && import_fs35.default.existsSync(att.local_path)) {
+          if (att.local_path && import_fs37.default.existsSync(att.local_path)) {
             try {
               const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
               if (resParse && resParse.success) {
@@ -36403,7 +39149,7 @@ var init_purchases = __esm({
         const dbAttachments = await db2.all("SELECT * FROM email_attachments WHERE uid = ?", [email_uid]);
         const parsedItems = [];
         for (const att of dbAttachments) {
-          if (att.local_path && import_fs35.default.existsSync(att.local_path)) {
+          if (att.local_path && import_fs37.default.existsSync(att.local_path)) {
             try {
               const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
               if (resParse && resParse.success && resParse.items && resParse.items.length > 0) {
@@ -36779,6 +39525,104 @@ var init_purchases = __esm({
   }
 });
 
+// src/routes/sellPrice.ts
+var sellPrice_exports = {};
+__export(sellPrice_exports, {
+  default: () => sellPrice_default
+});
+var import_express23, router23, sellPrice_default;
+var init_sellPrice = __esm({
+  "src/routes/sellPrice.ts"() {
+    "use strict";
+    import_express23 = __toESM(require("express"), 1);
+    init_connection();
+    init_inventoryCache();
+    router23 = import_express23.default.Router();
+    router23.post("/bulk-update", async (req, res) => {
+      let db2;
+      try {
+        const { items = [] } = req.body;
+        if (!Array.isArray(items) || items.length === 0) {
+          return res.status(400).json({ error: "items array is required" });
+        }
+        db2 = await dbManager.getConnection();
+        await db2.run("BEGIN TRANSACTION");
+        for (const item of items) {
+          const medId = item.medicine_id || item.id;
+          if (!medId) continue;
+          const rawPrice = item.sell_price;
+          const parsedPrice = rawPrice !== null && rawPrice !== "" && rawPrice !== void 0 && !isNaN(Number(rawPrice)) ? Math.round(Number(rawPrice) * 100) / 100 : null;
+          const validPrice = parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null;
+          const rawReorder = item.reorder_level;
+          const parsedReorder = rawReorder !== null && rawReorder !== "" && rawReorder !== void 0 && !isNaN(Number(rawReorder)) ? Math.max(0, parseInt(String(rawReorder), 10)) : null;
+          const rawMaxStock = item.max_stock_level;
+          const parsedMaxStock = rawMaxStock !== null && rawMaxStock !== "" && rawMaxStock !== void 0 && !isNaN(Number(rawMaxStock)) ? Math.max(0, parseInt(String(rawMaxStock), 10)) : null;
+          const updates = ["sell_price = ?"];
+          const params = [validPrice];
+          if (parsedReorder !== null) {
+            updates.push("reorder_level = ?");
+            params.push(parsedReorder);
+          }
+          if (parsedMaxStock !== null) {
+            updates.push("max_stock_level = ?");
+            params.push(parsedMaxStock);
+          }
+          params.push(medId);
+          await db2.run(`UPDATE medicines SET ${updates.join(", ")} WHERE id = ?`, params);
+          if (parsedReorder !== null) {
+            await db2.run("UPDATE inventory_master SET reorder_level = ? WHERE medicine_id = ?", [parsedReorder, medId]);
+          }
+        }
+        await db2.run("COMMIT");
+        inventoryCache2.invalidate();
+        res.json({ success: true, message: "Sell prices and stock levels updated successfully" });
+      } catch (error) {
+        if (db2) {
+          try {
+            await db2.run("ROLLBACK");
+          } catch (_) {
+          }
+        }
+        console.error("Bulk sell price update error:", error);
+        res.status(500).json({ error: error.message || "Failed to update sell prices" });
+      }
+    });
+    router23.get("/by-invoice/:invoiceNo", async (req, res) => {
+      let db2;
+      try {
+        const { invoiceNo } = req.params;
+        if (!invoiceNo) {
+          return res.status(400).json({ error: "invoiceNo is required" });
+        }
+        db2 = await dbManager.getConnection();
+        const rows = await db2.all(`
+      SELECT DISTINCT 
+        m.id as medicine_id, 
+        m.name as medicine_name, 
+        COALESCE(pi.cost_price, m.rate, 0) as rate, 
+        COALESCE(pi.mrp, m.mrp, 0) as mrp, 
+        m.sell_price,
+        m.reorder_level,
+        m.max_stock_level
+      FROM purchases p
+      JOIN purchase_items pi ON p.id = pi.purchase_id
+      JOIN medicines m ON pi.medicine_id = m.id
+      WHERE p.app_invoice_no = ? OR p.invoice_no = ?
+    `, [invoiceNo, invoiceNo]);
+        res.json({
+          success: true,
+          invoiceNo,
+          saved_medicines: rows || []
+        });
+      } catch (error) {
+        console.error("Error fetching sell price medicines by invoice:", error);
+        res.status(500).json({ error: error.message || "Failed to fetch items for invoice" });
+      }
+    });
+    sellPrice_default = router23;
+  }
+});
+
 // src/services/creditNoteService.ts
 var creditNoteService_exports = {};
 __export(creditNoteService_exports, {
@@ -36892,24 +39736,25 @@ function extractMedicineInfo(text) {
   }
   return info;
 }
-var import_express23, import_path45, import_fs36, import_pdfkit3, import_url41, __filename40, __dirname40, DB_PATH28, router23, returns_default;
+var import_express24, import_path47, import_fs38, import_pdfkit3, import_url41, __filename40, __dirname40, DB_PATH28, router24, returns_default;
 var init_returns = __esm({
   "src/routes/returns.ts"() {
     "use strict";
-    import_express23 = __toESM(require("express"), 1);
+    import_express24 = __toESM(require("express"), 1);
     init_connection();
-    import_path45 = __toESM(require("path"), 1);
-    import_fs36 = __toESM(require("fs"), 1);
+    import_path47 = __toESM(require("path"), 1);
+    import_fs38 = __toESM(require("fs"), 1);
     import_pdfkit3 = __toESM(require("pdfkit"), 1);
     import_url41 = require("url");
     init_aiCameraService();
     init_inventoryCache();
     init_config();
+    init_stockRebuild();
     __filename40 = (0, import_url41.fileURLToPath)(import_meta_url);
-    __dirname40 = import_path45.default.dirname(__filename40);
-    DB_PATH28 = process.env.DB_PATH || import_path45.default.resolve(__dirname40, "..", "..", "data", "app.db");
-    router23 = import_express23.default.Router();
-    router23.get("/", async (req, res) => {
+    __dirname40 = import_path47.default.dirname(__filename40);
+    DB_PATH28 = process.env.DB_PATH || import_path47.default.resolve(__dirname40, "..", "..", "data", "app.db");
+    router24 = import_express24.default.Router();
+    router24.get("/", async (req, res) => {
       let db2;
       try {
         const { search, date_from, date_to, min_amount, max_amount } = req.query;
@@ -36957,7 +39802,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.post("/", async (req, res) => {
+    router24.post("/", async (req, res) => {
       let db2;
       try {
         const { return_no, original_invoice_id, type, total_amount, distributor_id, is_expiry, loss_percentage, return_invoice_id, return_sub_type, return_date_time } = req.body;
@@ -36988,7 +39833,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.get("/near-expiry", async (req, res) => {
+    router24.get("/near-expiry", async (req, res) => {
       let db2;
       try {
         const monthsStr = req.query.months || "6";
@@ -37040,7 +39885,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.post("/financial-note", async (req, res) => {
+    router24.post("/financial-note", async (req, res) => {
       let pdfDoc;
       let stream;
       try {
@@ -37050,8 +39895,8 @@ var init_returns = __esm({
         }
         pdfDoc = new import_pdfkit3.default();
         const filename = `financial-note-${Date.now()}.pdf`;
-        const outPath = import_path45.default.resolve(getAppDataDir(), "uploads", filename);
-        stream = import_fs36.default.createWriteStream(outPath);
+        const outPath = import_path47.default.resolve(getAppDataDir(), "uploads", filename);
+        stream = import_fs38.default.createWriteStream(outPath);
         pdfDoc.pipe(stream);
         pdfDoc.fontSize(20).text(`${type.charAt(0).toUpperCase() + type.slice(1)} Note`, { align: "center" });
         if (amount) {
@@ -37084,7 +39929,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.post("/ai-camera/process", async (req, res) => {
+    router24.post("/ai-camera/process", async (req, res) => {
       try {
         if (!req.body || !req.body.image) {
           return res.status(400).json({ error: "Image data is required" });
@@ -37108,7 +39953,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error during OCR processing" });
       }
     });
-    router23.get("/lookup-purchases", async (req, res) => {
+    router24.get("/lookup-purchases", async (req, res) => {
       let db2;
       try {
         const { name, batch } = req.query;
@@ -37144,7 +39989,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.post("/process-returns", async (req, res) => {
+    router24.post("/process-returns", async (req, res) => {
       let db2;
       try {
         const { items } = req.body;
@@ -37199,14 +40044,31 @@ var init_returns = __esm({
             ]
           );
           const invItem = await db2.get(
-            "SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?",
+            `SELECT im.id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON m.id = im.medicine_id
+         WHERE im.medicine_id = ? AND im.batch_no = ?`,
             [item.medicine_id, item.batch_no]
           );
           if (invItem) {
-            const newQty = Math.max(0, invItem.quantity - item.quantity);
-            await db2.run("UPDATE inventory_master SET quantity = ? WHERE id = ?", [newQty, invItem.id]);
+            const restored = applyStockDelta(
+              { quantity: invItem.quantity, loose_quantity: invItem.loose_quantity },
+              -Number(item.quantity),
+              0,
+              invItem.pack_size
+            );
+            const newQuantity = restored.quantity < 0 ? 0 : restored.quantity;
+            const newLoose = restored.quantity < 0 ? 0 : restored.loose_quantity;
+            await db2.run("UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?", [newQuantity, newLoose, invItem.id]);
             const { refreshInventoryActiveStatus: refreshInventoryActiveStatus2 } = await Promise.resolve().then(() => (init_inventoryActive(), inventoryActive_exports));
             await refreshInventoryActiveStatus2(db2, invItem.id);
+            await recordStockLedger(db2, {
+              medicine_id: item.medicine_id,
+              batch_no: item.batch_no,
+              quantity: -Number(item.quantity),
+              loose_quantity: 0,
+              transaction_type: "return_to_distributor",
+              transaction_id: returnId
+            });
           }
         }
         await db2.run("COMMIT");
@@ -37220,7 +40082,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.post("/export-pdf-report", async (req, res) => {
+    router24.post("/export-pdf-report", async (req, res) => {
       try {
         const { items } = req.body;
         if (!items || !Array.isArray(items) || items.length === 0) {
@@ -37285,7 +40147,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.get("/:id/items", async (req, res) => {
+    router24.get("/:id/items", async (req, res) => {
       let db2;
       try {
         const { id } = req.params;
@@ -37317,7 +40179,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.get("/:id/resolve-missing", async (req, res) => {
+    router24.get("/:id/resolve-missing", async (req, res) => {
       let db2;
       try {
         const { id } = req.params;
@@ -37403,7 +40265,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.put("/:id", async (req, res) => {
+    router24.put("/:id", async (req, res) => {
       let db2;
       try {
         const { id } = req.params;
@@ -37430,7 +40292,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router23.delete("/:id", async (req, res) => {
+    router24.delete("/:id", async (req, res) => {
       let db2;
       try {
         const { id } = req.params;
@@ -37446,7 +40308,7 @@ var init_returns = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    returns_default = router23;
+    returns_default = router24;
   }
 });
 
@@ -37467,16 +40329,17 @@ var customerReturns_exports = {};
 __export(customerReturns_exports, {
   default: () => customerReturns_default
 });
-var import_express24, router24, customerReturns_default;
+var import_express25, router25, customerReturns_default;
 var init_customerReturns = __esm({
   "src/routes/customerReturns.ts"() {
     "use strict";
-    import_express24 = __toESM(require("express"), 1);
+    import_express25 = __toESM(require("express"), 1);
     init_connection();
     init_asyncHandler();
     init_inventoryCache();
-    router24 = import_express24.default.Router();
-    router24.get("/search-invoice", asyncHandler(async (req, res) => {
+    init_stockRebuild();
+    router25 = import_express25.default.Router();
+    router25.get("/search-invoice", asyncHandler(async (req, res) => {
       const { invoice_no } = req.query;
       if (!invoice_no) {
         return res.status(400).json({ error: "invoice_no required" });
@@ -37510,7 +40373,7 @@ var init_customerReturns = __esm({
       await dbManager.close();
       res.json({ invoice, items, previousReturns });
     }));
-    router24.post("/", asyncHandler(async (req, res) => {
+    router25.post("/", asyncHandler(async (req, res) => {
       const { original_invoice_id, return_items, reason } = req.body;
       if (!original_invoice_id || !Array.isArray(return_items) || return_items.length === 0) {
         return res.status(400).json({ error: "Invalid return data" });
@@ -37594,10 +40457,31 @@ var init_customerReturns = __esm({
           if (item.quantity + prevQty > saleItem.quantity) {
             throw new Error(`Cannot return more than originally sold. Sold: ${saleItem.quantity}, Previously Returned: ${prevQty}, Attempted Return: ${item.quantity}`);
           }
-          await db2.run(
-            "UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?",
-            [item.quantity, item.inventory_id]
+          const stockNow = await db2.get(
+            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON m.id = im.medicine_id WHERE im.id = ?`,
+            [item.inventory_id]
           );
+          if (stockNow) {
+            const restored = applyStockDelta(
+              { quantity: stockNow.quantity, loose_quantity: stockNow.loose_quantity },
+              Number(item.quantity),
+              0,
+              stockNow.pack_size
+            );
+            await db2.run(
+              "UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?",
+              [restored.quantity, restored.loose_quantity, item.inventory_id]
+            );
+            await recordStockLedger(db2, {
+              medicine_id: invInfo.medicine_id,
+              batch_no: invInfo.batch_no,
+              quantity: Number(item.quantity),
+              loose_quantity: 0,
+              transaction_type: "customer_return",
+              transaction_id: returnId
+            });
+          }
           await db2.run(
             `INSERT INTO return_items (return_id, medicine_id, batch_no, quantity, total_price, cgst_value, sgst_value) VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [returnId, invInfo.medicine_id, invInfo.batch_no, item.quantity, lineGross, itemCgst, itemSgst]
@@ -37614,7 +40498,7 @@ var init_customerReturns = __esm({
       inventoryCache2.invalidate();
       res.json({ success: true, return_no: result.returnNo, total_refund: result.totalRefund });
     }));
-    router24.get("/history", asyncHandler(async (req, res) => {
+    router25.get("/history", asyncHandler(async (req, res) => {
       const db2 = await dbManager.getConnection();
       const start = req.query.start;
       const end = req.query.end;
@@ -37694,7 +40578,7 @@ var init_customerReturns = __esm({
         res.json(rows);
       }
     }));
-    customerReturns_default = router24;
+    customerReturns_default = router25;
   }
 });
 
@@ -37703,19 +40587,19 @@ var creditNotes_exports = {};
 __export(creditNotes_exports, {
   default: () => creditNotes_default
 });
-var import_express25, import_path46, import_url42, __filename41, __dirname41, DB_PATH29, router25, creditNotes_default;
+var import_express26, import_path48, import_url42, __filename41, __dirname41, DB_PATH29, router26, creditNotes_default;
 var init_creditNotes = __esm({
   "src/routes/creditNotes.ts"() {
     "use strict";
-    import_express25 = __toESM(require("express"), 1);
+    import_express26 = __toESM(require("express"), 1);
     init_connection();
-    import_path46 = __toESM(require("path"), 1);
+    import_path48 = __toESM(require("path"), 1);
     import_url42 = require("url");
     __filename41 = (0, import_url42.fileURLToPath)(import_meta_url);
-    __dirname41 = import_path46.default.dirname(__filename41);
-    DB_PATH29 = process.env.DB_PATH || import_path46.default.resolve(__dirname41, "..", "..", "data", "app.db");
-    router25 = import_express25.default.Router();
-    router25.get("/", async (req, res) => {
+    __dirname41 = import_path48.default.dirname(__filename41);
+    DB_PATH29 = process.env.DB_PATH || import_path48.default.resolve(__dirname41, "..", "..", "data", "app.db");
+    router26 = import_express26.default.Router();
+    router26.get("/", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const { distributor_id, status } = req.query;
@@ -37742,7 +40626,7 @@ var init_creditNotes = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router25.get("/pending/:distributorId", async (req, res) => {
+    router26.get("/pending/:distributorId", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const { distributorId } = req.params;
@@ -37759,7 +40643,7 @@ var init_creditNotes = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router25.post("/", async (req, res) => {
+    router26.post("/", async (req, res) => {
       const { distributor_id, cn_number, cn_date, amount, reason, related_purchase_id } = req.body;
       if (!distributor_id || !cn_date || !amount) {
         return res.status(400).json({ error: "Distributor, CN date, and amount are required" });
@@ -37785,7 +40669,7 @@ var init_creditNotes = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router25.post("/apply", async (req, res) => {
+    router26.post("/apply", async (req, res) => {
       const { cn_id, purchase_id, apply_amount } = req.body;
       if (!cn_id || !purchase_id) {
         return res.status(400).json({ error: "Credit note ID and purchase ID are required" });
@@ -37840,7 +40724,7 @@ var init_creditNotes = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router25.delete("/:id", async (req, res) => {
+    router26.delete("/:id", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -37863,7 +40747,7 @@ var init_creditNotes = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    creditNotes_default = router25;
+    creditNotes_default = router26;
   }
 });
 
@@ -37949,22 +40833,22 @@ async function initOrdersTable(db2) {
   } catch (_) {
   }
 }
-var import_express26, import_path47, import_url43, __filename42, __dirname42, DB_PATH30, router26, handleStatusUpdate, orders_default;
+var import_express27, import_path49, import_url43, __filename42, __dirname42, DB_PATH30, router27, handleStatusUpdate, orders_default;
 var init_orders = __esm({
   "src/routes/orders.ts"() {
     "use strict";
-    import_express26 = __toESM(require("express"), 1);
+    import_express27 = __toESM(require("express"), 1);
     init_connection();
-    import_path47 = __toESM(require("path"), 1);
+    import_path49 = __toESM(require("path"), 1);
     import_url43 = require("url");
     init_whatsappClient();
     init_storeSettingsService();
     init_whatsappQueueWorker();
     __filename42 = (0, import_url43.fileURLToPath)(import_meta_url);
-    __dirname42 = import_path47.default.dirname(__filename42);
-    DB_PATH30 = process.env.DB_PATH || import_path47.default.resolve(__dirname42, "..", "..", "data", "app.db");
-    router26 = import_express26.default.Router();
-    router26.get("/", async (_req, res) => {
+    __dirname42 = import_path49.default.dirname(__filename42);
+    DB_PATH30 = process.env.DB_PATH || import_path49.default.resolve(__dirname42, "..", "..", "data", "app.db");
+    router27 = import_express27.default.Router();
+    router27.get("/", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await initOrdersTable(db2);
@@ -37980,7 +40864,7 @@ var init_orders = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router26.post("/batch", async (req, res) => {
+    router27.post("/batch", async (req, res) => {
       const {
         items,
         requester,
@@ -38004,22 +40888,27 @@ var init_orders = __esm({
         await initOrdersTable(db2);
         const cleanReqPhone = phone.trim();
         const cleanReqName = requester.trim();
+        const reqLang = req.body.language || "en";
         let customerId = req.body.customer_id || null;
         if (!customerId && (cleanReqPhone || cleanReqName)) {
-          let cust = await db2.get("SELECT id FROM customers WHERE phone = ? LIMIT 1", [cleanReqPhone]);
+          let cust = await db2.get("SELECT id, language FROM customers WHERE phone = ? LIMIT 1", [cleanReqPhone]);
           if (!cust && cleanReqName && cleanReqName.toLowerCase() !== "customer") {
-            cust = await db2.get("SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", [cleanReqName]);
+            cust = await db2.get("SELECT id, language FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", [cleanReqName]);
           }
           if (cust) {
             customerId = cust.id;
+            if (req.body.language) {
+              await db2.run("UPDATE customers SET language = ? WHERE id = ?", [reqLang, cust.id]).catch(() => {
+              });
+            }
           } else if (cleanReqPhone || cleanReqName) {
-            const custRes = await db2.run("INSERT INTO customers (name, phone) VALUES (?, ?)", [cleanReqName, cleanReqPhone]);
+            const custRes = await db2.run("INSERT INTO customers (name, phone, language) VALUES (?, ?, ?)", [cleanReqName, cleanReqPhone, reqLang]);
             customerId = custRes.lastID;
           }
           try {
             await db2.run(
-              `INSERT OR IGNORE INTO customers (name, phone) VALUES (?, ?)`,
-              [cleanReqName, cleanReqPhone]
+              `INSERT OR IGNORE INTO customers (name, phone, language) VALUES (?, ?, ?)`,
+              [cleanReqName, cleanReqPhone, reqLang]
             );
           } catch (_) {
           }
@@ -38072,19 +40961,51 @@ var init_orders = __esm({
           const totalAdv = Number(advance_payment || 0);
           const advText = totalAdv > 0 ? `
 \u{1F4B0} Total Advance Paid: \u20B9${totalAdv.toFixed(2)}` : "";
+          const custRow = await db2.get("SELECT language FROM customers WHERE phone = ? LIMIT 1", [cleanPhone]);
+          const lang = req.body.language || custRow?.language || "en";
           let msg = "";
-          if (insertedOrders.length === 1) {
-            const single = insertedOrders[0];
-            msg = `Hi ${cleanReqName}, your order for ${single.product} (Qty: ${single.qty})${totalAdv > 0 ? ` (Advance Paid: \u20B9${totalAdv.toFixed(2)})` : ""} has been booked at ${medicalName}. We will notify you when it arrives.`;
+          if (lang === "hi") {
+            if (insertedOrders.length === 1) {
+              const single = insertedOrders[0];
+              msg = `\u0928\u092E\u0938\u094D\u0924\u0947 ${cleanReqName}, ${medicalName} \u092A\u0930 \u0906\u092A\u0915\u0940 ${single.product} (\u092E\u093E\u0924\u094D\u0930\u093E: ${single.qty})${totalAdv > 0 ? ` (\u0905\u0917\u094D\u0930\u093F\u092E \u0930\u093E\u0936\u093F: \u20B9${totalAdv.toFixed(2)})` : ""} \u0915\u093E \u0911\u0930\u094D\u0921\u0930 \u092C\u0941\u0915 \u0915\u0930 \u0932\u093F\u092F\u093E \u0917\u092F\u093E \u0939\u0948\u0964 \u0926\u0935\u093E\u0908 \u0906\u0928\u0947 \u092A\u0930 \u0939\u092E \u0906\u092A\u0915\u094B \u0938\u0942\u091A\u093F\u0924 \u0915\u0930\u0947\u0902\u0917\u0947\u0964`;
+            } else {
+              const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} \u2014 \u092E\u093E\u0924\u094D\u0930\u093E: ${o.qty}`).join("\n");
+              msg = `\u0928\u092E\u0938\u094D\u0924\u0947 ${cleanReqName},
+
+\u0928\u093F\u092E\u094D\u0928\u0932\u093F\u0916\u093F\u0924 ${insertedOrders.length} \u0926\u0935\u093E\u0907\u092F\u094B\u0902 \u0915\u0947 \u0932\u093F\u090F \u0906\u092A\u0915\u093E \u0935\u093F\u0936\u0947\u0937 \u0911\u0930\u094D\u0921\u0930 ${medicalName} \u092A\u0930 \u092C\u0941\u0915 \u0915\u0930 \u0932\u093F\u092F\u093E \u0917\u092F\u093E \u0939\u0948:
+
+${itemListText}${advText}
+
+\u0926\u0935\u093E\u0908 \u0909\u092A\u0932\u092C\u094D\u0927 \u0939\u094B\u0924\u0947 \u0939\u0940 \u0939\u092E \u0906\u092A\u0915\u094B \u0938\u0942\u091A\u093F\u0924 \u0915\u0930\u0947\u0902\u0917\u0947\u0964 \u0927\u0928\u094D\u092F\u0935\u093E\u0926!`;
+            }
+          } else if (lang === "mr") {
+            if (insertedOrders.length === 1) {
+              const single = insertedOrders[0];
+              msg = `\u0928\u092E\u0938\u094D\u0915\u093E\u0930 ${cleanReqName}, ${medicalName} \u092F\u0947\u0925\u0947 \u0906\u092A\u0932\u0940 ${single.product} (\u092A\u094D\u0930\u092E\u093E\u0923: ${single.qty})${totalAdv > 0 ? ` (\u0905\u0917\u093E\u090A \u0930\u0915\u094D\u0915\u092E: \u20B9${totalAdv.toFixed(2)})` : ""} \u091A\u0940 \u0911\u0930\u094D\u0921\u0930 \u092C\u0941\u0915 \u0915\u0930\u0923\u094D\u092F\u093E\u0924 \u0906\u0932\u0940 \u0906\u0939\u0947. \u0914\u0937\u0927 \u0906\u0932\u094D\u092F\u093E\u0935\u0930 \u0906\u092E\u094D\u0939\u0940 \u0906\u092A\u0932\u094D\u092F\u093E\u0932\u093E \u0915\u0933\u0935\u0942.`;
+            } else {
+              const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} \u2014 \u092A\u094D\u0930\u092E\u093E\u0923: ${o.qty}`).join("\n");
+              msg = `\u0928\u092E\u0938\u094D\u0915\u093E\u0930 ${cleanReqName},
+
+\u0916\u093E\u0932\u0940\u0932 ${insertedOrders.length} \u0914\u0937\u0927\u093E\u0902\u0938\u093E\u0920\u0940 \u0906\u092A\u0932\u0940 \u0911\u0930\u094D\u0921\u0930 ${medicalName} \u092F\u0947\u0925\u0947 \u092C\u0941\u0915 \u091D\u093E\u0932\u0940 \u0906\u0939\u0947:
+
+${itemListText}${advText}
+
+\u0914\u0937\u0927 \u0909\u092A\u0932\u092C\u094D\u0927 \u0939\u094B\u0924\u093E\u091A \u0906\u092E\u094D\u0939\u0940 \u0906\u092A\u0932\u094D\u092F\u093E\u0932\u093E \u0915\u0933\u0935\u0942. \u0927\u0928\u094D\u092F\u0935\u093E\u0926!`;
+            }
           } else {
-            const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} \u2014 Qty: ${o.qty}`).join("\n");
-            msg = `Hi ${cleanReqName},
+            if (insertedOrders.length === 1) {
+              const single = insertedOrders[0];
+              msg = `Hi ${cleanReqName}, your order for ${single.product} (Qty: ${single.qty})${totalAdv > 0 ? ` (Advance Paid: \u20B9${totalAdv.toFixed(2)})` : ""} has been booked at ${medicalName}. We will notify you when it arrives.`;
+            } else {
+              const itemListText = insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} \u2014 Qty: ${o.qty}`).join("\n");
+              msg = `Hi ${cleanReqName},
 
 Your special order request for the following ${insertedOrders.length} medicines has been booked at ${medicalName}:
 
 ${itemListText}${advText}
 
 We will notify you as soon as your items arrive. Thank you!`;
+            }
           }
           try {
             await whatsappQueueWorker.enqueue(formattedPhone, msg, "special_order_batch", cleanReqName);
@@ -38104,7 +41025,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router26.post("/", async (req, res) => {
+    router27.post("/", async (req, res) => {
       const {
         product,
         medicine_name,
@@ -38216,7 +41137,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router26.post("/:id/notify-arrival", async (req, res) => {
+    router27.post("/:id/notify-arrival", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -38230,7 +41151,9 @@ We will notify you as soon as your items arrive. Thank you!`;
         }
         const cleanPhone = order.phone.replace(/\D/g, "");
         const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db2);
+        const custRow = await db2.get("SELECT language FROM customers WHERE phone = ? LIMIT 1", [cleanPhone]);
+        const lang = custRow?.language || "en";
+        const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db2, lang);
         await whatsappQueueWorker.enqueue(formattedPhone, msg, "special_order", order.requester || "Customer");
         await db2.run("UPDATE special_orders SET status = ?, notified = 1 WHERE id = ?", ["Ready", id]);
         await db2.run(
@@ -38244,7 +41167,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Failed to queue WhatsApp message: " + (err.message || "Unknown error") });
       }
     });
-    router26.post("/:id/resend-booking", async (req, res) => {
+    router27.post("/:id/resend-booking", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -38273,7 +41196,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Failed to queue WhatsApp message: " + (err.message || "Unknown error") });
       }
     });
-    router26.get("/uncollected-alerts", async (_req, res) => {
+    router27.get("/uncollected-alerts", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await initOrdersTable(db2);
@@ -38323,7 +41246,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router26.put("/:id", async (req, res) => {
+    router27.put("/:id", async (req, res) => {
       const { id } = req.params;
       const {
         status,
@@ -38371,7 +41294,9 @@ We will notify you as soon as your items arrive. Thank you!`;
             const cleanPhone = String(newPhone).replace(/\D/g, "");
             if (cleanPhone.length >= 10) {
               const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-              const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db2);
+              const custRow = await db2.get("SELECT language FROM customers WHERE phone = ? LIMIT 1", [cleanPhone]);
+              const lang = custRow?.language || "en";
+              const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db2, lang);
               await whatsappQueueWorker.enqueue(formattedPhone, msg, "special_order_arrived", newRequester || existing.requester || "Customer");
               await db2.run("UPDATE special_orders SET notified = 1 WHERE id = ?", [id]);
               await db2.run(
@@ -38409,7 +41334,9 @@ We will notify you as soon as your items arrive. Thank you!`;
             const cleanPhone = String(existing.phone).replace(/\D/g, "");
             if (cleanPhone.length >= 10) {
               const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-              const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db2);
+              const custRow = await db2.get("SELECT language FROM customers WHERE phone = ? LIMIT 1", [cleanPhone]);
+              const lang = custRow?.language || "en";
+              const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db2, lang);
               await whatsappQueueWorker.enqueue(formattedPhone, msg, "special_order_arrived", existing.requester || "Customer");
               await db2.run("UPDATE special_orders SET notified = 1 WHERE id = ?", [id]);
               await db2.run(
@@ -38428,9 +41355,9 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error: " + (err?.message || "") });
       }
     };
-    router26.post("/:id/status", handleStatusUpdate);
-    router26.put("/:id/status", handleStatusUpdate);
-    router26.delete("/:id", async (req, res) => {
+    router27.post("/:id/status", handleStatusUpdate);
+    router27.put("/:id/status", handleStatusUpdate);
+    router27.delete("/:id", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -38445,7 +41372,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router26.post("/convert-to-refill", async (req, res) => {
+    router27.post("/convert-to-refill", async (req, res) => {
       const { orderId, refillIntervalDays } = req.body;
       if (!orderId || !refillIntervalDays) {
         return res.status(400).json({ error: "orderId and refillIntervalDays are required" });
@@ -38466,7 +41393,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Internal server error: " + err.message });
       }
     });
-    router26.post("/:id/fulfill", async (req, res) => {
+    router27.post("/:id/fulfill", async (req, res) => {
       const { id } = req.params;
       const { invoiceNo, grandTotal } = req.body;
       try {
@@ -38492,7 +41419,7 @@ We will notify you as soon as your items arrive. Thank you!`;
         res.status(500).json({ error: "Failed to fulfill order: " + (err.message || "Unknown error") });
       }
     });
-    orders_default = router26;
+    orders_default = router27;
   }
 });
 
@@ -38501,14 +41428,14 @@ var quickAssistant_exports = {};
 __export(quickAssistant_exports, {
   default: () => quickAssistant_default
 });
-var import_express27, router27, quickAssistant_default;
+var import_express28, router28, quickAssistant_default;
 var init_quickAssistant = __esm({
   "src/routes/quickAssistant.ts"() {
     "use strict";
-    import_express27 = __toESM(require("express"), 1);
+    import_express28 = __toESM(require("express"), 1);
     init_connection();
-    router27 = import_express27.default.Router();
-    router27.get("/", async (_req, res) => {
+    router28 = import_express28.default.Router();
+    router28.get("/", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const [todayOrders, overlapsPending, readyToNotify, overdue] = await Promise.all([
@@ -38552,44 +41479,18 @@ var init_quickAssistant = __esm({
         res.status(500).json({ error: "Failed to fetch quick assistant summary" });
       }
     });
-    quickAssistant_default = router27;
+    quickAssistant_default = router28;
   }
 });
 
 // src/utils/reportExporter.ts
-function exportToExcel(title, headers, keys, rows) {
-  const wsData = [
-    [title],
-    [],
-    // Blank spacing
-    headers,
-    ...rows.map((row) => keys.map((k) => {
-      const val = row[k];
-      return val !== void 0 && val !== null ? val : "\u2014";
-    }))
-  ];
-  const wb = import_xlsx2.default.utils.book_new();
-  const ws = import_xlsx2.default.utils.aoa_to_sheet(wsData);
-  const colsCount = Math.max(headers.length, 1);
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: colsCount - 1 } }];
-  const maxLengths = headers.map((h, i) => {
-    let max = h.length;
-    rows.forEach((row) => {
-      const val = String(row[keys[i]] || "");
-      if (val.length > max) max = val.length;
-    });
-    return { wch: Math.min(Math.max(max + 4, 10), 40) };
-  });
-  ws["!cols"] = maxLengths;
-  import_xlsx2.default.utils.book_append_sheet(wb, ws, "Report");
-  return import_xlsx2.default.write(wb, { type: "buffer", bookType: "xlsx" });
-}
-function exportToPdf(res, title, headers, keys, rows, alignMap, columnWidths) {
+function exportToPdf(res, title, headers, keys, rows, alignMap, columnWidths, splitPerPage = false) {
   const doc = new import_pdfkit4.default({ margin: 50, bufferPages: true });
   doc.pipe(res);
   const tableWidth = 512;
   const startX = 50;
   const rowHeight = 22;
+  const itemsPerPageLimit = 30;
   const getColXAndWidth = (index) => {
     let x = startX;
     let width = tableWidth / headers.length;
@@ -38603,7 +41504,7 @@ function exportToPdf(res, title, headers, keys, rows, alignMap, columnWidths) {
     }
     return { x, width };
   };
-  const drawPageHeader = (pageTitle) => {
+  const drawPageHeader = (pageTitle, batchIndex, totalBatches2) => {
     doc.font("Helvetica");
     doc.fillColor("#1e293b");
     doc.fontSize(16).text("AI PHARMACY OS", { align: "left" });
@@ -38611,11 +41512,19 @@ function exportToPdf(res, title, headers, keys, rows, alignMap, columnWidths) {
     doc.moveDown(0.2);
     doc.strokeColor("#cbd5e1").lineWidth(1).moveTo(startX, doc.y).lineTo(startX + tableWidth, doc.y).stroke();
     doc.moveDown(0.6);
-    doc.font("Helvetica-Bold").fontSize(12).fillColor("#1e293b").text(pageTitle, { align: "center" });
+    let displayTitle = pageTitle;
+    if (splitPerPage && batchIndex !== void 0 && totalBatches2 !== void 0) {
+      const startItem = batchIndex * itemsPerPageLimit + 1;
+      const endItem = Math.min((batchIndex + 1) * itemsPerPageLimit, rows.length);
+      displayTitle = `${pageTitle} \u2014 Part ${batchIndex + 1} of ${totalBatches2} (Items ${startItem} to ${endItem})`;
+    }
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#1e293b").text(displayTitle, { align: "center" });
     doc.font("Helvetica");
     doc.moveDown(0.8);
   };
-  drawPageHeader(title);
+  const totalBatches = splitPerPage ? Math.ceil(rows.length / itemsPerPageLimit) || 1 : 1;
+  let currentBatch = 0;
+  drawPageHeader(title, currentBatch, totalBatches);
   let currentY = doc.y;
   doc.rect(startX, currentY, tableWidth, rowHeight).fill("#1e293b");
   doc.fontSize(8).fillColor("#ffffff");
@@ -38626,9 +41535,13 @@ function exportToPdf(res, title, headers, keys, rows, alignMap, columnWidths) {
   });
   currentY += rowHeight;
   rows.forEach((row, rowIndex) => {
-    if (currentY + rowHeight > 720) {
+    const isNewBatchBoundary = splitPerPage && rowIndex > 0 && rowIndex % itemsPerPageLimit === 0;
+    if (currentY + rowHeight > 720 || isNewBatchBoundary) {
       doc.addPage();
-      drawPageHeader(title);
+      if (isNewBatchBoundary) {
+        currentBatch++;
+      }
+      drawPageHeader(title, currentBatch, totalBatches);
       currentY = doc.y;
       doc.rect(startX, currentY, tableWidth, rowHeight).fill("#1e293b");
       doc.fontSize(8).fillColor("#ffffff");
@@ -38685,7 +41598,11 @@ function exportToCsv(headers, keys, rows) {
     (row) => keys.map((k) => {
       const val = row[k];
       const strVal = val !== void 0 && val !== null ? String(val) : "";
-      return `"${strVal.replace(/"/g, '""')}"`;
+      const cleaned = strVal.replace(/"/g, '""');
+      if (/^0\d+$/.test(strVal)) {
+        return `="${cleaned}"`;
+      }
+      return `"${cleaned}"`;
     }).join(",")
   );
   return [headerLine, ...rowLines].join("\n");
@@ -38747,33 +41664,33 @@ function isDateInRange(dateStr, startStr, endStr) {
   end.setHours(23, 59, 59, 999);
   return itemDate >= start && itemDate <= end;
 }
-var import_express28, import_path48, import_url44, import_fs37, __filename43, __dirname43, DB_PATH31, router28, expiry_default;
+var import_express29, import_path50, import_url44, import_fs39, __filename43, __dirname43, DB_PATH31, router29, expiry_default;
 var init_expiry = __esm({
   "src/routes/expiry.ts"() {
     "use strict";
-    import_express28 = __toESM(require("express"), 1);
+    import_express29 = __toESM(require("express"), 1);
     init_connection();
-    import_path48 = __toESM(require("path"), 1);
+    import_path50 = __toESM(require("path"), 1);
     import_url44 = require("url");
-    import_fs37 = __toESM(require("fs"), 1);
+    import_fs39 = __toESM(require("fs"), 1);
     init_reportExporter();
     init_config();
     __filename43 = (0, import_url44.fileURLToPath)(import_meta_url);
-    __dirname43 = import_path48.default.dirname(__filename43);
-    DB_PATH31 = process.env.DB_PATH || import_path48.default.resolve(__dirname43, "..", "..", "data", "app.db");
-    router28 = import_express28.default.Router();
-    router28.get("/", async (req, res) => {
+    __dirname43 = import_path50.default.dirname(__filename43);
+    DB_PATH31 = process.env.DB_PATH || import_path50.default.resolve(__dirname43, "..", "..", "data", "app.db");
+    router29 = import_express29.default.Router();
+    router29.get("/", async (req, res) => {
       const date_from = req.query.date_from || getTodayString();
       let date_to = req.query.date_to;
       if (!date_to) {
         const days = req.query.days ? parseInt(req.query.days, 10) : 90;
         date_to = getNDaysAheadString(days);
       }
-      const cacheDir = import_path48.default.resolve(getAppDataDir(), "data", "cache", "expiry");
+      const cacheDir = import_path50.default.resolve(getAppDataDir(), "data", "cache", "expiry");
       try {
         const months = getMonthsInRange(date_from, date_to);
-        const cacheDirExists = import_fs37.default.existsSync(cacheDir);
-        const hasCacheFiles = cacheDirExists && import_fs37.default.readdirSync(cacheDir).some((f) => f.startsWith("expiry_") && f.endsWith(".json"));
+        const cacheDirExists = import_fs39.default.existsSync(cacheDir);
+        const hasCacheFiles = cacheDirExists && import_fs39.default.readdirSync(cacheDir).some((f) => f.startsWith("expiry_") && f.endsWith(".json"));
         if (!cacheDirExists || !hasCacheFiles) {
           console.log("[ExpiryCache] Cache directory or files missing. Using live SQL and triggering rebuild.");
           const db2 = await dbManager.getConnection();
@@ -38803,11 +41720,11 @@ var init_expiry = __esm({
         }
         let items = [];
         for (const ym of months) {
-          const filePath = import_path48.default.join(cacheDir, `expiry_${ym}.json`);
-          if (import_fs37.default.existsSync(filePath)) {
+          const filePath = import_path50.default.join(cacheDir, `expiry_${ym}.json`);
+          if (import_fs39.default.existsSync(filePath)) {
             try {
-              const raw = await import_fs37.default.promises.readFile(filePath, "utf-8");
-              items = items.concat(JSON.parse(raw));
+              const raw2 = await import_fs39.default.promises.readFile(filePath, "utf-8");
+              items = items.concat(JSON.parse(raw2));
             } catch (err) {
               console.error(`[ExpiryCache] Failed to parse cache file for ${ym}:`, err);
               Promise.resolve().then(() => (init_expiryAlertService(), expiryAlertService_exports)).then((m) => m.rebuildAllExpiryCaches()).catch(() => {
@@ -38821,7 +41738,7 @@ var init_expiry = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router28.get("/export", async (req, res) => {
+    router29.get("/export", async (req, res) => {
       const date_from = req.query.date_from || getTodayString();
       let date_to = req.query.date_to;
       if (!date_to) {
@@ -38829,12 +41746,12 @@ var init_expiry = __esm({
         date_to = getNDaysAheadString(days);
       }
       const format = req.query.format || "pdf";
-      const cacheDir = import_path48.default.resolve(getAppDataDir(), "data", "cache", "expiry");
+      const cacheDir = import_path50.default.resolve(getAppDataDir(), "data", "cache", "expiry");
       let items = [];
       try {
         const months = getMonthsInRange(date_from, date_to);
-        const cacheDirExists = import_fs37.default.existsSync(cacheDir);
-        const hasCacheFiles = cacheDirExists && import_fs37.default.readdirSync(cacheDir).some((f) => f.startsWith("expiry_") && f.endsWith(".json"));
+        const cacheDirExists = import_fs39.default.existsSync(cacheDir);
+        const hasCacheFiles = cacheDirExists && import_fs39.default.readdirSync(cacheDir).some((f) => f.startsWith("expiry_") && f.endsWith(".json"));
         if (!cacheDirExists || !hasCacheFiles) {
           const db2 = await dbManager.getConnection();
           items = await db2.all(`
@@ -38859,11 +41776,11 @@ var init_expiry = __esm({
       `, [date_from, date_to]);
         } else {
           for (const ym of months) {
-            const filePath = import_path48.default.join(cacheDir, `expiry_${ym}.json`);
-            if (import_fs37.default.existsSync(filePath)) {
+            const filePath = import_path50.default.join(cacheDir, `expiry_${ym}.json`);
+            if (import_fs39.default.existsSync(filePath)) {
               try {
-                const raw = await import_fs37.default.promises.readFile(filePath, "utf-8");
-                items = items.concat(JSON.parse(raw));
+                const raw2 = await import_fs39.default.promises.readFile(filePath, "utf-8");
+                items = items.concat(JSON.parse(raw2));
               } catch (err) {
                 console.error(`[ExpiryCache] Failed to parse cache file for ${ym}:`, err);
               }
@@ -38906,7 +41823,7 @@ var init_expiry = __esm({
         res.status(500).json({ error: "Failed to generate report" });
       }
     });
-    router28.post("/create-return", async (req, res) => {
+    router29.post("/create-return", async (req, res) => {
       const { inventory_id, quantity } = req.body;
       if (!inventory_id || !quantity) {
         return res.status(400).json({ error: "inventory_id and quantity are required" });
@@ -38988,7 +41905,7 @@ var init_expiry = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router28.post("/send-alerts", async (req, res) => {
+    router29.post("/send-alerts", async (req, res) => {
       const { phone, days } = req.body;
       const targetDays = days ? parseInt(days, 10) : 90;
       try {
@@ -39042,28 +41959,29 @@ var init_expiry = __esm({
         res.status(500).json({ error: "Failed to send summary report alerts via WhatsApp" });
       }
     });
-    expiry_default = router28;
+    expiry_default = router29;
   }
 });
 
 // src/services/nonMovingReportService.ts
-var import_path49, import_fs38, import_url45, __filename44, __dirname44, NonMovingReportService, nonMovingReportService;
+var import_path51, import_fs40, import_url45, __filename44, __dirname44, NonMovingReportService, nonMovingReportService;
 var init_nonMovingReportService = __esm({
   "src/services/nonMovingReportService.ts"() {
     "use strict";
     init_inventoryActive();
     init_connection();
     init_telegramBot();
-    import_path49 = __toESM(require("path"), 1);
-    import_fs38 = __toESM(require("fs"), 1);
+    import_path51 = __toESM(require("path"), 1);
+    import_fs40 = __toESM(require("fs"), 1);
     import_url45 = require("url");
     __filename44 = (0, import_url45.fileURLToPath)(import_meta_url);
-    __dirname44 = import_path49.default.dirname(__filename44);
+    __dirname44 = import_path51.default.dirname(__filename44);
     NonMovingReportService = class {
       /**
-       * Get non-moving inventory items (no transactions in specified period)
+       * Get non-moving inventory items (no sales or ledger transactions in specified period, default 200 days).
+       * Isolates each inventory record by medicine, batch_no, and purchase/inward date.
        */
-      async getNonMovingItems(periodDays = 90) {
+      async getNonMovingItems(periodDays = 200) {
         return await dbManager.transaction(async (db2) => {
           const cutoffDate = /* @__PURE__ */ new Date();
           cutoffDate.setDate(cutoffDate.getDate() - periodDays);
@@ -39077,10 +41995,11 @@ var init_nonMovingReportService = __esm({
           GROUP BY sit.inventory_id
         ),
         active_ledger AS (
-          SELECT sl.medicine_id
+          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key
           FROM stock_ledger sl
-          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10))) >= date(?)
-          GROUP BY sl.medicine_id
+          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10)), date(sl.created_at)) >= date(?)
+            AND sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
+          GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
         ),
         latest_sales AS (
           SELECT sit.inventory_id, MAX(COALESCE(si.date, si.business_date)) as max_sale_date
@@ -39089,9 +42008,19 @@ var init_nonMovingReportService = __esm({
           GROUP BY sit.inventory_id
         ),
         latest_ledger AS (
-          SELECT sl.medicine_id, MAX(sl.business_date) as max_ledger_date
+          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key, MAX(COALESCE(sl.business_date, sl.created_at)) as max_ledger_date
           FROM stock_ledger sl
-          GROUP BY sl.medicine_id
+          WHERE sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
+          GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
+        ),
+        batch_purchases AS (
+          SELECT
+            pi.medicine_id,
+            LOWER(TRIM(COALESCE(pi.batch_no, ''))) as batch_key,
+            MIN(p.date) as min_purchase_date
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          GROUP BY pi.medicine_id, LOWER(TRIM(COALESCE(pi.batch_no, '')))
         )
         SELECT
           im.id,
@@ -39100,15 +42029,17 @@ var init_nonMovingReportService = __esm({
           im.batch_no,
           im.quantity,
           im.expiry_date,
+          bp.min_purchase_date as purchase_date,
           COALESCE(ls.max_sale_date, ll.max_ledger_date) as last_transaction_date,
           im.mrp,
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         LEFT JOIN active_sales sa ON im.id = sa.inventory_id
-        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id
+        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = sl.batch_key
         LEFT JOIN latest_sales ls ON im.id = ls.inventory_id
-        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id
+        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = ll.batch_key
+        LEFT JOIN batch_purchases bp ON im.medicine_id = bp.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = bp.batch_key
         WHERE ${INVENTORY_ACTIVE_WHERE}
           AND im.quantity > 0
           AND sa.inventory_id IS NULL
@@ -39117,14 +42048,19 @@ var init_nonMovingReportService = __esm({
           const nonMovingItems = [];
           const now = /* @__PURE__ */ new Date();
           for (const row of rows) {
-            let daysSinceLastTransaction = null;
-            let lastTransactionDate = row.last_transaction_date;
-            if (lastTransactionDate) {
-              const lastDate = new Date(lastTransactionDate);
-              const timeDiff = now.getTime() - lastDate.getTime();
-              daysSinceLastTransaction = Math.ceil(timeDiff / (1e3 * 3600 * 24));
-            } else {
-              daysSinceLastTransaction = 999;
+            let daysSinceLastTransaction = 0;
+            const lastTransactionDate = row.last_transaction_date;
+            const purchaseDate = row.purchase_date;
+            const baselineDateStr = lastTransactionDate || purchaseDate;
+            if (baselineDateStr) {
+              const baseDate = new Date(baselineDateStr);
+              if (!isNaN(baseDate.getTime())) {
+                const timeDiff = now.getTime() - baseDate.getTime();
+                daysSinceLastTransaction = Math.max(0, Math.ceil(timeDiff / (1e3 * 3600 * 24)));
+              }
+            }
+            if (baselineDateStr && daysSinceLastTransaction < periodDays) {
+              continue;
             }
             const totalValue = row.quantity * (row.mrp || 0);
             const totalCostValue = row.quantity * (row.cost_price || 0);
@@ -39135,6 +42071,7 @@ var init_nonMovingReportService = __esm({
               batchNo: row.batch_no || null,
               quantity: row.quantity,
               expiryDate: row.expiry_date || null,
+              purchaseDate: purchaseDate || null,
               lastTransactionDate: lastTransactionDate || null,
               daysSinceLastTransaction,
               mrp: row.mrp || null,
@@ -39152,7 +42089,7 @@ var init_nonMovingReportService = __esm({
       /**
        * Generate a comprehensive non-moving inventory report
        */
-      async generateNonMovingReport(periodDays = 90) {
+      async generateNonMovingReport(periodDays = 200) {
         const items = await this.getNonMovingItems(periodDays);
         const totalValue = items.reduce((sum, item) => sum + item.totalValue, 0);
         const report = {
@@ -39169,13 +42106,13 @@ var init_nonMovingReportService = __esm({
        */
       async saveReportToFile(report, filename) {
         try {
-          const reportDir = import_path49.default.join(process.cwd(), "data", "reports");
-          if (!import_fs38.default.existsSync(reportDir)) {
-            import_fs38.default.mkdirSync(reportDir, { recursive: true });
+          const reportDir = import_path51.default.join(process.cwd(), "data", "reports");
+          if (!import_fs40.default.existsSync(reportDir)) {
+            import_fs40.default.mkdirSync(reportDir, { recursive: true });
           }
           const fileName = filename || `non_moving_report_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`;
-          const filePath = import_path49.default.join(reportDir, fileName);
-          await import_fs38.default.promises.writeFile(filePath, JSON.stringify(report, null, 2));
+          const filePath = import_path51.default.join(reportDir, fileName);
+          await import_fs40.default.promises.writeFile(filePath, JSON.stringify(report, null, 2));
           console.log(`Non-moving inventory report saved to: ${filePath}`);
           return filePath;
         } catch (error) {
@@ -39197,7 +42134,7 @@ var init_nonMovingReportService = __esm({
 
 Top 5 oldest non-moving items:
 ${report.items.slice(0, 5).map(
-            (item, index) => `${index + 1}. ${item.medicineName} (Batch: ${item.batchNo || "N/A"}) - ${item.quantity} units - ${item.daysSinceLastTransaction || "Never"} days`
+            (item, index) => `${index + 1}. ${item.medicineName} (Batch: ${item.batchNo || "N/A"}, Purchased: ${item.purchaseDate || "N/A"}) - ${item.quantity} units - ${item.daysSinceLastTransaction} days inactive`
           ).join("\n")}
 
 For full report, check the data/reports directory.
@@ -39214,7 +42151,7 @@ For full report, check the data/reports directory.
       async generateAndSendMonthlyReport() {
         try {
           console.log("Generating monthly non-moving inventory report...");
-          const report = await this.generateNonMovingReport(90);
+          const report = await this.generateNonMovingReport(200);
           await this.saveReportToFile(report);
           await this.sendReportNotification(report);
           console.log("Monthly non-moving report generated and sent successfully");
@@ -39234,7 +42171,7 @@ __export(monthlyReportService_exports, {
   MonthlyReportService: () => MonthlyReportService,
   monthlyReportService: () => monthlyReportService
 });
-var import_pdfkit5, import_xlsx3, import_fs39, import_path50, import_url46, __filename45, __dirname45, TEMP_DIR3, MonthlyReportService, monthlyReportService;
+var import_pdfkit5, import_xlsx3, import_fs41, import_path52, import_url46, __filename45, __dirname45, TEMP_DIR3, MonthlyReportService, monthlyReportService;
 var init_monthlyReportService = __esm({
   "src/services/monthlyReportService.ts"() {
     "use strict";
@@ -39243,12 +42180,12 @@ var init_monthlyReportService = __esm({
     init_config();
     import_pdfkit5 = __toESM(require("pdfkit"), 1);
     import_xlsx3 = __toESM(require("xlsx"), 1);
-    import_fs39 = __toESM(require("fs"), 1);
-    import_path50 = __toESM(require("path"), 1);
+    import_fs41 = __toESM(require("fs"), 1);
+    import_path52 = __toESM(require("path"), 1);
     import_url46 = require("url");
     __filename45 = (0, import_url46.fileURLToPath)(import_meta_url);
-    __dirname45 = import_path50.default.dirname(__filename45);
-    TEMP_DIR3 = import_path50.default.resolve(getAppDataDir(), "uploads", "temp");
+    __dirname45 = import_path52.default.dirname(__filename45);
+    TEMP_DIR3 = import_path52.default.resolve(getAppDataDir(), "uploads", "temp");
     MonthlyReportService = class {
       /**
        * Helper to compute date range for monthly, midmonth, quarterly, yearly, or custom date ranges.
@@ -39493,13 +42430,13 @@ var init_monthlyReportService = __esm({
        * Generate a PDF report document using pdfkit with customizable template themes.
        */
       async generateReportPdf(data, chartStyle = "standard", templateTheme = "executive", outputPath) {
-        if (!import_fs39.default.existsSync(TEMP_DIR3)) {
-          import_fs39.default.mkdirSync(TEMP_DIR3, { recursive: true });
+        if (!import_fs41.default.existsSync(TEMP_DIR3)) {
+          import_fs41.default.mkdirSync(TEMP_DIR3, { recursive: true });
         }
-        const finalPath = outputPath || import_path50.default.join(TEMP_DIR3, `Report_${templateTheme}_${data.periodType}_${Date.now()}.pdf`);
+        const finalPath = outputPath || import_path52.default.join(TEMP_DIR3, `Report_${templateTheme}_${data.periodType}_${Date.now()}.pdf`);
         return new Promise((resolve, reject) => {
           const doc = new import_pdfkit5.default({ margin: 40, size: "A4" });
-          const stream = import_fs39.default.createWriteStream(finalPath);
+          const stream = import_fs41.default.createWriteStream(finalPath);
           doc.pipe(stream);
           const fmt = (n) => `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           let headerBg = "#0f172a";
@@ -39678,10 +42615,10 @@ Review this sample PDF report layout on your phone to choose your preferred desi
        * Generate an Excel spreadsheet report document.
        */
       async generateReportExcel(data, outputPath) {
-        if (!import_fs39.default.existsSync(TEMP_DIR3)) {
-          import_fs39.default.mkdirSync(TEMP_DIR3, { recursive: true });
+        if (!import_fs41.default.existsSync(TEMP_DIR3)) {
+          import_fs41.default.mkdirSync(TEMP_DIR3, { recursive: true });
         }
-        const finalPath = outputPath || import_path50.default.join(TEMP_DIR3, `Report_${data.periodType}_${Date.now()}.xlsx`);
+        const finalPath = outputPath || import_path52.default.join(TEMP_DIR3, `Report_${data.periodType}_${Date.now()}.xlsx`);
         const wsData = [
           [`${data.pharmacyName} - ${data.periodLabel}`],
           [`Period: ${data.startDate} to ${data.endDate}`],
@@ -39877,20 +42814,20 @@ async function resolveFromDate(requestedFrom, db2) {
   let from = requestedFrom && requestedFrom.trim() ? requestedFrom.trim() : "1970-01-01";
   return from;
 }
-var import_express29, router29, SALES_DATE_EXPR, SALES_INV_DATE_EXPR, PURCHASES_DATE_EXPR, PURCHASES_P_DATE_EXPR, reports_default;
+var import_express30, router30, SALES_DATE_EXPR, SALES_INV_DATE_EXPR, PURCHASES_DATE_EXPR, PURCHASES_P_DATE_EXPR, reports_default;
 var init_reports = __esm({
   "src/routes/reports.ts"() {
     "use strict";
-    import_express29 = __toESM(require("express"), 1);
+    import_express30 = __toESM(require("express"), 1);
     init_connection();
     init_reportExporter();
     init_nonMovingReportService();
-    router29 = import_express29.default.Router();
+    router30 = import_express30.default.Router();
     SALES_DATE_EXPR = "COALESCE(date(business_date), date(date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10)))";
     SALES_INV_DATE_EXPR = "COALESCE(date(sinv.business_date), date(sinv.date), date(substr(sinv.date, 1, 10)), date(substr(sinv.business_date, 1, 10)))";
     PURCHASES_DATE_EXPR = "COALESCE(date(date), date(business_date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10)))";
     PURCHASES_P_DATE_EXPR = "COALESCE(date(p.date), date(p.business_date), date(substr(p.date, 1, 10)), date(substr(p.business_date, 1, 10)))";
-    router29.get("/", async (req, res) => {
+    router30.get("/", async (req, res) => {
       const { fromDate, toDate, type } = req.query;
       const reportType = type ? String(type) : "sales";
       try {
@@ -40002,7 +42939,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router29.get("/data", async (req, res) => {
+    router30.get("/data", async (req, res) => {
       const { type, fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40051,7 +42988,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router29.get("/export-pdf", async (req, res) => {
+    router30.get("/export-pdf", async (req, res) => {
       const { type, fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40102,38 +43039,41 @@ var init_reports = __esm({
           alignMap = { medicine_name: "left", batch_no: "left", quantity: "right", cost_price: "right", expiry_date: "center", value: "right" };
           colWidths = [150, 70, 60, 60, 80, 92];
         } else if (type === "nonMoving") {
-          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
           title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-          headers = ["Medicine Name", "Batch No", "Stock Qty", "Expiry Date", "Cost Price", "Hold Value (Cost)", "Hold Value (MRP)", "Dormant Period"];
-          keys = ["medicineName", "batchNo", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
-          alignMap = { medicineName: "left", batchNo: "left", quantity: "right", expiryDate: "center", costPrice: "right", totalCostValue: "right", totalValue: "right", dormantDaysLabel: "center" };
-          colWidths = [120, 50, 45, 65, 50, 60, 60, 62];
+          headers = ["Medicine Name", "Batch No", "Purchase Date", "Stock Qty", "Expiry Date", "Cost Price", "Hold Value (Cost)", "Hold Value (MRP)", "Dormant Period"];
+          keys = ["medicineName", "batchNo", "purchaseDate", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
+          alignMap = { medicineName: "left", batchNo: "left", purchaseDate: "center", quantity: "right", expiryDate: "center", costPrice: "right", totalCostValue: "right", totalValue: "right", dormantDaysLabel: "center" };
+          colWidths = [110, 45, 55, 40, 60, 50, 55, 55, 52];
           const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
           const rows2 = nonMovingItems.map((item) => ({
             ...item,
             batchNo: item.batchNo || "N/A",
+            purchaseDate: item.purchaseDate || "N/A",
             expiryDate: item.expiryDate || "N/A",
             costPrice: (item.costPrice || 0).toFixed(2),
             totalCostValue: (item.totalCostValue || 0).toFixed(2),
             totalValue: (item.totalValue || 0).toFixed(2),
-            dormantDaysLabel: item.daysSinceLastTransaction === 999 ? "Never Sold" : `${item.daysSinceLastTransaction} days`
+            dormantDaysLabel: `${item.daysSinceLastTransaction} days`
           }));
+          const isSplit2 = req.query.split === "true";
           res.setHeader("Content-Type", "application/pdf");
           res.setHeader("Content-Disposition", `attachment; filename=report_nonMoving_${Date.now()}.pdf`);
-          return exportToPdf(res, title, headers, keys, rows2, alignMap, colWidths);
+          return exportToPdf(res, title, headers, keys, rows2, alignMap, colWidths, isSplit2);
         } else {
           return res.status(400).json({ error: "Invalid report type" });
         }
         const rows = await db2.all(query, params);
+        const isSplit = req.query.split === "true";
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename=report_${type}_${Date.now()}.pdf`);
-        exportToPdf(res, title, headers, keys, rows, alignMap, colWidths);
+        exportToPdf(res, title, headers, keys, rows, alignMap, colWidths, isSplit);
       } catch (err) {
         console.error("PDF export error:", err);
         res.status(500).json({ error: "Failed to export PDF" });
       }
     });
-    router29.get("/export-excel", async (req, res) => {
+    router30.get("/export-excel", async (req, res) => {
       const { type, fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40174,38 +43114,39 @@ var init_reports = __esm({
           headers = ["Medicine Name", "Batch No", "Stock Qty", "Cost Price (Rs.)", "Expiry Date", "Cost Value (Rs.)"];
           keys = ["medicine_name", "batch_no", "quantity", "cost_price", "expiry_date", "value"];
         } else if (type === "nonMoving") {
-          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
           title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-          headers = ["Medicine Name", "Batch No", "Stock Qty", "Expiry Date", "Cost Price (Rs.)", "Hold Value Cost (Rs.)", "Hold Value MRP (Rs.)", "Dormant Period"];
-          keys = ["medicineName", "batchNo", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
+          headers = ["Medicine Name", "Batch No", "Purchase Date", "Stock Qty", "Expiry Date", "Cost Price (Rs.)", "Hold Value Cost (Rs.)", "Hold Value MRP (Rs.)", "Dormant Period"];
+          keys = ["medicineName", "batchNo", "purchaseDate", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
           const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
           const rows2 = nonMovingItems.map((item) => ({
             ...item,
             batchNo: item.batchNo || "N/A",
+            purchaseDate: item.purchaseDate || "N/A",
             expiryDate: item.expiryDate || "N/A",
             costPrice: Number(item.costPrice || 0).toFixed(2),
             totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
             totalValue: Number(item.totalValue || 0).toFixed(2),
-            dormantDaysLabel: item.daysSinceLastTransaction === 999 ? "Never Sold" : `${item.daysSinceLastTransaction} days`
+            dormantDaysLabel: `${item.daysSinceLastTransaction} days`
           }));
-          const excelBuffer2 = exportToExcel(title, headers, keys, rows2);
-          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-          res.setHeader("Content-Disposition", `attachment; filename=report_nonMoving_${Date.now()}.xlsx`);
-          return res.send(excelBuffer2);
+          const csvContent2 = exportToCsv(headers, keys, rows2);
+          res.setHeader("Content-Type", "text/csv");
+          res.setHeader("Content-Disposition", `attachment; filename=report_nonMoving_${Date.now()}.csv`);
+          return res.send(csvContent2);
         } else {
           return res.status(400).json({ error: "Invalid report type" });
         }
         const rows = await db2.all(query, params);
-        const excelBuffer = exportToExcel(title, headers, keys, rows);
-        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        res.setHeader("Content-Disposition", `attachment; filename=report_${type}_${Date.now()}.xlsx`);
-        res.send(excelBuffer);
+        const csvContent = exportToCsv(headers, keys, rows);
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=report_${type}_${Date.now()}.csv`);
+        res.send(csvContent);
       } catch (err) {
         console.error("Excel export error:", err);
         res.status(500).json({ error: "Failed to export Excel sheet" });
       }
     });
-    router29.get("/export-csv", async (req, res) => {
+    router30.get("/export-csv", async (req, res) => {
       const { type, fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40246,19 +43187,20 @@ var init_reports = __esm({
           headers = ["Medicine Name", "Batch No", "Stock Qty", "Cost Price (Rs.)", "Expiry Date", "Cost Value (Rs.)"];
           keys = ["medicine_name", "batch_no", "quantity", "cost_price", "expiry_date", "value"];
         } else if (type === "nonMoving") {
-          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 90;
+          const periodDays = req.query.days ? parseInt(String(req.query.days)) : 200;
           title = `Non-Moving Inventory Report (${periodDays}+ Days Inactive)`;
-          headers = ["Medicine Name", "Batch No", "Stock Qty", "Expiry Date", "Cost Price (Rs.)", "Hold Value Cost (Rs.)", "Hold Value MRP (Rs.)", "Dormant Period"];
-          keys = ["medicineName", "batchNo", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
+          headers = ["Medicine Name", "Batch No", "Purchase Date", "Stock Qty", "Expiry Date", "Cost Price (Rs.)", "Hold Value Cost (Rs.)", "Hold Value MRP (Rs.)", "Dormant Period"];
+          keys = ["medicineName", "batchNo", "purchaseDate", "quantity", "expiryDate", "costPrice", "totalCostValue", "totalValue", "dormantDaysLabel"];
           const nonMovingItems = await nonMovingReportService.getNonMovingItems(periodDays);
           const rows2 = nonMovingItems.map((item) => ({
             ...item,
             batchNo: item.batchNo || "N/A",
+            purchaseDate: item.purchaseDate || "N/A",
             expiryDate: item.expiryDate || "N/A",
             costPrice: Number(item.costPrice || 0).toFixed(2),
             totalCostValue: Number(item.totalCostValue || 0).toFixed(2),
             totalValue: Number(item.totalValue || 0).toFixed(2),
-            dormantDaysLabel: item.daysSinceLastTransaction === 999 ? "Never Sold" : `${item.daysSinceLastTransaction} days`
+            dormantDaysLabel: `${item.daysSinceLastTransaction} days`
           }));
           const csvContent2 = exportToCsv(headers, keys, rows2);
           res.setHeader("Content-Type", "text/csv");
@@ -40277,10 +43219,10 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to export CSV file" });
       }
     });
-    router29.get("/non-moving", async (req, res) => {
+    router30.get("/non-moving", async (req, res) => {
       try {
         const { days } = req.query;
-        const periodDays = days ? parseInt(days) : 90;
+        const periodDays = days ? parseInt(days) : 200;
         const report = await nonMovingReportService.generateNonMovingReport(periodDays);
         await nonMovingReportService.saveReportToFile(report);
         await nonMovingReportService.sendReportNotification(report);
@@ -40299,10 +43241,10 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to generate non-moving report" });
       }
     });
-    router29.get("/non-moving/data", async (req, res) => {
+    router30.get("/non-moving/data", async (req, res) => {
       try {
         const { days } = req.query;
-        const periodDays = days ? parseInt(days) : 90;
+        const periodDays = days ? parseInt(days) : 200;
         const items = await nonMovingReportService.getNonMovingItems(periodDays);
         res.json({
           success: true,
@@ -40315,7 +43257,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to get non-moving inventory data" });
       }
     });
-    router29.get("/product-trace", async (req, res) => {
+    router30.get("/product-trace", async (req, res) => {
       const query = req.query.q;
       if (!query) {
         return res.json({ purchases: [], sales: [] });
@@ -40360,7 +43302,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router29.get("/monthly-scheduled-preview", async (req, res) => {
+    router30.get("/monthly-scheduled-preview", async (req, res) => {
       const periodType = req.query.type ? String(req.query.type) : "monthly";
       const chartStyle = req.query.style ? String(req.query.style) : "standard";
       const theme = req.query.theme ? String(req.query.theme) : "executive";
@@ -40390,7 +43332,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to generate report preview" });
       }
     });
-    router29.post("/send-all-template-samples", async (req, res) => {
+    router30.post("/send-all-template-samples", async (req, res) => {
       const customPhone = req.body.phone ? String(req.body.phone).trim() : void 0;
       try {
         const { monthlyReportService: monthlyReportService2 } = await Promise.resolve().then(() => (init_monthlyReportService(), monthlyReportService_exports));
@@ -40401,7 +43343,7 @@ var init_reports = __esm({
         res.status(500).json({ success: false, message: err.message || "Failed to send template samples" });
       }
     });
-    router29.post("/send-monthly-scheduled", async (req, res) => {
+    router30.post("/send-monthly-scheduled", async (req, res) => {
       const periodType = req.body.type ? String(req.body.type) : "monthly";
       const customPhone = req.body.phone ? String(req.body.phone).trim() : void 0;
       const deliveryFormat = req.body.deliveryFormat ? String(req.body.deliveryFormat).trim() : void 0;
@@ -40418,7 +43360,7 @@ var init_reports = __esm({
         res.status(500).json({ success: false, message: err.message || "Failed to send report" });
       }
     });
-    router29.get("/gstr-1", async (req, res) => {
+    router30.get("/gstr-1", async (req, res) => {
       const { fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40472,7 +43414,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to generate GSTR-1 summary" });
       }
     });
-    router29.get("/hsn-summary", async (req, res) => {
+    router30.get("/hsn-summary", async (req, res) => {
       const { fromDate, toDate } = req.query;
       try {
         const db2 = await dbManager.getConnection();
@@ -40523,7 +43465,7 @@ var init_reports = __esm({
         res.status(500).json({ error: "Failed to generate HSN summary report" });
       }
     });
-    reports_default = router29;
+    reports_default = router30;
   }
 });
 
@@ -40532,19 +43474,19 @@ var compliance_exports = {};
 __export(compliance_exports, {
   default: () => compliance_default
 });
-var import_express30, import_path51, import_url47, __filename46, __dirname46, DB_PATH32, router30, compliance_default;
+var import_express31, import_path53, import_url47, __filename46, __dirname46, DB_PATH32, router31, compliance_default;
 var init_compliance = __esm({
   "src/routes/compliance.ts"() {
     "use strict";
-    import_express30 = __toESM(require("express"), 1);
+    import_express31 = __toESM(require("express"), 1);
     init_connection();
-    import_path51 = __toESM(require("path"), 1);
+    import_path53 = __toESM(require("path"), 1);
     import_url47 = require("url");
     __filename46 = (0, import_url47.fileURLToPath)(import_meta_url);
-    __dirname46 = import_path51.default.dirname(__filename46);
-    DB_PATH32 = process.env.DB_PATH || import_path51.default.resolve(__dirname46, "..", "..", "data", "app.db");
-    router30 = import_express30.default.Router();
-    router30.get("/", async (_req, res) => {
+    __dirname46 = import_path53.default.dirname(__filename46);
+    DB_PATH32 = process.env.DB_PATH || import_path53.default.resolve(__dirname46, "..", "..", "data", "app.db");
+    router31 = import_express31.default.Router();
+    router31.get("/", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const expiredCount = await db2.get(`
@@ -40563,14 +43505,14 @@ var init_compliance = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router30.post("/add", async (req, res) => {
+    router31.post("/add", async (req, res) => {
       const { date, product, patient_id, doctor_id, license_no, qty, bill_no } = req.body;
       if (!date || !product) return res.status(400).json({ error: "Missing required fields" });
       try {
         const db2 = await dbManager.getConnection();
         await db2.run(
-          "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
-          ["COMPLIANCE_ENTRY", `Date: ${date} | Product: ${product} | Patient: ${patient_id} | Doctor: ${doctor_id} | Lic: ${license_no} | Qty: ${qty} | Bill: ${bill_no}`]
+          "INSERT INTO compliance_logs (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [date, product, patient_id, doctor_id, license_no, qty, bill_no, "general"]
         );
         res.json({ success: true, message: "Compliance entry added" });
       } catch (err) {
@@ -40578,16 +43520,17 @@ var init_compliance = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router30.post("/add-schedule-h1", async (req, res) => {
-      const { drug_name, patient_name, doctor_name } = req.body;
+    router31.post("/add-schedule-h1", async (req, res) => {
+      const { drug_name, patient_name, doctor_name, date, license_no, qty, bill_no } = req.body;
       if (!drug_name || !patient_name || !doctor_name) {
         return res.status(400).json({ error: "Missing required fields: drug_name, patient_name, doctor_name" });
       }
       try {
         const db2 = await dbManager.getConnection();
+        const finalDate = date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
         await db2.run(
-          "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
-          ["SCHEDULE_H1_DISPENSE", `Drug: ${drug_name} | Patient: ${patient_name} | Doctor: ${doctor_name} | Schedule: H1`]
+          "INSERT INTO compliance_logs (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [finalDate, drug_name, patient_name, doctor_name, license_no || null, qty || null, bill_no || null, "H1"]
         );
         res.json({ success: true, message: "Schedule H1 dispensing event logged" });
       } catch (err) {
@@ -40595,37 +43538,194 @@ var init_compliance = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router30.get("/h1-register", async (req, res) => {
-      let db2;
+    router31.get("/dashboard", async (_req, res) => {
       try {
-        db2 = await dbManager.getConnection();
-        const rows = await db2.all("SELECT * FROM compliance_logs ORDER BY id DESC");
+        const db2 = await dbManager.getConnection();
+        const todayStr2 = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+        const firstDayOfMonth = todayStr2.substring(0, 7) + "-01";
+        const todayCountRow = await db2.get(`
+      SELECT COUNT(*) as count FROM compliance_logs 
+      WHERE (schedule_type IN ('H1', 'H', 'X', 'Schedule H1') OR schedule_type LIKE '%H1%')
+      AND date >= ?
+    `, [todayStr2]);
+        const monthCountRow = await db2.get(`
+      SELECT COUNT(*) as count FROM compliance_logs 
+      WHERE (schedule_type IN ('H1', 'H', 'X', 'Schedule H1') OR schedule_type LIKE '%H1%')
+      AND date >= ?
+    `, [firstDayOfMonth]);
+        const pendingDoctorRow = await db2.get(`
+      SELECT COUNT(*) as count FROM compliance_logs 
+      WHERE (schedule_type IN ('H1', 'H', 'X', 'Schedule H1') OR schedule_type LIKE '%H1%')
+      AND (doctor_name IS NULL OR doctor_name = '' OR doctor_name LIKE '%Self%' OR doctor_name LIKE '%Pending%')
+    `);
+        const totalLogsRow = await db2.get(`SELECT COUNT(*) as count FROM compliance_logs`);
+        res.json({
+          success: true,
+          todayH1Sales: todayCountRow?.count || 0,
+          monthlyH1Sales: monthCountRow?.count || 0,
+          pendingDoctorAssignments: pendingDoctorRow?.count || 0,
+          totalComplianceLogs: totalLogsRow?.count || 0
+        });
+      } catch (err) {
+        console.error("Compliance dashboard error:", err);
+        res.status(500).json({ error: "Failed to load compliance dashboard metrics" });
+      }
+    });
+    router31.get("/h1-register", async (req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const { startDate, endDate, search, doctor, scheduleType } = req.query;
+        const conditions = [];
+        const params = [];
+        if (startDate) {
+          conditions.push("date >= ?");
+          params.push(startDate);
+        }
+        if (endDate) {
+          conditions.push("date <= ?");
+          params.push(endDate);
+        }
+        if (search) {
+          conditions.push("(drug_name LIKE ? OR patient_name LIKE ? OR bill_no LIKE ?)");
+          const q = `%${search}%`;
+          params.push(q, q, q);
+        }
+        if (doctor) {
+          conditions.push("doctor_name LIKE ?");
+          params.push(`%${doctor}%`);
+        }
+        if (scheduleType && scheduleType !== "ALL") {
+          conditions.push("schedule_type = ?");
+          params.push(scheduleType);
+        }
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const rows = await db2.all(`SELECT * FROM compliance_logs ${whereClause} ORDER BY id DESC LIMIT 500`, params);
         res.json(rows);
       } catch (err) {
         console.error("Fetch Schedule H1 register error:", err);
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    compliance_default = router30;
+    router31.put("/:id/doctor", async (req, res) => {
+      const { id } = req.params;
+      const { doctor_name, license_no } = req.body;
+      if (!doctor_name) {
+        return res.status(400).json({ error: "doctor_name is required" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run(
+          "UPDATE compliance_logs SET doctor_name = ?, license_no = COALESCE(?, license_no) WHERE id = ?",
+          [doctor_name, license_no || null, id]
+        );
+        res.json({ success: true, message: "Doctor details updated successfully" });
+      } catch (err) {
+        console.error("Update compliance doctor error:", err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    router31.get("/export", async (req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const rows = await db2.all("SELECT date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type FROM compliance_logs ORDER BY id DESC");
+        const headers = ["Date", "Drug Name", "Patient Name", "Prescribing Doctor", "Doctor Reg/License No", "Qty Sold", "Invoice Bill No", "Schedule Type"];
+        const csvLines = [headers.join(",")];
+        for (const r of rows) {
+          const line = [
+            `"${r.date || ""}"`,
+            `"${(r.drug_name || "").replace(/"/g, '""')}"`,
+            `"${(r.patient_name || "").replace(/"/g, '""')}"`,
+            `"${(r.doctor_name || "").replace(/"/g, '""')}"`,
+            `"${(r.license_no || "").replace(/"/g, '""')}"`,
+            r.qty || 0,
+            `"${(r.bill_no || "").replace(/"/g, '""')}"`,
+            `"${(r.schedule_type || "").replace(/"/g, '""')}"`
+          ];
+          csvLines.push(line.join(","));
+        }
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", 'attachment; filename="Schedule_H1_Register_Export.csv"');
+        res.send(csvLines.join("\n"));
+      } catch (err) {
+        console.error("Compliance CSV Export error:", err);
+        res.status(500).json({ error: "Export failed" });
+      }
+    });
+    compliance_default = router31;
+  }
+});
+
+// src/routes/emailOrderReviews.ts
+var emailOrderReviews_exports = {};
+__export(emailOrderReviews_exports, {
+  default: () => emailOrderReviews_default
+});
+var import_express32, router32, emailOrderReviews_default;
+var init_emailOrderReviews = __esm({
+  "src/routes/emailOrderReviews.ts"() {
+    "use strict";
+    import_express32 = __toESM(require("express"), 1);
+    init_connection();
+    router32 = import_express32.default.Router();
+    router32.get("/", async (req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        const { status } = req.query;
+        let rows;
+        if (status && typeof status === "string") {
+          rows = await db2.all(
+            "SELECT * FROM email_order_reviews WHERE status = ? ORDER BY created_at DESC, id DESC",
+            [status]
+          );
+        } else {
+          rows = await db2.all("SELECT * FROM email_order_reviews ORDER BY created_at DESC, id DESC");
+        }
+        res.json(rows);
+      } catch (err) {
+        console.error("List email order reviews error:", err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    router32.post("/:id/dismiss", async (req, res) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid review id" });
+      }
+      try {
+        const db2 = await dbManager.getConnection();
+        const result = await db2.run(
+          "UPDATE email_order_reviews SET status = 'reviewed' WHERE id = ?",
+          [id]
+        );
+        if (!result || result.changes === 0) {
+          return res.status(404).json({ error: "Review not found" });
+        }
+        res.json({ success: true });
+      } catch (err) {
+        console.error("Dismiss email order review error:", err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    emailOrderReviews_default = router32;
   }
 });
 
 // src/license/machineId.ts
 function runWmic(query) {
   try {
-    const raw = (0, import_child_process6.execSync)(query, { encoding: "utf8", timeout: 5e3 });
-    return raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() ?? "";
+    const raw2 = (0, import_child_process6.execSync)(query, { encoding: "utf8", timeout: 5e3 });
+    return raw2.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() ?? "";
   } catch {
     return "";
   }
 }
 function getMachineGuid() {
   try {
-    const raw = (0, import_child_process6.execSync)(
+    const raw2 = (0, import_child_process6.execSync)(
       'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
       { encoding: "utf8", timeout: 5e3 }
     );
-    const match = raw.match(/MachineGuid\s+REG_SZ\s+([^\r\n]+)/);
+    const match = raw2.match(/MachineGuid\s+REG_SZ\s+([^\r\n]+)/);
     return match ? match[1].trim() : "";
   } catch {
     return "";
@@ -40692,11 +43792,11 @@ function regWrite(valueName, data) {
 }
 function regRead(valueName) {
   try {
-    const raw = (0, import_child_process7.execSync)(
+    const raw2 = (0, import_child_process7.execSync)(
       `reg query "${REG_KEY}" /v "${valueName}"`,
       { encoding: "utf8", timeout: 5e3 }
     );
-    const match = raw.match(new RegExp(`${valueName}\\s+REG_SZ\\s+([^\\r\\n]+)`));
+    const match = raw2.match(new RegExp(`${valueName}\\s+REG_SZ\\s+([^\\r\\n]+)`));
     return match ? match[1].trim() : null;
   } catch {
     return null;
@@ -40866,19 +43966,19 @@ var license_exports = {};
 __export(license_exports, {
   default: () => license_default
 });
-var import_express31, import_crypto3, router31, GAS_URL2, license_default;
+var import_express33, import_crypto3, router33, GAS_URL2, license_default;
 var init_license = __esm({
   "src/routes/license.ts"() {
     "use strict";
-    import_express31 = require("express");
+    import_express33 = require("express");
     import_crypto3 = __toESM(require("crypto"), 1);
     init_machineId();
     init_tokenStore();
     init_licenseCheck();
     init_gracePolicy();
-    router31 = (0, import_express31.Router)();
+    router33 = (0, import_express33.Router)();
     GAS_URL2 = process.env.LICENSE_SERVER_URL ?? "";
-    router31.post("/activate", async (req, res) => {
+    router33.post("/activate", async (req, res) => {
       const { licenseKey } = req.body;
       if (!licenseKey || typeof licenseKey !== "string") {
         return res.status(400).json({ error: "licenseKey is required." });
@@ -40925,7 +44025,7 @@ var init_license = __esm({
         return res.status(500).json({ error: "Activation failed. Check internet connection." });
       }
     });
-    router31.get("/status", async (_req, res) => {
+    router33.get("/status", async (_req, res) => {
       try {
         const state = await getLicenseState();
         return res.json(state);
@@ -40933,7 +44033,7 @@ var init_license = __esm({
         return res.status(500).json({ error: "Failed to read license state." });
       }
     });
-    router31.post("/heartbeat", async (_req, res) => {
+    router33.post("/heartbeat", async (_req, res) => {
       try {
         const ok = await performLicenseCheck();
         const state = await getLicenseState();
@@ -40942,7 +44042,7 @@ var init_license = __esm({
         return res.status(500).json({ error: "Heartbeat failed." });
       }
     });
-    license_default = router31;
+    license_default = router33;
   }
 });
 
@@ -40952,31 +44052,31 @@ __export(upload_exports, {
   default: () => upload_default,
   upload: () => upload3
 });
-var import_express32, import_crypto4, import_path52, import_fs40, import_multer3, import_url48, __filename47, __dirname47, UPLOAD_DIR, TEMP_DIR4, RAW_DIR, ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_SIZE, storage2, upload3, router32, upload_default;
+var import_express34, import_crypto4, import_path54, import_fs42, import_multer3, import_url48, __filename47, __dirname47, UPLOAD_DIR, TEMP_DIR4, RAW_DIR, ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_SIZE, storage2, upload3, router34, upload_default;
 var init_upload = __esm({
   "src/routes/upload.ts"() {
     "use strict";
-    import_express32 = __toESM(require("express"), 1);
+    import_express34 = __toESM(require("express"), 1);
     import_crypto4 = __toESM(require("crypto"), 1);
-    import_path52 = __toESM(require("path"), 1);
-    import_fs40 = __toESM(require("fs"), 1);
+    import_path54 = __toESM(require("path"), 1);
+    import_fs42 = __toESM(require("fs"), 1);
     import_multer3 = __toESM(require("multer"), 1);
     import_url48 = require("url");
     init_connection();
     init_config();
     __filename47 = (0, import_url48.fileURLToPath)(import_meta_url);
-    __dirname47 = import_path52.default.dirname(__filename47);
-    UPLOAD_DIR = import_path52.default.resolve(getAppDataDir(), "uploads");
-    TEMP_DIR4 = import_path52.default.join(UPLOAD_DIR, "temp");
-    RAW_DIR = import_path52.default.resolve(getAppDataDir(), "catalogue", "raw");
-    if (!import_fs40.default.existsSync(UPLOAD_DIR)) {
-      import_fs40.default.mkdirSync(UPLOAD_DIR, { recursive: true });
+    __dirname47 = import_path54.default.dirname(__filename47);
+    UPLOAD_DIR = import_path54.default.resolve(getAppDataDir(), "uploads");
+    TEMP_DIR4 = import_path54.default.join(UPLOAD_DIR, "temp");
+    RAW_DIR = import_path54.default.resolve(getAppDataDir(), "catalogue", "raw");
+    if (!import_fs42.default.existsSync(UPLOAD_DIR)) {
+      import_fs42.default.mkdirSync(UPLOAD_DIR, { recursive: true });
     }
-    if (!import_fs40.default.existsSync(TEMP_DIR4)) {
-      import_fs40.default.mkdirSync(TEMP_DIR4, { recursive: true });
+    if (!import_fs42.default.existsSync(TEMP_DIR4)) {
+      import_fs42.default.mkdirSync(TEMP_DIR4, { recursive: true });
     }
-    if (!import_fs40.default.existsSync(RAW_DIR)) {
-      import_fs40.default.mkdirSync(RAW_DIR, { recursive: true });
+    if (!import_fs42.default.existsSync(RAW_DIR)) {
+      import_fs42.default.mkdirSync(RAW_DIR, { recursive: true });
     }
     ALLOWED_UPLOAD_EXTENSIONS = /\.(csv|xlsx?|pdf|zip|jpg|jpeg|png|gif|bmp|tiff?)$/i;
     MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
@@ -41000,25 +44100,25 @@ var init_upload = __esm({
         }
       }
     });
-    router32 = import_express32.default.Router();
-    router32.post("/upload", upload3.single("file"), async (req, res) => {
+    router34 = import_express34.default.Router();
+    router34.post("/upload", upload3.single("file"), async (req, res) => {
       try {
         if (!req.file) {
           return res.status(400).json({ error: "No file uploaded" });
         }
         const tempPath = req.file.path;
-        const originalName = req.file.originalname || import_path52.default.basename(tempPath);
+        const originalName = req.file.originalname || import_path54.default.basename(tempPath);
         const timestamp = Date.now();
         const sanitizedName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
         const rawFileName = `${timestamp}-${sanitizedName}`;
-        const rawPath = import_path52.default.join(RAW_DIR, rawFileName);
-        import_fs40.default.copyFileSync(tempPath, rawPath);
+        const rawPath = import_path54.default.join(RAW_DIR, rawFileName);
+        import_fs42.default.copyFileSync(tempPath, rawPath);
         try {
-          import_fs40.default.unlinkSync(tempPath);
+          import_fs42.default.unlinkSync(tempPath);
         } catch (err) {
           console.warn("Failed to delete temporary upload file:", err);
         }
-        const ext = import_path52.default.extname(originalName).toLowerCase();
+        const ext = import_path54.default.extname(originalName).toLowerCase();
         if (![".csv", ".xlsx", ".xls", ".pdf"].includes(ext)) {
           return res.status(400).json({ error: "Unsupported file format. Please upload a CSV, PDF, or Excel file." });
         }
@@ -41042,7 +44142,7 @@ var init_upload = __esm({
         res.status(500).json({ error: error.message || "Internal server error during upload" });
       }
     });
-    upload_default = router32;
+    upload_default = router34;
   }
 });
 
@@ -41051,16 +44151,16 @@ var catalog_exports = {};
 __export(catalog_exports, {
   default: () => catalog_default
 });
-var import_express33, import_fs41, router33, catalog_default;
+var import_express35, import_fs43, router35, catalog_default;
 var init_catalog = __esm({
   "src/routes/catalog.ts"() {
     "use strict";
-    import_express33 = __toESM(require("express"), 1);
-    import_fs41 = __toESM(require("fs"), 1);
+    import_express35 = __toESM(require("express"), 1);
+    import_fs43 = __toESM(require("fs"), 1);
     init_connection();
     init_medicineService();
-    router33 = import_express33.default.Router();
-    router33.get("/catalog/job/:id", async (req, res) => {
+    router35 = import_express35.default.Router();
+    router35.get("/catalog/job/:id", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const job = await db2.get(`SELECT * FROM catalog_jobs WHERE id = ?`, req.params.id);
@@ -41104,7 +44204,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error fetching job" });
       }
     });
-    router33.post("/catalog/job/:id/pause", async (req, res) => {
+    router35.post("/catalog/job/:id/pause", async (req, res) => {
       try {
         const jobId = parseInt(req.params.id, 10);
         const db2 = await dbManager.getConnection();
@@ -41135,7 +44235,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error pausing job" });
       }
     });
-    router33.post("/catalog/job/:id/resume", async (req, res) => {
+    router35.post("/catalog/job/:id/resume", async (req, res) => {
       try {
         const jobId = parseInt(req.params.id, 10);
         const db2 = await dbManager.getConnection();
@@ -41169,7 +44269,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error resuming job" });
       }
     });
-    router33.post("/catalog/import-job/:id", async (req, res) => {
+    router35.post("/catalog/import-job/:id", async (req, res) => {
       try {
         const jobId = parseInt(req.params.id, 10);
         const { mappings, filters } = req.body;
@@ -41206,7 +44306,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router33.post("/catalog/import", async (req, res) => {
+    router35.post("/catalog/import", async (req, res) => {
       const { medicines } = req.body;
       if (!Array.isArray(medicines)) {
         return res.status(400).json({ error: "Invalid payload, expected array of medicines" });
@@ -41236,7 +44336,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error during import" });
       }
     });
-    router33.get("/jobs", async (req, res) => {
+    router35.get("/jobs", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const jobs = await db2.all("SELECT * FROM catalog_jobs ORDER BY created_at DESC");
@@ -41248,7 +44348,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router33.delete("/catalog/job/:id", async (req, res) => {
+    router35.delete("/catalog/job/:id", async (req, res) => {
       try {
         const jobId = parseInt(req.params.id, 10);
         const db2 = await dbManager.getConnection();
@@ -41257,9 +44357,9 @@ var init_catalog = __esm({
           await dbManager.close();
           return res.status(404).json({ error: "Job not found" });
         }
-        if (job.file_path && import_fs41.default.existsSync(job.file_path)) {
+        if (job.file_path && import_fs43.default.existsSync(job.file_path)) {
           try {
-            import_fs41.default.unlinkSync(job.file_path);
+            import_fs43.default.unlinkSync(job.file_path);
           } catch (err) {
             console.warn(`[Catalog] Failed to delete physical file: ${job.file_path}`, err);
           }
@@ -41272,7 +44372,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: "Internal server error deleting job" });
       }
     });
-    router33.get("/catalog/reviews/pending", async (req, res) => {
+    router35.get("/catalog/reviews/pending", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const source = req.query.source || "whatsapp";
@@ -41304,7 +44404,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    router33.get("/catalog/job/:id/reviews", async (req, res) => {
+    router35.get("/catalog/job/:id/reviews", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const reviews = await db2.all(
@@ -41335,7 +44435,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    router33.post("/catalog/review/:id/approve", async (req, res) => {
+    router35.post("/catalog/review/:id/approve", async (req, res) => {
       const { approvedData } = req.body;
       try {
         const db2 = await dbManager.getConnection();
@@ -41446,7 +44546,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    router33.post("/catalog/review/:id/reject", async (req, res) => {
+    router35.post("/catalog/review/:id/reject", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await db2.run(
@@ -41467,7 +44567,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    router33.post("/catalog/review/:id/enrich", async (req, res) => {
+    router35.post("/catalog/review/:id/enrich", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const review = await db2.get("SELECT * FROM staged_medicine_reviews WHERE id = ?", req.params.id);
@@ -41517,7 +44617,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    router33.get("/catalog/search-status", async (req, res) => {
+    router35.get("/catalog/search-status", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const limitRow = await db2.get("SELECT value FROM app_settings WHERE key = 'google_search_daily_limit'");
@@ -41533,7 +44633,7 @@ var init_catalog = __esm({
         res.status(500).json({ error: error.message || "Internal server error" });
       }
     });
-    catalog_default = router33;
+    catalog_default = router35;
   }
 });
 
@@ -41542,15 +44642,15 @@ var medicines_exports = {};
 __export(medicines_exports, {
   default: () => medicines_default
 });
-var import_express34, router34, normalizeNumericSearch2, medicines_default;
+var import_express36, router36, normalizeNumericSearch2, medicines_default;
 var init_medicines = __esm({
   "src/routes/medicines.ts"() {
     "use strict";
-    import_express34 = __toESM(require("express"), 1);
+    import_express36 = __toESM(require("express"), 1);
     init_connection();
     init_inventoryCache();
     init_packaging();
-    router34 = import_express34.default.Router();
+    router36 = import_express36.default.Router();
     normalizeNumericSearch2 = (val) => {
       const cleaned = val.trim();
       if (!cleaned) return "";
@@ -41562,7 +44662,7 @@ var init_medicines = __esm({
       }
       return cleaned;
     };
-    router34.get("/medicines", async (req, res) => {
+    router36.get("/medicines", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 100;
@@ -41697,7 +44797,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.post("/medicines", async (req, res) => {
+    router36.post("/medicines", async (req, res) => {
       const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging } = req.body;
       if (!name) return res.status(400).json({ error: "Medicine name is required" });
       try {
@@ -41733,7 +44833,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.post("/medicines/bulk-delete", async (req, res) => {
+    router36.post("/medicines/bulk-delete", async (req, res) => {
       const { ids, all, search, productName, mrpFilter, apiFilter, packagingFilter, distributorFilter, category } = req.body;
       try {
         const db2 = await dbManager.getConnection();
@@ -41820,7 +44920,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.delete("/medicines/:id", async (req, res) => {
+    router36.delete("/medicines/:id", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -41847,7 +44947,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.get("/online-search", async (req, res) => {
+    router36.get("/online-search", async (req, res) => {
       const query = (req.query.q || "").trim();
       if (!query || query.length < 2) {
         return res.json([]);
@@ -41874,7 +44974,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error during online search" });
       }
     });
-    router34.post("/auto-enrich", async (req, res) => {
+    router36.post("/auto-enrich", async (req, res) => {
       const { name, api_reference, manufacturer } = req.body;
       if (!name || !name.trim()) {
         return res.status(400).json({ error: "Medicine name is required" });
@@ -41912,7 +45012,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error saving enrichment" });
       }
     });
-    router34.get("/manufacturers", async (req, res) => {
+    router36.get("/manufacturers", async (req, res) => {
       let db2;
       try {
         const q = (req.query.q || "").trim();
@@ -41945,7 +45045,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.get("/marketed-by", async (req, res) => {
+    router36.get("/marketed-by", async (req, res) => {
       let db2;
       try {
         const q = (req.query.q || "").trim();
@@ -41978,7 +45078,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.get("/medicines/compact", async (req, res) => {
+    router36.get("/medicines/compact", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const items = await inventoryCache2.get(db2);
@@ -41990,12 +45090,12 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.get("/medicines/:id/quick-details", async (req, res) => {
+    router36.get("/medicines/:id/quick-details", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
         const medicine = await db2.get(
-          "SELECT id, name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, api_reference, schedule_type, packaging FROM medicines WHERE id = ?",
+          "SELECT id, name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, strength, cgst_per, sgst_per, hsn_code, category, api_reference, schedule_type, packaging, sell_price, mrp FROM medicines WHERE id = ?",
           [id]
         );
         if (!medicine) {
@@ -42027,7 +45127,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router34.post("/medicines/seed-master", async (req, res) => {
+    router36.post("/medicines/seed-master", async (req, res) => {
       try {
         const { seedMasterMedicines: seedMasterMedicines2 } = await Promise.resolve().then(() => (init_masterMedicinesSeedService(), masterMedicinesSeedService_exports));
         const result = await seedMasterMedicines2(true);
@@ -42037,7 +45137,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Failed to seed master medicines: " + error.message });
       }
     });
-    router34.delete("/medicines/:id", async (req, res) => {
+    router36.delete("/medicines/:id", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -42054,7 +45154,7 @@ var init_medicines = __esm({
         res.status(500).json({ error: "Internal server error during medicine deletion" });
       }
     });
-    medicines_default = router34;
+    medicines_default = router36;
   }
 });
 
@@ -42063,13 +45163,13 @@ var enrichment_exports = {};
 __export(enrichment_exports, {
   default: () => enrichment_default
 });
-var import_express35, import_fs42, import_path53, import_url49, import_multer4, __filename48, __dirname48, DATA_DIR2, REFERENCE_CSV2, router35, upload4, enrichment_default;
+var import_express37, import_fs44, import_path55, import_url49, import_multer4, __filename48, __dirname48, DATA_DIR2, REFERENCE_CSV2, router37, upload4, enrichment_default;
 var init_enrichment = __esm({
   "src/routes/enrichment.ts"() {
     "use strict";
-    import_express35 = __toESM(require("express"), 1);
-    import_fs42 = __toESM(require("fs"), 1);
-    import_path53 = __toESM(require("path"), 1);
+    import_express37 = __toESM(require("express"), 1);
+    import_fs44 = __toESM(require("fs"), 1);
+    import_path55 = __toESM(require("path"), 1);
     import_url49 = require("url");
     import_multer4 = __toESM(require("multer"), 1);
     init_connection();
@@ -42077,12 +45177,12 @@ var init_enrichment = __esm({
     init_onlineDataEnricher();
     init_config();
     __filename48 = (0, import_url49.fileURLToPath)(import_meta_url);
-    __dirname48 = import_path53.default.dirname(__filename48);
-    DATA_DIR2 = import_path53.default.resolve(getAppDataDir(), "data");
-    REFERENCE_CSV2 = import_path53.default.join(DATA_DIR2, "reference_medicines.csv");
-    router35 = import_express35.default.Router();
+    __dirname48 = import_path55.default.dirname(__filename48);
+    DATA_DIR2 = import_path55.default.resolve(getAppDataDir(), "data");
+    REFERENCE_CSV2 = import_path55.default.join(DATA_DIR2, "reference_medicines.csv");
+    router37 = import_express37.default.Router();
     upload4 = (0, import_multer4.default)({ storage: import_multer4.default.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-    router35.get("/enrichment/status", async (_req, res) => {
+    router37.get("/enrichment/status", async (_req, res) => {
       try {
         const status = await getEnrichmentStatus();
         res.json(status);
@@ -42091,7 +45191,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/enrichment/start", async (_req, res) => {
+    router37.post("/enrichment/start", async (_req, res) => {
       try {
         if (getEnrichmentRunningState()) {
           return res.status(409).json({ error: "Enrichment is already running" });
@@ -42106,7 +45206,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/enrichment/stop", async (_req, res) => {
+    router37.post("/enrichment/stop", async (_req, res) => {
       try {
         if (!getEnrichmentRunningState()) {
           return res.status(409).json({ error: "Enrichment is not currently running" });
@@ -42118,7 +45218,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/enrichment/backfill-suggestions", async (_req, res) => {
+    router37.post("/enrichment/backfill-suggestions", async (_req, res) => {
       try {
         const result = await backfillSuggestedCompositions();
         res.json({ success: true, updated: result.updated });
@@ -42127,7 +45227,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/enrichment/reclassify-non-pharma", async (_req, res) => {
+    router37.post("/enrichment/reclassify-non-pharma", async (_req, res) => {
       try {
         const result = await reclassifyNonPharmaProducts();
         res.json({ success: true, updated: result.updated });
@@ -42136,7 +45236,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/reference/reload-from-disk", async (_req, res) => {
+    router37.post("/reference/reload-from-disk", async (_req, res) => {
       try {
         const result = await loadReferenceData({ force: true });
         const apiResult = await loadApiSubstances({ force: true });
@@ -42151,7 +45251,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/reference/import", upload4.single("file"), async (req, res) => {
+    router37.post("/reference/import", upload4.single("file"), async (req, res) => {
       try {
         if (!req.file) {
           return res.status(400).json({ error: "No file uploaded" });
@@ -42160,8 +45260,8 @@ var init_enrichment = __esm({
           return res.status(400).json({ error: "Only CSV files are accepted" });
         }
         const tmpPath = REFERENCE_CSV2 + ".tmp";
-        import_fs42.default.writeFileSync(tmpPath, req.file.buffer);
-        import_fs42.default.renameSync(tmpPath, REFERENCE_CSV2);
+        import_fs44.default.writeFileSync(tmpPath, req.file.buffer);
+        import_fs44.default.renameSync(tmpPath, REFERENCE_CSV2);
         const result = await loadReferenceData({ force: true });
         const apiResult = await loadApiSubstances({ force: true });
         res.json({
@@ -42175,7 +45275,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.get("/enrichment/reference/export", async (_req, res) => {
+    router37.get("/enrichment/reference/export", async (_req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all("SELECT name, composition1, composition2, manufacturer FROM medicine_reference ORDER BY name");
@@ -42196,7 +45296,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.get("/enrichment/export", async (req, res) => {
+    router37.get("/enrichment/export", async (req, res) => {
       try {
         const status = req.query.status || "manual";
         const allowed = ["manual", "matched", "needs_review"];
@@ -42225,7 +45325,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.get("/enrichment/queue", async (req, res) => {
+    router37.get("/enrichment/queue", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
@@ -42256,7 +45356,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.put("/enrichment/queue/:id", async (req, res) => {
+    router37.put("/enrichment/queue/:id", async (req, res) => {
       try {
         const id = parseInt(req.params.id);
         const { composition } = req.body;
@@ -42277,7 +45377,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.get("/enrichment/preview-tokens", (_req, res) => {
+    router37.get("/enrichment/preview-tokens", (_req, res) => {
       const rawName = (_req.query.name || "").trim();
       if (!rawName) {
         return res.status(400).json({ error: "name query param is required" });
@@ -42294,7 +45394,7 @@ var init_enrichment = __esm({
       const preview = tokens.filter((t) => t.included).map((t) => t.text.toUpperCase()).join(" ");
       res.json({ tokens, preview });
     });
-    router35.post("/enrichment/set-search-term", async (req, res) => {
+    router37.post("/enrichment/set-search-term", async (req, res) => {
       try {
         const id = parseInt(req.body.id);
         const searchTerm = (req.body.searchTerm || "").trim();
@@ -42315,7 +45415,7 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router35.post("/enrichment/trigger-online/:id", async (req, res) => {
+    router37.post("/enrichment/trigger-online/:id", async (req, res) => {
       try {
         const id = parseInt(req.params.id);
         if (!id) {
@@ -42341,7 +45441,204 @@ var init_enrichment = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    enrichment_default = router35;
+    enrichment_default = router37;
+  }
+});
+
+// src/routes/contacts.ts
+var contacts_exports = {};
+__export(contacts_exports, {
+  default: () => contacts_default
+});
+async function ensureContactsTable(db2) {
+  await db2.exec(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT DEFAULT 'general',
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      gstin TEXT,
+      notes TEXT,
+      alias_names TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+var import_express38, router38, contacts_default;
+var init_contacts = __esm({
+  "src/routes/contacts.ts"() {
+    "use strict";
+    import_express38 = __toESM(require("express"), 1);
+    init_connection();
+    init_distributorSyncHelper();
+    router38 = import_express38.default.Router();
+    router38.get("/", async (req, res) => {
+      const { type, search } = req.query;
+      try {
+        const db2 = await dbManager.getConnection();
+        await ensureContactsTable(db2);
+        let query = "SELECT * FROM contacts WHERE 1=1";
+        const params = [];
+        if (type) {
+          query += " AND type = ?";
+          params.push(type);
+        }
+        if (search) {
+          query += " AND (name LIKE ? OR phone LIKE ?)";
+          params.push(`%${search}%`, `%${search}%`);
+        }
+        query += " ORDER BY name ASC";
+        const contacts = await db2.all(query, params);
+        res.json({ success: true, count: contacts.length, data: contacts });
+      } catch (err) {
+        console.error("Failed to fetch contacts:", err);
+        res.status(500).json({ error: "Failed to fetch contacts" });
+      }
+    });
+    router38.post("/", async (req, res) => {
+      const { name, type = "general", phone, email, address, gstin, notes } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Name is required" });
+      }
+      const cleanPhone = phone ? String(phone).replace(/\D/g, "") : "";
+      try {
+        const db2 = await dbManager.getConnection();
+        await ensureContactsTable(db2);
+        let existing;
+        if (cleanPhone) {
+          existing = await db2.get("SELECT id FROM contacts WHERE phone = ? AND type = ?", [cleanPhone, type]);
+        }
+        if (!existing && name.trim()) {
+          existing = await db2.get("SELECT id FROM contacts WHERE LOWER(name) = LOWER(?) AND type = ?", [name.trim(), type]);
+        }
+        let contactId;
+        if (existing) {
+          contactId = existing.id;
+          await db2.run(
+            `UPDATE contacts 
+         SET name = ?,
+             phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+             email = CASE WHEN ? != '' THEN ? ELSE email END,
+             address = CASE WHEN ? != '' THEN ? ELSE address END,
+             gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+             notes = CASE WHEN ? != '' THEN ? ELSE notes END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+            [
+              name.trim(),
+              cleanPhone,
+              cleanPhone,
+              email || "",
+              email || "",
+              address || "",
+              address || "",
+              gstin || "",
+              gstin || "",
+              notes || "",
+              notes || "",
+              existing.id
+            ]
+          );
+        } else {
+          const result = await db2.run(
+            `INSERT INTO contacts (name, type, phone, email, address, gstin, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [name.trim(), type, cleanPhone, email || "", address || "", gstin || "", notes || ""]
+          );
+          contactId = result.lastID || 0;
+        }
+        if (type === "distributor") {
+          try {
+            await syncDistributorPhoneAcrossTables(db2, {
+              name: name.trim(),
+              phone: cleanPhone,
+              email,
+              address,
+              gstin,
+              notes
+            });
+          } catch (syncErr) {
+            console.warn("Failed to sync distributor phone from contacts POST:", syncErr);
+          }
+        }
+        const saved = await db2.get("SELECT * FROM contacts WHERE id = ?", [contactId]);
+        res.json({ success: true, message: "Contact saved successfully", data: saved });
+      } catch (err) {
+        console.error("Failed to save contact:", err);
+        res.status(500).json({ error: "Failed to save contact" });
+      }
+    });
+    router38.put("/:id", async (req, res) => {
+      const { id } = req.params;
+      const { name, type, phone, email, address, gstin, notes } = req.body;
+      const cleanPhone = phone ? String(phone).replace(/\D/g, "") : "";
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run(
+          `UPDATE contacts 
+       SET name = CASE WHEN ? != '' THEN ? ELSE name END,
+           type = CASE WHEN ? != '' THEN ? ELSE type END,
+           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+           email = CASE WHEN ? != '' THEN ? ELSE email END,
+           address = CASE WHEN ? != '' THEN ? ELSE address END,
+           gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+           notes = CASE WHEN ? != '' THEN ? ELSE notes END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+          [
+            name || "",
+            name || "",
+            type || "",
+            type || "",
+            cleanPhone,
+            cleanPhone,
+            email || "",
+            email || "",
+            address || "",
+            address || "",
+            gstin || "",
+            gstin || "",
+            notes || "",
+            notes || "",
+            id
+          ]
+        );
+        const updated = await db2.get("SELECT * FROM contacts WHERE id = ?", [id]);
+        if (updated && updated.type === "distributor") {
+          try {
+            await syncDistributorPhoneAcrossTables(db2, {
+              name: updated.name,
+              phone: updated.phone,
+              email: updated.email,
+              address: updated.address,
+              gstin: updated.gstin,
+              notes: updated.notes
+            });
+          } catch (syncErr) {
+            console.warn("Failed to sync distributor phone from contacts PUT:", syncErr);
+          }
+        }
+        res.json({ success: true, message: "Contact updated successfully", data: updated });
+      } catch (err) {
+        console.error("Failed to update contact:", err);
+        res.status(500).json({ error: "Failed to update contact" });
+      }
+    });
+    router38.delete("/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run("DELETE FROM contacts WHERE id = ?", [id]);
+        res.json({ success: true, message: "Contact deleted successfully" });
+      } catch (err) {
+        console.error("Failed to delete contact:", err);
+        res.status(500).json({ error: "Failed to delete contact" });
+      }
+    });
+    contacts_default = router38;
   }
 });
 
@@ -42350,15 +45647,16 @@ var distributors_exports = {};
 __export(distributors_exports, {
   default: () => distributors_default
 });
-var import_express36, router36, getDistributorsHandler, postDistributorsHandler, putDistributorHandler, deleteDistributorHandler, distributors_default;
+var import_express39, router39, getDistributorsHandler, postDistributorsHandler, putDistributorHandler, deleteDistributorHandler, distributors_default;
 var init_distributors = __esm({
   "src/routes/distributors.ts"() {
     "use strict";
-    import_express36 = __toESM(require("express"), 1);
+    import_express39 = __toESM(require("express"), 1);
     init_connection();
     init_creditNoteService();
-    init_emailSanitizer();
-    router36 = import_express36.default.Router();
+    init_distributorSyncHelper();
+    init_eventService();
+    router39 = import_express39.default.Router();
     getDistributorsHandler = async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
@@ -42368,85 +45666,70 @@ var init_distributors = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     };
-    router36.get("/distributors", getDistributorsHandler);
-    router36.get("/", getDistributorsHandler);
+    router39.get("/distributors", getDistributorsHandler);
+    router39.get("/", getDistributorsHandler);
     postDistributorsHandler = async (req, res) => {
-      const { name, phone, email, address, gstin } = req.body;
-      if (!name) {
+      const { name, store_name, phone, contact, email, address, gstin, state_code, preferred_file_format } = req.body;
+      const distName = (name || store_name || "").trim();
+      if (!distName) {
         return res.status(400).json({ error: "Distributor name is required" });
       }
-      const cleanEmail = extractCleanEmail(email);
       try {
         const db2 = await dbManager.getConnection();
-        const existing = await db2.get("SELECT id FROM distributors WHERE name = ? OR name LIKE ?", [name, `%${name}%`]);
-        let targetId;
-        if (existing) {
-          targetId = existing.id;
-          await db2.run(
-            `UPDATE distributors 
-         SET phone = COALESCE(?, phone),
-             contact = COALESCE(?, contact, phone),
-             email = COALESCE(?, email),
-             address = COALESCE(?, address),
-             gstin = COALESCE(?, gstin)
-         WHERE id = ?`,
-            [phone, phone, cleanEmail, address, gstin, existing.id]
-          );
-        } else {
-          const result = await db2.run(
-            `INSERT INTO distributors (name, phone, contact, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
-            [name, phone, phone, cleanEmail, address, gstin]
-          );
-          targetId = result.lastID || 0;
-        }
-        try {
-          await db2.run(
-            "INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)",
-            [targetId]
-          );
-        } catch (_) {
-        }
-        res.json({ success: true, message: existing ? "Distributor updated" : "Distributor created", id: targetId });
+        const savedDistributor = await syncDistributorPhoneAcrossTables(db2, {
+          name: distName,
+          phone,
+          contact,
+          email,
+          address,
+          gstin,
+          state_code,
+          preferred_file_format
+        });
+        res.json({
+          success: true,
+          message: "Distributor saved successfully",
+          id: savedDistributor.id,
+          data: savedDistributor
+        });
+        eventService.broadcast("distributors_updated", { action: "create", id: savedDistributor.id });
       } catch (error) {
         console.error("Failed to create/update distributor:", error);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ error: "Internal server error: " + error.message });
       }
     };
-    router36.post("/distributors", postDistributorsHandler);
-    router36.post("/", postDistributorsHandler);
+    router39.post("/distributors", postDistributorsHandler);
+    router39.post("/", postDistributorsHandler);
     putDistributorHandler = async (req, res) => {
       const { id } = req.params;
-      const { name, phone, email, preferred_file_format, gstin, address } = req.body;
-      const cleanEmail = extractCleanEmail(email);
+      const { name, store_name, phone, contact, email, preferred_file_format, gstin, address, state_code } = req.body;
       try {
         const db2 = await dbManager.getConnection();
-        await db2.run(
-          `UPDATE distributors 
-       SET name = COALESCE(?, name),
-           phone = COALESCE(?, phone),
-           contact = COALESCE(?, contact, phone),
-           email = COALESCE(?, email),
-           preferred_file_format = COALESCE(?, preferred_file_format),
-           gstin = COALESCE(?, gstin),
-           address = COALESCE(?, address)
-       WHERE id = ?`,
-          [name, phone, phone, cleanEmail, preferred_file_format, gstin, address, id]
-        );
-        try {
-          await db2.run(
-            "INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)",
-            [id]
-          );
-        } catch (_) {
-        }
-        res.json({ success: true, message: "Distributor details updated successfully", id: Number(id) });
+        const savedDistributor = await syncDistributorPhoneAcrossTables(db2, {
+          id: Number(id),
+          name: name || store_name,
+          phone,
+          contact,
+          email,
+          address,
+          gstin,
+          state_code,
+          preferred_file_format
+        });
+        res.json({
+          success: true,
+          message: "Distributor details updated successfully",
+          id: Number(id),
+          data: savedDistributor
+        });
+        eventService.broadcast("distributors_updated", { action: "update", id: Number(id) });
       } catch (error) {
         console.error("Failed to update distributor:", error);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ error: "Internal server error: " + error.message });
       }
     };
-    router36.put("/distributors/:id", putDistributorHandler);
-    router36.put("/:id", putDistributorHandler);
+    router39.put("/distributors/:id", putDistributorHandler);
+    router39.put("/:id", putDistributorHandler);
     deleteDistributorHandler = async (req, res) => {
       const { id } = req.params;
       try {
@@ -42456,15 +45739,16 @@ var init_distributors = __esm({
           await db2.run("DELETE FROM distributor_learning_profiles WHERE distributor_id = ?", [id]);
         } catch (_) {
         }
+        eventService.broadcast("distributors_updated", { action: "delete", id: Number(id) });
         res.json({ success: true, message: "Distributor deleted successfully" });
       } catch (error) {
         console.error("Failed to delete distributor:", error);
         res.status(500).json({ error: "Internal server error" });
       }
     };
-    router36.delete("/distributors/:id", deleteDistributorHandler);
-    router36.delete("/:id", deleteDistributorHandler);
-    router36.post("/purchases", async (req, res) => {
+    router39.delete("/distributors/:id", deleteDistributorHandler);
+    router39.delete("/:id", deleteDistributorHandler);
+    router39.post("/purchases", async (req, res) => {
       const { distributor, invoice_no, total_amount } = req.body;
       try {
         const db2 = await dbManager.getConnection();
@@ -42480,7 +45764,7 @@ var init_distributors = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router36.post("/returns/reconcile-credit", async (req, res) => {
+    router39.post("/returns/reconcile-credit", async (req, res) => {
       const { distributor_id, actual_credit_amount, purchase_id } = req.body;
       if (!distributor_id || actual_credit_amount === void 0) {
         return res.status(400).json({ error: "distributor_id and actual_credit_amount are required" });
@@ -42494,7 +45778,7 @@ var init_distributors = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router36.get("/:id/pending-returns", async (req, res) => {
+    router39.get("/:id/pending-returns", async (req, res) => {
       const { id } = req.params;
       try {
         const db2 = await dbManager.getConnection();
@@ -42512,7 +45796,7 @@ var init_distributors = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    distributors_default = router36;
+    distributors_default = router39;
   }
 });
 
@@ -42615,17 +45899,17 @@ async function checkDeviceConnections() {
     console.error("Error during periodic device monitoring:", err);
   }
 }
-var import_express37, import_qrcode4, import_os, router37, deviceOnlineStateCache, notifications_default;
+var import_express40, import_qrcode5, import_os, router40, deviceOnlineStateCache, notifications_default;
 var init_notifications2 = __esm({
   "src/routes/notifications.ts"() {
     "use strict";
-    import_express37 = __toESM(require("express"), 1);
+    import_express40 = __toESM(require("express"), 1);
     init_eventService();
     init_connection();
-    import_qrcode4 = __toESM(require("qrcode"), 1);
+    import_qrcode5 = __toESM(require("qrcode"), 1);
     import_os = __toESM(require("os"), 1);
-    router37 = import_express37.default.Router();
-    router37.get("/notifications/connection-info", async (req, res) => {
+    router40 = import_express40.default.Router();
+    router40.get("/notifications/connection-info", async (req, res) => {
       try {
         const interfaces = import_os.default.networkInterfaces();
         const ips = [];
@@ -42645,7 +45929,7 @@ var init_notifications2 = __esm({
           serverUrls.push(`http://localhost:${port}`);
         }
         const qrData = JSON.stringify({ serverUrls });
-        const qrCodeUrl = await import_qrcode4.default.toDataURL(qrData, { width: 250, margin: 1 });
+        const qrCodeUrl = await import_qrcode5.default.toDataURL(qrData, { width: 250, margin: 1 });
         res.json({
           success: true,
           ips,
@@ -42658,16 +45942,16 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to generate connection info: " + err.message });
       }
     });
-    router37.get("/notifications/download-apk", (req, res) => {
-      const fs44 = require("fs");
-      const path56 = require("path");
+    router40.get("/notifications/download-apk", (req, res) => {
+      const fs45 = require("fs");
+      const path57 = require("path");
       const candidatePaths = [
-        path56.join(process.cwd(), "data", "pharmacy-mobile.apk"),
-        path56.join(process.cwd(), "public", "pharmacy-mobile.apk"),
-        path56.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "release", "app-release.apk"),
-        path56.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+        path57.join(process.cwd(), "data", "pharmacy-mobile.apk"),
+        path57.join(process.cwd(), "public", "pharmacy-mobile.apk"),
+        path57.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+        path57.join(process.cwd(), "pharmacy-mobile", "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
       ];
-      const foundPath = candidatePaths.find((p) => fs44.existsSync(p));
+      const foundPath = candidatePaths.find((p) => fs45.existsSync(p));
       if (foundPath) {
         res.setHeader("Content-Type", "application/vnd.android.package-archive");
         return res.download(foundPath, "AI-Pharmacy-Mobile.apk");
@@ -42677,7 +45961,7 @@ var init_notifications2 = __esm({
         message: "Place pharmacy-mobile.apk inside the data/ folder to enable direct mobile APK downloads."
       });
     });
-    router37.get("/notifications/stream", (req, res) => {
+    router40.get("/notifications/stream", (req, res) => {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
@@ -42696,7 +45980,7 @@ var init_notifications2 = __esm({
 `);
     });
     deviceOnlineStateCache = /* @__PURE__ */ new Map();
-    router37.post("/notifications/register-token", async (req, res) => {
+    router40.post("/notifications/register-token", async (req, res) => {
       const { token, deviceName, os: os2 } = req.body;
       if (!token) {
         return res.status(400).json({ error: "Token is required" });
@@ -42742,7 +46026,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to register token: " + err.message });
       }
     });
-    router37.get("/notifications/devices", async (req, res) => {
+    router40.get("/notifications/devices", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all(`
@@ -42775,7 +46059,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to get devices: " + err.message });
       }
     });
-    router37.patch("/notifications/devices/:token/rename", async (req, res) => {
+    router40.patch("/notifications/devices/:token/rename", async (req, res) => {
       const { token } = req.params;
       const { name } = req.body;
       if (!name || !name.trim()) {
@@ -42790,7 +46074,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to rename device: " + err.message });
       }
     });
-    router37.post("/patients/send-refill", async (req, res) => {
+    router40.post("/patients/send-refill", async (req, res) => {
       const { whatsapp_number, name } = req.body;
       if (!whatsapp_number) {
         return res.status(400).json({ error: "WhatsApp number required" });
@@ -42803,7 +46087,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to send reminder" });
       }
     });
-    router37.get("/notifications/devices/logs", async (req, res) => {
+    router40.get("/notifications/devices/logs", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all("SELECT * FROM device_connection_logs ORDER BY timestamp DESC LIMIT 150");
@@ -42813,7 +46097,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to fetch logs: " + err.message });
       }
     });
-    router37.post("/notifications/devices/logs/clear", async (req, res) => {
+    router40.post("/notifications/devices/logs/clear", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await db2.run("DELETE FROM device_connection_logs");
@@ -42823,7 +46107,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to clear logs: " + err.message });
       }
     });
-    router37.get("/notifications/action-logs", async (req, res) => {
+    router40.get("/notifications/action-logs", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all("SELECT * FROM action_logs ORDER BY created_at DESC LIMIT 250");
@@ -42833,7 +46117,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to fetch logs: " + err.message });
       }
     });
-    router37.post("/notifications/action-logs/clear", async (req, res) => {
+    router40.post("/notifications/action-logs/clear", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await db2.run("DELETE FROM action_logs");
@@ -42843,7 +46127,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to clear logs: " + err.message });
       }
     });
-    router37.post("/notifications/chat-logs", async (req, res) => {
+    router40.post("/notifications/chat-logs", async (req, res) => {
       const { sessionId, deviceName, sender, messageText, metadata } = req.body;
       if (!sessionId || !sender || !messageText) {
         return res.status(400).json({ error: "sessionId, sender and messageText are required" });
@@ -42892,7 +46176,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to save assistant chat log: " + err.message });
       }
     });
-    router37.get("/notifications/chat-logs", async (req, res) => {
+    router40.get("/notifications/chat-logs", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const rows = await db2.all("SELECT * FROM assistant_chat_logs ORDER BY created_at ASC LIMIT 1000");
@@ -42902,7 +46186,7 @@ var init_notifications2 = __esm({
         res.status(500).json({ error: "Failed to get assistant chat logs: " + err.message });
       }
     });
-    router37.post("/notifications/chat-logs/clear", async (req, res) => {
+    router40.post("/notifications/chat-logs/clear", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         await db2.run("DELETE FROM assistant_chat_logs");
@@ -42913,7 +46197,7 @@ var init_notifications2 = __esm({
       }
     });
     setInterval(checkDeviceConnections, 1e4);
-    notifications_default = router37;
+    notifications_default = router40;
   }
 });
 
@@ -42922,15 +46206,15 @@ var whatsappQueue_exports = {};
 __export(whatsappQueue_exports, {
   default: () => whatsappQueue_default
 });
-var import_express38, router38, whatsappQueue_default;
+var import_express41, router41, whatsappQueue_default;
 var init_whatsappQueue = __esm({
   "src/routes/whatsappQueue.ts"() {
     "use strict";
-    import_express38 = __toESM(require("express"), 1);
+    import_express41 = __toESM(require("express"), 1);
     init_whatsappQueueWorker();
     init_connection();
-    router38 = import_express38.default.Router();
-    router38.get("/status", async (_req, res) => {
+    router41 = import_express41.default.Router();
+    router41.get("/status", async (_req, res) => {
       try {
         const state = await whatsappQueueWorker.getWorkerState();
         res.json(state);
@@ -42939,7 +46223,7 @@ var init_whatsappQueue = __esm({
         res.status(500).json({ error: err?.message || "Failed to fetch queue status" });
       }
     });
-    router38.post("/enqueue-distributor-collection", async (req, res) => {
+    router41.post("/enqueue-distributor-collection", async (req, res) => {
       const { orderIds, deliveryBoyPhone, deliveryBoyName } = req.body;
       if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "orderIds array is required" });
@@ -42989,7 +46273,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to enqueue collection messages" });
       }
     });
-    router38.post("/enqueue-pharmarack-batch", async (req, res) => {
+    router41.post("/enqueue-pharmarack-batch", async (req, res) => {
       const { orders, deliveryBoyPhone, deliveryBoyName, storeInfo } = req.body;
       if (!orders || !Array.isArray(orders) || orders.length === 0) {
         return res.status(400).json({ error: "orders array is required" });
@@ -43013,16 +46297,24 @@ ${order.items || "Standard Pharmacy Order"}
             targetBoyName = "Admin Contact";
           }
         }
+        let cleanBoyPhone = "";
         if (targetBoyPhone) {
-          const cleanBoyPhone = String(targetBoyPhone).replace(/\D/g, "");
+          cleanBoyPhone = String(targetBoyPhone).replace(/\D/g, "");
+          if (cleanBoyPhone.length === 10) cleanBoyPhone = `91${cleanBoyPhone}`;
           if (cleanBoyPhone.length >= 10) {
             const dateLabel = (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
             const totalItems = orders.reduce((sum, o) => sum + (o.items?.length || 0), 0);
-            let summaryMsg = `\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
+            const shopRow = await db2.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
+            const headerShopName = storeInfo?.name || storeInfo?.storeName || shopRow?.value || "AI Pharmacy";
+            let summaryMsg = `\u{1F3E5} *${headerShopName}*
+\u{1F4CB} *TODAY DISTRIBUTOR SUMMARY & TOTALS \u2014 ${dateLabel}*
 
 `;
             orders.forEach((o, idx) => {
-              summaryMsg += `${idx + 1}. *${o.storeName}*: ${o.phone || "N/A"} (${o.items?.length || 0} items)
+              const cleanP = String(o.phone || "").replace(/\D/g, "");
+              const phoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : cleanP.length >= 10 ? `+${cleanP}` : o.phone || "N/A";
+              summaryMsg += `${idx + 1}. *${o.storeName}*: (${o.items?.length || 0} items)
+    ${phoneNoGap}
 `;
             });
             summaryMsg += `
@@ -43039,28 +46331,40 @@ ${order.items || "Standard Pharmacy Order"}
               "delivery_boy_summary",
               `Delivery Boy (${targetBoyName})`
             );
-            enqueuedIds.push(boyQueueId);
+            if (boyQueueId) enqueuedIds.push(boyQueueId);
           }
         }
+        const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
         for (const order of orders) {
           if (!order.phone || !order.message) continue;
-          const cleanPhone = String(order.phone).replace(/\D/g, "");
+          let cleanPhone = String(order.phone).replace(/\D/g, "");
+          if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
           if (cleanPhone.length < 10) continue;
+          if (cleanBoyPhone && cleanBoyPhone === cleanPhone && orders.length === 1) {
+            console.log(`[Queue Safeguard] Delivery boy phone matches distributor phone for ${order.storeName}. Skipping duplicate summary send.`);
+          }
+          const alreadyPlacedToday = await db2.get(
+            `SELECT id FROM pharmarack_placed_orders WHERE order_date = ? AND store_name = ? LIMIT 1`,
+            [today, order.storeName]
+          );
+          if (alreadyPlacedToday) {
+            console.log(`[Queue Safeguard] Order for ${order.storeName} was already placed today (${today}). Enqueuing fresh items delta.`);
+          }
           const distQueueId = await whatsappQueueWorker.enqueue(
             cleanPhone,
             order.message,
             "pharmarack_distributor_order",
             order.storeName
           );
-          enqueuedIds.push(distQueueId);
+          if (distQueueId) enqueuedIds.push(distQueueId);
           try {
-            const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+            const today2 = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
             const placedAt = Date.now();
             await db2.run(
               `INSERT INTO pharmarack_placed_orders (order_date, store_id, store_name, items_json, delivery_persons_json, placed_at, batch_sent, batch_sent_at)
            VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
               [
-                today,
+                today2,
                 order.storeId || null,
                 order.storeName,
                 JSON.stringify(order.items || []),
@@ -43097,7 +46401,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to enqueue Pharmarack batch orders" });
       }
     });
-    router38.post("/flush", async (_req, res) => {
+    router41.post("/flush", async (_req, res) => {
       try {
         whatsappQueueWorker.triggerProcessing();
         const state = await whatsappQueueWorker.getWorkerState();
@@ -43106,7 +46410,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to trigger queue processing" });
       }
     });
-    router38.post("/toggle-pause", async (_req, res) => {
+    router41.post("/toggle-pause", async (_req, res) => {
       try {
         const isPaused = whatsappQueueWorker.togglePaused();
         const state = await whatsappQueueWorker.getWorkerState();
@@ -43115,7 +46419,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to toggle queue pause" });
       }
     });
-    router38.post("/pause", async (_req, res) => {
+    router41.post("/pause", async (_req, res) => {
       try {
         whatsappQueueWorker.setPaused(true);
         const state = await whatsappQueueWorker.getWorkerState();
@@ -43124,7 +46428,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to pause queue" });
       }
     });
-    router38.post("/resume", async (_req, res) => {
+    router41.post("/resume", async (_req, res) => {
       try {
         whatsappQueueWorker.setPaused(false);
         whatsappQueueWorker.triggerProcessing();
@@ -43134,7 +46438,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to resume queue" });
       }
     });
-    router38.post("/retry-failed", async (_req, res) => {
+    router41.post("/retry-failed", async (_req, res) => {
       try {
         const retriedCount = await whatsappQueueWorker.retryAllFailed();
         res.json({ success: true, retriedCount, message: `Reset ${retriedCount} failed queue item(s) to pending` });
@@ -43142,7 +46446,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to retry failed items" });
       }
     });
-    router38.put("/pacing", async (req, res) => {
+    router41.put("/pacing", async (req, res) => {
       const { minSec, maxSec } = req.body;
       if (typeof minSec !== "number" || typeof maxSec !== "number") {
         return res.status(400).json({ error: "minSec and maxSec numbers required" });
@@ -43154,7 +46458,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to update pacing" });
       }
     });
-    router38.put("/update-item", async (req, res) => {
+    router41.put("/update-item", async (req, res) => {
       const { id, number, message } = req.body;
       if (!id || !number) {
         return res.status(400).json({ error: "id and number are required" });
@@ -43169,7 +46473,7 @@ ${order.items || "Standard Pharmacy Order"}
         res.status(500).json({ error: err?.message || "Failed to update queue item" });
       }
     });
-    whatsappQueue_default = router38;
+    whatsappQueue_default = router41;
   }
 });
 
@@ -43184,15 +46488,15 @@ async function logAction(db2, actionType, description) {
     [actionType, description]
   );
 }
-var import_express39, router39, investigation_default;
+var import_express42, router42, investigation_default;
 var init_investigation = __esm({
   "src/routes/investigation.ts"() {
     "use strict";
-    import_express39 = __toESM(require("express"), 1);
+    import_express42 = __toESM(require("express"), 1);
     init_connection();
     init_inventoryCache();
-    router39 = import_express39.default.Router();
-    router39.get("/timeline", async (req, res) => {
+    router42 = import_express42.default.Router();
+    router42.get("/timeline", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const {
@@ -43633,7 +46937,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router39.get("/search", async (req, res) => {
+    router42.get("/search", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const {
@@ -43727,7 +47031,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router39.get("/details/:inventoryId", async (req, res) => {
+    router42.get("/details/:inventoryId", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const { inventoryId } = req.params;
@@ -43792,7 +47096,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    router39.put("/inventory/:inventoryId", async (req, res) => {
+    router42.put("/inventory/:inventoryId", async (req, res) => {
       let db2;
       try {
         db2 = await dbManager.getConnection();
@@ -43843,7 +47147,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: err.message || "Internal server error" });
       }
     });
-    router39.put("/sales/:invoiceId", async (req, res) => {
+    router42.put("/sales/:invoiceId", async (req, res) => {
       let db2;
       try {
         db2 = await dbManager.getConnection();
@@ -43974,7 +47278,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: err.message || "Internal server error" });
       }
     });
-    router39.put("/purchases/:purchaseId", async (req, res) => {
+    router42.put("/purchases/:purchaseId", async (req, res) => {
       let db2;
       try {
         db2 = await dbManager.getConnection();
@@ -44103,7 +47407,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: err.message || "Internal server error" });
       }
     });
-    router39.get("/audit-logs/:inventoryId", async (req, res) => {
+    router42.get("/audit-logs/:inventoryId", async (req, res) => {
       try {
         const db2 = await dbManager.getConnection();
         const { inventoryId } = req.params;
@@ -44130,7 +47434,7 @@ var init_investigation = __esm({
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    investigation_default = router39;
+    investigation_default = router42;
   }
 });
 
@@ -44139,16 +47443,16 @@ var medicineAvailability_exports = {};
 __export(medicineAvailability_exports, {
   default: () => medicineAvailability_default
 });
-var import_express40, router40, medicineAvailability_default;
+var import_express43, router43, medicineAvailability_default;
 var init_medicineAvailability = __esm({
   "src/routes/medicineAvailability.ts"() {
     "use strict";
-    import_express40 = __toESM(require("express"), 1);
+    import_express43 = __toESM(require("express"), 1);
     init_medicineAvailabilityEngine();
     init_stockCalculatorWorker();
     init_substituteCacheWorker();
-    router40 = import_express40.default.Router();
-    router40.get("/medicines/availability", async (req, res) => {
+    router43 = import_express43.default.Router();
+    router43.get("/medicines/availability", async (req, res) => {
       try {
         const query = req.query.query || "";
         const mode = req.query.mode || "POS";
@@ -44168,7 +47472,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.get("/medicines/search-full", async (req, res) => {
+    router43.get("/medicines/search-full", async (req, res) => {
       try {
         const query = req.query.query || "";
         const mode = req.query.mode || "POS";
@@ -44190,7 +47494,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.get("/medicines/substitutes/:medicineId", async (req, res) => {
+    router43.get("/medicines/substitutes/:medicineId", async (req, res) => {
       try {
         const medicineId = parseInt(req.params.medicineId);
         if (isNaN(medicineId)) {
@@ -44208,7 +47512,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.get("/medicines/emergency-stock", async (req, res) => {
+    router43.get("/medicines/emergency-stock", async (req, res) => {
       try {
         const categories = req.query.categories?.split(",") || [
           "Injured soldiers medicaments",
@@ -44222,7 +47526,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.post("/medicines/learn-correction", async (req, res) => {
+    router43.post("/medicines/learn-correction", async (req, res) => {
       try {
         const { originalQuery, correctedMedicineId, context } = req.body;
         if (!originalQuery || !correctedMedicineId) {
@@ -44239,7 +47543,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.post("/medicines/recalculate-stock", async (req, res) => {
+    router43.post("/medicines/recalculate-stock", async (req, res) => {
       try {
         await recalculateStockLimits();
         medicineAvailabilityEngine.refreshStockCache();
@@ -44249,7 +47553,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    router40.post("/medicines/rebuild-substitutes", async (req, res) => {
+    router43.post("/medicines/rebuild-substitutes", async (req, res) => {
       try {
         await precomputeSubstitutes();
         res.json({ success: true, message: "Substitutes rebuilt" });
@@ -44258,7 +47562,7 @@ var init_medicineAvailability = __esm({
         res.status(500).json({ error: error.message });
       }
     });
-    medicineAvailability_default = router40;
+    medicineAvailability_default = router43;
   }
 });
 
@@ -44376,17 +47680,17 @@ __export(whatsappQueue_exports2, {
   default: () => whatsappQueue_default2,
   whatsappQueue: () => whatsappQueue
 });
-var import_path54, import_url50, __filename49, __dirname49, DB_PATH33, WhatsappQueue, whatsappQueue, whatsappQueue_default2;
+var import_path56, import_url50, __filename49, __dirname49, DB_PATH33, WhatsappQueue, whatsappQueue, whatsappQueue_default2;
 var init_whatsappQueue2 = __esm({
   "src/services/whatsappQueue.ts"() {
     "use strict";
     init_connection();
-    import_path54 = __toESM(require("path"), 1);
+    import_path56 = __toESM(require("path"), 1);
     import_url50 = require("url");
     init_whatsappClient();
     __filename49 = (0, import_url50.fileURLToPath)(import_meta_url);
-    __dirname49 = import_path54.default.dirname(__filename49);
-    DB_PATH33 = process.env.DB_PATH || import_path54.default.resolve(__dirname49, "..", "..", "data", "app.db");
+    __dirname49 = import_path56.default.dirname(__filename49);
+    DB_PATH33 = process.env.DB_PATH || import_path56.default.resolve(__dirname49, "..", "..", "data", "app.db");
     WhatsappQueue = class {
       isProcessing = false;
       async queueJob(invoiceId, phone, pdfPath, caption, explicitScheduledAt) {
@@ -44691,18 +47995,18 @@ __export(server_exports, {
   extractMedicinesWithPython: () => extractMedicinesWithPython
 });
 function lazyRoute(loader) {
-  let router41 = null;
+  let router44 = null;
   let loadPromise = null;
   return (req, res, next) => {
     if (process.env.NODE_ENV !== "production") {
       loader().then((m) => m.default(req, res, next)).catch(next);
       return;
     }
-    if (router41) return router41(req, res, next);
+    if (router44) return router44(req, res, next);
     if (!loadPromise) {
       loadPromise = loader().then((m) => {
-        router41 = m.default;
-        return router41;
+        router44 = m.default;
+        return router44;
       });
     }
     loadPromise.then((r) => r(req, res, next)).catch(next);
@@ -44710,8 +48014,8 @@ function lazyRoute(loader) {
 }
 function extractMedicinesWithPython(messageText) {
   return new Promise((resolve, reject) => {
-    const pythonExecutable = import_path55.default.resolve("python_scripts", ".venv", "Scripts", "python.exe");
-    const scriptPath = import_path55.default.resolve("python_scripts", "extract_medicine.py");
+    const pythonExecutable = import_path57.default.resolve("python_scripts", ".venv", "Scripts", "python.exe");
+    const scriptPath = import_path57.default.resolve("python_scripts", "extract_medicine.py");
     const pythonProcess = (0, import_child_process8.spawn)(pythonExecutable, [scriptPath, messageText]);
     let resultData = "";
     let errorData = "";
@@ -44896,20 +48200,20 @@ async function gracefulShutdown(signal) {
   await dbManager.close(true);
   process.exit(0);
 }
-var import_express41, import_compression, import_cors, import_helmet, import_express_rate_limit, import_path55, import_child_process8, import_url51, import_fs43, __filename50, __dirname50, DB_PATH34, schemaReady, app, UPLOAD_DIR2, TEMP_DIR5, RAW_DIR2, ALLOWED_ORIGINS, appDataDir2, frontendCandidates, frontendDist, PORT, server;
+var import_express44, import_compression, import_cors, import_helmet, import_express_rate_limit, import_path57, import_child_process8, import_url51, import_fs45, __filename50, __dirname50, DB_PATH34, schemaReady, app, UPLOAD_DIR2, TEMP_DIR5, RAW_DIR2, ALLOWED_ORIGINS, appDataDir2, frontendCandidates, frontendDist, PORT, server;
 var init_server = __esm({
   "src/server.ts"() {
     "use strict";
     init_sqlitePatch();
-    import_express41 = __toESM(require("express"), 1);
+    import_express44 = __toESM(require("express"), 1);
     import_compression = __toESM(require("compression"), 1);
     import_cors = __toESM(require("cors"), 1);
     import_helmet = __toESM(require("helmet"), 1);
     import_express_rate_limit = __toESM(require("express-rate-limit"), 1);
-    import_path55 = __toESM(require("path"), 1);
+    import_path57 = __toESM(require("path"), 1);
     import_child_process8 = require("child_process");
     import_url51 = require("url");
-    import_fs43 = __toESM(require("fs"), 1);
+    import_fs45 = __toESM(require("fs"), 1);
     init_auth();
     init_errorHandler();
     init_notFoundHandler();
@@ -44920,13 +48224,12 @@ var init_server = __esm({
     init_dataFetchControl();
     init_config();
     __filename50 = (0, import_url51.fileURLToPath)(import_meta_url);
-    __dirname50 = import_path55.default.dirname(__filename50);
+    __dirname50 = import_path57.default.dirname(__filename50);
     DB_PATH34 = config.dbPath;
     schemaReady = false;
     registerProcessGuardian();
-    process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || "true";
-    process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || "true";
-    console.log("\u{1F6D1} ALL SELF-HEALING WORKERS AND BACKGROUND SUPERVISORS ARE STOPPED AND DISABLED.");
+    process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || "false";
+    process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || "false";
     if (process.env.SKIP_AUTH === "true" && process.env.NODE_ENV === "production" && process.env.ENFORCE_PROD_AUTH === "true") {
       throw new Error(
         "FATAL: SKIP_AUTH=true is set while NODE_ENV=production and ENFORCE_PROD_AUTH=true. This is forbidden. Unset SKIP_AUTH before deploying to production server."
@@ -44935,7 +48238,7 @@ var init_server = __esm({
     if (process.env.SKIP_AUTH === "true") {
       console.warn("\u26A0\uFE0F  AUTH BYPASS ACTIVE \u2014 SKIP_AUTH=true.");
     }
-    app = (0, import_express41.default)();
+    app = (0, import_express44.default)();
     app.use((0, import_compression.default)());
     app.use((req, res, next) => {
       const isEnrichmentStatus = req.path.startsWith("/api/enrichment/status") || req.path.startsWith("/api/enrichment/queue");
@@ -44948,15 +48251,15 @@ var init_server = __esm({
     });
     UPLOAD_DIR2 = config.uploadDir;
     TEMP_DIR5 = config.tempDir;
-    RAW_DIR2 = import_path55.default.join(getAppDataDir(), "catalogue", "raw");
-    if (!import_fs43.default.existsSync(UPLOAD_DIR2)) {
-      import_fs43.default.mkdirSync(UPLOAD_DIR2, { recursive: true });
+    RAW_DIR2 = import_path57.default.join(getAppDataDir(), "catalogue", "raw");
+    if (!import_fs45.default.existsSync(UPLOAD_DIR2)) {
+      import_fs45.default.mkdirSync(UPLOAD_DIR2, { recursive: true });
     }
-    if (!import_fs43.default.existsSync(TEMP_DIR5)) {
-      import_fs43.default.mkdirSync(TEMP_DIR5, { recursive: true });
+    if (!import_fs45.default.existsSync(TEMP_DIR5)) {
+      import_fs45.default.mkdirSync(TEMP_DIR5, { recursive: true });
     }
-    if (!import_fs43.default.existsSync(RAW_DIR2)) {
-      import_fs43.default.mkdirSync(RAW_DIR2, { recursive: true });
+    if (!import_fs45.default.existsSync(RAW_DIR2)) {
+      import_fs45.default.mkdirSync(RAW_DIR2, { recursive: true });
     }
     app.use((0, import_helmet.default)({
       contentSecurityPolicy: false
@@ -44991,9 +48294,9 @@ var init_server = __esm({
       skip: (req) => process.env.NODE_ENV !== "production" || req.path.startsWith("/api/migration") || req.path.startsWith("/api/notifications"),
       message: { error: "Too many requests, please try again later" }
     }));
-    app.use(import_express41.default.json({ limit: "15mb" }));
-    app.use("/uploads", import_express41.default.static(UPLOAD_DIR2));
-    app.use("/data/search_screenshots", import_express41.default.static(import_path55.default.join(getAppDataDir(), "data", "search_screenshots")));
+    app.use(import_express44.default.json({ limit: "15mb" }));
+    app.use("/uploads", import_express44.default.static(UPLOAD_DIR2));
+    app.use("/data/search_screenshots", import_express44.default.static(import_path57.default.join(getAppDataDir(), "data", "search_screenshots")));
     app.use("/api/wa-business/webhook", lazyRoute(() => Promise.resolve().then(() => (init_whatsappBusiness(), whatsappBusiness_exports))));
     app.get("/api/health", (req, res) => {
       res.json({ success: true, status: "ok", time: (/* @__PURE__ */ new Date()).toISOString() });
@@ -45046,6 +48349,7 @@ var init_server = __esm({
     app.use("/api/inventory", lazyRoute(() => Promise.resolve().then(() => (init_inventory(), inventory_exports))));
     app.use("/api/dashboard", lazyRoute(() => Promise.resolve().then(() => (init_dashboard(), dashboard_exports))));
     app.use("/api/purchases", lazyRoute(() => Promise.resolve().then(() => (init_purchases(), purchases_exports))));
+    app.use("/api/sell-price", lazyRoute(() => Promise.resolve().then(() => (init_sellPrice(), sellPrice_exports))));
     app.use("/api/returns", lazyRoute(() => Promise.resolve().then(() => (init_returns(), returns_exports))));
     app.use("/api/customer-returns", lazyRoute(() => Promise.resolve().then(() => (init_customerReturns(), customerReturns_exports))));
     app.use("/api/credit-notes", lazyRoute(() => Promise.resolve().then(() => (init_creditNotes(), creditNotes_exports))));
@@ -45054,35 +48358,36 @@ var init_server = __esm({
     app.use("/api/expiry", lazyRoute(() => Promise.resolve().then(() => (init_expiry(), expiry_exports))));
     app.use("/api/reports", lazyRoute(() => Promise.resolve().then(() => (init_reports(), reports_exports))));
     app.use("/api/compliance", lazyRoute(() => Promise.resolve().then(() => (init_compliance(), compliance_exports))));
+    app.use("/api/email-order-reviews", lazyRoute(() => Promise.resolve().then(() => (init_emailOrderReviews(), emailOrderReviews_exports))));
     app.use("/api/license", lazyRoute(() => Promise.resolve().then(() => (init_license(), license_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_upload(), upload_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_catalog(), catalog_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_medicines(), medicines_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_enrichment(), enrichment_exports))));
+    app.use("/api/contacts", lazyRoute(() => Promise.resolve().then(() => (init_contacts(), contacts_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_distributors(), distributors_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_notifications2(), notifications_exports))));
     app.use("/api/whatsapp/queue", lazyRoute(() => Promise.resolve().then(() => (init_whatsappQueue(), whatsappQueue_exports))));
     app.use("/api/investigation", lazyRoute(() => Promise.resolve().then(() => (init_investigation(), investigation_exports))));
-    app.use("/api/dispatch", lazyRoute(() => Promise.resolve().then(() => (init_dispatch(), dispatch_exports))));
     app.use("/api", lazyRoute(() => Promise.resolve().then(() => (init_medicineAvailability(), medicineAvailability_exports))));
     appDataDir2 = getAppDataDir();
     frontendCandidates = [
-      import_path55.default.resolve(appDataDir2, "frontend", "dist"),
-      import_path55.default.resolve(process.cwd(), "frontend", "dist"),
-      import_path55.default.resolve(__dirname50, "..", "frontend", "dist"),
-      import_path55.default.resolve(__dirname50, "..", "..", "frontend", "dist"),
-      import_path55.default.resolve(process.cwd(), "dist"),
-      import_path55.default.resolve(appDataDir2, "dist")
+      import_path57.default.resolve(appDataDir2, "frontend", "dist"),
+      import_path57.default.resolve(process.cwd(), "frontend", "dist"),
+      import_path57.default.resolve(__dirname50, "..", "frontend", "dist"),
+      import_path57.default.resolve(__dirname50, "..", "..", "frontend", "dist"),
+      import_path57.default.resolve(process.cwd(), "dist"),
+      import_path57.default.resolve(appDataDir2, "dist")
     ];
-    frontendDist = frontendCandidates.find((dir) => import_fs43.default.existsSync(import_path55.default.join(dir, "index.html"))) || frontendCandidates[0];
-    app.use(import_express41.default.static(frontendDist));
+    frontendDist = frontendCandidates.find((dir) => import_fs45.default.existsSync(import_path57.default.join(dir, "index.html"))) || frontendCandidates[0];
+    app.use(import_express44.default.static(frontendDist));
     app.use((req, res, next) => {
       if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/ws")) return next();
       if (req.path.startsWith("/assets/") || /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff2?|ttf|map)$/i.test(req.path)) {
         return res.status(404).send("Asset not found");
       }
-      const indexPath = import_path55.default.join(frontendDist, "index.html");
-      if (import_fs43.default.existsSync(indexPath)) {
+      const indexPath = import_path57.default.join(frontendDist, "index.html");
+      if (import_fs45.default.existsSync(indexPath)) {
         return res.sendFile(indexPath);
       }
       res.status(503).send(`
@@ -45169,7 +48474,6 @@ var init_server = __esm({
             // Step 2: Unified Engine background workers
             (async () => {
               const { startStockCalculatorWorker: startStockCalculatorWorker2 } = await Promise.resolve().then(() => (init_stockCalculatorWorker(), stockCalculatorWorker_exports));
-              const { startSubstituteCacheWorker: startSubstituteCacheWorker2 } = await Promise.resolve().then(() => (init_substituteCacheWorker(), substituteCacheWorker_exports));
               startStockCalculatorWorker2();
               console.log("[Boot] Unified Engine background workers started");
             })(),
