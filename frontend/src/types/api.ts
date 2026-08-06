@@ -43,6 +43,7 @@ export interface Medicine {
   marketed_by?: string;
   manufactured_by?: string;
   mrp?: number;
+  sell_price?: number | string | null;
   purchase_price?: number;
   gst?: string;
   hsn?: string;

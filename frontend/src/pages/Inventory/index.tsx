@@ -78,13 +78,14 @@ const Inventory = () => {
 
   // Column Visibility — persisted in localStorage
   const COL_KEYS = [
-    { key: 'id',     label: 'ID' },
-    { key: 'batch',  label: 'Batch' },
-    { key: 'expiry', label: 'Expiry' },
-    { key: 'packs',  label: 'Packs' },
-    { key: 'loose',  label: 'Loose' },
-    { key: 'mrp',    label: 'MRP' },
-    { key: 'rack',   label: 'Rack' },
+    { key: 'id',         label: 'ID' },
+    { key: 'batch',      label: 'Batch' },
+    { key: 'expiry',     label: 'Expiry' },
+    { key: 'packs',      label: 'Packs' },
+    { key: 'loose',      label: 'Loose' },
+    { key: 'mrp',        label: 'MRP' },
+    { key: 'sell_price', label: 'Sell Price' },
+    { key: 'rack',       label: 'Rack' },
   ] as const;
   type ColKey = typeof COL_KEYS[number]['key'];
   const defaultVisible = new Set<ColKey>(COL_KEYS.map(c => c.key));
@@ -119,6 +120,7 @@ const Inventory = () => {
       ...(col('packs') ? [{ key: 'stock_quantity', label: 'Packs' }] : []),
       ...(col('loose') ? [{ key: 'loose_quantity', label: 'Loose' }] : []),
       ...(col('mrp') ? [{ key: 'mrp', label: 'MRP' }] : []),
+      ...(col('sell_price') ? [{ key: 'sell_price', label: 'Sell Price' }] : []),
       ...(col('rack') ? [{ key: 'rack_location', label: 'Rack' }] : []),
     ];
 
@@ -483,6 +485,13 @@ const Inventory = () => {
                   </div>
                 </th>
               )}
+              {col('sell_price') && (
+                <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Sell Price</span>
+                  </div>
+                </th>
+              )}
               {col('rack') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
@@ -567,6 +576,11 @@ const Inventory = () => {
                     {col('mrp') && (
                       <td className="px-3 py-0 text-[12px] w-24 shrink-0 font-semibold text-green">
                         ₹{item.mrp?.toFixed(2) || '0.00'}
+                      </td>
+                    )}
+                    {col('sell_price') && (
+                      <td className="px-3 py-0 text-[12px] w-24 shrink-0 font-semibold text-primary font-mono">
+                        {item.sell_price ? `₹${Number(item.sell_price).toFixed(2)}` : <span className="opacity-30">—</span>}
                       </td>
                     )}
                     {col('rack') && (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Shield, Calendar, Search, Download, Printer, User, FileText, 
-  AlertTriangle, RefreshCw, CheckCircle, Filter, Edit3, ChevronRight, Check
+  AlertTriangle, RefreshCw, CheckCircle, Filter, Edit3, ChevronRight, Check, X
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDisplayDate } from '../../utils/date';

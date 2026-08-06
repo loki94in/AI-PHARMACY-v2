@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 .z-toast {
-  z-index: 99999 !important;
+  z-index: 10020 !important;
 }
 .z-dropdown {
-  z-index: 9999 !important;
+  z-index: 999 !important;
 }
 .z-sticky-header {
   z-index: 1000 !important;

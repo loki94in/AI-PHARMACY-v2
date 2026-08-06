@@ -32,9 +32,9 @@ interface ReturnItem {
   medicine_name: string;
   batch_no: string;
   expiry_date: string;
-  quantity: number;
-  cost_price: number;
-  mrp: number;
+  quantity: number | string;
+  cost_price: number | string;
+  mrp: number | string;
   purchase_item_id?: number;
   invoice_no?: string;
   purchase_date?: string;
@@ -182,7 +182,7 @@ const Returns: React.FC = () => {
         distributor_id: item.distributor_id || ret.distributor_id,
       }));
       setHistoryReturnItems(mapped);
-      setEditingItems(mapped.map(i => ({ ...i })));
+      setEditingItems(mapped.map((i: any) => ({ ...i })));
     } catch (error) {
       console.error('Error fetching return items:', error);
     } finally {
@@ -223,7 +223,7 @@ const Returns: React.FC = () => {
     setSaving(true);
     try {
       const validItems = editingItems.filter(i => i.medicine_id && (parseFloat(i.quantity) || 0) > 0);
-      const total = validItems.reduce((s, i) => s + (i.cost_price || 0) * (i.quantity || 0), 0);
+      const total = validItems.reduce((s, i) => s + (Number(i.cost_price) || 0) * (Number(i.quantity) || 0), 0);
       await api.updateReturn(selectedHistoryReturn.id, { items: validItems, total_amount: total });
       setIsEditingHistory(false);
       await handleSelectHistoryReturn(selectedHistoryReturn);
@@ -914,8 +914,8 @@ const Returns: React.FC = () => {
                   className="w-full px-1.5 py-0.5 bg-bg border border-glass-border rounded text-[10px] text-text focus:outline-none"
                 >
                   <option value="">All Distributors</option>
-                  {[...new Set(returnHistory.map(r => r.distributor_name).filter(Boolean))].map(d => (
-                    <option key={d} value={d}>{d}</option>
+                  {[...new Set(returnHistory.map((r: any) => r.distributor_name).filter(Boolean))].map((d: any) => (
+                    <option key={String(d)} value={String(d)}>{String(d)}</option>
                   ))}
                 </select>
               </div>
@@ -950,7 +950,7 @@ const Returns: React.FC = () => {
             <div className="space-y-1.5">
               {loading ? (
                 <div className="text-center py-4 text-xs text-muted">Loading...</div>
-              ) : returnHistory.filter(ret => {
+              ) : returnHistory.filter((ret: any) => {
                   const itemDate = ret.date ? ret.date.substring(0, 10) : '';
                   const matchesDate = (!dateFrom || itemDate >= dateFrom) && (!dateTo || itemDate <= dateTo);
                   const matchesMin = !minAmount || (ret.total_amount || 0) >= Number(minAmount);
@@ -960,14 +960,14 @@ const Returns: React.FC = () => {
                 }).length === 0 ? (
                 <div className="text-center py-4 text-xs text-muted">No returns found.</div>
               ) : (
-                returnHistory.filter(ret => {
+                returnHistory.filter((ret: any) => {
                   const itemDate = ret.date ? ret.date.substring(0, 10) : '';
                   const matchesDate = (!dateFrom || itemDate >= dateFrom) && (!dateTo || itemDate <= dateTo);
                   const matchesMin = !minAmount || (ret.total_amount || 0) >= Number(minAmount);
                   const matchesMax = !maxAmount || (ret.total_amount || 0) <= Number(maxAmount);
                   const matchesDist = !distributorFilter || ret.distributor_name === distributorFilter;
                   return matchesDate && matchesMin && matchesMax && matchesDist;
-                }).map((ret) => {
+                }).map((ret: any) => {
                   const isSelected = selectedHistoryReturn?.id === ret.id;
                   return (
                     <div 
@@ -1602,7 +1602,7 @@ const Returns: React.FC = () => {
                           <td className="py-2 text-muted">{item.expiry_date}</td>
                           <td className="py-2 text-right text-muted">{item.quantity}</td>
                           <td className="py-2 text-right text-muted">₹{item.cost_price}</td>
-                          <td className="py-2 text-right text-text font-semibold">₹{(item.cost_price * item.quantity).toFixed(2)}</td>
+                          <td className="py-2 text-right text-text font-semibold">₹{((Number(item.cost_price) || 0) * (Number(item.quantity) || 0)).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>

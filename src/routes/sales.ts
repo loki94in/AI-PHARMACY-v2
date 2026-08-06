@@ -1303,6 +1303,7 @@ router.get('/search-medicine', async (req, res) => {
           im.quantity AS quantity, 
           im.loose_quantity AS loose_quantity,
           COALESCE(im.mrp, m.mrp, 0) AS mrp, 
+          m.sell_price,
           im.unit_price, 
           COALESCE(im.cost_price, 0) AS cost_price,
           m.cgst_per, 

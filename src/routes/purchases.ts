@@ -1211,6 +1211,7 @@ router.put('/:id/full', async (req, res) => {
     }
 
     // 4. Insert new items
+    const savedItems: any[] = [];
     for (const item of items) {
       const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
       
@@ -1281,6 +1282,17 @@ router.put('/:id/full', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
+      // Fetch current sell_price for saved_items
+      const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
+      savedItems.push({
+        medicine_id: medId,
+        name: medName,
+        medicine_name: medName,
+        rate: rawRate,
+        mrp: mrp || 0,
+        sell_price: medRow?.sell_price ?? null
+      });
+
       // Update inventory_master (add new quantity and update cost_price, mrp, expiry_date)
       const totalQty = rawQty + rawFreeQty;
       const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
@@ -1323,7 +1335,14 @@ router.put('/:id/full', async (req, res) => {
       })();
     }
 
-        res.json({ success: true, message: 'Purchase updated successfully' });
+    res.json({
+      success: true,
+      message: 'Purchase updated successfully',
+      app_invoice_no: invoice_no,
+      purchase_id: Number(id),
+      saved_items: savedItems,
+      saved_medicines: savedItems
+    });
   } catch (error: any) {
     console.error('Full purchase update error:', error);
     if (db) {

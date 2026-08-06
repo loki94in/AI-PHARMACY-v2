@@ -258,17 +258,23 @@ const POS = () => {
           const results = await api.searchMedicine(refillMedicineName);
           if (results && results.length > 0) {
             const matched = results[0];
+            const sellPrice = Number(matched.sell_price || 0);
+            const mrp = Number(matched.mrp || 100);
+            const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+              ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+              : 0;
             const cartItem = {
               id: matched.id,
               name: matched.name,
               batch: matched.batch_no || matched.batch_number || 'AUTO',
               expiry: matched.expiry_date || '12/28',
               mrp: matched.mrp || 100,
+              sell_price: matched.sell_price || null,
               qty: Number(refillQty),
               quantity: Number(refillQty),
               unitPrice: matched.unit_price || matched.mrp || 100,
               looseQty: 0,
-              discount: 0,
+              discount: autoDisc,
               packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10
             };
             setCart([cartItem]);
@@ -379,17 +385,23 @@ const POS = () => {
                 const matched = await api.searchMedicine(targetName);
                 if (matched && matched.length > 0) {
                   const m = matched[0];
+                  const sellPrice = Number(m.sell_price || 0);
+                  const mrp = Number(m.mrp || 100);
+                  const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                    ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                    : 0;
                   cartItems.push({
                     id: m.id,
                     name: m.name,
                     batch: m.batch_no || m.batch_number || 'AUTO',
                     expiry: m.expiry_date || '12/28',
                     mrp: m.mrp || 100,
+                    sell_price: m.sell_price || null,
                     qty: targetQty,
                     quantity: targetQty,
                     unitPrice: m.unit_price || m.mrp || 100,
                     looseQty: 0,
-                    discount: 0,
+                    discount: autoDisc,
                     packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 10
                   });
                 } else {
@@ -1050,17 +1062,23 @@ const POS = () => {
     try {
       const results = await api.searchMedicine(matchedRefill.medicine_name);
       const matched = (results && results.length > 0) ? results[0] : null;
+      const sellPrice = matched ? Number(matched.sell_price || 0) : 0;
+      const mrp = matched ? Number(matched.mrp || 100) : 100;
+      const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+        ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+        : 0;
       const cartItem = {
         id: matched ? matched.id : matchedRefill.medicine_id,
         name: matchedRefill.medicine_name,
         batch: matched ? (matched.batch_no || matched.batch_number || 'AUTO') : 'AUTO',
         expiry: matched ? (matched.expiry_date || '12/28') : '12/28',
         mrp: matched ? (matched.mrp || 100) : 100,
+        sell_price: matched?.sell_price || null,
         qty: Number(matchedRefill.quantity),
         quantity: Number(matchedRefill.quantity),
         unitPrice: matched ? (matched.unit_price || matched.mrp || 100) : 100,
         looseQty: 0,
-        discount: 0,
+        discount: autoDisc,
         packSize: matched ? (parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10) : 10
       };
 
@@ -3405,12 +3423,20 @@ const POS = () => {
                                       onMouseDown={() => {
                                         updateCart(prev => prev.map(cItem => {
                                           if (cItem.id !== item.id) return cItem;
+                                          const newSellPrice = b.sell_price || cItem.sell_price || null;
+                                          const newMrp = Number(b.mrp || cItem.mrp || 0);
+                                          const numSellPrice = Number(newSellPrice || 0);
+                                          const autoDiscount = (numSellPrice > 0 && newMrp > 0 && numSellPrice < newMrp)
+                                            ? parseFloat((((newMrp - numSellPrice) / newMrp) * 100).toFixed(2))
+                                            : cItem.discount;
                                           return {
                                             ...cItem,
                                             id: b.inventory_id,
                                             batch: b.batch_no,
                                             expiry: b.expiry_date,
                                             mrp: b.mrp,
+                                            sell_price: newSellPrice,
+                                            discount: autoDiscount,
                                             costPrice: b.cost_price,
                                             packSize: b.pack_size || cItem.packSize,
                                             availableStock: b.quantity !== undefined ? b.quantity : 0,

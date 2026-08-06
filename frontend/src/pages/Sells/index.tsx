@@ -123,7 +123,7 @@ const Sells = () => {
     try {
       const res = await api.generateSaleInvoiceBarcode(invoiceNo);
       if (res.success) {
-        setBarcodeData(res);
+        setBarcodeData(res as any);
       } else {
         toastEvent.trigger('Failed to generate invoice barcode', 'error');
       }
@@ -848,8 +848,8 @@ const Sells = () => {
                                         name: item.medicine_name,
                                         mrp: item.mrp,
                                         pack_size: item.pack_size,
-                                        batch_no: item.batch_no,
-                                        quantity: item.qty
+                                        batch_no: (item as any).batch_no || (item as any).batch || '',
+                                        quantity: (item as any).qty || item.quantity || 1
                                       });
                                       setUniversalEditMedicineId(item.medicine_id);
                                     }

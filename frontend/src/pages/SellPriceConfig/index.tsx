@@ -26,9 +26,11 @@ export default function SellPriceConfig() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const stateData = location.state as { invoiceNo?: string; isEdit?: boolean; items?: any[]; saved_items?: any[]; saved_medicines?: any[] } | undefined;
+  const isEdit = !!stateData?.isEdit;
+
   useEffect(() => {
     const urlInvoice = searchParams.get('invoice') || '';
-    const stateData = location.state as { invoiceNo?: string; items?: any[]; saved_items?: any[]; saved_medicines?: any[] } | undefined;
     const invNo = stateData?.invoiceNo || urlInvoice;
     if (invNo) {
       setInvoiceNo(invNo);
@@ -205,7 +207,7 @@ export default function SellPriceConfig() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-text flex items-center gap-2">
-              Set Sell Prices & Stock Limits
+              {isEdit ? 'Edit Sell Prices & Stock Limits' : 'Set Sell Prices & Stock Limits'}
               {invoiceNo && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-bg3 text-muted font-medium border border-glass-border">
                   Invoice: {invoiceNo}

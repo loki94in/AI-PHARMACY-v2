@@ -775,7 +775,6 @@ const Purchases: React.FC = () => {
 
       // Escape: Close Overlays / Modals
       if (e.key === 'Escape') {
-        setShowBarcodeModal(false);
         setShowUploadModal(false);
         setShowDistributorModal(false);
         setShowPriceHistoryModal(false);
@@ -859,7 +858,6 @@ const Purchases: React.FC = () => {
   const savingStartedAtRef = useRef<number>(0);
   const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
-  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
@@ -1360,10 +1358,10 @@ const Purchases: React.FC = () => {
                 const scored = matchedList.map((m: any) => ({
                   item: m,
                   score: calculateSimilarity(mName, m.name)
-                })).filter(s => s.score >= 0.60);
+                })).filter((s: any) => s.score >= 0.60);
                 
                 if (scored.length > 0) {
-                  scored.sort((a, b) => b.score - a.score);
+                  scored.sort((a: any, b: any) => b.score - a.score);
                   bestMatch = scored[0].item;
                 }
               }
@@ -1385,10 +1383,10 @@ const Purchases: React.FC = () => {
                   const scored = (tokenResults || []).map((m: any) => ({
                     item: m,
                     score: calculateSimilarity(mName, m.name)
-                  })).filter(s => s.score >= 0.60);
+                  })).filter((s: any) => s.score >= 0.60);
 
                   if (scored.length > 0) {
-                    scored.sort((a, b) => b.score - a.score);
+                    scored.sort((a: any, b: any) => b.score - a.score);
                     bestMatch = scored[0].item;
                   }
                 }
@@ -1726,7 +1724,8 @@ const Purchases: React.FC = () => {
       navigate(`/sell-price-config?invoice=${encodeURIComponent(savedInvoiceNo)}`, {
         state: {
           invoiceNo: savedInvoiceNo,
-          saved_medicines: savedMeds
+          saved_medicines: savedMeds,
+          isEdit: !!editPurchaseId
         }
       });
       setInvoiceNo('');
@@ -1745,17 +1744,6 @@ const Purchases: React.FC = () => {
 
       // Refresh local POS inventory search cache
       api.getCompactInventory().catch(() => {});
-
-      // Redirect user to dedicated Sell Price configuration page
-      const itemsToConfigure = response?.saved_items || validItems;
-      setTimeout(() => {
-        navigate('/sell-price-config', {
-          state: {
-            invoiceNo: savedInvoiceNo,
-            saved_items: itemsToConfigure
-          }
-        });
-      }, 300);
     } catch (error: any) {
       console.error('Error saving purchase:', error);
       const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
@@ -3249,81 +3237,6 @@ const Purchases: React.FC = () => {
                 className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Barcode Print Prompt Modal */}
-      {showBarcodeModal && createPortal(
-        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md fade-in text-left">
-          <div className="bg-gray-900 border border-white/20 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col p-6 space-y-6">
-            <div className="text-center space-y-2">
-              <div className="inline-flex p-3 rounded-full bg-green-500/10 border border-green-500/20 text-green-400 mb-2">
-                <CheckCircle size={32} className="animate-bounce" />
-              </div>
-              <h3 className="text-lg font-bold text-white font-sans">Purchase Saved Successfully!</h3>
-              <p className="text-xs text-gray-400">Invoice No: <span className="font-mono text-blue-400 font-semibold">{lastSavedInvoiceNo}</span></p>
-            </div>
-
-            <div className="bg-white/5 border border-white/10 p-4 rounded-xl space-y-3">
-              <p className="text-xs text-center text-gray-200 font-medium leading-relaxed font-sans">
-                Would you like to print unique barcode/QR code labels for the medicines in this purchase, or generate a single barcode for the purchase bill itself?
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2.5">
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await api.generateMedicineBarcodes(lastSavedItems);
-                    if (res && res.success && res.pdfUrl) {
-                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                      window.open(`${backendUrl}${res.pdfUrl}`, '_blank');
-                    } else {
-                      alert('Failed to generate barcodes');
-                    }
-                  } catch (err) {
-                    console.error(err);
-                    alert('Error generating medicine barcodes');
-                  }
-                  setShowBarcodeModal(false);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-green-600 hover:bg-green-500 text-white transition-all shadow-[0_4px_12px_rgba(34,197,94,0.2)] flex items-center justify-center gap-2 font-sans"
-              >
-                Create Medicine Barcodes
-              </button>
-
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await api.generateBillBarcode(lastSavedInvoiceNo);
-                    if (res && res.success && res.pdfUrl) {
-                      const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-                      window.open(`${backendUrl}${res.pdfUrl}`, '_blank');
-                    } else {
-                      alert('Failed to generate bill barcode');
-                    }
-                  } catch (err) {
-                    console.error(err);
-                    alert('Error generating bill barcode');
-                  }
-                  setShowBarcodeModal(false);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-[0_4px_12px_rgba(59,130,246,0.2)] flex items-center justify-center gap-2 font-sans"
-              >
-                Create Bill Barcode
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowBarcodeModal(false);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all font-sans"
-              >
-                No / Skip
               </button>
             </div>
           </div>
