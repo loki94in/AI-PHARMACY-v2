@@ -10,101 +10,6 @@ export const apiClient = axios.create({
   },
 });
 
-let cachedBootstrapToken: string | null = null;
-let bootstrapTokenPromise: Promise<string | null> | null = null;
-
-/** Resolve auth token from storage or server bootstrap (no hardcoded fallback in bundle). */
-export async function ensureAuthToken(): Promise<string | null> {
-  try {
-    const stored = localStorage.getItem('session_token') || localStorage.getItem('api_key');
-    if (stored) return stored;
-  } catch {
-    // localStorage unavailable
-  }
-  if (cachedBootstrapToken) return cachedBootstrapToken;
-  if (!bootstrapTokenPromise) {
-    bootstrapTokenPromise = fetchBootstrapTokenWithRetry()
-      .then((data) => {
-        cachedBootstrapToken = data?.token?.trim() || null;
-        if (cachedBootstrapToken) {
-          try {
-            localStorage.setItem('session_token', cachedBootstrapToken);
-          } catch {
-            // localStorage unavailable
-          }
-        }
-        return cachedBootstrapToken;
-      })
-      .catch(() => null)
-      .finally(() => {
-        bootstrapTokenPromise = null;
-      });
-  }
-  return bootstrapTokenPromise;
-}
-
-// Retries with backoff so a transient failure during the ~1-60s server boot
-// window (schema still initializing — see /api/health/ready) doesn't leave
-// the client permanently tokenless. Bypasses apiClient/axios deliberately:
-// this call happens before any token exists, so it can't go through the
-// interceptor that attaches one.
-const BOOTSTRAP_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000];
-
-async function fetchBootstrapTokenWithRetry(): Promise<{ token?: string } | null> {
-  for (let attempt = 0; attempt <= BOOTSTRAP_RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      // A stalled connection here (no server response, no error) would otherwise
-      // hang forever with no AbortController — and since this runs inside the
-      // apiClient request interceptor, every API call (save, load, everything)
-      // would freeze along with it. Bound each attempt so the retry loop always
-      // keeps moving.
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      let res: Response;
-      try {
-        res = await fetch(`${API_URL}/auth/bootstrap-token`, { signal: controller.signal });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      if (res.ok) return res.json();
-      // 503 = server still initializing (schema not ready yet) — worth retrying.
-      // Any other non-OK status is not transient; stop retrying.
-      if (res.status !== 503) return null;
-    } catch {
-      // Network error or abort timeout — worth retrying.
-    }
-    const delay = BOOTSTRAP_RETRY_DELAYS_MS[attempt];
-    if (delay === undefined) break;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-  return null;
-}
-
-export function clearAuthTokenCache(): void {
-  cachedBootstrapToken = null;
-  bootstrapTokenPromise = null;
-  try {
-    localStorage.removeItem('session_token');
-    localStorage.removeItem('api_key');
-  } catch {
-    // localStorage unavailable
-  }
-}
-
-// Interceptor to attach the session token if available.
-// When unactivated, fetches token from /api/auth/bootstrap-token (server-side legacy key).
-apiClient.interceptors.request.use(async (config) => {
-  try {
-    const token = await ensureAuthToken();
-    if (token) {
-      config.headers['x-session-token'] = token;
-    }
-  } catch (err) {
-    console.warn('localStorage access denied. Token not attached.');
-  }
-  return config;
-});
-
 // Utility for API Data Standardization (snake_case -> camelCase)
 // This is the implementation of the missing data standardizer layer
 // DO NOT globally enable this interceptor yet as it will break 432+ legacy UI elements.
@@ -137,7 +42,7 @@ export const objectToCamelCase = (obj: any): any => {
 declare module 'axios' {
   export interface AxiosRequestConfig {
     standardizeData?: boolean;
-    _authRetry?: boolean;
+    _rateLimitRetryCount?: number;
   }
 }
 
@@ -152,23 +57,7 @@ apiClient.interceptors.response.use(
   },
   async (error) => {
     const config = error.config;
-    
-    // If 401 Unauthorized, clear stale cached token and retry once with fresh bootstrap token
-    if (error.response?.status === 401 && config && !config._authRetry) {
-      config._authRetry = true;
-      console.warn('[API] 401 Unauthorized. Clearing stale token cache and re-bootstrapping auth token...');
-      clearAuthTokenCache();
-      try {
-        const newToken = await ensureAuthToken();
-        if (newToken) {
-          config.headers['x-session-token'] = newToken;
-          return apiClient(config);
-        }
-      } catch (retryErr) {
-        console.error('[API] Auth re-bootstrap failed:', retryErr);
-      }
-    }
-    
+
     // If 503 Service Initializing, retry with backoff. A truly fresh install
     // (no pre-existing DB, unlike a dev machine reusing one) can take longer
     // than a few seconds to finish creating the schema on first-ever launch,
@@ -181,6 +70,20 @@ apiClient.interceptors.response.use(
         const delay = Math.min(baseDelay * config._retryCount, 5000);
         console.warn(`[API] Server is initializing. Retrying ${config.url} (Attempt ${config._retryCount}/${maxRetries}) in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
+        return apiClient(config);
+      }
+    }
+
+    // If 429 Too Many Requests, retry with exponential backoff rather than failing page rendering outright
+    if (error.response?.status === 429) {
+      const maxRetries = 3;
+      if (config && (!config._rateLimitRetryCount || config._rateLimitRetryCount < maxRetries)) {
+        config._rateLimitRetryCount = (config._rateLimitRetryCount || 0) + 1;
+        const retryAfterHeader = error.response?.headers?.['retry-after'];
+        const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : 0;
+        const backoffDelay = retryAfterMs || Math.min(1000 * Math.pow(2, config._rateLimitRetryCount - 1), 4000);
+        console.warn(`[API] 429 Rate limited on ${config.url}. Retrying (Attempt ${config._rateLimitRetryCount}/${maxRetries}) in ${backoffDelay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay));
         return apiClient(config);
       }
     }
@@ -200,9 +103,7 @@ apiClient.interceptors.response.use(
     // Diagnostics check for false backend errors — result attached to the rejected error so callers can inspect it
     if (isNetworkError && config && config.url !== '/verification/health' && config.url !== '/api/verification/health') {
       console.warn(`[Verification Layer] Request to ${config.url} failed. Performing silent health check...`);
-      axios.get('/api/verification/health', {
-        headers: config.headers ? { 'x-session-token': config.headers['x-session-token'] } : {}
-      })
+      axios.get('/api/verification/health')
       .then(res => {
         if (res.data && res.data.success) {
           const msg = `Backend & DB healthy — endpoint-specific issue on: ${config.url}`;
@@ -728,10 +629,7 @@ export const api = {
   // Utilities (Barcode generation)
   generateMedicineBarcodes: (items: Array<{ name: string; batch?: string }>) => apiClient.post('/utilities/barcode', { items }).then(res => res.data),
   generateBillBarcode: (code: string) => apiClient.get(`/utilities/barcode/${encodeURIComponent(code)}`).then(res => res.data),
-  
-  // License
-  getLicenseStatus: () => apiClient.get('/license/status').then(res => res.data),
-  activateLicense: (key: string) => apiClient.post('/license/activate', { licenseKey: key }).then(res => res.data),
+
 
   // WhatsApp Custom UI
   getWhatsappStatus: () => apiClient.get('/messaging/qr').then(res => res.data),

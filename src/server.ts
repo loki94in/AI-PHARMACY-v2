@@ -8,7 +8,6 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { authenticateApiKey } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { dbManager } from './database/connection.js';
@@ -23,9 +22,8 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = config.dbPath;
 
 // Flipped to true once ensureSchema() finishes below. Gates every /api route
-// (including the public bootstrap-token endpoint) so the first requests after
-// exe launch can't hit a not-yet-created schema and randomly 401/500 during
-// the boot window.
+// so the first requests after exe launch can't hit a not-yet-created schema
+// and randomly 500 during the boot window.
 let schemaReady = false;
 
 // Startup check disabled permanently
@@ -67,19 +65,6 @@ registerProcessGuardian();
 // Enable background workers and supervisors by default (can be disabled via env var if needed)
 process.env.DISABLE_BACKGROUND_WORKERS = process.env.DISABLE_BACKGROUND_WORKERS || 'false';
 process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORKERS || 'false';
-
-// ── SKIP_AUTH safety guard ──────────────────────────────────────────
-// Hard block: never allow auth bypass when ENFORCE_PROD_AUTH=true in production
-if (process.env.SKIP_AUTH === 'true' && process.env.NODE_ENV === 'production' && process.env.ENFORCE_PROD_AUTH === 'true') {
-  throw new Error(
-    'FATAL: SKIP_AUTH=true is set while NODE_ENV=production and ENFORCE_PROD_AUTH=true. ' +
-    'This is forbidden. Unset SKIP_AUTH before deploying to production server.'
-  );
-}
-if (process.env.SKIP_AUTH === 'true') {
-  console.warn('⚠️  AUTH BYPASS ACTIVE — SKIP_AUTH=true.');
-}
-// ────────────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(compression());
@@ -138,10 +123,16 @@ app.use(cors({
 }));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // limit each IP to 300 requests per window
+  max: 10000, // Increased threshold for high-frequency SPA interactions
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => process.env.NODE_ENV !== 'production' || req.path.startsWith('/api/migration') || req.path.startsWith('/api/notifications'),
+  skip: (req) => {
+    // Skip rate limits in dev mode, packaged desktop app, or local loopback requests
+    if (process.env.NODE_ENV !== 'production' || isPackagedApp()) return true;
+    const ip = req.ip || req.socket.remoteAddress || '';
+    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.includes('localhost')) return true;
+    return req.path.startsWith('/api/migration') || req.path.startsWith('/api/notifications');
+  },
   message: { error: 'Too many requests, please try again later' }
 }));
 app.use(express.json({ limit: '15mb' }));
@@ -169,46 +160,22 @@ app.get('/api/health/ready', (req, res) => {
   res.status(503).json({ success: false, ready: false, retryAfter: 1 });
 });
 
-// Block every other /api route — including the public bootstrap-token
-// endpoint — until the schema is ready. Responds 503 (not 401), which the
-// frontend already retries with backoff instead of surfacing as an auth error.
+// Block every other /api route until the schema is ready. Responds 503 (not
+// 401), which the frontend already retries with backoff.
 //
 // /migration is exempt: it must work on a fresh install before anything else
-// is ready (see the auth whitelist in middleware/auth.ts, which exempts it
-// for the same reason). Its DB-touching sub-routes already open the sqlite
-// file directly via dbManager and would simply 500 on a missing table during
-// the few-second schema-creation window — the same behavior they had before
-// this gate existed. Gating /migration here regressed it: multer's
-// disk-upload route needs no schema at all, but a slow first-ever schema
-// creation on a truly fresh %LOCALAPPDATA% install (no pre-existing DB, unlike
-// a dev machine reusing one) could outlast the frontend's 503 retry budget
-// and make file uploads fail outright.
+// is ready. Its DB-touching sub-routes already open the sqlite file directly
+// via dbManager and would simply 500 on a missing table during the few-second
+// schema-creation window — the same behavior they had before this gate
+// existed. Gating /migration here regressed it: multer's disk-upload route
+// needs no schema at all, but a slow first-ever schema creation on a truly
+// fresh %LOCALAPPDATA% install (no pre-existing DB, unlike a dev machine
+// reusing one) could outlast the frontend's 503 retry budget and make file
+// uploads fail outright.
 app.use('/api', (req, res, next) => {
   if (schemaReady || req.path === '/health' || req.path === '/health/ready' || req.path.startsWith('/migration')) return next();
   res.status(503).json({ error: 'Server is initializing', retryAfter: 1 });
 });
-
-// Local SPA bootstrap: issue session token without embedding defaults in the client bundle
-app.get('/api/auth/bootstrap-token', async (_req, res) => {
-  try {
-    const db = await dbManager.getConnection();
-    const row = await db.get<{ value: string }>(
-      "SELECT value FROM app_settings WHERE key = 'license_session_token'"
-    );
-    const sessionToken = row?.value?.trim();
-    if (sessionToken) {
-      return res.json({ token: sessionToken, source: 'session' });
-    }
-    const { config } = await import('./config/index.js');
-    return res.json({ token: config.apiKey, source: 'legacy' });
-  } catch (err) {
-    console.error('[Auth] bootstrap-token error:', err);
-    return res.status(500).json({ error: 'Failed to resolve auth token' });
-  }
-});
-
-// Session token auth for all other API routes
-app.use('/api', authenticateApiKey);
 
 // All routes lazy-loaded: modules import on first request, not at server startup.
 // Agent 2 (CRM & Utilities) Routers
@@ -245,7 +212,6 @@ app.use('/api/expiry', lazyRoute(() => import('./routes/expiry.js')));
 app.use('/api/reports', lazyRoute(() => import('./routes/reports.js')));
 app.use('/api/compliance', lazyRoute(() => import('./routes/compliance.js')));
 app.use('/api/email-order-reviews', lazyRoute(() => import('./routes/emailOrderReviews.js')));
-app.use('/api/license', lazyRoute(() => import('./routes/license.js')));
 // Generic /api routes
 app.use('/api', lazyRoute(() => import('./routes/upload.js')));
 app.use('/api', lazyRoute(() => import('./routes/catalog.js')));

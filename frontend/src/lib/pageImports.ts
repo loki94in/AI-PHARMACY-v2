@@ -7,7 +7,6 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/purchase-history': () => import('../pages/PurchaseHistory'),
   '/migration': () => import('../pages/Migration'),
   '/reports': () => import('../pages/Reports'),
-  '/license': () => import('../pages/License'),
   '/settings': () => import('../pages/Settings'),
   '/mail': () => import('../pages/Mail'),
   '/returns': () => import('../pages/Returns'),

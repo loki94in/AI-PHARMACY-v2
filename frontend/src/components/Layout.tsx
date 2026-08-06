@@ -147,7 +147,6 @@ const Sidebar = ({
     { path: '/phone-sales', label: 'Phone Sales', icon: <Smartphone size={18} /> },
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },
-    { path: '/license', label: 'License', icon: <Database size={18} /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
   ];
 

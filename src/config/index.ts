@@ -94,7 +94,6 @@ export interface AppConfig {
   uploadDir: string;
   tempDir: string;
   backupDir: string;
-  apiKey: string;
   corsOrigin: string;
   taxRate: number;
   maxUploadSize: number;
@@ -122,7 +121,6 @@ export const config: AppConfig = {
   uploadDir: process.env.UPLOAD_DIR || path.join(appDataDir, 'uploads'),
   tempDir: process.env.TEMP_DIR || path.join(appDataDir, 'uploads', 'temp'),
   backupDir: process.env.BACKUP_DIR || path.join(appDataDir, 'backup'),
-  apiKey: process.env.API_KEY || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5174',
   taxRate: parseFloat(process.env.TAX_RATE || '0.05'),
   maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE || '50', 10) * 1024 * 1024, // 50MB default

@@ -29,7 +29,6 @@ const CRM = lazy(pageImports['/crm']);
 const PurchaseHistory = lazy(pageImports['/purchase-history']);
 const Migration = lazy(pageImports['/migration']);
 const Reports = lazy(pageImports['/reports']);
-const License = lazy(pageImports['/license']);
 const Settings = lazy(pageImports['/settings']);
 const Mail = lazy(pageImports['/mail']);
 const Returns = lazy(pageImports['/returns']);
@@ -63,7 +62,6 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/pharmarack-cart', element: <PharmarackCart /> },
   { path: '/migration', element: <Migration /> },
   { path: '/reports', element: <Reports /> },
-  { path: '/license', element: <License /> },
   { path: '/settings', element: <Settings /> },
   { path: '/mail', element: <Mail /> },
   { path: '/learning', element: <Learning /> },

@@ -332,6 +332,28 @@ export async function runManualMigration(
   }]);
 }
 
+// Streams srcPath through gunzip into destPath. Truncated/interrupted downloads
+// decompress partway then hit Z_BUF_ERROR ("unexpected end of file") — that raw
+// zlib message is meaningless to a pharmacy user, so it's translated here into
+// an actionable one before it reaches migrationStatus.message.
+async function gunzipToFile(srcPath: string, destPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const gzStream = zlib.createGunzip();
+    gzStream.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'Z_BUF_ERROR') {
+        reject(new Error('This backup file is incomplete or corrupted — the download/export was likely interrupted partway through. Please re-export or re-download it and try again.'));
+      } else {
+        reject(err);
+      }
+    });
+    const writeStream = fs.createWriteStream(destPath);
+    writeStream.on('close', resolve);
+    writeStream.on('finish', resolve);
+    writeStream.on('error', reject);
+    fs.createReadStream(srcPath).pipe(gzStream).pipe(writeStream);
+  });
+}
+
 async function processMigrationFile(
   originalFilePath: string,
   dataType: string,
@@ -497,17 +519,7 @@ async function processMigrationFile(
       fs.mkdirSync(extractPath, { recursive: true });
       sqlFilePath = isDb ? STAGING_DB_PATH : path.join(extractPath, 'decompressed_backup.sql');
 
-      await new Promise<void>((resolve, reject) => {
-        const gzStream = zlib.createGunzip();
-        gzStream.on('error', reject);
-        const writeStream = fs.createWriteStream(sqlFilePath);
-        writeStream.on('close', resolve);
-        writeStream.on('finish', resolve);
-        writeStream.on('error', reject);
-        fs.createReadStream(tempProcessingPath)
-          .pipe(gzStream)
-          .pipe(writeStream);
-      });
+      await gunzipToFile(tempProcessingPath, sqlFilePath);
 
       if (isDb) {
         const validation = await validateStagingDatabaseFile(STAGING_DB_PATH);
@@ -547,17 +559,7 @@ async function processMigrationFile(
         // GZIP file with .zip extension — decompress directly, skip unzipper
         migrationStatus.message = 'Decompressing GZIP backup (detected inside .zip container)...';
         sqlFilePath = path.join(extractPath, 'decompressed_backup.sql');
-        await new Promise<void>((resolve, reject) => {
-          const gzStream = zlib.createGunzip();
-          gzStream.on('error', reject);
-          const writeStream = fs.createWriteStream(sqlFilePath);
-          writeStream.on('close', resolve);
-          writeStream.on('finish', resolve);
-          writeStream.on('error', reject);
-          fs.createReadStream(tempProcessingPath)
-            .pipe(gzStream)
-            .pipe(writeStream);
-        });
+        await gunzipToFile(tempProcessingPath, sqlFilePath);
       } else {
         // True ZIP archive — extract with unzipper then find the SQL/DB file recursively
         try {
@@ -598,15 +600,7 @@ async function processMigrationFile(
         if (dbFilePath) {
           migrationStatus.message = 'Database file detected in ZIP. Loading database directly...';
           if (dbFilePath.toLowerCase().endsWith('.gz')) {
-            await new Promise<void>((resolve, reject) => {
-              const gzStream = zlib.createGunzip();
-              gzStream.on('error', reject);
-              const writeStream = fs.createWriteStream(STAGING_DB_PATH);
-              writeStream.on('close', resolve);
-              writeStream.on('finish', resolve);
-              writeStream.on('error', reject);
-              fs.createReadStream(dbFilePath).pipe(gzStream).pipe(writeStream);
-            });
+            await gunzipToFile(dbFilePath, STAGING_DB_PATH);
           } else {
             fs.copyFileSync(dbFilePath, STAGING_DB_PATH);
           }
@@ -641,15 +635,7 @@ async function processMigrationFile(
         if (foundSql.toLowerCase().endsWith('.gz')) {
           migrationStatus.message = 'Decompressing .sql.gz found inside ZIP archive...';
           sqlFilePath = path.join(extractPath, 'decompressed_nested_backup.sql');
-          await new Promise<void>((resolve, reject) => {
-            const gzStream = zlib.createGunzip();
-            gzStream.on('error', reject);
-            const writeStream = fs.createWriteStream(sqlFilePath);
-            writeStream.on('close', resolve);
-            writeStream.on('finish', resolve);
-            writeStream.on('error', reject);
-            fs.createReadStream(foundSql).pipe(gzStream).pipe(writeStream);
-          });
+          await gunzipToFile(foundSql, sqlFilePath);
         } else {
           sqlFilePath = foundSql;
         }
