@@ -925,6 +925,7 @@ const Topbar = ({
           <span className="text-sm font-bold uppercase tracking-wider text-text/90 truncate">
             {location.pathname === '/' ? 'POS' : location.pathname.substring(1).replace('-', ' ')}
           </span>
+          <LiveHeaderClock />
           {catalogJob && (
             <div className="flex items-center gap-2.5 px-3 py-1 bg-primary/10 border border-primary/20 rounded-xl text-primary animate-pulse">
               <RefreshCw size={12} className="animate-spin" />
@@ -1123,9 +1124,6 @@ const Topbar = ({
             </div>
           )}
 
-          {/* Live System Clock */}
-          <LiveHeaderClock />
-
           {/* Quick Order Shortcut Button */}
           <button
             onClick={() => quickOrderEvent.triggerOpen()}
@@ -1147,16 +1145,6 @@ const Topbar = ({
           </button>
 
           {/* Refresh Page Cache Button */}
-          <button
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('cache-invalidate'));
-            }}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
-            title="Refresh Page Data"
-          >
-            <RefreshCw size={18} />
-          </button>
-
           {/* Backup Center Shortcut Button */}
           <button
             onClick={() => {

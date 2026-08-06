@@ -235,6 +235,7 @@ app.use('/api/sales', lazyRoute(() => import('./routes/sales.js')));
 app.use('/api/inventory', lazyRoute(() => import('./routes/inventory.js')));
 app.use('/api/dashboard', lazyRoute(() => import('./routes/dashboard.js')));
 app.use('/api/purchases', lazyRoute(() => import('./routes/purchases.js')));
+app.use('/api/sell-price', lazyRoute(() => import('./routes/sellPrice.js')));
 app.use('/api/returns', lazyRoute(() => import('./routes/returns.js')));
 app.use('/api/customer-returns', lazyRoute(() => import('./routes/customerReturns.js')));
 app.use('/api/credit-notes', lazyRoute(() => import('./routes/creditNotes.js')));

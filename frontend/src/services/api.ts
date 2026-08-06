@@ -446,6 +446,12 @@ export const api = {
   getQuickEditMedicine: (id: number) => apiClient.get(`/inventory/medicines/${id}/quick-edit`).then(res => res.data),
   updateQuickEditMedicine: (id: number, data: any) => apiClient.put(`/inventory/medicines/${id}/quick-edit`, data).then(res => res.data),
   
+  // Sell Price
+  updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null }>) =>
+    apiClient.post('/sell-price/bulk-update', { items }).then(res => res.data),
+  getSellPriceMedicinesByInvoice: (invoiceNo: string) =>
+    apiClient.get(`/sell-price/by-invoice/${encodeURIComponent(invoiceNo)}`).then(res => res.data),
+  
   // Sales / POS
   getSalesHistory: () => apiClient.get('/sales/history').then(res => res.data),
   createSale: (data: SalePayload) => apiClient.post('/sales', data).then(res => res.data),
@@ -498,8 +504,6 @@ export const api = {
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
   getManufacturers: (q: string) => apiClient.get('/manufacturers', { params: { q } }).then(res => res.data),
   getMarketedBy: (q: string) => apiClient.get('/marketed-by', { params: { q } }).then(res => res.data),
-  updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null }>) =>
-    apiClient.post('/inventory/bulk-sell-prices', { items }).then(res => res.data),
 
 
   
@@ -667,6 +671,17 @@ export const api = {
     mapped?: boolean;
   }>) => 
     apiClient.post('/pharmarack/cart/add', { items }).then(res => res.data),
+  deletePharmarackCartItem: (data: {
+    storeId: number;
+    productId?: number | string | null;
+    productCode?: string;
+    productName?: string;
+    company?: string;
+    packaging?: string;
+    ptr?: number;
+    mrp?: number;
+    storeName?: string;
+  }) => apiClient.post('/pharmarack/delete-cart-item', data).then(res => res.data),
   getPharmarackCart: () => apiClient.get('/pharmarack/cart').then(res => res.data),
   sendManualCartNotification: (data: { storeId: number; storeName: string; deliveryPersons: any[]; items: any[] }) =>
     apiClient.post('/pharmarack/cart/notify-manual', data).then(res => res.data),

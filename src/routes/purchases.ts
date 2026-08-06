@@ -958,6 +958,7 @@ router.post('/manual', async (req, res) => {
       const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
       savedItems.push({
         medicine_id: medId,
+        name: medName,
         medicine_name: medName,
         rate: rawRate,
         mrp: mrp || 0,
@@ -1005,7 +1006,8 @@ router.post('/manual', async (req, res) => {
       message: 'Purchase saved successfully',
       app_invoice_no: appInvoiceNo,
       purchase_id: purchaseId,
-      saved_items: savedItems
+      saved_items: savedItems,
+      saved_medicines: savedItems
     });
 
     setImmediate(async () => {

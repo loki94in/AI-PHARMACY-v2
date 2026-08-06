@@ -746,41 +746,49 @@ router.post('/cart/add', async (req, res) => {
         }
       }
 
-      // If still missing, query search API on-the-fly
-      if (!item.productCode && token) {
+      // If productCode or productId is missing/0, query OpenSearch API on-the-fly to resolve exact PrProductId
+      const hasValidId = Boolean(item.productId) && Number(item.productId) > 0;
+      const hasValidCode = Boolean(item.productCode);
+      if ((!hasValidId || !hasValidCode) && token) {
         try {
           let cleanKeyword = (item.productName || item.product || item.name || '').trim();
           cleanKeyword = cleanKeyword.replace(/\s*\([^)]*\)\s*$/, '').trim();
-          const searchPayload = {
-            SearchKeyword: cleanKeyword,
-            StoreId: [],
-            NonMappedStoreId: [],
-            Count: 10,
-            SkipCount: 0,
-            isMappedSearch: null,
-            IsStock: 2,
-            IsScheme: 2,
-            IsSort: 1,
-            CartSource: 'MOVP'
-          };
-          const searchRes = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
-            method: 'POST',
-            body: JSON.stringify(searchPayload),
-            signal: AbortSignal.timeout(4000)
-          });
-          if (searchRes.ok) {
-            const searchData: any = await searchRes.json();
-            if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
-              const matched = searchData.data.find((p: any) => p.PrProductId === item.productId && p.StoreId === item.storeId) || searchData.data[0];
-              if (matched) {
-                item.productId = matched.PrProductId || item.productId || 0;
-                item.storeId = matched.StoreId || item.storeId || 0;
-                item.productCode = matched.ProductCode || '';
-                item.productName = matched.ProductName || matched.ProductFullName || item.productName || item.product || '';
-                item.storeName = matched.StoreName || item.storeName || '';
-                item.company = matched.Company || item.company || '';
-                item.mrp = matched.MRP || item.mrp || 0;
-                item.rate = matched.PTR || item.rate || 0;
+          if (cleanKeyword) {
+            const searchPayload = {
+              SearchKeyword: cleanKeyword,
+              StoreId: item.storeId ? [Number(item.storeId)] : [],
+              NonMappedStoreId: [],
+              Count: 10,
+              SkipCount: 0,
+              isMappedSearch: null,
+              IsStock: 2,
+              IsScheme: 2,
+              IsSort: 1,
+              CartSource: 'MOVP'
+            };
+            const searchRes = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+              method: 'POST',
+              body: JSON.stringify(searchPayload),
+              signal: AbortSignal.timeout(4000)
+            });
+            if (searchRes.ok) {
+              const searchData: any = await searchRes.json().catch(() => null);
+              if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
+                const matched = searchData.data.find((p: any) => 
+                  (p.PrProductId === item.productId || String(p.ProductCode).toLowerCase() === String(item.productCode).toLowerCase()) &&
+                  Number(p.StoreId) === Number(item.storeId)
+                ) || searchData.data.find((p: any) => Number(p.StoreId) === Number(item.storeId)) || searchData.data[0];
+
+                if (matched) {
+                  item.productId = Number(matched.PrProductId || matched.ProductId || item.productId || 0);
+                  item.storeId = Number(matched.StoreId || item.storeId || 0);
+                  item.productCode = matched.ProductCode || item.productCode || '';
+                  item.productName = matched.ProductName || matched.ProductFullName || item.productName || item.product || '';
+                  item.storeName = matched.StoreName || item.storeName || '';
+                  item.company = matched.Company || item.company || '';
+                  item.mrp = Number(matched.MRP || item.mrp || 0);
+                  item.rate = Number(matched.PTR || item.rate || 0);
+                }
               }
             }
           }
@@ -1181,6 +1189,342 @@ router.post('/cart/add', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Delete product directly from Pharmarack live cart
+router.post('/delete-cart-item', async (req, res) => {
+  const { storeId, productId, productCode, productName, company, packaging, ptr, mrp, storeName } = req.body;
+  if (!storeId || (!productId && !productCode && !productName)) {
+    return res.status(400).json({ error: 'Missing required item details for cart deletion' });
+  }
+
+  try {
+    const settings = await getPharmarackSettings();
+    let token = settings['pharmarack_session_token'] || '';
+
+    let deleteSuccess = false;
+    let lastError = '';
+
+    let resolvedProductId = (() => {
+      if (!productId) return 0;
+      const n = Number(productId);
+      if (!isNaN(n) && n > 0) return n;
+      const stripped = String(productId).replace(/^PR/i, '');
+      const sn = Number(stripped);
+      return (!isNaN(sn) && sn > 0) ? sn : 0;
+    })();
+    let resolvedProductCode = productCode || '';
+    let resolvedCompany = company || '';
+    let resolvedPtr = Number(ptr || 0);
+    let resolvedMrp = Number(mrp || resolvedPtr);
+
+    // Step A: Search enrichment if ProductId or ProductCode is missing/0
+    if ((!resolvedProductId || !resolvedProductCode) && token) {
+      try {
+        let cleanKeyword = (productName || '').trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
+        if (cleanKeyword) {
+          const searchPayload = {
+            SearchKeyword: cleanKeyword,
+            StoreId: storeId ? [Number(storeId)] : [],
+            NonMappedStoreId: [],
+            Count: 10,
+            SkipCount: 0,
+            isMappedSearch: null,
+            IsStock: 2,
+            IsScheme: 2,
+            IsSort: 1,
+            CartSource: 'MOVP'
+          };
+          const searchRes = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+            method: 'POST',
+            body: JSON.stringify(searchPayload),
+            signal: AbortSignal.timeout(3500)
+          });
+          if (searchRes.ok) {
+            const searchData: any = await searchRes.json().catch(() => null);
+            if (searchData && Array.isArray(searchData.data) && searchData.data.length > 0) {
+              const matched = searchData.data.find((p: any) => Number(p.StoreId) === Number(storeId)) || searchData.data[0];
+              if (matched) {
+                resolvedProductId = Number(matched.PrProductId || matched.ProductId || resolvedProductId);
+                resolvedProductCode = matched.ProductCode || resolvedProductCode;
+                resolvedCompany = matched.Company || resolvedCompany;
+                resolvedPtr = Number(matched.PTR || resolvedPtr);
+                resolvedMrp = Number(matched.MRP || resolvedMrp);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Pharmarack Delete] Search enrichment warning:', e);
+      }
+    }
+
+    // Step B: Direct 76-field Official Payload API Deletion
+    if (token) {
+      try {
+        const fullDeletePayload = {
+          StoreId: Number(storeId) || 0,
+          StoreName: storeName || '',
+          ProductCode: resolvedProductCode || '',
+          Quantity: 0,
+          PTR: resolvedPtr,
+          Free: 0,
+          HiddenPTR: resolvedPtr,
+          NetRate: resolvedPtr,
+          Scheme: '',
+          SchemeType: '',
+          GSTPercentage: 0,
+          ItemGSTValue: 0,
+          CartSource: 'MOVP',
+          DeliveryOption: '',
+          RemarkForStore: '',
+          ProductAddedBy: 0,
+          Priority: '',
+          OrderPlaced: 0,
+          OrderPlacedBy: 0,
+          CreatedBy: 0,
+          ProductName: productName || '',
+          StoreProductName: productName || '',
+          StoreWiseAmount: 0,
+          StoreWiseGSTAmount: 0,
+          IsDeleted: 1,
+          AllowMinQty: 0,
+          AllowMaxQty: 0,
+          StepUpValue: 1,
+          AllowMOQ: true,
+          MinItemLimit: 0,
+          MaxItemLimit: 0,
+          MinAmountLimit: 0,
+          MaxAmountLimit: 0,
+          DODIsPrefenceSet: 0,
+          IsDODPreferenceSet: 0,
+          DisplayHalfSchemeOn: '',
+          DisplayHalfScheme: '0',
+          RetailerSchemePreference: 1,
+          HalfSchemeValueToRetailer: 0,
+          RoundOffDisplayHS: '',
+          MinOrderQuantity: 0,
+          MaxOrderQuantity: 0,
+          IsDODProduct: 0,
+          IsDODProductCheck: 0,
+          IsDODProductSelected: 0,
+          OrderDeliveryModeStatus: 1,
+          OrderRemarks: 1,
+          SpecialRate: 0,
+          Stock: 999,
+          RShowPtr: 1,
+          IsPartyLocked: 0,
+          RewardSchemeId: 0,
+          IsProductChecked: 0,
+          DeliveryPerson: '',
+          DeliveryPersonCode: '',
+          RShowPtrForAllCompanies: 1,
+          Company: resolvedCompany || company || '',
+          IsGroupWisePTR: 0,
+          IsGroupWisePTRRetailer: 0,
+          RateValidity: null,
+          IsShowNonMappedOrderStock: 1,
+          RStockVisibility: 0,
+          IsMapped: 1,
+          ProductId: resolvedProductId,
+          MRP: String(resolvedMrp || resolvedPtr),
+          ProductWiseAmount: 0,
+          ProductWiseGSTAmount: 0,
+          ProductWiseSchemeAmount: 0,
+          ProductWiseSchemeGSTAmount: 0,
+          StoreWiseSchemeAmount: 0,
+          StoreWiseSchemeGSTAmount: 0,
+          ProductLock: 0,
+          BoxPacking: '0',
+          CasePacking: packaging || '1 strip',
+          Packing: packaging || '1 strip'
+        };
+
+        const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/AddUserProductCartDetail', {
+          method: 'POST',
+          body: JSON.stringify(fullDeletePayload),
+          signal: AbortSignal.timeout(6000)
+        });
+
+        if (response.ok) {
+          const resJson = await response.json().catch(() => ({}));
+          const isOk = resJson && (
+            resJson.StatusCode === 200 || 
+            resJson.statusCode === 200 || 
+            String(resJson.StatusCode) === '200' || 
+            resJson.status === 200 || 
+            resJson.status === 'success' || 
+            resJson.success === true ||
+            (resJson.Message && String(resJson.Message).toLowerCase().includes('success')) ||
+            (resJson.message && String(resJson.message).toLowerCase().includes('success'))
+          );
+
+          if (isOk) {
+            deleteSuccess = true;
+          } else {
+            lastError = `AddUserProductCartDetail response: ${resJson.message || resJson.Message || JSON.stringify(resJson)}`;
+          }
+        } else {
+          const errText = await response.text().catch(() => '');
+          lastError = `AddUserProductCartDetail status: ${response.status}. Details: ${errText}`;
+        }
+
+        // Secondary endpoint tries: DeleteCartProductDetail & DeleteUserProductCartDetail
+        if (!deleteSuccess) {
+          const secEndpoints = [
+            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartProductDetail',
+            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteUserProductCartDetail',
+            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartDetail'
+          ];
+          for (const ep of secEndpoints) {
+            try {
+              const secRes = await fetchPharmarack(ep, {
+                method: 'POST',
+                body: JSON.stringify({
+                  StoreId: Number(storeId),
+                  ProductId: resolvedProductId,
+                  ProductCode: resolvedProductCode || '',
+                  CartSource: 'MOVP'
+                }),
+                signal: AbortSignal.timeout(4000)
+              });
+              if (secRes.ok) {
+                deleteSuccess = true;
+                break;
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (err: any) {
+        lastError = err.message;
+      }
+    }
+
+    // Step C: Headless Puppeteer Browser UI Automation Fallback on Official Site
+    if (!deleteSuccess) {
+      const chromePath = findChromePath();
+      if (chromePath) {
+        console.log('[Pharmarack Delete] Initiating Puppeteer UI automation fallback on official website cart...');
+        const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
+        let browser;
+        let tempProfilePathToDelete = '';
+        const puppeteer = await getPuppeteer();
+
+        try {
+          try {
+            await killOrphanChromeProcesses('pharmarack_profile');
+            cleanProfileLockFiles(pharmarackProfilePath);
+            browser = await puppeteer.launch({
+              executablePath: chromePath,
+              headless: true,
+              userDataDir: pharmarackProfilePath,
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--mute-audio',
+                '--window-position=-10000,-10000'
+              ]
+            });
+          } catch (launchErr: any) {
+            console.log('[Pharmarack Fallback] Main profile locked. Copying temp profile...', launchErr.message);
+            const randomSuffix = Math.floor(Math.random() * 1000000);
+            const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
+            copyProfileFolder(pharmarackProfilePath, tempProfilePath);
+            cleanProfileLockFiles(tempProfilePath);
+            browser = await puppeteer.launch({
+              executablePath: chromePath,
+              headless: true,
+              userDataDir: tempProfilePath,
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--mute-audio',
+                '--window-position=-10000,-10000'
+              ]
+            });
+            tempProfilePathToDelete = tempProfilePath;
+          }
+
+          const [page] = await browser.pages();
+
+          // Open Pharmarack Cart page on actual site
+          await page.goto('https://retailers.pharmarack.com/cart', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+          await new Promise(r => setTimeout(r, 2000));
+
+          // Find row and click trash / delete button inside web page DOM
+          const clicked = await page.evaluate(async (targetName, targetCode) => {
+            const rows = Array.from(document.querySelectorAll('tr, .cart-item, .product-row, .cart-product, .item-row, div.row'));
+            for (const row of rows) {
+              const text = (row.textContent || '').toLowerCase();
+              const matchName = targetName && text.includes(targetName.toLowerCase());
+              const matchCode = targetCode && text.includes(targetCode.toLowerCase());
+
+              if (matchName || matchCode) {
+                const btn = row.querySelector('button[title*="delete" i], button[title*="remove" i], .delete-icon, .icon-delete, .fa-trash, .fa-trash-alt, svg.lucide-trash, button.btn-danger, a.delete, [class*="trash" i], [id*="delete" i]') as HTMLElement;
+                if (btn) {
+                  btn.click();
+                  return true;
+                }
+              }
+            }
+
+            // Fallback: Click first trash icon on page matching store
+            const globalTrashBtns = Array.from(document.querySelectorAll('button[title*="delete" i], .fa-trash, .fa-trash-alt, .delete-icon, [class*="trash" i]'));
+            for (const btn of globalTrashBtns) {
+              const parentText = (btn.parentElement?.parentElement?.textContent || '').toLowerCase();
+              if (targetName && parentText.includes(targetName.toLowerCase())) {
+                (btn as HTMLElement).click();
+                return true;
+              }
+            }
+            return false;
+          }, productName || '', resolvedProductCode || productCode || '');
+
+          if (clicked) {
+            console.log('[Pharmarack Fallback] Clicked trash delete button on retailers.pharmarack.com/cart page!');
+            await new Promise(r => setTimeout(r, 2000));
+            deleteSuccess = true;
+          }
+        } catch (pwErr: any) {
+          console.error('Headless browser deletion fallback error:', pwErr.message);
+        } finally {
+          if (browser) {
+            try { await browser.close(); } catch (_) {}
+          }
+          if (tempProfilePathToDelete) {
+            try {
+              if (deleteSuccess) copyProfileFolder(tempProfilePathToDelete, pharmarackProfilePath);
+            } catch (_) {}
+            try {
+              if (fs.existsSync(tempProfilePathToDelete)) fs.rmSync(tempProfilePathToDelete, { recursive: true, force: true });
+            } catch (_) {}
+          }
+        }
+      }
+    }
+
+    if (deleteSuccess) {
+      return res.json({ success: true, message: 'Successfully removed item from Pharmarack live cart!' });
+    } else {
+      return res.status(500).json({ error: 'Failed to delete item from Pharmarack live cart', details: lastError });
+    }
+  } catch (err: any) {
+    console.error('Error in /api/pharmarack/delete-cart-item:', err);
+    res.status(500).json({ error: 'Failed to delete cart item: ' + err.message });
+  }
+});
+
 
 // Helper to verify if an order was placed on Pharmarack for a specific store today
 async function verifyOrderPlacedInPharmarack(storeId: number): Promise<boolean> {

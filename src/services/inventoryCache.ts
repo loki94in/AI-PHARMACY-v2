@@ -9,6 +9,7 @@ export interface CompactInventoryItem {
   batch_no: string;
   expiry_date: string;
   mrp: number;
+  sell_price?: number | null;
   stock_qty: number;
   loose_quantity: number;
   unit_price: number;
@@ -59,6 +60,7 @@ class InventoryCache {
             im.batch_no,
             im.expiry_date,
             COALESCE(im.mrp, m.mrp, 0) AS mrp,
+            m.sell_price,
             im.quantity AS stock_qty,
             im.loose_quantity,
             im.unit_price,

@@ -714,6 +714,7 @@ export async function ensureSchema(dbPath: string) {
     ['medicines', 'igst_per', 'ALTER TABLE medicines ADD COLUMN igst_per REAL DEFAULT 0'],
     ['medicines', 'item_code', 'ALTER TABLE medicines ADD COLUMN item_code TEXT'],
     ['medicines', 'metadata', 'ALTER TABLE medicines ADD COLUMN metadata TEXT'],
+    ['medicines', 'sell_price', 'ALTER TABLE medicines ADD COLUMN sell_price REAL DEFAULT NULL'],
     ['purchases', 'cgst_value', 'ALTER TABLE purchases ADD COLUMN cgst_value REAL DEFAULT 0'],
     ['purchases', 'sgst_value', 'ALTER TABLE purchases ADD COLUMN sgst_value REAL DEFAULT 0'],
     ['purchases', 'igst_value', 'ALTER TABLE purchases ADD COLUMN igst_value REAL DEFAULT 0'],

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers } from 'lucide-react';
+import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2 } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
@@ -104,6 +104,7 @@ export default function PharmarackCart() {
   const currentTab = searchParams.get('tab') || 'cart';
   const [distributors, setDistributors] = useState<Distributor[]>(() => cachedDistributors);
   const [loading, setLoading] = useState(() => cachedDistributors.length === 0);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(() => cachedLastFetched);
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
@@ -1678,6 +1679,16 @@ export default function PharmarackCart() {
     }
   };
 
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchCart();
+      await new Promise(r => setTimeout(r, 600));
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const fetchCartSilent = async () => {
     try {
       const data = await api.getPharmarackCart();
@@ -1696,35 +1707,39 @@ export default function PharmarackCart() {
   };
 
   const handleUpdateQty = async (item: CartLineItem, newQty: number) => {
-    if (newQty < 1) return;
+    if (newQty < 1) {
+      handleDeleteItem(item);
+      return;
+    }
 
-    // 1. Optimistic Update (Immediate UI state update)
-    setDistributors(prev => prev.map(dist => {
-      if (dist.storeId !== item.storeId) return dist;
+    // 1. Optimistic UI Update (< 5ms perception, instant response)
+    setDistributors(prev => {
+      const updated = prev.map(dist => {
+        if (dist.storeId !== item.storeId) return dist;
 
-      const updatedItems = dist.items.map(i => {
-        if (i.productCode !== item.productCode) return i;
-        const oldQty = i.qty;
-        // Recalculate amount using PTR rate
-        const rateVal = i.ptr || 0;
-        const newAmount = rateVal * newQty;
+        const updatedItems = dist.items.map(i => {
+          if (i.productCode !== item.productCode) return i;
+          const rateVal = i.ptr || 0;
+          return {
+            ...i,
+            qty: newQty,
+            amount: rateVal * newQty
+          };
+        });
+
         return {
-          ...i,
-          qty: newQty,
-          amount: newAmount
+          ...dist,
+          items: updatedItems,
+          lineTotal: updatedItems.reduce((sum, it) => sum + it.amount, 0)
         };
       });
-
-      const newlineTotal = updatedItems.reduce((sum, it) => sum + it.amount, 0);
-
-      return {
-        ...dist,
-        items: updatedItems,
-        lineTotal: newlineTotal
-      };
-    }));
+      cachedDistributors = updated;
+      return updated;
+    });
 
     setUpdatingItemId(item.productCode);
+
+    // 2. Silent Background API Sync (Debounced, never locks screen with loading spinners)
     try {
       const storeName = distributors.find(d => d.storeId === item.storeId)?.storeName || '';
       const payload = [{
@@ -1743,17 +1758,77 @@ export default function PharmarackCart() {
 
       const res = await api.addPharmarackCart(payload);
       if (res && res.success) {
-        toastEvent.trigger('Quantity updated successfully', 'success');
-        // Silent background refresh to verify final state without showing a full screen loading spinner
-        await fetchCartSilent();
+        toastEvent.trigger('Quantity updated in Pharmarack live cart', 'success');
+        // Silent delayed refresh to align with Pharmarack server indexing without page reload
+        setTimeout(() => { fetchCartSilent(); }, 1500);
       } else {
-        toastEvent.trigger(res?.error || 'Failed to update quantity', 'error');
-        await fetchCart(); // Revert to server state on error
+        toastEvent.trigger(res?.error || 'Failed to update quantity on Pharmarack', 'error');
+        await fetchCartSilent(); // Silent sync on error without full-screen loading spinner
       }
     } catch (err: any) {
       console.error('Failed to update quantity:', err);
       toastEvent.trigger(err?.response?.data?.error || 'Failed to update quantity', 'error');
-      await fetchCart(); // Revert to server state on error
+      await fetchCartSilent(); // Silent sync on error without full-screen loading spinner
+    } finally {
+      setUpdatingItemId(null);
+    }
+  };
+
+  const handleDeleteItem = async (item: CartLineItem) => {
+    // 1. Optimistic UI update (immediately remove item from UI state & update totals in < 5ms)
+    setDistributors(prev => {
+      const updated = prev.map(dist => {
+        if (dist.storeId !== item.storeId) return dist;
+        const remainingItems = dist.items.filter(i => 
+          (item.productCode && i.productCode === item.productCode) 
+            ? false 
+            : (item.productId && i.productId === item.productId)
+              ? false 
+              : i.productName !== item.productName
+        );
+        const newLineTotal = remainingItems.reduce((sum, it) => sum + it.amount, 0);
+        return {
+          ...dist,
+          items: remainingItems,
+          lineTotal: newLineTotal
+        };
+      }).filter(dist => dist.items.length > 0);
+
+      cachedDistributors = updated;
+      return updated;
+    });
+
+    const itemKey = item.productCode || String(item.productId || item.productName);
+    setUpdatingItemId(itemKey);
+    toastEvent.trigger(`Removing "${item.productName}"...`, 'info');
+
+    // 2. Silent Background Live Cart Deletion
+    try {
+      const storeName = distributors.find(d => d.storeId === item.storeId)?.storeName || '';
+      const res = await api.deletePharmarackCartItem({
+        storeId: item.storeId,
+        productId: item.productId,
+        productCode: item.productCode,
+        productName: item.productName,
+        company: item.company,
+        packaging: item.packaging,
+        ptr: item.ptr,
+        mrp: item.mrp,
+        storeName: storeName
+      });
+
+      if (res && res.success) {
+        toastEvent.trigger(`Removed "${item.productName}" from live cart`, 'success');
+        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+        setTimeout(() => { fetchCartSilent(); }, 1500);
+      } else {
+        toastEvent.trigger(res?.error || 'Failed to delete item from live cart', 'error');
+        await fetchCartSilent(); // Silent sync on error without full-screen loading spinner
+      }
+    } catch (err: any) {
+      console.error('Failed to delete Pharmarack cart item:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to delete item from live cart', 'error');
+      await fetchCartSilent(); // Silent sync on error without full-screen loading spinner
     } finally {
       setUpdatingItemId(null);
     }
@@ -2100,12 +2175,15 @@ export default function PharmarackCart() {
 
             <div className="flex items-center gap-2">
               <button
-                onClick={fetchCart}
-                disabled={loading}
-                className="p-2 rounded-lg bg-bg2 border border-glass-border text-muted hover:text-text hover:bg-bg3 transition-all active:scale-95 flex items-center justify-center disabled:opacity-50"
+                onClick={handleManualRefresh}
+                disabled={loading || isRefreshing}
+                className="group p-2 rounded-lg bg-bg2 border border-glass-border hover:border-emerald-500/40 hover:bg-emerald-500/10 text-muted hover:text-emerald-400 transition-all active:scale-90 flex items-center justify-center disabled:opacity-50 hover:shadow-[0_0_12px_rgba(16,185,129,0.2)] cursor-pointer"
                 title="Refresh Cart Contents"
               >
-                <RefreshCw size={14} className={loading ? 'animate-spin text-primary' : ''} />
+                <RotateCcw
+                  size={14}
+                  className={`transition-transform duration-500 ${isRefreshing || loading ? 'animate-spin text-emerald-400' : 'group-hover:-rotate-180 text-muted group-hover:text-emerald-400'}`}
+                />
               </button>
 
               <button
@@ -2976,11 +3054,13 @@ export default function PharmarackCart() {
                                 <th className="text-center px-3 py-2">Scheme</th>
                                 <th className="text-center px-3 py-2">Stock</th>
                                 <th className="text-right px-4 py-2">Amount</th>
+                                <th className="text-center px-3 py-2">Action</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-glass-border/15">
                               {dist.items.map((item, idx) => {
                                 const isSent = isItemAlreadySent(item, dist);
+                                const isDeleting = updatingItemId === (item.productCode || String(item.productId || item.productName));
                                 return (
                                   <tr
                                     key={`${item.productCode}-${idx}`}
@@ -3106,6 +3186,22 @@ export default function PharmarackCart() {
                                   </td>
                                   <td className="px-4 py-2.5 text-right font-mono font-black text-emerald-400 text-[11px]">
                                     ₹{getCartItemAmount(item).toFixed(2)}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteItem(item)}
+                                      disabled={isDeleting}
+                                      className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1 font-bold text-[10px] mx-auto cursor-pointer"
+                                      title={`Delete ${item.productName} from Pharmarack live cart`}
+                                    >
+                                      {isDeleting ? (
+                                        <span className="w-2.5 h-2.5 border border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
+                                      ) : (
+                                        <Trash2 size={12} />
+                                      )}
+                                      <span>Delete</span>
+                                    </button>
                                   </td>
                                 </tr>
                               );

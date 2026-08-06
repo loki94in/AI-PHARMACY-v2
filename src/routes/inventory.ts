@@ -807,7 +807,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     item_type, therapeutic, sub_therapeutic, schedule_type,
     short_code, ucode, cgst_per, sgst_per, igst_per,
     reorder_level, max_stock_level, rack, disable_auto_barcode, tb_medicine,
-    metadata
+    sell_price, metadata
   } = req.body;
   
   try {
@@ -817,7 +817,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     db = await dbManager.getConnection();
     await db.run('BEGIN TRANSACTION');
  
-    // 1. Update medicines table (up to 23 fields)
+    // 1. Update medicines table (up to 24 fields)
     const updates = [];
     const params = [];
     
@@ -852,6 +852,11 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (rack !== undefined) { updates.push('rack = ?'); params.push(rack); }
     if (disable_auto_barcode !== undefined) { updates.push('disable_auto_barcode = ?'); params.push(disable_auto_barcode ? 1 : 0); }
     if (tb_medicine !== undefined) { updates.push('tb_medicine = ?'); params.push(tb_medicine ? 1 : 0); }
+    if (sell_price !== undefined) {
+      const parsedPrice = (sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : null;
+      updates.push('sell_price = ?');
+      params.push(parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null);
+    }
     if (metadata !== undefined) { updates.push('metadata = ?'); params.push(typeof metadata === 'string' ? metadata : JSON.stringify(metadata)); }
  
     if (updates.length > 0) {

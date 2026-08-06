@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Tag, Save, SkipForward, AlertTriangle, Check, ArrowLeft, Percent } from 'lucide-react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Tag, Save, SkipForward, AlertTriangle, Check, ArrowLeft, Percent, Info } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface SellPriceRow {
@@ -9,56 +9,85 @@ interface SellPriceRow {
   rate: number; // cost price
   mrp: number;
   sell_price: string; // raw input
+  warning?: string | null;
 }
 
 export default function SellPriceConfig() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [invoiceNo, setInvoiceNo] = useState<string>('');
   const [rows, setRows] = useState<SellPriceRow[]>([]);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    const stateData = location.state as { invoiceNo?: string; items?: any[]; saved_items?: any[] } | undefined;
-    if (stateData) {
-      if (stateData.invoiceNo) {
-        setInvoiceNo(stateData.invoiceNo);
-      }
-      const rawItems = stateData.saved_items || stateData.items || [];
-      if (Array.isArray(rawItems) && rawItems.length > 0) {
-        const mappedRows: SellPriceRow[] = rawItems.map(item => {
-          const medId = item.medicine_id || item.id || 0;
-          const medName = item.medicine_name || item.name || 'Unknown Item';
-          const rateVal = Number(item.rate || item.cost_price || 0);
-          const mrpVal = Number(item.mrp || 0);
-          const initialSellPrice = item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : '';
-
-          return {
-            medicine_id: medId,
-            medicine_name: medName,
-            rate: rateVal,
-            mrp: mrpVal,
-            sell_price: initialSellPrice
-          };
-        });
-        setRows(mappedRows);
-      }
+    const urlInvoice = searchParams.get('invoice') || '';
+    const stateData = location.state as { invoiceNo?: string; items?: any[]; saved_items?: any[]; saved_medicines?: any[] } | undefined;
+    const invNo = stateData?.invoiceNo || urlInvoice;
+    if (invNo) {
+      setInvoiceNo(invNo);
     }
-  }, [location.state]);
+
+    const rawItems = stateData?.saved_medicines || stateData?.saved_items || stateData?.items || [];
+    if (Array.isArray(rawItems) && rawItems.length > 0) {
+      const mappedRows: SellPriceRow[] = rawItems.map(item => {
+        const medId = item.medicine_id || item.id || 0;
+        const medName = item.medicine_name || item.name || 'Unknown Item';
+        const rateVal = Number(item.rate || item.cost_price || 0);
+        const mrpVal = Number(item.mrp || 0);
+        const initialSellPrice = item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : '';
+
+        return {
+          medicine_id: medId,
+          medicine_name: medName,
+          rate: rateVal,
+          mrp: mrpVal,
+          sell_price: initialSellPrice
+        };
+      });
+      setRows(mappedRows);
+    } else if (invNo) {
+      // Fetch medicines for invoice from backend if not provided in state
+      setLoading(true);
+      api.getSellPriceMedicinesByInvoice(invNo)
+        .then(res => {
+          const fetchedItems = res.saved_medicines || res.saved_items || [];
+          if (Array.isArray(fetchedItems) && fetchedItems.length > 0) {
+            const mappedRows: SellPriceRow[] = fetchedItems.map((item: any) => ({
+              medicine_id: item.medicine_id || item.id || 0,
+              medicine_name: item.medicine_name || item.name || 'Unknown Item',
+              rate: Number(item.rate || item.cost_price || 0),
+              mrp: Number(item.mrp || 0),
+              sell_price: item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : ''
+            }));
+            setRows(mappedRows);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load items for invoice:', err);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [location.state, searchParams]);
 
   const handleSellPriceChange = (index: number, val: string) => {
     setRows(prev => {
       const next = [...prev];
       const row = { ...next[index] };
       row.sell_price = val;
+      row.warning = null;
 
       const numVal = parseFloat(val);
       if (!isNaN(numVal) && row.mrp > 0 && numVal > row.mrp) {
-        // Clamp to MRP if user enters greater than MRP
+        // Clamp to MRP if user enters price > MRP
         row.sell_price = String(row.mrp);
+        row.warning = 'Sell price cannot exceed MRP. Clamped to MRP.';
       }
 
       next[index] = row;
@@ -72,6 +101,39 @@ export default function SellPriceConfig() {
     if (isNaN(sellPrice) || sellPrice <= 0 || sellPrice >= mrp) return 0;
     const disc = ((mrp - sellPrice) / mrp) * 100;
     return parseFloat(disc.toFixed(2));
+  };
+
+  const renderDiscountBadge = (mrp: number, sellPriceStr: string) => {
+    const disc = calculateDiscount(mrp, sellPriceStr);
+    if (disc === null || disc === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-bg3 text-muted font-medium text-xs font-mono border border-glass-border">
+          No discount
+        </span>
+      );
+    }
+    if (disc <= 10) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-500 font-semibold text-xs font-mono border border-amber-500/20">
+          <Percent className="w-3 h-3" />
+          {disc}%
+        </span>
+      );
+    }
+    if (disc <= 25) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold text-xs font-mono border border-emerald-500/20">
+          <Percent className="w-3 h-3" />
+          {disc}%
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-500 font-semibold text-xs font-mono border border-rose-500/20" title="Deep discount warning">
+        <Percent className="w-3 h-3" />
+        {disc}%
+      </span>
+    );
   };
 
   const handleSaveAll = async () => {
@@ -92,7 +154,7 @@ export default function SellPriceConfig() {
       setSuccessMsg('Sell prices updated successfully!');
       setTimeout(() => {
         navigate('/purchases');
-      }, 1200);
+      }, 1000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save sell prices');
     } finally {
@@ -107,7 +169,7 @@ export default function SellPriceConfig() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-bg2 p-5 rounded-2xl border border-border shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-bg2 p-5 rounded-2xl border border-glass-border shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-xl bg-primary/10 text-primary">
             <Tag className="w-6 h-6" />
@@ -116,13 +178,13 @@ export default function SellPriceConfig() {
             <h1 className="text-xl font-bold text-text flex items-center gap-2">
               Set Sell Prices (Special Rates)
               {invoiceNo && (
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-bg3 text-muted font-medium">
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-bg3 text-muted font-medium border border-glass-border">
                   Invoice: {invoiceNo}
                 </span>
               )}
             </h1>
             <p className="text-sm text-muted">
-              Configure target selling prices for items saved in this purchase bill. Selling prices automatically compute discounts in POS.
+              Configure target selling prices for items in this purchase bill. The app auto-computes discounts in POS.
             </p>
           </div>
         </div>
@@ -131,7 +193,7 @@ export default function SellPriceConfig() {
           <button
             onClick={handleSkip}
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-bg hover:bg-bg3 text-text text-sm font-medium transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-glass-border bg-bg hover:bg-bg3 text-text text-sm font-medium transition-colors disabled:opacity-50"
           >
             <SkipForward className="w-4 h-4 text-muted" />
             Skip / Done
@@ -152,6 +214,14 @@ export default function SellPriceConfig() {
         </div>
       </div>
 
+      {/* Info Tip Banner */}
+      <div className="p-4 rounded-xl bg-primary/5 border border-primary/15 flex items-start gap-3 text-xs text-text">
+        <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+        <div>
+          <span className="font-semibold text-primary">Sell Price is optional:</span> If left empty or set equal to MRP, the medicine will sell at full MRP with no discount. When a sell price is set (e.g. MRP ₹150, Sell Price ₹120), POS auto-applies 20% discount without manual typing.
+        </div>
+      </div>
+
       {/* Success / Error Messages */}
       {successMsg && (
         <div className="flex items-center gap-2 p-4 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-sm font-medium">
@@ -167,12 +237,17 @@ export default function SellPriceConfig() {
         </div>
       )}
 
-      {/* Main Table */}
-      {rows.length === 0 ? (
-        <div className="text-center p-12 bg-bg2 rounded-2xl border border-border">
+      {/* Loading state */}
+      {loading ? (
+        <div className="text-center p-12 bg-bg2 rounded-2xl border border-glass-border">
+          <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-3" />
+          <p className="text-sm text-muted">Loading purchase bill medicines...</p>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="text-center p-12 bg-bg2 rounded-2xl border border-glass-border">
           <Tag className="w-12 h-12 text-muted mx-auto mb-3 opacity-40" />
           <h3 className="text-base font-semibold text-text mb-1">No items found for configuration</h3>
-          <p className="text-sm text-muted mb-4">No medicines were passed from the purchase bill.</p>
+          <p className="text-sm text-muted mb-4">No medicines were passed or retrieved for this purchase bill.</p>
           <button
             onClick={handleSkip}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium"
@@ -182,44 +257,49 @@ export default function SellPriceConfig() {
           </button>
         </div>
       ) : (
-        <div className="bg-bg2 rounded-2xl border border-border overflow-hidden shadow-sm">
+        <div className="bg-bg2 rounded-2xl border border-glass-border overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-bg3/60 text-muted uppercase text-[11px] tracking-wider font-semibold border-b border-border">
+              <thead className="bg-bg3/60 text-muted uppercase text-[11px] tracking-wider font-semibold border-b border-glass-border">
                 <tr>
                   <th className="py-3.5 px-4 w-12 text-center">#</th>
                   <th className="py-3.5 px-4">Medicine Name</th>
                   <th className="py-3.5 px-4 w-32 text-right">Cost Rate (₹)</th>
                   <th className="py-3.5 px-4 w-32 text-right">MRP (₹)</th>
-                  <th className="py-3.5 px-4 w-44">Target Sell Price (₹)</th>
-                  <th className="py-3.5 px-4 w-32 text-center">Discount (%)</th>
+                  <th className="py-3.5 px-4 w-48">Target Sell Price (₹)</th>
+                  <th className="py-3.5 px-4 w-36 text-center">Auto-Discount (%)</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/60">
+              <tbody className="divide-y divide-glass-border">
                 {rows.map((row, idx) => {
-                  const disc = calculateDiscount(row.mrp, row.sell_price);
                   const numSellPrice = parseFloat(row.sell_price);
                   const isBelowCost = !isNaN(numSellPrice) && numSellPrice > 0 && numSellPrice < row.rate;
 
                   return (
                     <tr key={row.medicine_id || idx} className="hover:bg-bg3/40 transition-colors">
-                      <td className="py-3 px-4 text-center font-medium text-muted">{idx + 1}</td>
-                      <td className="py-3 px-4">
+                      <td className="py-3.5 px-4 text-center font-medium text-muted">{idx + 1}</td>
+                      <td className="py-3.5 px-4">
                         <div className="font-semibold text-text">{row.medicine_name}</div>
                         {isBelowCost && (
-                          <div className="flex items-center gap-1 text-xs text-amber-500 mt-0.5">
-                            <AlertTriangle className="w-3 h-3 shrink-0" />
-                            <span>Selling price is below cost price (₹{row.rate})</span>
+                          <div className="flex items-center gap-1 text-xs text-rose-500 mt-1">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>⚠️ Sell price is below cost price (₹{row.rate.toFixed(2)}). You will make a loss.</span>
+                          </div>
+                        )}
+                        {row.warning && (
+                          <div className="flex items-center gap-1 text-xs text-amber-500 mt-1">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{row.warning}</span>
                           </div>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right text-muted font-mono font-medium">
+                      <td className="py-3.5 px-4 text-right text-muted font-mono font-medium">
                         ₹{row.rate.toFixed(2)}
                       </td>
-                      <td className="py-3 px-4 text-right text-text font-mono font-semibold">
+                      <td className="py-3.5 px-4 text-right text-text font-mono font-semibold">
                         ₹{row.mrp.toFixed(2)}
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3.5 px-4">
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted font-medium text-xs">₹</span>
                           <input
@@ -230,19 +310,12 @@ export default function SellPriceConfig() {
                             placeholder={row.mrp > 0 ? `${row.mrp}` : 'MRP'}
                             value={row.sell_price}
                             onChange={(e) => handleSellPriceChange(idx, e.target.value)}
-                            className="w-full pl-7 pr-3 py-1.5 rounded-xl border border-border bg-bg text-text text-sm font-mono focus:outline-none focus:border-primary transition-colors"
+                            className="w-full pl-7 pr-3 py-2 rounded-xl border border-glass-border bg-bg text-text text-sm font-mono font-bold focus:outline-none focus:border-primary transition-colors"
                           />
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-center">
-                        {disc !== null && disc > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold text-xs font-mono">
-                            <Percent className="w-3 h-3" />
-                            {disc}%
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted font-mono">0% (MRP)</span>
-                        )}
+                      <td className="py-3.5 px-4 text-center">
+                        {renderDiscountBadge(row.mrp, row.sell_price)}
                       </td>
                     </tr>
                   );
@@ -251,7 +324,7 @@ export default function SellPriceConfig() {
             </table>
           </div>
 
-          <div className="p-4 bg-bg3/30 border-t border-border flex items-center justify-between">
+          <div className="p-4 bg-bg3/30 border-t border-glass-border flex items-center justify-between">
             <p className="text-xs text-muted">
               Note: Leave sell price blank or set equal to MRP to sell at standard MRP (no discount).
             </p>
@@ -259,7 +332,7 @@ export default function SellPriceConfig() {
               <button
                 onClick={handleSkip}
                 disabled={saving}
-                className="px-4 py-2 rounded-xl border border-border bg-bg hover:bg-bg3 text-text text-sm font-medium transition-colors"
+                className="px-4 py-2 rounded-xl border border-glass-border bg-bg hover:bg-bg3 text-text text-sm font-medium transition-colors"
               >
                 Skip / Done
               </button>

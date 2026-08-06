@@ -423,8 +423,13 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
         is_loose: !!form.is_loose
       };
 
+      const parsedSellPrice = form.sell_price !== '' && form.sell_price !== null && form.sell_price !== undefined && !isNaN(Number(form.sell_price))
+        ? parseFloat(form.sell_price)
+        : null;
+
       await api.updateQuickEditMedicine(medicineId, {
         ...form,
+        sell_price: parsedSellPrice,
         inventory_id: inventoryId,
         metadata: JSON.stringify(metadataObj)
       });

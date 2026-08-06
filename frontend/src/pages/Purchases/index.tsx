@@ -73,6 +73,7 @@ interface BillItem {
   batch?: string;
   expiry?: string;
   price?: number | string;
+  sell_price?: number | string | null;
   cgst?: number | string;
   sgst?: number | string;
   pack_size?: number | string;
@@ -1696,9 +1697,17 @@ const Purchases: React.FC = () => {
         name: item.medicine_name,
         batch: item.batch_no || 'N/A'
       })));
-      setShowBarcodeModal(true);
 
-      toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully! Inventory stock updated.`, 'success');
+      const savedMeds = response?.saved_medicines || response?.saved_items || validItems.map(i => ({
+        medicine_id: i.medicine_id,
+        name: i.medicine_name,
+        medicine_name: i.medicine_name,
+        rate: Number(i.rate) || 0,
+        mrp: Number(i.mrp) || 0,
+        sell_price: i.sell_price || null
+      }));
+
+      toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully! Directing to sell price setup...`, 'success');
       if (typeof (window as any).refreshStagedCounts === 'function') {
         (window as any).refreshStagedCounts(true);
       }
@@ -1708,6 +1717,18 @@ const Purchases: React.FC = () => {
       setItems([createEmptyItem()]);
       setSelectedDistributor(null);
       setDistributorSearch('');
+      setInvoiceNo('');
+      setGrnNo(nextGrn);
+      setGlobalCdPer('');
+      setExtraCredit('');
+      setCnAmount('');
+
+      navigate(`/sell-price-config?invoice=${encodeURIComponent(savedInvoiceNo)}`, {
+        state: {
+          invoiceNo: savedInvoiceNo,
+          saved_medicines: savedMeds
+        }
+      });
       setInvoiceNo('');
       setGrnNo(nextGrn);
       setGlobalCdPer('');

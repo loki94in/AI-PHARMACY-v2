@@ -1630,6 +1630,7 @@ const POS = () => {
       batch: item.batch_no,
       expiry: item.expiry_date,
       mrp: item.mrp,
+      sell_price: item.sell_price,
       costPrice: item.cost_price,
       salts: item.salts || item.hsn_code || 'Generic',
       packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
@@ -1654,8 +1655,16 @@ const POS = () => {
         );
         if (idx === -1) return prevCart;
         const updated = [...cleanPrev];
+        const fetchedSellPrice = details.sell_price !== undefined ? details.sell_price : updated[idx].sell_price;
+        const mrpVal = updated[idx].mrp || details.mrp || 0;
+        let autoDiscount = updated[idx].discount;
+        if (fetchedSellPrice && fetchedSellPrice > 0 && mrpVal > 0 && fetchedSellPrice < mrpVal) {
+          autoDiscount = parseFloat((((mrpVal - fetchedSellPrice) / mrpVal) * 100).toFixed(2));
+        }
         updated[idx] = {
           ...updated[idx],
+          sell_price: fetchedSellPrice,
+          discount: autoDiscount,
           salts: details.api_reference || details.hsn_code || updated[idx].salts,
           packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || updated[idx].packSize,
           alternatives: details.alternatives || [],
