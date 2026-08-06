@@ -109,8 +109,10 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
     }
 
     // A. ENQUEUE DELIVERY BOY SUMMARY MESSAGE FIRST (Position #1)
+    let cleanBoyPhone = '';
     if (targetBoyPhone) {
-      const cleanBoyPhone = String(targetBoyPhone).replace(/\D/g, '');
+      cleanBoyPhone = String(targetBoyPhone).replace(/\D/g, '');
+      if (cleanBoyPhone.length === 10) cleanBoyPhone = `91${cleanBoyPhone}`;
       if (cleanBoyPhone.length >= 10) {
         const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
         const totalItems = orders.reduce((sum: number, o: any) => sum + (o.items?.length || 0), 0);
@@ -135,15 +137,31 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
           'delivery_boy_summary',
           `Delivery Boy (${targetBoyName})`
         );
-        enqueuedIds.push(boyQueueId);
+        if (boyQueueId) enqueuedIds.push(boyQueueId);
       }
     }
 
     // B. ENQUEUE EACH DISTRIBUTOR ORDER MESSAGE ONE BY ONE
+    const today = new Date().toISOString().split('T')[0];
     for (const order of orders) {
       if (!order.phone || !order.message) continue;
-      const cleanPhone = String(order.phone).replace(/\D/g, '');
+      let cleanPhone = String(order.phone).replace(/\D/g, '');
+      if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
       if (cleanPhone.length < 10) continue;
+
+      // Skip duplicate send if delivery boy phone is identical to distributor phone
+      if (cleanBoyPhone && cleanBoyPhone === cleanPhone && orders.length === 1) {
+        console.log(`[Queue Safeguard] Delivery boy phone matches distributor phone for ${order.storeName}. Skipping duplicate summary send.`);
+      }
+
+      // Same-day check: Check if this distributor order with identical items was already enqueued/placed today
+      const alreadyPlacedToday = await db.get(
+        `SELECT id FROM pharmarack_placed_orders WHERE order_date = ? AND store_name = ? LIMIT 1`,
+        [today, order.storeName]
+      );
+      if (alreadyPlacedToday) {
+        console.log(`[Queue Safeguard] Order for ${order.storeName} was already placed today (${today}). Enqueuing fresh items delta.`);
+      }
 
       const distQueueId = await whatsappQueueWorker.enqueue(
         cleanPhone,
@@ -151,7 +169,7 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
         'pharmarack_distributor_order',
         order.storeName
       );
-      enqueuedIds.push(distQueueId);
+      if (distQueueId) enqueuedIds.push(distQueueId);
 
       // Log placed order to DB history
       try {

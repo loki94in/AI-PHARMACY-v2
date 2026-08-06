@@ -447,8 +447,17 @@ export const api = {
   updateQuickEditMedicine: (id: number, data: any) => apiClient.put(`/inventory/medicines/${id}/quick-edit`, data).then(res => res.data),
   
   // Sell Price
-  updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null }>) =>
-    apiClient.post('/sell-price/bulk-update', { items }).then(res => res.data),
+  updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null; reorder_level?: number | null; max_stock_level?: number | null }>) =>
+    apiClient.post('/sell-price/bulk-update', { items }).then(async res => {
+      try {
+        await api.getCompactInventory();
+        window.dispatchEvent(new CustomEvent('compact-inventory-ready'));
+        window.dispatchEvent(new CustomEvent('inventory-cache-ready'));
+      } catch (err) {
+        console.warn('Failed to refresh compact inventory after sell price bulk update:', err);
+      }
+      return res.data;
+    }),
   getSellPriceMedicinesByInvoice: (invoiceNo: string) =>
     apiClient.get(`/sell-price/by-invoice/${encodeURIComponent(invoiceNo)}`).then(res => res.data),
   

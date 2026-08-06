@@ -110,12 +110,25 @@ router.delete('/orders/:id', async (req, res) => {
 
 // ─── DELIVERY BOYS ────────────────────────────────────────────────────────────
 
+const ensureDeliveryBoysTable = async (db: any) => {
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS delivery_boys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      whatsapp_number TEXT,
+      telegram_chat_id TEXT,
+      is_active INTEGER DEFAULT 1
+    )
+  `);
+};
+
 // GET /api/dispatch/delivery-boys
 router.get('/delivery-boys', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
+    await ensureDeliveryBoysTable(db);
     const boys = await db.all('SELECT * FROM delivery_boys ORDER BY name');
-        res.json(boys);
+    res.json(boys || []);
   } catch (error) {
     console.error('Fetch delivery boys error:', error);
     res.status(500).json({ error: 'Failed to fetch delivery boys' });
@@ -132,6 +145,7 @@ router.post('/delivery-boys', async (req, res) => {
 
   try {
     const db = await dbManager.getConnection();
+    await ensureDeliveryBoysTable(db);
     
     // Upsert: check if record already exists by name or phone
     const existing = await db.get(
@@ -143,7 +157,7 @@ router.post('/delivery-boys', async (req, res) => {
     if (existing) {
       targetId = existing.id;
       await db.run(
-        'UPDATE delivery_boys SET name = ?, whatsapp_number = COALESCE(?, whatsapp_number), is_active = 1 WHERE id = ?',
+        'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?',
         [cleanName, cleanPhone, existing.id]
       );
     } else {
@@ -176,6 +190,7 @@ router.put('/delivery-boys/:id', async (req, res) => {
   const { name, whatsapp_number, telegram_chat_id, is_active } = req.body;
   try {
     const db = await dbManager.getConnection();
+    await ensureDeliveryBoysTable(db);
     const existing = await db.get('SELECT * FROM delivery_boys WHERE id = ?', id);
     if (!existing) { return res.status(404).json({ error: 'Delivery boy not found' }); }
     const rawDigits = whatsapp_number !== undefined ? (whatsapp_number ? String(whatsapp_number).replace(/\D/g, '') : '') : null;

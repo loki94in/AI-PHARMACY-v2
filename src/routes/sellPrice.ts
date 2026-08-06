@@ -4,7 +4,7 @@ import { inventoryCache } from '../services/inventoryCache.js';
 
 const router = express.Router();
 
-// Bulk update sell prices for multiple medicines
+// Bulk update sell prices, reorder levels, and max stock levels for multiple medicines
 router.post('/bulk-update', async (req, res) => {
   let db;
   try {
@@ -24,16 +24,42 @@ router.post('/bulk-update', async (req, res) => {
       const parsedPrice = (rawPrice !== null && rawPrice !== '' && rawPrice !== undefined && !isNaN(Number(rawPrice)))
         ? Math.round(Number(rawPrice) * 100) / 100
         : null;
-
       const validPrice = (parsedPrice !== null && parsedPrice > 0) ? parsedPrice : null;
 
-      await db.run('UPDATE medicines SET sell_price = ? WHERE id = ?', [validPrice, medId]);
+      const rawReorder = item.reorder_level;
+      const parsedReorder = (rawReorder !== null && rawReorder !== '' && rawReorder !== undefined && !isNaN(Number(rawReorder)))
+        ? Math.max(0, parseInt(String(rawReorder), 10))
+        : null;
+
+      const rawMaxStock = item.max_stock_level;
+      const parsedMaxStock = (rawMaxStock !== null && rawMaxStock !== '' && rawMaxStock !== undefined && !isNaN(Number(rawMaxStock)))
+        ? Math.max(0, parseInt(String(rawMaxStock), 10))
+        : null;
+
+      const updates = ['sell_price = ?'];
+      const params: any[] = [validPrice];
+
+      if (parsedReorder !== null) {
+        updates.push('reorder_level = ?');
+        params.push(parsedReorder);
+      }
+      if (parsedMaxStock !== null) {
+        updates.push('max_stock_level = ?');
+        params.push(parsedMaxStock);
+      }
+
+      params.push(medId);
+      await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
+
+      if (parsedReorder !== null) {
+        await db.run('UPDATE inventory_master SET reorder_level = ? WHERE medicine_id = ?', [parsedReorder, medId]);
+      }
     }
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    res.json({ success: true, message: 'Sell prices updated successfully' });
+    res.json({ success: true, message: 'Sell prices and stock levels updated successfully' });
   } catch (error: any) {
     if (db) {
       try { await db.run('ROLLBACK'); } catch (_) {}
@@ -43,7 +69,7 @@ router.post('/bulk-update', async (req, res) => {
   }
 });
 
-// Fetch saved medicines for a purchase invoice to set sell prices
+// Fetch saved medicines for a purchase invoice to set sell prices and stock levels
 router.get('/by-invoice/:invoiceNo', async (req, res) => {
   let db;
   try {
@@ -59,7 +85,9 @@ router.get('/by-invoice/:invoiceNo', async (req, res) => {
         m.name as medicine_name, 
         COALESCE(pi.cost_price, m.rate, 0) as rate, 
         COALESCE(pi.mrp, m.mrp, 0) as mrp, 
-        m.sell_price
+        m.sell_price,
+        m.reorder_level,
+        m.max_stock_level
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
       JOIN medicines m ON pi.medicine_id = m.id

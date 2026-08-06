@@ -505,12 +505,78 @@ router.post('/google/disconnect', async (_req, res) => {
   }
 });
 
+// Registered Devices Management (for Mobile Pairing & Footer Bar)
+router.get('/registered-devices', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        token TEXT PRIMARY KEY,
+        device_name TEXT,
+        os TEXT,
+        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const rows = await db.all(`
+      SELECT 
+        push_tokens.token, 
+        push_tokens.device_name, 
+        push_tokens.os, 
+        push_tokens.last_seen,
+        CASE 
+          WHEN (strftime('%s', 'now') - strftime('%s', push_tokens.last_seen)) <= 40 THEN 1 
+          ELSE 0 
+        END as is_online
+      FROM push_tokens
+      INNER JOIN (
+        SELECT MAX(last_seen) as max_last_seen, device_name, os
+        FROM push_tokens
+        GROUP BY device_name, os
+      ) p2 ON p2.max_last_seen = push_tokens.last_seen 
+        AND p2.device_name = push_tokens.device_name 
+        AND p2.os = push_tokens.os
+      ORDER BY is_online DESC, push_tokens.last_seen DESC
+    `);
+    res.json({ success: true, devices: rows || [] });
+  } catch (err: any) {
+    console.error('Failed to fetch registered devices:', err);
+    res.json({ success: true, devices: [] });
+  }
+});
+
+router.put('/registered-devices/rename', async (req, res) => {
+  const { token, device_name } = req.body;
+  if (!token || !device_name) {
+    return res.status(400).json({ error: 'Token and device_name are required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('UPDATE push_tokens SET device_name = ? WHERE token = ?', [device_name.trim(), token]);
+    res.json({ success: true, message: 'Device renamed successfully' });
+  } catch (err: any) {
+    console.error('Failed to rename registered device:', err);
+    res.status(500).json({ error: err.message || 'Failed to rename device' });
+  }
+});
+
 // Storage Locations Management
 router.get('/storage-locations', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS storage_locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        code TEXT UNIQUE,
+        type TEXT DEFAULT 'rack',
+        description TEXT,
+        is_default INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
     const locations = await db.all('SELECT * FROM storage_locations ORDER BY is_default DESC, name ASC');
-    res.json(locations);
+    res.json(locations || []);
   } catch (error) {
     console.error('Failed to fetch storage locations:', error);
     res.status(500).json({ error: 'Failed to fetch storage locations' });

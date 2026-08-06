@@ -513,7 +513,7 @@ export class NotificationService {
       let itemsText = '';
       if (items && items.length > 0) {
         itemsText = items
-          .map((item: any) => `  • ${item.productName || item.name || 'Medicine Item'} — \n    Qty: ${item.qty || item.Quantity || 1}`)
+          .map((item: any) => `  • ${item.productName || item.name || 'Medicine Item'}\n    Qty: ${item.qty || item.Quantity || 1}`)
           .join('\n');
       } else {
         itemsText = '  • Standard Pharmacy Order Items';
@@ -580,6 +580,10 @@ export class NotificationService {
 
       // Send to delivery boy(s)
       for (const boy of resolvedDeliveryBoys) {
+        if (uniqueDistPhones.includes(boy.phone)) {
+          console.log(`[CartOrderNotif] Skipping duplicate send to delivery boy ${boy.name} at ${boy.phone} (already messaged in distributor batch).`);
+          continue;
+        }
         try {
           const sendResult = await sendMessage(boy.phone, undefined, message);
           const logStatus = sendLogStatus(sendResult);

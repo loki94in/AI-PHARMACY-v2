@@ -158,6 +158,23 @@ class WhatsAppQueueWorker {
     const cleanPhone = number.replace(/[^0-9]/g, '');
     const now = Date.now();
 
+    // Deduplication check: suppress identical messages sent to the same number within the same day
+    try {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startOfDayMs = startOfDay.getTime();
+
+      const existingToday = await db.get(
+        `SELECT id, status FROM whatsapp_send_queue 
+         WHERE number = ? AND message = ? AND created_at >= ? LIMIT 1`,
+        [cleanPhone, message, startOfDayMs]
+      );
+      if (existingToday?.id) {
+        console.log(`[Queue Safeguard] Suppressed duplicate enqueue for ${cleanPhone} today (status: ${existingToday.status}, queue ID: ${existingToday.id}).`);
+        return existingToday.id;
+      }
+    } catch (_) {}
+
     // Auto-resolve targetName if omitted
     let resolvedTargetName = targetName?.trim() || '';
     if (!resolvedTargetName && cleanPhone.length >= 7) {

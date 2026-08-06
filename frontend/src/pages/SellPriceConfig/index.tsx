@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Tag, Save, SkipForward, AlertTriangle, Check, ArrowLeft, Percent, Info } from 'lucide-react';
+import { Tag, Save, SkipForward, AlertTriangle, Check, ArrowLeft, Percent, Info, Layers } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface SellPriceRow {
@@ -9,6 +9,8 @@ interface SellPriceRow {
   rate: number; // cost price
   mrp: number;
   sell_price: string; // raw input
+  reorder_level: string; // min stock level
+  max_stock_level: string; // max stock level
   warning?: string | null;
 }
 
@@ -40,13 +42,17 @@ export default function SellPriceConfig() {
         const rateVal = Number(item.rate || item.cost_price || 0);
         const mrpVal = Number(item.mrp || 0);
         const initialSellPrice = item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : '';
+        const initialReorder = item.reorder_level !== null && item.reorder_level !== undefined ? String(item.reorder_level) : '10';
+        const initialMaxStock = item.max_stock_level !== null && item.max_stock_level !== undefined ? String(item.max_stock_level) : '';
 
         return {
           medicine_id: medId,
           medicine_name: medName,
           rate: rateVal,
           mrp: mrpVal,
-          sell_price: initialSellPrice
+          sell_price: initialSellPrice,
+          reorder_level: initialReorder,
+          max_stock_level: initialMaxStock
         };
       });
       setRows(mappedRows);
@@ -62,7 +68,9 @@ export default function SellPriceConfig() {
               medicine_name: item.medicine_name || item.name || 'Unknown Item',
               rate: Number(item.rate || item.cost_price || 0),
               mrp: Number(item.mrp || 0),
-              sell_price: item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : ''
+              sell_price: item.sell_price !== null && item.sell_price !== undefined ? String(item.sell_price) : '',
+              reorder_level: item.reorder_level !== null && item.reorder_level !== undefined ? String(item.reorder_level) : '10',
+              max_stock_level: item.max_stock_level !== null && item.max_stock_level !== undefined ? String(item.max_stock_level) : ''
             }));
             setRows(mappedRows);
           }
@@ -91,6 +99,22 @@ export default function SellPriceConfig() {
       }
 
       next[index] = row;
+      return next;
+    });
+  };
+
+  const handleReorderChange = (index: number, val: string) => {
+    setRows(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], reorder_level: val };
+      return next;
+    });
+  };
+
+  const handleMaxStockChange = (index: number, val: string) => {
+    setRows(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], max_stock_level: val };
       return next;
     });
   };
@@ -143,15 +167,20 @@ export default function SellPriceConfig() {
 
     try {
       const payload = rows.map(r => {
-        const numVal = parseFloat(r.sell_price);
+        const numSellPrice = parseFloat(r.sell_price);
+        const numReorder = parseInt(r.reorder_level, 10);
+        const numMaxStock = parseInt(r.max_stock_level, 10);
+
         return {
           medicine_id: r.medicine_id,
-          sell_price: !isNaN(numVal) && numVal > 0 ? numVal : null
+          sell_price: !isNaN(numSellPrice) && numSellPrice > 0 ? numSellPrice : null,
+          reorder_level: !isNaN(numReorder) && numReorder >= 0 ? numReorder : null,
+          max_stock_level: !isNaN(numMaxStock) && numMaxStock >= 0 ? numMaxStock : null
         };
       });
 
       await api.updateBulkSellPrices(payload);
-      setSuccessMsg('Sell prices updated successfully!');
+      setSuccessMsg('Sell prices and stock levels updated successfully!');
       setTimeout(() => {
         navigate('/purchases');
       }, 1000);
@@ -167,7 +196,7 @@ export default function SellPriceConfig() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-bg2 p-5 rounded-2xl border border-glass-border shadow-sm">
         <div className="flex items-center gap-3">
@@ -176,7 +205,7 @@ export default function SellPriceConfig() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-text flex items-center gap-2">
-              Set Sell Prices (Special Rates)
+              Set Sell Prices & Stock Limits
               {invoiceNo && (
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-bg3 text-muted font-medium border border-glass-border">
                   Invoice: {invoiceNo}
@@ -184,7 +213,7 @@ export default function SellPriceConfig() {
               )}
             </h1>
             <p className="text-sm text-muted">
-              Configure target selling prices for items in this purchase bill. The app auto-computes discounts in POS.
+              Configure target selling prices, minimum stock alerts (reorder level), and maximum stock capacity per product.
             </p>
           </div>
         </div>
@@ -218,7 +247,7 @@ export default function SellPriceConfig() {
       <div className="p-4 rounded-xl bg-primary/5 border border-primary/15 flex items-start gap-3 text-xs text-text">
         <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
         <div>
-          <span className="font-semibold text-primary">Sell Price is optional:</span> If left empty or set equal to MRP, the medicine will sell at full MRP with no discount. When a sell price is set (e.g. MRP ₹150, Sell Price ₹120), POS auto-applies 20% discount without manual typing.
+          <span className="font-semibold text-primary">Sell Price & Stock Limits:</span> Setting a target sell price automatically computes the discount percentage in POS billing. Min Stock (Reorder Level) triggers low-stock alerts, while Max Stock prevents over-purchasing.
         </div>
       </div>
 
@@ -264,10 +293,12 @@ export default function SellPriceConfig() {
                 <tr>
                   <th className="py-3.5 px-4 w-12 text-center">#</th>
                   <th className="py-3.5 px-4">Medicine Name</th>
-                  <th className="py-3.5 px-4 w-32 text-right">Cost Rate (₹)</th>
-                  <th className="py-3.5 px-4 w-32 text-right">MRP (₹)</th>
-                  <th className="py-3.5 px-4 w-48">Target Sell Price (₹)</th>
-                  <th className="py-3.5 px-4 w-36 text-center">Auto-Discount (%)</th>
+                  <th className="py-3.5 px-4 w-28 text-right">Cost Rate (₹)</th>
+                  <th className="py-3.5 px-4 w-28 text-right">MRP (₹)</th>
+                  <th className="py-3.5 px-4 w-40">Target Sell Price (₹)</th>
+                  <th className="py-3.5 px-4 w-32 text-center">Auto-Discount (%)</th>
+                  <th className="py-3.5 px-4 w-36">Min Stock (Reorder)</th>
+                  <th className="py-3.5 px-4 w-36">Max Stock Level</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border">
@@ -316,6 +347,26 @@ export default function SellPriceConfig() {
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         {renderDiscountBadge(row.mrp, row.sell_price)}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="10"
+                          value={row.reorder_level}
+                          onChange={(e) => handleReorderChange(idx, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-glass-border bg-bg text-text text-sm font-mono font-semibold focus:outline-none focus:border-primary transition-colors"
+                        />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="Max"
+                          value={row.max_stock_level}
+                          onChange={(e) => handleMaxStockChange(idx, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-glass-border bg-bg text-text text-sm font-mono font-semibold focus:outline-none focus:border-primary transition-colors"
+                        />
                       </td>
                     </tr>
                   );

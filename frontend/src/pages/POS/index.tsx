@@ -1422,6 +1422,15 @@ const POS = () => {
     // 6. Build the new cart rows for this medicine
     const firstMedItem = medicineItems[0];
     const newMedRows = allocations.map((alloc) => {
+      const rowSellPrice = alloc.batch.sell_price !== undefined && alloc.batch.sell_price !== null
+        ? alloc.batch.sell_price
+        : (firstMedItem.sell_price || null);
+      const rowMrp = alloc.batch.mrp || firstMedItem.mrp || 0;
+      let rowDiscount = firstMedItem.discount;
+      if ((rowDiscount === undefined || rowDiscount === 0) && rowSellPrice && Number(rowSellPrice) > 0 && rowMrp > 0 && Number(rowSellPrice) < rowMrp) {
+        rowDiscount = parseFloat((((rowMrp - Number(rowSellPrice)) / rowMrp) * 100).toFixed(2));
+      }
+
       return {
         ...firstMedItem,
         id: alloc.batch.inventory_id,
@@ -1430,9 +1439,11 @@ const POS = () => {
         qty: alloc.qty,
         quantity: alloc.qty,
         looseQty: alloc.looseQty,
-        mrp: alloc.batch.mrp,
-        costPrice: alloc.batch.cost_price || (alloc.batch.mrp * 0.7),
-        unitPrice: alloc.batch.unit_price || alloc.batch.mrp,
+        mrp: rowMrp,
+        sell_price: rowSellPrice,
+        discount: rowDiscount || 0,
+        costPrice: alloc.batch.cost_price || (rowMrp * 0.7),
+        unitPrice: alloc.batch.unit_price || rowMrp,
         availableStock: alloc.batch.stock_qty,
         availableLooseStock: alloc.batch.loose_quantity,
         alternative_batches: activeBatches.filter(b => b.inventory_id !== alloc.batch.inventory_id)
@@ -1657,9 +1668,11 @@ const POS = () => {
         const updated = [...cleanPrev];
         const fetchedSellPrice = details.sell_price !== undefined ? details.sell_price : updated[idx].sell_price;
         const mrpVal = updated[idx].mrp || details.mrp || 0;
+        const numSellPrice = Number(fetchedSellPrice || 0);
+        const numMrp = Number(mrpVal || 0);
         let autoDiscount = updated[idx].discount;
-        if (fetchedSellPrice && fetchedSellPrice > 0 && mrpVal > 0 && fetchedSellPrice < mrpVal) {
-          autoDiscount = parseFloat((((mrpVal - fetchedSellPrice) / mrpVal) * 100).toFixed(2));
+        if (numSellPrice > 0 && numMrp > 0 && numSellPrice < numMrp) {
+          autoDiscount = parseFloat((((numMrp - numSellPrice) / numMrp) * 100).toFixed(2));
         }
         updated[idx] = {
           ...updated[idx],

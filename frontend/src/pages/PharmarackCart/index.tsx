@@ -1119,7 +1119,7 @@ export default function PharmarackCart() {
 
     itemsToSend.forEach((item) => {
       const pack = item.packaging ? ` (${item.packaging})` : '';
-      msg += `  • ${item.productName}${pack} — \n    Qty: ${item.qty}\n`;
+      msg += `  • ${item.productName}${pack}\n    Qty: ${item.qty}\n`;
     });
 
     msg += `\n🚚 *Assigned Delivery Boy:*\n`;
@@ -3425,9 +3425,9 @@ export default function PharmarackCart() {
       )}
 
       {/* Missing Delivery Boy Confirmation Modal */}
-      {showMissingBoyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-scale-up">
+      {showMissingBoyModal && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden animate-scale-up">
             <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between bg-bg3/40">
               <div className="flex items-center gap-2.5">
                 <Truck className="text-amber-400" size={20} />
@@ -3502,7 +3502,8 @@ export default function PharmarackCart() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
