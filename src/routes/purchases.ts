@@ -1,4 +1,5 @@
 import express from 'express';
+import { recordStockLedger } from '../utils/stockRebuild.js';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -969,7 +970,7 @@ router.post('/manual', async (req, res) => {
       const totalQty = rawQty + rawFreeQty;
       const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
       if (invRow) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
+        await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?',
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
         await refreshInventoryActiveStatus(db, invRow.id);
       } else {
@@ -979,6 +980,11 @@ router.post('/manual', async (req, res) => {
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
         await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
+      await recordStockLedger(db, {
+        medicine_id: medId, batch_no: rawBatch,
+        quantity: totalQty, loose_quantity: 0,
+        transaction_type: 'purchase', transaction_id: purchaseId
+      });
 
       // Keep medicines.mrp, rate, and GST in sync for future purchases
       if (mrp && mrp > 0) {

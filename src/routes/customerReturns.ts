@@ -2,6 +2,7 @@ import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
 
 const router = express.Router();
 
@@ -154,11 +155,31 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
         throw new Error(`Cannot return more than originally sold. Sold: ${saleItem.quantity}, Previously Returned: ${prevQty}, Attempted Return: ${item.quantity}`);
       }
 
-      // Add to inventory
-      await db.run(
-        'UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?',
-        [item.quantity, item.inventory_id]
+      // Add to inventory — routed through the same fungible pack+loose math
+      // as Sales, instead of a raw `quantity = quantity + ?`, so this stays
+      // consistent if loose-unit returns are ever supported here. Reads the
+      // current stock fresh (not from the earlier snapshot) so this stays
+      // correct even if the same batch appears more than once in one return.
+      const stockNow = await db.get(
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON m.id = im.medicine_id WHERE im.id = ?`,
+        [item.inventory_id]
       );
+      if (stockNow) {
+        const restored = applyStockDelta(
+          { quantity: stockNow.quantity, loose_quantity: stockNow.loose_quantity },
+          Number(item.quantity), 0, stockNow.pack_size
+        );
+        await db.run(
+          'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+          [restored.quantity, restored.loose_quantity, item.inventory_id]
+        );
+        await recordStockLedger(db, {
+          medicine_id: invInfo.medicine_id, batch_no: invInfo.batch_no,
+          quantity: Number(item.quantity), loose_quantity: 0,
+          transaction_type: 'customer_return', transaction_id: returnId
+        });
+      }
       
       // Log in return_items
       await db.run(

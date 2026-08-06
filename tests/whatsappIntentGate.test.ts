@@ -34,3 +34,26 @@ describe('WhatsApp Intent Confidence Gate', () => {
     expect(passesGate(0, true, 'text')).toBe(false);
   });
 });
+
+describe('OCR Stage-0 Scan Gate — must never fail open on an empty api_substances dictionary', () => {
+  let resolveOcrGateDecision: any;
+
+  beforeAll(async () => {
+    resolveOcrGateDecision = (await import('../src/services/whatsappIntentService.js')).resolveOcrGateDecision;
+  });
+
+  test('empty dictionary still SKIPS a plausible name with no dose-form/strength signal (e.g. a ticket or bill)', () => {
+    const decision = resolveOcrGateDecision('PNR 1234567 Boarding pass seat 22A', 'Azithromycin', new Set());
+    expect(decision).toBe('skip');
+  });
+
+  test('empty dictionary still IDENTIFIES a real medicine scan carrying a dose-form/strength signal', () => {
+    const decision = resolveOcrGateDecision('Azithromycin 500mg tablet strip of 10', 'Azithromycin', new Set());
+    expect(decision).toBe('identify');
+  });
+
+  test('a populated dictionary can identify purely from a known API name, no dose-form needed', () => {
+    const decision = resolveOcrGateDecision('some random label text mentioning azithromycin', 'Azithromycin', new Set(['azithromycin']));
+    expect(decision).toBe('identify');
+  });
+});

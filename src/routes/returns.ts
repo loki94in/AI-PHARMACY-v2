@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { aiCameraService } from '../services/aiCameraService.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { getAppDataDir } from '../config/index.js';
+import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -355,16 +356,34 @@ router.post('/process-returns', async (req, res) => {
         ]
       );
 
-      // Decrement inventory_master quantity if match exists
+      // Decrement inventory_master stock if match exists — routed through the
+      // same fungible pack+loose math as Sales, instead of a raw quantity
+      // subtraction, so this stays consistent if loose-unit returns are ever
+      // supported here.
       const invItem = await db.get(
-        'SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?',
+        `SELECT im.id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+         FROM inventory_master im JOIN medicines m ON m.id = im.medicine_id
+         WHERE im.medicine_id = ? AND im.batch_no = ?`,
         [item.medicine_id, item.batch_no]
       );
       if (invItem) {
-        const newQty = Math.max(0, invItem.quantity - item.quantity);
-        await db.run('UPDATE inventory_master SET quantity = ? WHERE id = ?', [newQty, invItem.id]);
+        const restored = applyStockDelta(
+          { quantity: invItem.quantity, loose_quantity: invItem.loose_quantity },
+          -Number(item.quantity), 0, invItem.pack_size
+        );
+        // A negative total means the return exceeds what's on hand — clamp to
+        // zero rather than let the split go negative (same safety the old
+        // Math.max(0, ...) guard provided).
+        const newQuantity = restored.quantity < 0 ? 0 : restored.quantity;
+        const newLoose = restored.quantity < 0 ? 0 : restored.loose_quantity;
+        await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newQuantity, newLoose, invItem.id]);
         const { refreshInventoryActiveStatus } = await import('../utils/inventoryActive.js');
         await refreshInventoryActiveStatus(db, invItem.id);
+        await recordStockLedger(db, {
+          medicine_id: item.medicine_id, batch_no: item.batch_no,
+          quantity: -Number(item.quantity), loose_quantity: 0,
+          transaction_type: 'return_to_distributor', transaction_id: returnId
+        });
       }
     }
 

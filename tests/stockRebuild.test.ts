@@ -1,4 +1,4 @@
-import { rebuildStockFromLedger, applyStockDelta } from '../src/utils/stockRebuild.js';
+import { rebuildStockFromLedger, applyStockDelta, recordStockLedger } from '../src/utils/stockRebuild.js';
 
 describe('rebuildStockFromLedger', () => {
   it('treats strips and loose as one fungible pool, not independent balances', () => {
@@ -61,5 +61,30 @@ describe('applyStockDelta', () => {
     const result = applyStockDelta({ quantity: 3, loose_quantity: 5 }, -1, -8, 10);
     // total = 3*10+5=35, sold 1*10+8=18, remaining=17 -> 1 strip + 7 loose
     expect(result).toEqual({ quantity: 1, loose_quantity: 7 });
+  });
+});
+
+describe('recordStockLedger', () => {
+  it('inserts a signed delta row with the given transaction type/id', async () => {
+    const calls: any[] = [];
+    const db = { run: async (sql: string, params?: any[]) => { calls.push({ sql, params }); } };
+
+    await recordStockLedger(db, {
+      medicine_id: 42, batch_no: 'B1',
+      quantity: -2, loose_quantity: -5,
+      transaction_type: 'sale', transaction_id: 101
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toMatch(/INSERT INTO stock_ledger/);
+    expect(calls[0].params).toEqual([42, 'B1', -2, -5, 'sale', '101']);
+  });
+
+  it('never throws when the insert fails — a ledger write must not break the real transaction', async () => {
+    const db = { run: async () => { throw new Error('disk full'); } };
+    await expect(recordStockLedger(db, {
+      medicine_id: 1, batch_no: null, quantity: 1, loose_quantity: 0,
+      transaction_type: 'purchase', transaction_id: null
+    })).resolves.toBeUndefined();
   });
 });

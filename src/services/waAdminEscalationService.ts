@@ -65,6 +65,47 @@ async function resolvePhone(
   return { display, waDigits };
 }
 
+// Priority order of app_settings keys that may hold the pharmacy's admin
+// WhatsApp number. The visible Settings page saves 'owner_whatsapp_number';
+// bouncedAlertService/shortageReminderService read 'admin_whatsapp_number';
+// only 'admin_whatsapp' was ever checked here, so a number saved through the
+// normal Settings UI was silently ignored and escalations never sent.
+const ADMIN_PHONE_SETTING_KEYS = ['admin_whatsapp', 'owner_whatsapp_number', 'admin_whatsapp_number', 'shop_phone', 'store_phone'];
+
+/**
+ * Resolve the pharmacy's admin WhatsApp number from whichever settings key
+ * actually holds it. Returns '' if none are set. Exported for unit testing.
+ */
+export async function resolveAdminWhatsappNumber(db: any): Promise<string> {
+  for (const key of ADMIN_PHONE_SETTING_KEYS) {
+    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]);
+    if (row?.value && row.value.trim() !== '') {
+      return row.value.trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Notify the pharmacy about an inbound WhatsApp image that couldn't be
+ * turned into a confident medicine match — either the download failed after
+ * retries (no imagePath, text-only alert) or OCR ran but the result was too
+ * uncertain to auto-escalate (imagePath set, forwards the actual photo so a
+ * human can look at it instead of the message silently vanishing).
+ * Returns false (and sends nothing) if no admin number is configured.
+ */
+export async function notifyAdminOfUnprocessedMedia(
+  db: any,
+  opts: { phone: string; chatId?: string; imagePath?: string; reason: string }
+): Promise<boolean> {
+  const adminWhatsapp = await resolveAdminWhatsappNumber(db);
+  if (!adminWhatsapp) return false;
+
+  const caption = `⚠️ *Unprocessed WhatsApp Image*\n📞 ${opts.phone}\n${opts.reason}\nPlease check this chat manually.`;
+  await sendMessage(adminWhatsapp, opts.imagePath, caption);
+  return true;
+}
+
 export async function maybeEscalate(payload: EscalationPayload): Promise<void> {
   try {
     const db = await dbManager.getConnection();
@@ -84,9 +125,9 @@ export async function maybeEscalate(payload: EscalationPayload): Promise<void> {
       return;
     }
 
-    const adminWhatsapp = await getSetting('admin_whatsapp', '');
-    if (!adminWhatsapp || adminWhatsapp.trim() === '') {
-      console.warn('[Admin Escalation] wa_auto_share_admin is enabled, but admin_whatsapp is empty. Skipping.');
+    const adminWhatsapp = await resolveAdminWhatsappNumber(db);
+    if (!adminWhatsapp) {
+      console.warn(`[Admin Escalation] wa_auto_share_admin is enabled, but no admin WhatsApp number is configured (checked ${ADMIN_PHONE_SETTING_KEYS.join(', ')}). Skipping.`);
       return;
     }
 
@@ -300,4 +341,4 @@ ${matchBlock}${contextBlock}
   }
 }
 
-export const waAdminEscalationService = { maybeEscalate };
+export const waAdminEscalationService = { maybeEscalate, notifyAdminOfUnprocessedMedia, resolveAdminWhatsappNumber };

@@ -62,3 +62,32 @@ export function applyStockDelta(
   const loose_quantity = newTotal - quantity * size;
   return { quantity, loose_quantity };
 }
+
+export interface StockLedgerEntry {
+  medicine_id: number | null;
+  batch_no: string | null;
+  quantity: number;
+  loose_quantity: number;
+  transaction_type: string;
+  transaction_id: string | number | null | undefined;
+}
+
+/**
+ * Appends one row to stock_ledger for a normal stock-writing operation
+ * (sale, purchase, return). quantity/loose_quantity are signed deltas —
+ * negative for stock leaving, positive for stock arriving — matching the
+ * legacy import format in pgReturnsImporter.ts so old and new rows stay
+ * comparable. Best-effort: a ledger write must never fail or roll back the
+ * actual stock transaction it's recording, so errors are logged, not thrown.
+ */
+export async function recordStockLedger(db: { run: (sql: string, params?: any[]) => Promise<any> }, entry: StockLedgerEntry): Promise<void> {
+  try {
+    await db.run(
+      `INSERT INTO stock_ledger (medicine_id, batch_no, quantity, loose_quantity, transaction_type, transaction_id, business_date)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [entry.medicine_id, entry.batch_no, entry.quantity, entry.loose_quantity, entry.transaction_type, entry.transaction_id != null ? String(entry.transaction_id) : null]
+    );
+  } catch (err) {
+    console.warn('[Stock Ledger] Failed to record entry:', err);
+  }
+}

@@ -611,6 +611,8 @@ export const api = {
   triggerEmailSync: () => apiClient.post('/email/sync').then(res => res.data),
   clearAttachmentsCache: () => apiClient.delete('/email/attachments/cache').then(res => res.data),
   getAttachmentPreview: (filename: string) => apiClient.get('/email/attachments/preview', { params: { filename } }).then(res => res.data),
+  getEmailOrderReviews: (status?: string) => apiClient.get('/email-order-reviews', { params: status ? { status } : undefined }).then(res => res.data),
+  dismissEmailOrderReview: (id: number) => apiClient.post(`/email-order-reviews/${id}/dismiss`).then(res => res.data),
   
   
   // Medicines Database

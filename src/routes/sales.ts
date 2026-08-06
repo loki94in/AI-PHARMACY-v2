@@ -3,7 +3,7 @@ import { INVENTORY_ACTIVE_WHERE } from '../utils/inventoryActive.js';
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { productNameFilterService } from '../services/productNameFilterService.js';
-import { applyStockDelta } from '../utils/stockRebuild.js';
+import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { verificationService } from '../services/verificationService.js';
 import path from 'path';
@@ -341,7 +341,7 @@ router.post('/', async (req, res) => {
 
       // Stock Level Verification before processing decrement (strips + loose counted as one pool)
       const currentStock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+        `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [inventory_id]
       );
@@ -386,6 +386,11 @@ router.post('/', async (req, res) => {
         throw new Error(`Failed to decrement stock for inventory ID ${inventory_id}`);
       }
       await refreshInventoryActiveStatus(db, inventory_id);
+      await recordStockLedger(db, {
+        medicine_id: currentStock.medicine_id, batch_no: currentStock.batch_no,
+        quantity: -soldQty, loose_quantity: -soldLoose,
+        transaction_type: 'sale', transaction_id: invoiceId
+      });
 
       // Handle refill logic if enabled
       if (refillEnabled && inventory_id) {
@@ -1865,7 +1870,7 @@ router.put('/:id', async (req, res) => {
       const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
       for (const oi of oldItems) {
         const oldStock = await db.get(
-          `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+          `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
           [oi.inventory_id]
         );
@@ -1875,6 +1880,11 @@ router.put('/:id', async (req, res) => {
           Number(oi.quantity), Number(oi.loose_qty || 0), oldStock.pack_size
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, oi.inventory_id]);
+        await recordStockLedger(db, {
+          medicine_id: oldStock.medicine_id, batch_no: oldStock.batch_no,
+          quantity: Number(oi.quantity), loose_quantity: Number(oi.loose_qty || 0),
+          transaction_type: 'sale_edit_restore', transaction_id: id
+        });
       }
 
       // Delete old items
@@ -1889,7 +1899,7 @@ router.put('/:id', async (req, res) => {
 
         // Stock Level & Expiry Verification (strips + loose counted as one pool)
         const currentStock = await db.get(
-          `SELECT im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+          `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
           [inventory_id]
         );
@@ -1926,6 +1936,11 @@ router.put('/:id', async (req, res) => {
           -Number(quantity), -Number(loose_qty), pSize
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
+        await recordStockLedger(db, {
+          medicine_id: currentStock.medicine_id, batch_no: currentStock.batch_no,
+          quantity: -Number(quantity), loose_quantity: -Number(loose_qty),
+          transaction_type: 'sale_edit', transaction_id: id
+        });
       }
 
       await db.run(
@@ -1966,7 +1981,7 @@ router.delete('/:id', async (req, res) => {
     const items = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
     for (const item of items) {
       const stock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+        `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [item.inventory_id]
       );
@@ -1976,6 +1991,11 @@ router.delete('/:id', async (req, res) => {
         Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size
       );
       await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.inventory_id]);
+      await recordStockLedger(db, {
+        medicine_id: stock.medicine_id, batch_no: stock.batch_no,
+        quantity: Number(item.quantity), loose_quantity: Number(item.loose_qty || 0),
+        transaction_type: 'sale_delete_restore', transaction_id: id
+      });
     }
 
     // Delete items then invoice

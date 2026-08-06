@@ -45,6 +45,18 @@ interface AttachmentFile {
   isSelected: boolean;
 }
 
+interface EmailOrderReview {
+  id: number;
+  email_uid: number | null;
+  distributor_name: string | null;
+  invoice_number: string | null;
+  medicines_json: string | null;
+  email_subject: string | null;
+  email_date: string | null;
+  status: string;
+  created_at: string;
+}
+
 const FILE_ICONS: Record<string, typeof FileText> = {
   pdf: FileText,
   csv: FileSpreadsheet,
@@ -123,6 +135,7 @@ let cachedEmails: EmailRecord[] = [];
 let cachedLastSyncedAt: Date | null = null;
 let cachedSelectedEmail: EmailRecord | null = null;
 let cachedAttachments: AttachmentFile[] = [];
+let cachedPendingReviews: EmailOrderReview[] = [];
 
 const Mail = () => {
   const navigate = useNavigate();
@@ -149,7 +162,71 @@ const Mail = () => {
   const [isImapConfigured, setIsImapConfigured] = useState<boolean>(true);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [loadingPreview, setLoadingPreview] = useState<boolean>(false);
+  const [pendingReviews, setPendingReviews] = useState<EmailOrderReview[]>(() => cachedPendingReviews);
+  const [showReviews, setShowReviews] = useState(false);
   const syncInProgress = useRef(false);
+
+  // Backend safety-net queue: emails that looked like a distributor order but
+  // were never turned into a purchase bill (no attachment to auto-parse, or
+  // staff never got to it). Otherwise invisible unless the DB is queried directly.
+  const refreshPendingReviews = useCallback(() => {
+    api.getEmailOrderReviews('pending')
+      .then((rows: EmailOrderReview[]) => {
+        cachedPendingReviews = Array.isArray(rows) ? rows : [];
+        setPendingReviews(cachedPendingReviews);
+      })
+      .catch((err: any) => console.error('Failed to fetch pending email order reviews:', err));
+  }, []);
+
+  useEffect(() => {
+    refreshPendingReviews();
+    window.addEventListener('focus', refreshPendingReviews);
+    return () => window.removeEventListener('focus', refreshPendingReviews);
+  }, [refreshPendingReviews]);
+
+  const dismissReview = useCallback((id: number) => {
+    setPendingReviews(prev => {
+      cachedPendingReviews = prev.filter(r => r.id !== id);
+      return cachedPendingReviews;
+    });
+    api.dismissEmailOrderReview(id).catch((err: any) => {
+      console.error('Failed to dismiss email order review:', err);
+      refreshPendingReviews(); // re-sync on failure since the optimistic removal above may be wrong
+    });
+  }, [refreshPendingReviews]);
+
+  const processReview = useCallback((review: EmailOrderReview) => {
+    let meds: Array<{ name: string; quantity: string }> = [];
+    try {
+      meds = review.medicines_json ? JSON.parse(review.medicines_json) : [];
+    } catch { /* malformed JSON — proceed with an empty item list */ }
+
+    navigate('/purchases', {
+      state: {
+        prefilledPurchase: {
+          distributorName: review.distributor_name || '',
+          invoiceNo: review.invoice_number || '',
+          date: review.email_date ? getLocalDateString(new Date(review.email_date)) : getTodayString(),
+          totalAmount: 0,
+          globalCdPer: 0,
+          items: meds.map(m => ({
+            medicine_name: m.name || '',
+            qty: parseInt(m.quantity, 10) || 0,
+            free_qty: 0, rate: 0, mrp: 0, batch_no: '', expiry_date: '',
+            cgst_per: 0, sgst_per: 0, cd_per: 0, cd_rs: 0,
+          }))
+        },
+        emailSource: {
+          email_uid: review.email_uid,
+          subject: review.email_subject,
+          date: review.email_date,
+          distributorName: review.distributor_name || '',
+          medicineNames: meds.map(m => m.name).filter(Boolean),
+        }
+      }
+    });
+    dismissReview(review.id);
+  }, [navigate, dismissReview]);
 
   // Check backend IMAP configuration status dynamically
   const checkImapStatus = useCallback(() => {
@@ -561,6 +638,59 @@ const Mail = () => {
           {emails.length} email{emails.length !== 1 ? 's' : ''} stored locally
         </div>
       </div>
+
+      {/* Pending Order Reviews — emails that looked like a distributor order
+          but were never turned into a purchase bill. Backend queues these
+          automatically; this panel is the only place they're visible. */}
+      {pendingReviews.length > 0 && (
+        <div className="glass-panel border-amber-400/40 bg-amber-400/5 shrink-0">
+          <button
+            onClick={() => setShowReviews(v => !v)}
+            className="w-full p-2.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-amber-300"
+          >
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+              {pendingReviews.length} Pending Order Review{pendingReviews.length !== 1 ? 's' : ''} — detected in email, not yet entered as a purchase
+            </span>
+            <span className="text-muted normal-case">{showReviews ? 'Hide' : 'Show'}</span>
+          </button>
+          {showReviews && (
+            <div className="border-t border-glass-border/40 p-2 space-y-2 max-h-56 overflow-y-auto">
+              {pendingReviews.map(review => {
+                let meds: Array<{ name: string; quantity: string }> = [];
+                try { meds = review.medicines_json ? JSON.parse(review.medicines_json) : []; } catch { /* ignore malformed */ }
+                return (
+                  <div key={review.id} className="flex items-center justify-between gap-3 bg-black/15 border border-glass-border/40 rounded-lg p-2 text-xs">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-text truncate">
+                        {review.distributor_name || 'Unknown Distributor'}
+                        {review.invoice_number ? ` — ${review.invoice_number}` : ''}
+                      </div>
+                      <div className="text-muted truncate">
+                        {review.email_subject || ''}{meds.length > 0 ? ` · ${meds.length} item${meds.length !== 1 ? 's' : ''}: ${meds.slice(0, 3).map(m => m.name).join(', ')}${meds.length > 3 ? '…' : ''}` : ''}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => processReview(review)}
+                        className="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 font-bold"
+                      >
+                        Process → Purchases
+                      </button>
+                      <button
+                        onClick={() => dismissReview(review.id)}
+                        className="px-2 py-1 rounded bg-white/5 text-muted hover:text-text hover:bg-white/10"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Two-Panel Layout */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-4 overflow-hidden">

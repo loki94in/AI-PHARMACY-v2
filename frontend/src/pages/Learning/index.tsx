@@ -2181,18 +2181,25 @@ const Learning: React.FC = () => {
                         if (settingsData.gmail_auth_status === 'failed') {
                           statusText = 'GMAIL AUTHENTICATION FAILED';
                           statusColor = 'text-red font-bold animate-pulse';
+                        } else if (settingsData.gmail_auth_status === 'error') {
+                          statusText = 'GMAIL SYNC FAILING';
+                          statusColor = 'text-amber font-bold animate-pulse';
                         } else {
                           statusText = 'GMAIL MONITOR LISTENING';
                           statusColor = 'text-green font-bold';
                         }
                       }
 
+                      const hasVisibleError = isGmailConfigured
+                        && (settingsData.gmail_auth_status === 'failed' || settingsData.gmail_auth_status === 'error')
+                        && settingsData.gmail_auth_error;
+
                       return (
                         <div className="space-y-4 pt-3 border-t border-glass-border/40">
                           <div className="flex justify-between items-center text-[10px] bg-bg border border-glass-border p-2 rounded">
                             <div className="flex flex-col gap-0.5 text-left">
                               <span>Status: <strong className={statusColor}>{statusText}</strong></span>
-                              {isGmailConfigured && settingsData.gmail_auth_status === 'failed' && settingsData.gmail_auth_error && (
+                              {hasVisibleError && (
                                 <span className="text-[9px] text-red/80 font-medium">
                                   Error: {settingsData.gmail_auth_error}
                                 </span>

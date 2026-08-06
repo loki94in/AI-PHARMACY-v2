@@ -1,5 +1,7 @@
 // WhatsApp Intent Service — central orchestrator for inbound messages.
 // Routes messages through: ignore check → customer lookup → text parse → OCR → smart match.
+import fs from 'fs';
+import path from 'path';
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
 import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely } from './intentKeywords.js';
@@ -7,7 +9,7 @@ import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
 import { waAdminEscalationService } from './waAdminEscalationService.js';
-import { GATE_VARIANTS } from '../../scanGateAlgorithms.js';
+import { GATE_VARIANTS, type GateDecision } from '../../scanGateAlgorithms.js';
 
 // Confidence gate: below these similarity scores a message is discarded as
 // chit-chat instead of being broadcast/escalated. Tune here; every discard is
@@ -22,6 +24,74 @@ const GATE_IMPLICIT = 0.72;    // bare text with no intent words
 export function passesGate(bestScore: number, hasIntentWords: boolean, source: 'text' | 'ocr' | 'both'): boolean {
   const threshold = (hasIntentWords || source !== 'text') ? GATE_WITH_INTENT : GATE_IMPLICIT;
   return bestScore >= threshold;
+}
+
+export interface DownloadRetryOptions {
+  maxAttempts?: number;
+  delayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Retry a WhatsApp media download. whatsapp-web.js's downloadMedia() is
+ * commonly not ready the instant a message event fires (decryption keys not
+ * yet available, especially for @lid-addressed chats) — a single failed or
+ * empty attempt must not drop the image silently. Exported for unit testing.
+ */
+export async function downloadMediaWithRetry(
+  downloadFn: () => Promise<{ data?: string } | undefined>,
+  options: DownloadRetryOptions = {}
+): Promise<{ data?: string } | undefined> {
+  const maxAttempts = options.maxAttempts ?? 3;
+  const delayMs = options.delayMs ?? 1000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await downloadFn();
+      if (result?.data) return result;
+      lastErr = new Error('downloadMedia returned no data');
+    } catch (err) {
+      lastErr = err;
+    }
+    if (attempt < maxAttempts) {
+      await sleep(delayMs);
+    }
+  }
+  throw lastErr;
+}
+
+const INBOUND_MEDIA_DIR = path.resolve(process.cwd(), 'data', 'inbound_media');
+
+/**
+ * Persist a downloaded WhatsApp image to disk immediately after download,
+ * before OCR runs — regardless of match outcome, so a customer's photo is
+ * never processed and then lost with no trace. Exported for unit testing.
+ */
+export async function saveInboundMedia(msgId: string, buffer: Buffer): Promise<string> {
+  await fs.promises.mkdir(INBOUND_MEDIA_DIR, { recursive: true });
+  const safeId = String(msgId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filePath = path.join(INBOUND_MEDIA_DIR, `${safeId}.jpg`);
+  await fs.promises.writeFile(filePath, buffer);
+  return filePath;
+}
+
+/**
+ * Decide whether an OCR'd image should be treated as a medicine scan.
+ * Always runs the structural V2 gate (dose-form / strength / known-API), even
+ * when the api_substances dictionary is empty. An empty dictionary narrows
+ * the gate to dose-form/strength heuristics only — it must never bypass the
+ * gate entirely, or every image (tickets, bills, food packets) gets scanned
+ * and escalated to the admin. Exported for unit testing.
+ */
+export function resolveOcrGateDecision(ocrRaw: string, finalName: string, knownApis: Set<string>): GateDecision {
+  const v2Gate = GATE_VARIANTS.find(v => v.id === 'V2');
+  if (!v2Gate) return 'skip';
+  if (knownApis.size === 0) {
+    console.warn('[Intent Service] api_substances is empty; scan gate relying on dose-form/strength heuristics only.');
+  }
+  return v2Gate.decide(ocrRaw, finalName, { knownApis });
 }
 
 interface MatchResult {
@@ -245,14 +315,33 @@ export async function handleInbound(msg: any): Promise<void> {
     // 5. MEDIA CHECK — if has image, queue for OCR
     if (hasMedia) {
       try {
-        const media = await msg.downloadMedia();
+        // whatsapp-web.js's downloadMedia() is commonly not ready the instant
+        // the event fires (decryption keys not yet available, especially for
+        // @lid-addressed chats) — retry before giving up.
+        const media = await downloadMediaWithRetry(() => msg.downloadMedia());
         if (media?.data) {
           const buffer = Buffer.from(media.data, 'base64');
-          ocrScanQueue.enqueue(msgId, buffer, { phone, chatId, messageBody: body });
+          let imagePath: string | undefined;
+          try {
+            imagePath = await saveInboundMedia(msgId, buffer);
+          } catch (saveErr) {
+            console.error('[Intent Service] Failed to persist inbound media to disk:', saveErr);
+          }
+          ocrScanQueue.enqueue(msgId, buffer, { phone, chatId, messageBody: body, imagePath });
           // OCR result will be handled by ocrScanComplete listener (registered below)
         }
       } catch (mediaErr) {
-        console.error('[Intent Service] Failed to download media:', mediaErr);
+        console.error('[Intent Service] Failed to download media after retries:', mediaErr);
+        try {
+          const db = await dbManager.getConnection();
+          await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db, {
+            phone,
+            chatId,
+            reason: 'Received an image from this customer but could not download it after 3 attempts.'
+          });
+        } catch (notifyErr) {
+          console.error('[Intent Service] Failed to notify admin of media download failure:', notifyErr);
+        }
       }
     }
 
@@ -307,8 +396,9 @@ async function searchAndBroadcast(opts: {
   phone?: string;
   chatId?: string;
   hasIntentWords?: boolean;
+  imagePath?: string;
 }): Promise<void> {
-  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone, chatId } = opts;
+  const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone, chatId, imagePath } = opts;
   const hasIntentWords = !!opts.hasIntentWords;
 
   // Search local medicines DB (FTS5 + fuzzy match)
@@ -380,6 +470,22 @@ async function searchAndBroadcast(opts: {
   const bestScore = Math.max(filterResult.topScore ?? 0, catalogTopScore());
   if (!passesGate(bestScore, hasIntentWords, source)) {
     console.log(`[Intent Service] Gate: discarding "${medicineName}" (bestScore=${bestScore.toFixed(2)}, intent=${hasIntentWords}, source=${source}). Not a medicine.`);
+    // Forward the actual photo to the pharmacy when the app is unsure — an
+    // image with real OCR text that still can't clear the confidence gate
+    // is exactly the "not sure" case, so a human should see it, not a log line.
+    if (source !== 'text' && imagePath) {
+      try {
+        const db = await dbManager.getConnection();
+        await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db, {
+          phone: phone || customer?.phone || '',
+          chatId,
+          imagePath,
+          reason: `Found "${medicineName}" in this photo but the match confidence was too low to auto-identify (score ${Math.round(bestScore * 100)}%).`
+        });
+      } catch (notifyErr) {
+        console.error('[Intent Service] Failed to notify admin of uncertain scan:', notifyErr);
+      }
+    }
     return;
   }
   const confidence = Math.round(bestScore * 100);
@@ -465,7 +571,7 @@ async function searchAndBroadcast(opts: {
  * Registered as an event listener in server.ts startup.
  */
 export function handleOcrComplete(data: any): void {
-  const { phone, chatId, messageBody, ocrResult, msgId } = data;
+  const { phone, chatId, messageBody, ocrResult, msgId, imagePath } = data;
   if (!ocrResult) return;
 
   let medicineName = ocrResult.medicineInfo?.potentialName;
@@ -499,7 +605,26 @@ export function handleOcrComplete(data: any): void {
       return;
     }
   }
-  if (!finalName) return;
+  if (!finalName) {
+    // App genuinely could not read anything usable from this image — this is
+    // the clearest "not sure" case, so a human should see the actual photo.
+    if (imagePath) {
+      (async () => {
+        try {
+          const db = await dbManager.getConnection();
+          await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db, {
+            phone: phone || '',
+            chatId,
+            imagePath,
+            reason: 'Could not extract any readable medicine name from this photo.'
+          });
+        } catch (notifyErr) {
+          console.error('[Intent Service] Failed to notify admin of unreadable scan:', notifyErr);
+        }
+      })();
+    }
+    return;
+  }
 
   // Stage 0 Scan Gate: skip images that are clearly NOT medicines
   // (booking/ticket/bill/finance docs, food packets, random photos).
@@ -518,15 +643,7 @@ export function handleOcrComplete(data: any): void {
     dbManager.getConnection().then(db => db.all('SELECT api FROM api_substances'))
   ]).then(([customer, rows]) => {
     const knownApis = new Set(rows.map(r => (r.api || '').toLowerCase()));
-    const v2Gate = GATE_VARIANTS.find(v => v.id === 'V2');
-    // Fail open: with an empty api_substances dictionary the gate cannot recognize
-    // medicines and would drop every scan that lacks a dose-form/strength token.
-    let decision = 'identify';
-    if (knownApis.size === 0) {
-      console.warn('[Intent Service] Scan gate bypassed: api_substances is empty. Run reference enrichment to enable gating.');
-    } else if (v2Gate) {
-      decision = v2Gate.decide(ocrRaw, finalName, { knownApis });
-    }
+    const decision = resolveOcrGateDecision(ocrRaw, finalName, knownApis);
 
     if (decision === 'skip') {
       console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
@@ -546,6 +663,7 @@ export function handleOcrComplete(data: any): void {
       msgId,
       phone,
       chatId,
+      imagePath,
       hasIntentWords: textParsed.rawIntentWords.length > 0
     }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
   }).catch(err => {

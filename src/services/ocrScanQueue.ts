@@ -6,7 +6,7 @@ import { eventService } from './eventService.js';
 interface QueueItem {
   msgId: string;
   buffer: Buffer;
-  meta: { phone: string; chatId: string; messageBody?: string };
+  meta: { phone: string; chatId: string; messageBody?: string; imagePath?: string };
 }
 
 const queue: QueueItem[] = [];
@@ -46,6 +46,7 @@ async function runScan(item: QueueItem): Promise<void> {
       phone: item.meta.phone,
       chatId: item.meta.chatId,
       messageBody: item.meta.messageBody,
+      imagePath: item.meta.imagePath,
       ocrResult: result
     };
     eventService.broadcast('ocr_scan_complete', scanPayload);
@@ -67,7 +68,7 @@ async function runScan(item: QueueItem): Promise<void> {
 /**
  * Enqueue an image for OCR scanning. Skips if already queued or done.
  */
-export function enqueue(msgId: string, buffer: Buffer, meta: { phone: string; chatId: string; messageBody?: string }): void {
+export function enqueue(msgId: string, buffer: Buffer, meta: { phone: string; chatId: string; messageBody?: string; imagePath?: string }): void {
   if (done.has(msgId) || processing.has(msgId) || queue.some(q => q.msgId === msgId)) {
     return; // Already handled
   }

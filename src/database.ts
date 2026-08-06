@@ -29,7 +29,7 @@ async function tableExists(db: any, name: string): Promise<boolean> {
   return !!row;
 }
 
-async function dropFtsTriggers(db: any) {
+export async function dropFtsTriggers(db: any) {
   for (const trigger of ['medicines_ai', 'medicines_ad', 'medicines_au']) {
     try { await db.exec(`DROP TRIGGER IF EXISTS ${trigger}`); } catch (_) { }
   }
@@ -155,12 +155,14 @@ export async function ensureMedicinesFts(db: any): Promise<'ok' | 'repaired' | '
     // No usable index. Leaving the triggers in place would block every write to
     // `medicines`, so the app runs without fuzzy search instead.
     await dropFtsTriggers(db);
+    await purgeMedicinesFts(db);
     console.error('[Schema] Could not create medicines_fts — medicine search disabled:', err.message);
     return 'unavailable';
   }
 
   if ((await inspectFts(db)) !== 'ok') {
     await dropFtsTriggers(db);
+    await purgeMedicinesFts(db);
     console.error('[Schema] medicines_fts still unusable after rebuild — medicine search disabled.');
     return 'unavailable';
   }

@@ -773,27 +773,54 @@ router.post('/staging/finalize', async (req, res) => {
     }
 
     // 2. Checkpoint staging.db and set journal_mode = DELETE to cleanly merge all WAL frames into staging.db file
-    try {
+    {
       const Database = (await import('better-sqlite3')).default;
-      const tempStagingDb = new Database(STAGING_DB_PATH);
-      tempStagingDb.pragma('wal_checkpoint(TRUNCATE)');
-      tempStagingDb.pragma('journal_mode = DELETE');
-      tempStagingDb.close();
-    } catch (checkpointErr) {
-      console.warn('[Migration Finalize] Staging DB checkpoint warning:', checkpointErr);
+      let tempStagingDb: InstanceType<typeof Database> | null = null;
+      try {
+        tempStagingDb = new Database(STAGING_DB_PATH);
+        tempStagingDb.pragma('wal_checkpoint(TRUNCATE)');
+        tempStagingDb.pragma('journal_mode = DELETE');
+      } catch (checkpointErr) {
+        console.warn('[Migration Finalize] Staging DB checkpoint warning:', checkpointErr);
+      } finally {
+        // A leaked open handle here would still be pointing at staging.db's file
+        // when it gets copied over app.db below — close it no matter how the
+        // checkpoint above went, or the copy races a stale connection.
+        try { tempStagingDb?.close(); } catch (_) { }
+      }
     }
 
     // 3. Validate staging.db integrity before swap
     try {
       const Database = (await import('better-sqlite3')).default;
       const checkDb = new Database(STAGING_DB_PATH, { readonly: true });
-      const checkResult = checkDb.pragma('integrity_check') as any;
-      checkDb.close();
+      let checkResult: any;
+      try {
+        checkResult = checkDb.pragma('integrity_check') as any;
+      } finally {
+        // Close even if the pragma throws — a leaked handle on staging.db would
+        // still be open when it gets copied over app.db a few steps down.
+        try { checkDb.close(); } catch (_) { }
+      }
       if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
         return res.status(400).json({ error: `Staging database integrity validation failed: ${JSON.stringify(checkResult)}` });
       }
     } catch (integrityErr: any) {
-      return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
+      if (String(integrityErr?.message).includes('vtable constructor failed')) {
+        console.warn('[Migration Finalize] Staging DB has damaged search index; purging index before final swap...');
+        const sqlite3 = (await import('sqlite3')).default;
+        const { open } = await import('sqlite');
+        const repairDb = await open({ filename: STAGING_DB_PATH, driver: sqlite3.Database });
+        try {
+          const { purgeMedicinesFts, dropFtsTriggers } = await import('../database.js');
+          await dropFtsTriggers(repairDb);
+          await purgeMedicinesFts(repairDb);
+        } finally {
+          await repairDb.close();
+        }
+      } else {
+        return res.status(400).json({ error: `Failed to validate staging database: ${integrityErr.message}` });
+      }
     }
 
     // 4. Close all open staging connections and stop supervisor background workers
@@ -805,19 +832,30 @@ router.post('/staging/finalize', async (req, res) => {
       console.warn('Failed to stop workers or close staging connections:', err);
     }
 
-    // 5. Close live dbManager connection pool FIRST to release file handles
+    // 5. Close live dbManager connection pool FIRST to release file handles, then
+    // suspend it so no background timer (messaging queue, device-connection poll,
+    // stock calculator, etc.) can reopen a connection while the file underneath is
+    // being backed up and swapped. Must be resumed on every exit path below.
     await dbManager.close(true);
+    dbManager.suspend();
 
     // 6. Checkpoint active DB using better-sqlite3 with timeout
     if (fs.existsSync(DB_PATH)) {
+      const Database = (await import('better-sqlite3')).default;
+      let tempAppDb: InstanceType<typeof Database> | null = null;
       try {
-        const Database = (await import('better-sqlite3')).default;
-        const tempAppDb = new Database(DB_PATH, { timeout: 10000 });
+        tempAppDb = new Database(DB_PATH, { timeout: 10000 });
         tempAppDb.pragma('wal_checkpoint(TRUNCATE)');
         tempAppDb.pragma('journal_mode = DELETE');
-        tempAppDb.close();
       } catch (checkpointErr) {
         console.warn('[Migration Finalize] Active DB checkpoint warning:', checkpointErr);
+      } finally {
+        // If the checkpoint pragma above throws, this connection was never closed —
+        // it stays open on DB_PATH straight through the backup and the copyFileSync
+        // swap a few lines down, and a stale handle open on the destination during
+        // that overwrite is what corrupts the swapped file (observed as "malformed
+        // database schema ... index already exists" on the post-swap integrity check).
+        try { tempAppDb?.close(); } catch (_) { }
       }
     }
 
@@ -843,21 +881,33 @@ router.post('/staging/finalize', async (req, res) => {
     try {
       const Database = (await import('better-sqlite3')).default;
       const checkDb = new Database(DB_PATH, { readonly: true });
-      const checkResult = checkDb.pragma('integrity_check') as any;
-      checkDb.close();
+      let checkResult: any;
+      try {
+        checkResult = checkDb.pragma('integrity_check') as any;
+      } finally {
+        // Close even if the pragma throws — a leaked handle here stays open on
+        // DB_PATH right through dbManager reconnecting to it a few lines down.
+        try { checkDb.close(); } catch (_) { }
+      }
       if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
         throw new Error(`Integrity check failed: ${JSON.stringify(checkResult)}`);
       }
       try { fs.unlinkSync(STAGING_DB_PATH); } catch (_) {}
     } catch (integrityErr: any) {
-      console.error('[Migration Finalize] Swapped app.db integrity check failed:', integrityErr);
-      if (backupPath && fs.existsSync(backupPath)) {
-        fs.copyFileSync(backupPath, DB_PATH);
+      if (String(integrityErr?.message).includes('vtable constructor failed')) {
+        console.warn('[Migration Finalize] Swapped app.db has a damaged search index; will rebuild index on connection boot.');
+        try { fs.unlinkSync(STAGING_DB_PATH); } catch (_) {}
+      } else {
+        console.error('[Migration Finalize] Swapped app.db integrity check failed:', integrityErr);
+        if (backupPath && fs.existsSync(backupPath)) {
+          fs.copyFileSync(backupPath, DB_PATH);
+        }
+        throw new Error(`Swapped database integrity check failed. Restored from backup. Details: ${integrityErr.message}`);
       }
-      throw new Error(`Swapped database integrity check failed. Restored from backup. Details: ${integrityErr.message}`);
     }
 
     // 9. Re-initialize live dbManager connection pool
+    dbManager.resume();
     const activeDb = await dbManager.getConnection();
 
     // The database that just went live came from a staging copy or an imported
@@ -946,6 +996,7 @@ router.post('/staging/finalize', async (req, res) => {
     console.error('[Migration Finalize] Error during finalize:', e);
 
     // Ensure dbManager connection pool and background workers are restored even on failure
+    dbManager.resume();
     try {
       if (backupPath && fs.existsSync(backupPath) && !fs.existsSync(DB_PATH)) {
         fs.copyFileSync(backupPath, DB_PATH);

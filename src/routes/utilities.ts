@@ -751,8 +751,15 @@ router.post('/reset-data', async (req, res) => {
           const { default: sqlite3 } = await import('sqlite3');
           const stagingDb = await open({ filename: stagingDbPath, driver: sqlite3.Database });
           await stagingDb.run('PRAGMA foreign_keys = OFF');
+          try {
+            await stagingDb.exec('DROP TABLE IF EXISTS medicines_fts');
+          } catch (_) {
+            const { purgeMedicinesFts, dropFtsTriggers } = await import('../database.js');
+            await dropFtsTriggers(stagingDb);
+            await purgeMedicinesFts(stagingDb);
+          }
           const stagingTables = await stagingDb.all(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'medicines_fts%'"
           );
           for (const { name } of stagingTables) {
             await stagingDb.run(`DROP TABLE IF EXISTS "${name}"`);

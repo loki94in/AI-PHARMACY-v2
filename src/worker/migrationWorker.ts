@@ -405,7 +405,26 @@ async function processMigrationFile(
           throw new Error(`Integrity check result not ok: ${JSON.stringify(checkResult)}`);
         }
       } catch (integrityErr: any) {
-        throw new Error(`Failed to copy staging database securely: ${integrityErr.message}`);
+        if (String(integrityErr?.message).includes('vtable constructor failed')) {
+          console.warn('[Migration Worker] Staging DB has a damaged search index; purging index and re-verifying...');
+          const repairDb = await open({ filename: STAGING_DB_PATH, driver: sqlite3.Database });
+          try {
+            const { purgeMedicinesFts, dropFtsTriggers } = await import('../database.js');
+            await dropFtsTriggers(repairDb);
+            await purgeMedicinesFts(repairDb);
+          } finally {
+            await repairDb.close();
+          }
+          const Database = (await import('better-sqlite3')).default;
+          const checkDb = new Database(STAGING_DB_PATH, { readonly: true });
+          const checkResult = checkDb.pragma('integrity_check') as any;
+          checkDb.close();
+          if (!checkResult || !checkResult[0] || checkResult[0].integrity_check !== 'ok') {
+            throw new Error(`Integrity check result not ok after FTS purge: ${JSON.stringify(checkResult)}`);
+          }
+        } else {
+          throw new Error(`Failed to copy staging database securely: ${integrityErr.message}`);
+        }
       }
     }
 
@@ -540,24 +559,45 @@ async function processMigrationFile(
             .pipe(writeStream);
         });
       } else {
-        // True ZIP archive — extract with unzipper then find the SQL file
+        // True ZIP archive — extract with unzipper then find the SQL/DB file recursively
         try {
           await fs.createReadStream(tempProcessingPath)
             .pipe(unzipper.Extract({ path: extractPath }))
             .promise();
         } catch (unzipError: any) {
-          throw new Error(`Failed to extract ZIP file: ${unzipError.message}`);
+          // Fallback: attempt extraction via native tar / system zip if available
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`tar -xf "${tempProcessingPath}" -C "${extractPath}"`);
+          } catch (_) {
+            throw new Error(`Failed to extract ZIP file: ${unzipError.message}`);
+          }
         }
 
         migrationStatus.message = 'Scanning extracted files...';
-        const files = fs.readdirSync(extractPath);
 
-        // Check if there is a SQLite database or database snapshot inside the ZIP
-        const dbFile = files.find(f => f.toLowerCase().endsWith('.db') || f.toLowerCase().endsWith('.db.gz'));
-        if (dbFile) {
+        const findFileInDir = (dir: string, matcher: (filename: string) => boolean): string | null => {
+          try {
+            const list = fs.readdirSync(dir);
+            for (const item of list) {
+              const fullPath = path.join(dir, item);
+              const stat = fs.statSync(fullPath);
+              if (stat.isDirectory()) {
+                const found = findFileInDir(fullPath, matcher);
+                if (found) return found;
+              } else if (matcher(item)) {
+                return fullPath;
+              }
+            }
+          } catch (_) {}
+          return null;
+        };
+
+        // 1. Check for SQLite database file inside the ZIP (root or subdirectories)
+        const dbFilePath = findFileInDir(extractPath, f => f.toLowerCase().endsWith('.db') || f.toLowerCase().endsWith('.db.gz'));
+        if (dbFilePath) {
           migrationStatus.message = 'Database file detected in ZIP. Loading database directly...';
-          const dbFilePath = path.join(extractPath, dbFile);
-          if (dbFile.endsWith('.gz')) {
+          if (dbFilePath.toLowerCase().endsWith('.gz')) {
             await new Promise<void>((resolve, reject) => {
               const gzStream = zlib.createGunzip();
               gzStream.on('error', reject);
@@ -592,11 +632,27 @@ async function processMigrationFile(
           return;
         }
 
-        const sqlFile = files.find(f => f.toLowerCase().endsWith('.sql'));
-        if (!sqlFile) {
-          throw new Error('No .sql or .db file found in the ZIP archive');
+        // 2. Check for SQL dump file inside the ZIP (root or subdirectories)
+        const foundSql = findFileInDir(extractPath, f => f.toLowerCase().endsWith('.sql') || f.toLowerCase().endsWith('.sql.gz'));
+        if (!foundSql) {
+          throw new Error('No .sql or .db file found inside the ZIP archive');
         }
-        sqlFilePath = path.join(extractPath, sqlFile);
+
+        if (foundSql.toLowerCase().endsWith('.gz')) {
+          migrationStatus.message = 'Decompressing .sql.gz found inside ZIP archive...';
+          sqlFilePath = path.join(extractPath, 'decompressed_nested_backup.sql');
+          await new Promise<void>((resolve, reject) => {
+            const gzStream = zlib.createGunzip();
+            gzStream.on('error', reject);
+            const writeStream = fs.createWriteStream(sqlFilePath);
+            writeStream.on('close', resolve);
+            writeStream.on('finish', resolve);
+            writeStream.on('error', reject);
+            fs.createReadStream(foundSql).pipe(gzStream).pipe(writeStream);
+          });
+        } else {
+          sqlFilePath = foundSql;
+        }
       }
     }
     else if (ext === '.tar' || ext === '.tgz' || tempProcessingPath.toLowerCase().endsWith('.tar.gz')) {

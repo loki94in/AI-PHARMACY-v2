@@ -3149,19 +3149,27 @@ export class EmailService {
         console.error('Failed to save gmail auth success:', dbErr);
       }
     } catch (err: any) {
-      const errMsg = err.message || '';
-      if (errMsg.includes('AUTHENTICATIONFAILED') || errMsg.includes('Invalid credentials') || errMsg.includes('login') || errMsg.includes('auth')) {
+      const errMsg = err.message || String(err) || 'Unknown IMAP error';
+      const isAuthError = errMsg.includes('AUTHENTICATIONFAILED') || errMsg.includes('Invalid credentials') || errMsg.includes('login') || errMsg.includes('auth');
+      if (isAuthError) {
         eventService.broadcast('auth_failure', {
           message: 'Gmail authentication failed. Please update your credentials in Settings.',
           service: 'gmail'
         });
-        try {
-          const dbConn = await dbManager.getConnection();
-          await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'failed')");
-          await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_error', ?)", [errMsg]);
-        } catch (dbErr) {
-          console.error('Failed to save gmail auth error:', dbErr);
-        }
+      }
+      // Every sync failure — not just auth ones — must update the visible
+      // status, otherwise a network/TLS/host error is swallowed entirely and
+      // the Learning page badge stays stuck showing a stale "connected" state
+      // while every poll silently fails in the background.
+      try {
+        const dbConn = await dbManager.getConnection();
+        await dbConn.run(
+          "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', ?)",
+          [isAuthError ? 'failed' : 'error']
+        );
+        await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_error', ?)", [errMsg]);
+      } catch (dbErr) {
+        console.error('Failed to save gmail sync error status:', dbErr);
       }
       console.error('[Sync] syncNewEmailsFromIMAP error:', err);
     } finally {

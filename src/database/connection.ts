@@ -15,6 +15,14 @@ class DatabaseManager {
   private static instance: DatabaseManager;
   private connection: Database | null = null;
   private currentDbPath: string | null = null;
+  // Gate against callers re-opening a connection while the underlying file is being
+  // replaced on disk (e.g. migration finalize's backup/swap). Every background timer
+  // in this process (messaging queue, device-connection poll, stock calculator, etc.)
+  // calls getConnection() on its own schedule; without this gate one of them can reopen
+  // a connection mid-swap, write a WAL against the old file layout, and corrupt the file
+  // fs.copyFileSync just replaced underneath it.
+  private suspendedUntil: Promise<void> | null = null;
+  private resumeFn: (() => void) | null = null;
 
   private constructor() {}
 
@@ -25,7 +33,22 @@ class DatabaseManager {
     return DatabaseManager.instance;
   }
 
+  /** Block new connections (existing callers already mid-call are unaffected) until resume(). */
+  public suspend(): void {
+    if (this.suspendedUntil) return;
+    this.suspendedUntil = new Promise(resolve => { this.resumeFn = resolve; });
+  }
+
+  public resume(): void {
+    if (this.resumeFn) {
+      this.resumeFn();
+      this.resumeFn = null;
+    }
+    this.suspendedUntil = null;
+  }
+
   public async getConnection(): Promise<Database> {
+    if (this.suspendedUntil) await this.suspendedUntil;
     const dbPath = config.dbPath;
     if (this.connection) {
       try {

@@ -70,6 +70,11 @@ const NOISE_WORDS = new Set([
   'kadhi', 'kevha', 'udya', 'udhya', 'sandhyakali', 'sakali', 'dupari', 'ratri',
   'thik', 'theek', 'thike', 'barobar', 'hoy', 'chalel', 'chala', 'done', 'accha', 'acha', 'bara', 'bar',
   'madam', 'tai', 'dada', 'kaka', 'anna', 'bhau', 'saheb',
+  // Common English filler/pronoun words — a "thank you so much" style residual
+  // (after stripping 'thank'/'bhai' etc.) must not be searched as a medicine.
+  'you', 'your', 'yours', 'so', 'much', 'too', 'also', 'well', 'how', 'are',
+  'soon', 'see', 'come', 'coming', 'going', 'love', 'miss', 'fine', 'great',
+  'welcome', 'sorry', 'very',
   // Common Devanagari chatter (greetings/particles/questions)
   'ना', 'नाही', 'आहे', 'आहेत', 'का', 'हो', 'हा', 'नको', 'ठीक', 'बाकी', 'आज', 'उद्या',
   'कधी', 'केव्हा', 'कसे', 'कसा', 'काय', 'क्या', 'कब', 'कहा', 'कैसे', 'हां', 'हाँ', 'जी',
