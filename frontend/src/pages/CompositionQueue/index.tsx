@@ -242,8 +242,7 @@ export default function CompositionQueue() {
 
   useEffect(() => {
     if (!status?.isRunning || !statusPollControl.shouldFetch || !pageActive) return;
-    const timer = setInterval(loadStatus, 3000);
-    return () => clearInterval(timer);
+    loadStatus();
   }, [status?.isRunning, loadStatus, statusPollControl.shouldFetch, pageActive]);
 
   useEffect(() => {

@@ -37,6 +37,20 @@ router.get('/patients', async (req, res) => {
     }
     
     const patients = await db.all(query, params);
+
+    if (q && patients.length === 0) {
+      try {
+        const allCustomers = await db.all('SELECT id, name, phone, address FROM customers LIMIT 300');
+        const candidateNames = allCustomers.map((c: any) => c.name);
+        const { findSimilarNames } = await import('../services/similarityService.js');
+        const similarNames = findSimilarNames(q as string, candidateNames, 4, 0.25);
+        const suggestions = allCustomers.filter((c: any) => similarNames.includes(c.name));
+        return res.json({ data: [], suggestions, isSuggestion: true });
+      } catch (sugErr) {
+        console.warn('[CRM] Failed to compute patient suggestions:', sugErr);
+      }
+    }
+
     res.json(patients);
   } catch (error) {
     console.error('Failed to fetch patients:', error);

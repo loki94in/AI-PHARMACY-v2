@@ -8,6 +8,7 @@
 
 import { Database } from 'sqlite';
 import { medicineMap, distributorMap, patientMap } from './pgMasterImporter.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const purchaseOrderMap = new Map<string, number>(); // legacy PO id → new id
@@ -30,9 +31,9 @@ export async function importPurchaseOrder(row: Record<string, string | null>, db
   poBatch.push({
     distributor_id: distributorId || null,
     status: row['status'] || 'DRAFT',
-    date: row['created_time'] || null,
+    date: normalizeDateOrRaw(row['created_time']),
     legacy_id: legacyId,
-    business_date: row['business_date'] || row['created_time'] || null,
+    business_date: normalizeDateOrRaw(row['business_date'] || row['created_time']),
   });
 
   if (poBatch.length >= 500) {
@@ -135,8 +136,8 @@ export async function importScheduledOrder(row: Record<string, string | null>, d
   refillBatch.push({
     patient_id: legacyPatientId,
     doctor_id: row['doctor_id'] || null,
-    start_date: row['start_date'] || null,
-    end_date: row['end_date'] || null,
+    start_date: normalizeDateOrRaw(row['start_date']),
+    end_date: normalizeDateOrRaw(row['end_date']),
     interval_days: intervalDays,
     title: row['title'] || null,
     legacy_id: legacyId,

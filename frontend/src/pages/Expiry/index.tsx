@@ -17,7 +17,7 @@ import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { getTodayString, getNDaysAgoString } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 
 interface ExpiryItem {
   id: number;
@@ -486,7 +486,7 @@ const Expiry = () => {
                   <td className="p-2">
                     <input
                       type="date"
-                      value={colFilterDate}
+                      value={toDateInputValue(colFilterDate)}
                       onChange={e => setColFilterDate(e.target.value)}
                       className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                     />
@@ -575,7 +575,12 @@ const Expiry = () => {
                   <tr>
                     <td colSpan={11} className="p-16 text-center text-muted font-semibold">
                       <CheckCircle2 size={36} className="mx-auto mb-3 text-muted/30" />
-                      No items matching expiry thresholds in inventory.
+                      <span>No items matching expiry thresholds in inventory.</span>
+                      {colFilterMedName && colFilterMedName.trim().length >= 2 && (
+                        <div className="mt-2 text-[12px] text-amber-400 font-medium">
+                          🔍 No expiring items match "{colFilterMedName}". Please check spelling or clear medicine filter.
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ) : (

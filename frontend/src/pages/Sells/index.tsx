@@ -10,7 +10,7 @@ import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
@@ -383,6 +383,9 @@ const Sells = () => {
       await api.deleteSale(id);
       toastEvent.trigger('Invoice deleted, stock restored', 'success');
       setDeleteConfirm(null);
+      if (viewInvoice?.id === id) {
+        setViewInvoice(null);
+      }
       fetchInvoices(true);
       
       // Centralized cache invalidation for frontend lists and local infinite scroll caches
@@ -508,14 +511,14 @@ const Sells = () => {
             <span className="text-[10px] font-bold text-muted uppercase">FROM:</span>
             <input
               type="date"
-              value={dateRangeHelper.dateRange.from}
+              value={toDateInputValue(dateRangeHelper.dateRange.from)}
               onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
               className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
             />
             <span className="text-[10px] font-bold text-muted uppercase">TO:</span>
             <input
               type="date"
-              value={dateRangeHelper.dateRange.to}
+              value={toDateInputValue(dateRangeHelper.dateRange.to)}
               onChange={e => dateRangeHelper.handleToChange(e.target.value)}
               className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
             />
@@ -1076,7 +1079,7 @@ const Sells = () => {
             {/* Modal Body */}
             <div className="p-5 space-y-5 flex-1 overflow-y-auto">
               {/* Customer Info */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-bg2/50 p-4 rounded-xl border border-glass-border">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-bg2/50 p-4 rounded-xl border border-glass-border">
                 <div>
                   <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Customer Name</div>
                   <div className="text-sm font-semibold text-text">{viewInvoice.customer_name || 'Walk-in'}</div>
@@ -1084,6 +1087,10 @@ const Sells = () => {
                 <div>
                   <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Phone</div>
                   <div className="text-sm font-semibold text-text">{viewInvoice.customer_phone || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Doctor Name</div>
+                  <div className="text-sm font-semibold text-text">{viewInvoice.doctor_name || 'Self / Direct'}</div>
                 </div>
                 <div>
                   <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1">Payment Method</div>
@@ -1099,18 +1106,18 @@ const Sells = () => {
               {barcodeData && barcodeData.invoiceNo === viewInvoice.invoice_no ? (
                 <div className="bg-bg2/60 p-4 rounded-xl border border-glass-border flex flex-col md:flex-row items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
-                    <img src={barcodeData.qrDataUrl} alt="Invoice QR" className="w-16 h-16 rounded bg-white p-1 shrink-0 shadow-sm" />
+                    <img src={barcodeData.qrDataUrl} alt="Invoice QR" className="w-16 h-16 rounded bg-bg p-1 shrink-0 shadow-sm" />
                     <div>
                       <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
                         <QrCode size={12} className="text-purple-400" /> Scannable Return Barcode (Code128 + QR)
                       </div>
-                      <img src={barcodeData.code128DataUrl} alt="Invoice Code128" className="h-10 bg-white p-1 rounded max-w-[220px]" />
+                      <img src={barcodeData.code128DataUrl} alt="Invoice Code128" className="h-10 bg-bg p-1 rounded max-w-[220px]" />
                       <div className="text-[10px] font-mono text-muted mt-1">{barcodeData.barcodeText}</div>
                     </div>
                   </div>
                   <button
                     onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
-                    className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                    className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
                   >
                     <Printer size={14} /> Print Barcode Label
                   </button>
@@ -1132,7 +1139,7 @@ const Sells = () => {
                     <button
                       onClick={() => handleGenerateProductBarcodes(viewInvoice.items || [])}
                       disabled={generatingProductBarcode}
-                      className="px-3 py-1.5 bg-purple-500/20 hover:bg-purple-600 text-purple-300 hover:text-white rounded-lg text-xs font-bold border border-purple-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      className="px-3 py-1.5 bg-purple-500/20 hover:bg-purple-600 text-purple-300 hover:text-text rounded-lg text-xs font-bold border border-purple-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       title="Generate product barcode labels for all items in this bill (for missing/torn box barcodes)"
                     >
                       <QrCode size={13} /> Print All Product Barcodes
@@ -1145,6 +1152,7 @@ const Sells = () => {
                       <tr>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Medicine</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Batch</th>
+                        <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Expiry</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border text-center">Qty (Strips/Loose)</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border text-center">CD %</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">MRP</th>
@@ -1168,6 +1176,9 @@ const Sells = () => {
                             <td className="p-3 border-b border-glass-border/50">
                               <span className="text-[10px] font-mono bg-bg3 px-2 py-0.5 rounded text-text">{item.batch_number || '-'}</span>
                             </td>
+                            <td className="p-3 border-b border-glass-border/50 text-xs font-mono text-muted">
+                              {item.expiry_date ? formatDate(item.expiry_date) : '-'}
+                            </td>
                             <td className="p-3 border-b border-glass-border/50 text-center text-sm">
                               {item.quantity} / {looseQty}
                             </td>
@@ -1187,7 +1198,7 @@ const Sells = () => {
                               <button
                                 onClick={() => handleGenerateProductBarcodes([{ medicine_name: item.medicine_name || `Item #${item.inventory_id}`, batch_number: item.batch_number || 'N/A' }])}
                                 disabled={generatingProductBarcode}
-                                className="px-2 py-1 bg-purple-500/10 hover:bg-purple-600 text-purple-400 hover:text-white rounded-md text-[11px] font-bold border border-purple-500/30 transition-all flex items-center gap-1 mx-auto cursor-pointer disabled:opacity-50"
+                                className="px-2 py-1 bg-purple-500/10 hover:bg-purple-600 text-purple-400 hover:text-text rounded-md text-[11px] font-bold border border-purple-500/30 transition-all flex items-center gap-1 mx-auto cursor-pointer disabled:opacity-50"
                                 title="Generate product barcode label for missing/torn box barcode"
                               >
                                 <QrCode size={11} /> Print Label
@@ -1198,7 +1209,7 @@ const Sells = () => {
                       })}
                       {(!viewInvoice.items || viewInvoice.items.length === 0) && (
                         <tr>
-                          <td colSpan={8} className="p-8 text-center text-muted">No items found in this invoice</td>
+                          <td colSpan={9} className="p-8 text-center text-muted">No items found in this invoice</td>
                         </tr>
                       )}
                     </tbody>
@@ -1208,15 +1219,31 @@ const Sells = () => {
 
               {/* Discount & Tax Info */}
               <div className="flex justify-end pt-2 mt-6">
-                <div className="w-64 space-y-2">
+                <div className="w-72 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted">Subtotal:</span>
                     <span className="font-semibold">₹{Math.round(viewInvoice.subtotal || 0)}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted">Discount:</span>
-                    <span className="font-semibold text-amber-500">-₹{Math.round(viewInvoice.discount || 0)}</span>
-                  </div>
+                  {(viewInvoice.discount || 0) > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted">Discount:</span>
+                      <span className="font-semibold text-amber-500">-₹{Math.round(viewInvoice.discount || 0)}</span>
+                    </div>
+                  )}
+                  {(viewInvoice.tax_amount || 0) > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted">Tax (GST):</span>
+                      <span className="font-semibold text-sky-400">₹{Number(viewInvoice.tax_amount).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {viewInvoice.roff !== undefined && viewInvoice.roff !== null && viewInvoice.roff !== 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted">Round Off:</span>
+                      <span className="font-semibold text-muted">
+                        {viewInvoice.roff > 0 ? `+₹${viewInvoice.roff.toFixed(2)}` : `-₹${Math.abs(viewInvoice.roff).toFixed(2)}`}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-lg font-bold pt-2 border-t border-glass-border/50">
                     <span className="text-text">Grand Total:</span>
                     <span className="text-green text-xl">₹{Math.round(viewInvoice.total_amount || 0)}</span>
@@ -1226,20 +1253,50 @@ const Sells = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-5 border-t border-glass-border flex justify-between items-center bg-white/5 shrink-0">
+            <div className="p-5 border-t border-glass-border flex justify-between items-center bg-bg2/80 shrink-0">
               <button
                 onClick={() => setViewInvoice(null)}
-                className="px-4 py-2 bg-white/10 text-muted rounded-lg text-sm font-semibold hover:bg-white/20 transition-all"
+                className="px-4 py-2 bg-bg3 hover:bg-glass-border text-muted hover:text-text border border-glass-border rounded-lg text-sm font-semibold transition-all cursor-pointer"
               >
                 Close Preview
               </button>
-              <button
-                onClick={() => openEdit(viewInvoice)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-lg text-sm font-bold hover:bg-primary/80 transition-all"
-              >
-                <Edit3 size={14} />
-                Edit Invoice
-              </button>
+
+              <div className="flex items-center gap-3">
+                {deleteConfirm === viewInvoice.id ? (
+                  <div className="flex items-center gap-2 p-1 rounded-lg bg-red-500/10 border border-red-500/30">
+                    <span className="text-xs text-red font-semibold px-2">Delete this bill?</span>
+                    <button
+                      onClick={() => handleDelete(viewInvoice.id)}
+                      className="px-3 py-1.5 bg-red hover:bg-red/80 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
+                    >
+                      Yes, Delete
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirm(null)}
+                      className="px-3 py-1.5 bg-bg3 text-text rounded-lg text-xs font-bold hover:bg-glass-border transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirm(viewInvoice.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red text-red hover:text-white border border-red-500/30 rounded-lg text-sm font-bold transition-all cursor-pointer"
+                    title="Delete invoice and restore inventory stock"
+                  >
+                    <Trash2 size={15} />
+                    Delete Invoice
+                  </button>
+                )}
+
+                <button
+                  onClick={() => openEdit(viewInvoice)}
+                  className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm font-bold transition-all cursor-pointer"
+                >
+                  <Edit3 size={15} />
+                  Edit Invoice
+                </button>
+              </div>
             </div>
           </div>
         </div>,

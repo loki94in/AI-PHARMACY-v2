@@ -148,7 +148,8 @@ export function normalizeDate(dateStr: string): string | null | undefined {
     }
 
     // Try to match DD-MM-YYYY format with optional time suffix
-    const ddMMYYYYMatch = cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{1,2}):(\d{1,2}))?$/);
+    // (tolerates a Postgres-style "T" separator, fractional seconds, and a trailing timezone offset)
+    const ddMMYYYYMatch = cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/);
     if (ddMMYYYYMatch) {
         const day = parseInt(ddMMYYYYMatch[1], 10);
         const month = parseInt(ddMMYYYYMatch[2], 10);
@@ -164,7 +165,8 @@ export function normalizeDate(dateStr: string): string | null | undefined {
     }
 
     // Try to match DD/MM/YYYY format with optional time suffix
-    const ddMMYYYYSlashMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2}):(\d{1,2}))?$/);
+    // (tolerates a Postgres-style "T" separator, fractional seconds, and a trailing timezone offset)
+    const ddMMYYYYSlashMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/);
     if (ddMMYYYYSlashMatch) {
         const day = parseInt(ddMMYYYYSlashMatch[1], 10);
         const month = parseInt(ddMMYYYYSlashMatch[2], 10);
@@ -179,7 +181,9 @@ export function normalizeDate(dateStr: string): string | null | undefined {
     }
 
     // Try to match YYYY-MM-DD format with optional time suffix
-    const yyyymmddMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2}):(\d{1,2}))?$/);
+    // (tolerates a Postgres-style "T" separator, fractional seconds, and a trailing timezone offset,
+    // e.g. "2026-08-07 13:29:11.718" or "2026-08-07T13:29:11.718+00")
+    const yyyymmddMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/);
     if (yyyymmddMatch) {
         const year = parseInt(yyyymmddMatch[1], 10);
         const month = parseInt(yyyymmddMatch[2], 10);
@@ -196,4 +200,14 @@ export function normalizeDate(dateStr: string): string | null | undefined {
 
     // If none of the matched formats, return null to indicate failure
     return null;
+}
+
+/**
+ * Normalizes a raw migration date/timestamp value, falling back to the original
+ * string when normalizeDate() can't parse it — so a transaction is never dropped
+ * over a date format quirk. Returns null for NULL/empty input.
+ */
+export function normalizeDateOrRaw(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    return normalizeDate(raw) ?? raw;
 }

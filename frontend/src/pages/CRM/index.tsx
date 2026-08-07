@@ -11,7 +11,7 @@ import {
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 
 // ─── Module-level Cache (SPA Performance Contract) ──────────────────────
 let cachedRefillsData: RefillPatient[] = [];
@@ -1603,19 +1603,14 @@ const WhatsAppSection: React.FC = () => {
   }, [isReady, loadChats]);
 
   useEffect(() => {
-    // Poll status every 5s when not ready (for QR), every 30s when ready (for chat list) —
-    // paused while this page isn't the one visible (keep-alive keeps it mounted in the background).
     if (!statusPollActive) return;
-    const pollId = setInterval(() => {
-      checkStatus();
-      if (isReady) loadChats();
-    }, 5_000);
-    return () => clearInterval(pollId);
+    checkStatus();
+    if (isReady) loadChats();
   }, [checkStatus, loadChats, isReady, statusPollActive]);
 
   const messagePollActive = usePageActive();
 
-  // Load Thread Messages when activeChat changes
+  // Load Thread Messages when activeChat changes (Every BOOT/mount)
   useEffect(() => {
     if (!activeChat) {
       setMessages([]);
@@ -1656,10 +1651,6 @@ const WhatsAppSection: React.FC = () => {
     };
 
     loadMessages(true);
-    // Live polling: refresh messages every 10s when a chat is open — paused while hidden.
-    if (!messagePollActive) return;
-    const msgPollId = setInterval(() => loadMessages(false), 10_000);
-    return () => clearInterval(msgPollId);
   }, [activeChat, messagePollActive]);
 
 function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string): boolean {
@@ -3091,14 +3082,14 @@ const SpecialOrdersSection: React.FC = () => {
             <Calendar size={13} className="text-muted" />
             <input
               type="date"
-              value={dateFrom}
+              value={toDateInputValue(dateFrom)}
               onChange={e => setDateFrom(e.target.value)}
               className="bg-transparent text-text font-medium focus:outline-none text-[11px]"
             />
             <span className="text-muted text-[10px]">to</span>
             <input
               type="date"
-              value={dateTo}
+              value={toDateInputValue(dateTo)}
               onChange={e => {
                 setManualToDate(true);
                 setDateTo(e.target.value);
@@ -3163,7 +3154,23 @@ const SpecialOrdersSection: React.FC = () => {
         {loading && orders.length === 0 ? (
           <div className="p-12 text-center text-xs text-muted">Loading special requests...</div>
         ) : filteredOrders.length === 0 ? (
-          <div className="p-12 text-center text-xs text-muted">No special requests found matching your filter.</div>
+          <div className="p-12 text-center flex flex-col items-center gap-2 text-xs text-muted bg-bg2/40 rounded-2xl border border-border/50">
+            <span className="font-semibold text-text text-sm">No special requests found matching your filter.</span>
+            {searchQuery.trim().length >= 2 && (
+              <div className="flex flex-col items-center gap-2 mt-1">
+                <span className="text-amber-400 font-medium text-[12px]">
+                  🔍 No exact match for "{searchQuery}". Please check spelling or try searching by product or patient name.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-[12px] font-bold transition-all"
+                >
+                  Clear Search Query
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           filteredOrders.map(order => {
             const isArrived = order.status === 'Ready' || order.status === 'Arrived';
@@ -4253,7 +4260,7 @@ const CustomerCreditSection: React.FC = () => {
                     <div className="flex items-center gap-1.5">
                       <input
                         type="date"
-                        value={newDueDate}
+                        value={toDateInputValue(newDueDate)}
                         onChange={e => setNewDueDate(e.target.value)}
                         className="px-2 py-0.5 bg-bg2 border border-border rounded text-xs text-text focus:outline-none"
                       />

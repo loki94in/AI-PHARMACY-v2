@@ -8,6 +8,7 @@
 import { Database } from 'sqlite';
 import { medicineMap, distributorMap } from './pgMasterImporter.js';
 import { formatInvoiceWithFY } from '../../utils/migrationValidation.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const batchMap = new Map<string, number>();     // legacy batch_id → new inventory_master.id
@@ -53,9 +54,8 @@ export async function importBatch(row: Record<string, string | null>, db: Databa
   const medicineId = medicineMap.get(legacyMedicineId);
   if (!medicineId) return; // Medicine was deleted or not imported
 
-  // ponytail: batch_expiry is a full timestamp — normalise to date string
   const rawExpiry = row['batch_expiry'] || null;
-  const expiryNorm = rawExpiry ? rawExpiry.split(' ')[0] : null;
+  const expiryNorm = rawExpiry ? (normalizeDateOrRaw(rawExpiry) || '').split(' ')[0] || null : null;
 
   batchBatch.push({
     medicine_id: medicineId,
@@ -120,12 +120,13 @@ export async function importInventory(row: Record<string, string | null>, db: Da
   const distributorId = legacyDistId ? distributorMap.get(legacyDistId) : null;
 
   const rawDate = row['created_time'] || null;
+  const normalizedDate = normalizeDateOrRaw(rawDate);
   const rawInvoice = row['invoice'] || row['invoice_id'] || legacyId;
 
   purchaseBatch.push({
     distributor_id: distributorId || null,
-    invoice_no: rawInvoice ? formatInvoiceWithFY(rawInvoice, rawDate || '') : rawInvoice,
-    date: rawDate,
+    invoice_no: rawInvoice ? formatInvoiceWithFY(rawInvoice, normalizedDate || '') : rawInvoice,
+    date: normalizedDate,
     total_amount: parseFloat(row['amount'] || '0') || 0,
     cgst_value: parseFloat(row['cgst_value'] || '0') || 0,
     sgst_value: parseFloat(row['sgst_value'] || '0') || 0,
@@ -133,7 +134,7 @@ export async function importInventory(row: Record<string, string | null>, db: Da
     roff: parseFloat(row['roff'] || '0') || 0,
     status: status || 'PUBLISHED',
     legacy_id: legacyId,
-    business_date: row['business_date'] || row['created_time'] || null,
+    business_date: normalizeDateOrRaw(row['business_date'] || row['created_time']),
   });
 
   if (purchaseBatch.length >= 1000) {

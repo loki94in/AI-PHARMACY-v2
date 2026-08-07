@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getLocalDateString, getTodayString, getNDaysAgoString } from '../../utils/date';
+import { getLocalDateString, getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { toastEvent } from '../../services/events';
 import { sanitizePhoneInput } from '../../utils/phone';
 
@@ -108,15 +108,30 @@ interface PurchaseHistory {
 
 let cachedMasterCatalog: Medicine[] = [];
 let isMasterCatalogHydrating = false;
+let cachedMergedCatalog: Medicine[] | null = null;
+let lastMasterLength = -1;
+let lastCompactLength = -1;
 
 const getMergedCatalog = (): Medicine[] => {
   const compact = getCompactInventoryCache();
-  if (compact.length === 0) return cachedMasterCatalog;
+  if (cachedMergedCatalog && lastMasterLength === cachedMasterCatalog.length && lastCompactLength === compact.length) {
+    return cachedMergedCatalog;
+  }
+
+  if (compact.length === 0) {
+    cachedMergedCatalog = cachedMasterCatalog;
+    lastMasterLength = cachedMasterCatalog.length;
+    lastCompactLength = 0;
+    return cachedMergedCatalog;
+  }
+
   const map = new Map<number, Medicine>();
-  for (const m of cachedMasterCatalog) {
+  for (let i = 0; i < cachedMasterCatalog.length; i++) {
+    const m = cachedMasterCatalog[i];
     if (m && m.id) map.set(m.id, { ...m });
   }
-  for (const item of compact) {
+  for (let i = 0; i < compact.length; i++) {
+    const item = compact[i];
     const medId = item.medicine_id || item.id;
     if (medId) {
       const existing = map.get(medId);
@@ -144,7 +159,10 @@ const getMergedCatalog = (): Medicine[] => {
       }
     }
   }
-  return Array.from(map.values());
+  cachedMergedCatalog = Array.from(map.values());
+  lastMasterLength = cachedMasterCatalog.length;
+  lastCompactLength = compact.length;
+  return cachedMergedCatalog;
 };
 
 const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: number; found: boolean } | null => {
@@ -186,26 +204,26 @@ const filterLocalCatalog = (query: string, catalog?: Medicine[]): Medicine[] => 
   const term = query.trim().toLowerCase();
   const sourceCatalog = (catalog && catalog.length > 0) ? catalog : getMergedCatalog();
   
-  // Prefix matches first
-  const prefixes = sourceCatalog.filter(m =>
-    (m.name && m.name.toLowerCase().startsWith(term)) ||
-    (m.generic_name && m.generic_name.toLowerCase().startsWith(term)) ||
-    (m.manufacturer && m.manufacturer.toLowerCase().startsWith(term))
-  );
+  const prefixes: Medicine[] = [];
+  const infixes: Medicine[] = [];
 
-  if (prefixes.length >= 15) {
-    return prefixes.slice(0, 30);
+  for (let i = 0; i < sourceCatalog.length; i++) {
+    const m = sourceCatalog[i];
+    const name = m.name ? m.name.toLowerCase() : '';
+    const generic = m.generic_name ? m.generic_name.toLowerCase() : '';
+    const mfg = m.manufacturer ? m.manufacturer.toLowerCase() : '';
+
+    if (name.startsWith(term) || generic.startsWith(term) || mfg.startsWith(term)) {
+      prefixes.push(m);
+      if (prefixes.length >= 30) break;
+    } else if (name.includes(term) || generic.includes(term) || mfg.includes(term)) {
+      if (infixes.length < 15) {
+        infixes.push(m);
+      }
+    }
   }
 
-  // Infix matches second
-  const infixes = sourceCatalog.filter(m =>
-    ((m.name && m.name.toLowerCase().includes(term)) ||
-     (m.generic_name && m.generic_name.toLowerCase().includes(term)) ||
-     (m.manufacturer && m.manufacturer.toLowerCase().includes(term))) &&
-    !(m.name && m.name.toLowerCase().startsWith(term))
-  );
-
-  return [...prefixes, ...infixes].slice(0, 30);
+  return prefixes.length >= 15 ? prefixes.slice(0, 30) : [...prefixes, ...infixes].slice(0, 30);
 };
 
 const getInitialPurchasesTabs = () => {
@@ -545,6 +563,20 @@ const Purchases: React.FC = () => {
       window.removeEventListener('contacts-updated', handleDistributorUpdate);
     };
   }, [queryClient, deferredFetchesReady]);
+
+  // Auto-resolve selectedDistributor once distributors finish loading if distributorSearch was prefilled
+  useEffect(() => {
+    if (distributorSearch && !selectedDistributor && distributors && distributors.length > 0) {
+      const matched = distributors.find(
+        (d) => (d.name && d.name.trim().toLowerCase() === distributorSearch.trim().toLowerCase()) ||
+               (d.name && d.name.toLowerCase().includes(distributorSearch.toLowerCase())) ||
+               (distributorSearch.toLowerCase().includes((d.name || '').toLowerCase()))
+      );
+      if (matched) {
+        setSelectedDistributor(matched.id);
+      }
+    }
+  }, [distributors, distributorSearch, selectedDistributor]);
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditItem, setUniversalEditItem] = useState<any>(null);
@@ -1144,7 +1176,10 @@ const Purchases: React.FC = () => {
     setActiveMedicineIndex(index);
 
     const cleanTerm = (term || '').trim();
-    if (!cleanTerm) {
+    if (!cleanTerm || cleanTerm.length < 3) {
+      if (cleanTerm.length > 0) {
+        getMergedCatalog();
+      }
       setSearchResults([]);
       setSearchHighlightIndex(-1);
       return;
@@ -1206,6 +1241,37 @@ const Purchases: React.FC = () => {
     }
   };
 
+  const focusRowMedicineName = (rowIndex: number) => {
+    setTimeout(() => {
+      const el = document.querySelector(`input[data-row-index="${rowIndex}"][data-field="medicine_name"]`) as HTMLInputElement;
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        el.focus();
+      }
+    }, 60);
+  };
+
+  // Auto-scroll row and dropdown into view when search dropdown opens
+  useEffect(() => {
+    if (activeSearchIndex !== null && searchResults.length > 0 && activeSearchRef.current) {
+      activeSearchRef.current.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth'
+      });
+    }
+  }, [activeSearchIndex, searchResults.length]);
+
+  const handleRowInputKeyDown = (e: React.KeyboardEvent, index: number, _fieldName: string) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const targetIndex = index + 1;
+      if (index === items.length - 1) {
+        setItems(prev => [...prev, createEmptyItem()]);
+      }
+      focusRowMedicineName(targetIndex);
+    }
+  };
+
   const selectMedicine = (medicine: Medicine, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
@@ -1227,11 +1293,18 @@ const Purchases: React.FC = () => {
     item.scheme_free = medicine.scheme_free;
     item.amount = calculateItemAmount(item);
 
+    const targetRowIndex = index + 1;
+    if (index === items.length - 1) {
+      newItems.push(createEmptyItem());
+    }
+
     // Apply immediately so the UI feels instant
     setItems(newItems);
     setSearchResults([]);
     setActiveSearchIndex(null);
     setSearchHighlightIndex(-1);
+
+    focusRowMedicineName(targetRowIndex);
 
     // Alias creation: fire-and-forget in background
     if (item.original_name && item.original_name !== medicine.name) {
@@ -1283,9 +1356,10 @@ const Purchases: React.FC = () => {
   // Handle prefilled purchase data from navigation state (e.g. from Mail page)
   useEffect(() => {
     if (location.state?.prefilledPurchase) {
-      const { editPurchaseId, distributorName, invoiceNo: prefInvoiceNo, date: prefDate, items: prefilledItems, globalCdPer: prefGlobalCdPer, totalAmount: prefTotalAmount, cnAmount: prefCnAmount, cnNumber: prefCnNumber, reconcileExpiryReturnId: prefReconcileExpiryReturnId, source_filename, source_file_headers, mapping_config } = location.state.prefilledPurchase;
+      const { editPurchaseId, distributor_id, distributorName, invoiceNo: prefInvoiceNo, date: prefDate, items: prefilledItems, globalCdPer: prefGlobalCdPer, totalAmount: prefTotalAmount, cnAmount: prefCnAmount, cnNumber: prefCnNumber, reconcileExpiryReturnId: prefReconcileExpiryReturnId, source_filename, source_file_headers, mapping_config } = location.state.prefilledPurchase;
       
       if (editPurchaseId) setEditPurchaseId(editPurchaseId);
+      if (distributor_id) setSelectedDistributor(distributor_id);
       if (prefInvoiceNo) setInvoiceNo(prefInvoiceNo);
       if (prefDate) setInvoiceDate(prefDate);
       if (prefCnAmount !== undefined) setCnAmount(prefCnAmount);
@@ -2342,7 +2416,7 @@ const Purchases: React.FC = () => {
             <label className="block text-sm font-medium text-gray-300 mb-1">Date</label>
             <input
               type="date"
-              value={invoiceDate}
+              value={toDateInputValue(invoiceDate)}
               onChange={(e) => setInvoiceDate(e.target.value)}
               className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
@@ -2509,6 +2583,8 @@ const Purchases: React.FC = () => {
                           <div className="flex gap-1">
                             <input
                               type="text"
+                              data-row-index={index}
+                              data-field="medicine_name"
                               value={item.medicine_name}
                               onFocus={() => {
                                 setActiveSearchIndex(index);
@@ -2519,23 +2595,29 @@ const Purchases: React.FC = () => {
                                 searchMedicines(e.target.value, index);
                               }}
                               onKeyDown={e => {
-                                if (activeSearchIndex !== index || searchResults.length === 0) return;
-                                if (e.key === 'ArrowDown') {
-                                  e.preventDefault();
-                                  setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
-                                } else if (e.key === 'ArrowUp') {
-                                  e.preventDefault();
-                                  setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                                } else if (e.key === 'Enter' || e.key === 'Tab') {
-                                  if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                                if (activeSearchIndex === index && searchResults.length > 0) {
+                                  if (e.key === 'ArrowDown') {
                                     e.preventDefault();
-                                    selectMedicine(searchResults[searchHighlightIndex], index);
+                                    setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                                    return;
+                                  } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                                    return;
+                                  } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                    if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
+                                      e.preventDefault();
+                                      selectMedicine(searchResults[searchHighlightIndex], index);
+                                      return;
+                                    }
+                                  } else if (e.key === 'Escape') {
+                                    setActiveSearchIndex(null);
+                                    setSearchResults([]);
+                                    setSearchHighlightIndex(-1);
+                                    return;
                                   }
-                                } else if (e.key === 'Escape') {
-                                  setActiveSearchIndex(null);
-                                  setSearchResults([]);
-                                  setSearchHighlightIndex(-1);
                                 }
+                                handleRowInputKeyDown(e, index, 'medicine_name');
                               }}
                               className="flex-1 min-w-[150px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm h-8"
                               placeholder="Search medicine..."
@@ -2584,8 +2666,18 @@ const Purchases: React.FC = () => {
                             }
                             return null;
                           })()}
+                          {activeSearchIndex === index && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
+                            <div className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-border rounded-xl shadow-2xl p-3 text-center left-0 backdrop-blur-xl">
+                              <span className="text-[12px] text-amber-400 font-bold block mb-1">
+                                🔍 No exact match for "{item.medicine_name}" in catalog
+                              </span>
+                              <span className="text-[11px] text-muted block">
+                                Check spelling or continue to create a new medicine entry.
+                              </span>
+                            </div>
+                          )}
                           {activeSearchIndex === index && searchResults.length > 0 && (
-                            <div ref={searchResultsRef} className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl max-h-64 overflow-y-auto left-0">
                               {item.original_name && (
                                 <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
                                   📄 Original Bill Name: {item.original_name}
@@ -2660,6 +2752,7 @@ const Purchases: React.FC = () => {
                       type="text"
                       value={item.batch_no}
                       onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'batch_no')}
                       className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm h-8"
                     />
                   </td>
@@ -2670,6 +2763,7 @@ const Purchases: React.FC = () => {
                       value={item.expiry_date}
                       onChange={(e) => updateItem(index, 'expiry_date', e.target.value)}
                       onBlur={(e) => updateItem(index, 'expiry_date', formatExpiryToMMYY(e.target.value))}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'expiry_date')}
                       className="w-[68px] bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm font-mono text-center h-8"
                     />
                   </td>
@@ -2699,6 +2793,7 @@ const Purchases: React.FC = () => {
                         type="number"
                         value={item.rate}
                         onChange={(e) => updateItem(index, 'rate', e.target.value)}
+                        onKeyDown={(e) => handleRowInputKeyDown(e, index, 'rate')}
                         className="w-full bg-transparent border-0 outline-none text-white text-sm text-right p-0 focus:ring-0 focus:outline-none"
                       />
                     </div>
@@ -2719,6 +2814,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.mrp}
                       onChange={(e) => updateItem(index, 'mrp', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
                       className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right h-8"
                     />
                     {item.medicine_name && (
@@ -2737,6 +2833,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.qty}
                       onChange={(e) => updateItem(index, 'qty', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'qty')}
                       className="w-16 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
@@ -2745,6 +2842,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.free_qty}
                       onChange={(e) => updateItem(index, 'free_qty', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'free_qty')}
                       className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
@@ -2753,6 +2851,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.sgst_per}
                       onChange={(e) => updateItem(index, 'sgst_per', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'sgst_per')}
                       className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
@@ -2761,6 +2860,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.cgst_per}
                       onChange={(e) => updateItem(index, 'cgst_per', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cgst_per')}
                       className="w-11 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
@@ -2769,6 +2869,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.cd_per}
                       onChange={(e) => updateItem(index, 'cd_per', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cd_per')}
                       className="w-12 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-center h-8"
                     />
                   </td>
@@ -2777,6 +2878,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.cd_rs}
                       onChange={(e) => updateItem(index, 'cd_rs', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cd_rs')}
                       className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right h-8"
                     />
                   </td>
@@ -2785,6 +2887,7 @@ const Purchases: React.FC = () => {
                       type="number"
                       value={item.additional_discount}
                       onChange={(e) => updateItem(index, 'additional_discount', e.target.value)}
+                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'additional_discount')}
                       className="w-14 bg-white/10 border border-white/20 rounded px-1 py-1 text-white text-sm text-right h-8"
                       placeholder="0"
                     />

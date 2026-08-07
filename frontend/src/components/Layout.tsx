@@ -810,27 +810,9 @@ const Topbar = ({
 
     if (!compactCacheLoaded) return;
 
-    // Poll enrichment status to show/hide the header pill
-    const pollEnrichment = async () => {
-      try {
-        const { data } = await apiClient.get('/enrichment/status');
-        setEnrichmentRunning(!!data?.isRunning);
-      } catch {
-        // silently ignore — don't surface a UI error just for the header pill
-      }
-    };
-    if (enrichmentPollControl.shouldFetch) {
-      let enrichmentPollInterval: ReturnType<typeof setInterval> | undefined;
-      const cancelDefer = deferUntilIdle(() => {
-        pollEnrichment();
-        enrichmentPollInterval = setInterval(pollEnrichment, 5000);
-      });
-      return () => {
-        cancelDefer();
-        clearInterval(enrichmentPollInterval);
-      };
-    }
-  }, [enrichmentPollControl.shouldFetch, compactCacheLoaded]);
+    // Background enrichment permanently stopped by user
+    setEnrichmentRunning(false);
+  }, [compactCacheLoaded]);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [connectedDevices, setConnectedDevices] = useState<{ token: string; device_name: string; os: string; is_online: number; last_seen: string; offline_seconds?: number }[]>([]);
@@ -896,7 +878,18 @@ const Topbar = ({
       if (res && res.success && res.services) {
         setServicesStatus(res.services);
       }
-      // Also fetch detailed queue worker state for live header progress
+    } catch (err) {
+      console.warn('[Layout] Failed to fetch services status:', err);
+    }
+  }, []);
+
+  const fetchWhatsAppQueueStatus = useCallback(async () => {
+    try {
+      if (servicesStatus && (!servicesStatus.whatsapp?.connected || servicesStatus.whatsapp?.isSyncing === false && !servicesStatus.whatsapp?.connected)) {
+        // Skip WhatsApp queue status polling if WhatsApp gateway is not connected/configured
+        return;
+      }
+      const { api } = await import('../services/api.js');
       const qData = await api.getWhatsAppQueueStatus();
       if (qData) {
         setWaQueueDetail({
@@ -909,7 +902,6 @@ const Topbar = ({
         const sending = qData.counts?.sending || 0;
         const sent = qData.counts?.sent || 0;
         const isQueueActive = pending > 0 || sending > 0 || qData.isProcessing;
-        // Update ref for polling interval adjustment (avoids effect re-trigger)
         waQueueActiveRef.current = isQueueActive;
 
         if (prevQueueActiveRef.current && !isQueueActive && sent > 0) {
@@ -929,30 +921,25 @@ const Topbar = ({
         }
       }
     } catch (err) {
-      console.warn('[Layout] Failed to fetch services status:', err);
+      console.warn('[Layout] Failed to fetch whatsapp queue status:', err);
     }
   }, []);
+
   useEffect(() => {
     if (!compactCacheLoaded) return;
-    // Poll faster (every 3s) when queue has pending/sending items, otherwise 8s
-    let interval: ReturnType<typeof setInterval> | undefined;
-    const poll = () => {
-      fetchServicesStatus().then(() => {
-        const activeQueue = waQueueActiveRef.current;
-        const newMs = activeQueue ? 3000 : 8000;
-        if (!interval) {
-          interval = setInterval(poll, newMs);
-        }
-      }).catch(() => {});
-    };
-    const cancelDefer = deferUntilIdle(() => {
-      poll();
-    });
+    // Services status: Poll every 360 seconds (360,000 ms)
+    fetchServicesStatus();
+    const sInterval = setInterval(fetchServicesStatus, 360000);
+
+    // WhatsApp queue status: Poll every 480 seconds (480,000 ms)
+    fetchWhatsAppQueueStatus();
+    const qInterval = setInterval(fetchWhatsAppQueueStatus, 480000);
+
     return () => {
-      cancelDefer();
-      clearInterval(interval);
+      clearInterval(sInterval);
+      clearInterval(qInterval);
     };
-  }, [fetchServicesStatus, compactCacheLoaded]);
+  }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
 
   useEffect(() => {
     fetchDevices();

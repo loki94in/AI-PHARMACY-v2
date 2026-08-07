@@ -381,7 +381,7 @@ export default function PharmarackCart() {
     };
 
     syncQueueStatus();
-    const interval = setInterval(syncQueueStatus, 3500);
+    const interval = setInterval(syncQueueStatus, 185000);
     return () => {
       isMounted = false;
       clearInterval(interval);

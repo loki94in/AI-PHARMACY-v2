@@ -1022,6 +1022,7 @@ export class EmailService {
   private pollInterval: NodeJS.Timeout | null = null;
   private isPolling: boolean = false;
   private isSyncing: boolean = false;
+  private lastUnconfiguredLogTime: number = 0;
 
   constructor() {
     // IMAP configuration for receiving emails
@@ -1112,6 +1113,11 @@ export class EmailService {
    * Polls the IMAP inbox for unseen emails and processes them
    */
   public async pollInbox(): Promise<void> {
+    const { isConfigured } = await this.buildImapConfig();
+    if (!isConfigured) {
+      return;
+    }
+
     try {
       const { getBackendFetchMode } = await import('./dataFetchControl.js');
       const mode = await getBackendFetchMode('bg.emailImapPoll', 'off');
@@ -1145,10 +1151,17 @@ export class EmailService {
   /**
    * Starts the email polling interval
    */
-  public startPolling(intervalInMinutes: number = 5): void {
+  public async startPolling(intervalInMinutes: number = 5): Promise<void> {
     // Clear any existing interval
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+
+    const { isConfigured } = await this.buildImapConfig();
+    if (!isConfigured) {
+      console.log('[Mail] IMAP credentials not saved/configured. Background email polling is stopped.');
+      return;
     }
 
     // Immediate first run
@@ -2914,7 +2927,11 @@ export class EmailService {
 
     if (authMethod === 'password') {
       if (!user || !password) {
-        console.log('[Sync] Gmail App Password authentication selected but user or password not configured.');
+        const now = Date.now();
+        if (now - this.lastUnconfiguredLogTime > 3600000) {
+          console.log('[Sync] Gmail App Password authentication selected but user or password not configured.');
+          this.lastUnconfiguredLogTime = now;
+        }
         return { imapConfig: null, isConfigured: false };
       }
     } else {
@@ -2926,7 +2943,11 @@ export class EmailService {
           console.log('[Sync] Gmail OAuth token unavailable; falling back to App Password authentication.');
           authMethod = 'password';
         } else {
-          console.log('[Sync] Gmail not configured: no OAuth token and no App Password. Configure via Learning → Email Invoice Ingestion → Configure Scanner.');
+          const now = Date.now();
+          if (now - this.lastUnconfiguredLogTime > 3600000) {
+            console.log('[Sync] Gmail not configured: no OAuth token and no App Password. Configure via Learning → Email Invoice Ingestion → Configure Scanner.');
+            this.lastUnconfiguredLogTime = now;
+          }
           return { imapConfig: null, isConfigured: false };
         }
       } else {

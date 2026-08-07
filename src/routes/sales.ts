@@ -9,9 +9,10 @@ import { verificationService } from '../services/verificationService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+import fs from 'fs';
+import PDFDocument from 'pdfkit';
+import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
+import { getAppDataDir } from '../config/index.js';
 
 const router = express.Router();
 
@@ -299,10 +300,14 @@ router.post('/', async (req, res) => {
     // Insert invoice
     const invoiceDateValue = sale_date ? new Date(sale_date).toISOString() : new Date().toISOString();
     let resolvedDoctorId = doctor_id || null;
-    if (!resolvedDoctorId && doctor_name) {
-      const docRow = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?) LIMIT 1', [doctor_name.trim()]);
+    if (doctor_name && typeof doctor_name === 'string' && doctor_name.trim().length > 0) {
+      const cleanDocName = doctor_name.trim();
+      const docRow = await db.get('SELECT id FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1', [cleanDocName]);
       if (docRow) {
         resolvedDoctorId = docRow.id;
+      } else {
+        const newDoc = await db.run('INSERT INTO doctors (name) VALUES (?)', [cleanDocName]);
+        resolvedDoctorId = newDoc.lastID;
       }
     }
 
@@ -1206,7 +1211,7 @@ router.get('/list', async (req, res) => {
     }
 
     // Optional: total count for pagination (lightweight count query with same filters)
-    const countSql = `SELECT COUNT(*) as total FROM sales_invoices si LEFT JOIN customers c ON si.customer_id = c.id ${where}`;
+    const countSql = `SELECT COUNT(*) as total FROM sales_invoices si LEFT JOIN customers c ON si.customer_id = c.id LEFT JOIN doctors d ON si.doctor_id = d.id ${where}`;
     const countResult = await queryAllWithRetry(db, countSql, params);
     const total = (countResult && countResult[0] && countResult[0].total) ? countResult[0].total : 0;
 
@@ -1694,13 +1699,16 @@ router.get('/suggest-medicine', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-    await productNameFilterService.initialize();
-    
     const filterResult = await productNameFilterService.filterProductNames(query.trim(), { minConfidenceThreshold: 0.6 });
-    const matchedNames = filterResult.matches.slice(0, 3);
+    let matchedNames = filterResult.matches.slice(0, 4);
     if (matchedNames.length === 0) {
+      const { findSimilarNames } = await import('../services/similarityService.js');
+      const allMeds = await db.all('SELECT id AS medicine_id, name, api_reference FROM medicines LIMIT 500');
+      const medNames = allMeds.map((m: any) => m.name);
+      const similar = findSimilarNames(query.trim(), medNames, 4, 0.25);
+      const matched = allMeds.filter((m: any) => similar.includes(m.name));
       await dbManager.close();
-      return res.json([]);
+      return res.json(matched);
     }
     
     const placeholders = matchedNames.map(() => '?').join(',');
@@ -1710,7 +1718,7 @@ router.get('/suggest-medicine', async (req, res) => {
     
     // Sort according to matchedNames order
     const sorted = matchedNames
-      .map(name => rows.find(r => r.name.toLowerCase() === name.toLowerCase()))
+      .map((name: string) => rows.find((r: any) => r.name.toLowerCase() === name.toLowerCase()))
       .filter(Boolean);
       
     res.json(sorted);
@@ -1863,6 +1871,90 @@ router.get('/staged', async (req, res) => {
   }
 });
 
+// Generate scannable invoice barcode (Code128 + QR) and printable PDF
+const handleInvoiceBarcode = async (req: express.Request, res: express.Response) => {
+  const invoiceNo = (req.params.invoiceNo || req.query.invoiceNo || req.query.invoice_no || '').toString();
+  if (!invoiceNo) {
+    return res.status(400).json({ error: 'Invoice number is required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    const invoice = await db.get(
+      `SELECT si.invoice_no, si.date, si.total_amount, c.name as customer_name, c.phone as customer_phone
+       FROM sales_invoices si
+       LEFT JOIN customers c ON si.customer_id = c.id
+       WHERE si.invoice_no = ? OR si.id = ?`,
+      [invoiceNo, invoiceNo]
+    );
+
+    const actualInvoiceNo = invoice ? invoice.invoice_no : invoiceNo;
+    const invoiceDate = invoice ? invoice.date : undefined;
+    const barcodeData = await generateInvoiceBarcodeData(actualInvoiceNo, invoiceDate);
+
+    // Fetch shop details from app_settings
+    const settingsRows = await db.all('SELECT key, value FROM app_settings');
+    const settings: Record<string, string> = {};
+    settingsRows.forEach(r => { settings[r.key] = r.value; });
+
+    const shopName = settings.shop_name || 'AI PHARMACY OS';
+    const shopPhone = settings.shop_phone || '';
+
+    // Build printable PDF label
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const doc = new PDFDocument({ size: [350, 220], margin: 15 });
+    const sanitizeNo = actualInvoiceNo.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const pdfPath = path.join(uploadsDir, `barcode_invoice_${sanitizeNo}_${Date.now()}.pdf`);
+    const stream = fs.createWriteStream(pdfPath);
+    doc.pipe(stream);
+
+    // Header
+    doc.font('Helvetica-Bold').fontSize(14).fillColor('#0284c7').text(shopName, { align: 'center' });
+    if (shopPhone) {
+      doc.font('Helvetica').fontSize(8).fillColor('#64748b').text(`Ph: ${shopPhone}`, { align: 'center' });
+    }
+    doc.moveDown(0.5);
+
+    // Metadata
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text(`Invoice: ${actualInvoiceNo}`, { align: 'center' });
+    if (invoice) {
+      const formattedDate = new Date(invoice.date).toLocaleDateString();
+      const custText = invoice.customer_name ? `Customer: ${invoice.customer_name}` : 'Walk-in Customer';
+      doc.font('Helvetica').fontSize(8).fillColor('#475569').text(`Date: ${formattedDate} | ${custText} | Total: ₹${Number(invoice.total_amount || 0).toFixed(2)}`, { align: 'center' });
+    }
+
+    doc.moveDown(0.5);
+
+    // Render Barcodes
+    const startY = doc.y;
+    doc.image(barcodeData.qrBuffer, 25, startY, { width: 85, height: 85 });
+    doc.image(barcodeData.code128Buffer, 125, startY + 10, { width: 200, height: 60 });
+    doc.fontSize(7).fillColor('#94a3b8').text(`Scan Code128 or QR for return lookup (${barcodeData.barcodeText})`, 15, 195, { align: 'center' });
+    doc.end();
+
+    stream.on('finish', () => {
+      res.json({
+        success: true,
+        invoiceNo: actualInvoiceNo,
+        barcodeText: barcodeData.barcodeText,
+        qrDataUrl: barcodeData.qrDataUrl,
+        code128DataUrl: barcodeData.code128DataUrl,
+        pdfUrl: `/uploads/${path.basename(pdfPath)}`
+      });
+    });
+  } catch (error: any) {
+    console.error('Sale invoice barcode generation error:', error);
+    res.status(500).json({ error: 'Failed to generate sale invoice barcode: ' + error.message });
+  }
+};
+
+router.get('/invoice-barcode', handleInvoiceBarcode);
+router.get('/invoice-barcode/:invoiceNo', handleInvoiceBarcode);
+
 // Get single sale invoice with items
 router.get('/:id', async (req, res) => {
   let db;
@@ -1909,7 +2001,7 @@ router.put('/:id', async (req, res) => {
   try {
     db = await dbManager.getConnection();
     const { id } = req.params;
-    const { items, patient_name, patient_phone, discount = 0, paymentMedium, paymentStatus, doctor_id } = req.body;
+    const { items, patient_name, patient_phone, discount = 0, paymentMedium, paymentStatus, doctor_id, doctor_name } = req.body;
 
     await db.run('BEGIN TRANSACTION');
 
@@ -1917,7 +2009,7 @@ router.put('/:id', async (req, res) => {
     const existing = await db.get('SELECT * FROM sales_invoices WHERE id = ?', [id]);
     if (!existing) {
       await db.run('ROLLBACK');
-            return res.status(404).json({ error: 'Invoice not found' });
+      return res.status(404).json({ error: 'Invoice not found' });
     }
 
     // Resolve customer
@@ -1929,6 +2021,23 @@ router.put('/:id', async (req, res) => {
       } else {
         const custResult = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [patient_name, patient_phone || '']);
         customerId = custResult.lastID;
+      }
+    }
+
+    // Resolve doctor
+    let resolvedDoctorId = doctor_id !== undefined ? (doctor_id || null) : (existing.doctor_id || null);
+    if (doctor_name !== undefined) {
+      if (doctor_name && typeof doctor_name === 'string' && doctor_name.trim().length > 0) {
+        const cleanDocName = doctor_name.trim();
+        const docRow = await db.get('SELECT id FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1', [cleanDocName]);
+        if (docRow) {
+          resolvedDoctorId = docRow.id;
+        } else {
+          const newDoc = await db.run('INSERT INTO doctors (name) VALUES (?)', [cleanDocName]);
+          resolvedDoctorId = newDoc.lastID;
+        }
+      } else {
+        resolvedDoctorId = null;
       }
     }
 
@@ -2035,11 +2144,11 @@ router.put('/:id', async (req, res) => {
 
       await db.run(
         'UPDATE sales_invoices SET customer_id = ?, total_amount = ?, tax_amount = ?, cgst_value = ?, sgst_value = ?, payment_medium = COALESCE(?, payment_medium), payment_status = COALESCE(?, payment_status), discount = ?, subtotal = ?, doctor_id = ?, roff = ? WHERE id = ?',
-        [customerId, total, tax, totalCgst, totalSgst, paymentMedium || null, paymentStatus || null, Number(discount || 0), subtotal, doctor_id || null, roff, id]
+        [customerId, total, tax, totalCgst, totalSgst, paymentMedium || null, paymentStatus || null, Number(discount || 0), subtotal, resolvedDoctorId, roff, id]
       );
     } else {
-      // Just update customer/discount
-      await db.run('UPDATE sales_invoices SET customer_id = ? WHERE id = ?', [customerId, id]);
+      // Just update customer/discount/doctor
+      await db.run('UPDATE sales_invoices SET customer_id = ?, doctor_id = ? WHERE id = ?', [customerId, resolvedDoctorId, id]);
     }
 
     await db.run('COMMIT');

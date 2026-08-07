@@ -9,7 +9,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
-import { formatDisplayDate } from '../../utils/date';
+import { formatDisplayDate, toDateInputValue } from '../../utils/date';
 
 export default function CustomerReturnHistory() {
   const [_, setSearchParams] = useSearchParams();
@@ -132,7 +132,7 @@ export default function CustomerReturnHistory() {
             <span className="text-[10px] text-muted font-black uppercase">From</span>
             <input
               type="date"
-              value={dateRangeHelper.dateRange.from}
+              value={toDateInputValue(dateRangeHelper.dateRange.from)}
               onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
               className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-32"
             />
@@ -141,7 +141,7 @@ export default function CustomerReturnHistory() {
             <span className="text-[10px] text-muted font-black uppercase">To</span>
             <input
               type="date"
-              value={dateRangeHelper.dateRange.to}
+              value={toDateInputValue(dateRangeHelper.dateRange.to)}
               onChange={e => dateRangeHelper.handleToChange(e.target.value)}
               className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-32"
             />

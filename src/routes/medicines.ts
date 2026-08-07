@@ -167,13 +167,26 @@ router.get('/medicines', async (req, res) => {
       medicines = medicines.slice(0, limit);
     }
     
+    let suggestions: string[] = [];
+    if (search && medicines.length === 0) {
+      try {
+        const candidateRows = await db.all('SELECT name FROM medicines LIMIT 500');
+        const candidateNames = candidateRows.map((r: any) => r.name);
+        const { findSimilarNames } = await import('../services/similarityService.js');
+        suggestions = findSimilarNames(search, candidateNames, 4, 0.25);
+      } catch (sugErr) {
+        console.warn('[Medicines] Failed to compute search suggestions:', sugErr);
+      }
+    }
+
     await dbManager.close();
     
     res.json({
       data: medicines,
       totalPages,
       currentPage: page,
-      totalItems
+      totalItems,
+      suggestions
     });
   } catch (error) {
     await dbManager.close();

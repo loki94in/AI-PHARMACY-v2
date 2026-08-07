@@ -5,7 +5,7 @@ import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
-import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
@@ -231,6 +231,7 @@ const PurchaseHistory = () => {
         state: {
           prefilledPurchase: {
             editPurchaseId: data.purchase.id,
+            distributor_id: data.purchase.distributor_id,
             distributorName: data.purchase.distributor_name,
             invoiceNo: data.purchase.invoice_no,
             date: data.purchase.date,
@@ -391,14 +392,14 @@ const PurchaseHistory = () => {
                 <span className="text-muted text-[10px] uppercase font-bold">From:</span>
                 <input
                   type="date"
-                  value={dateRangeHelper.dateRange.from}
+                  value={toDateInputValue(dateRangeHelper.dateRange.from)}
                   onChange={(e) => dateRangeHelper.handleFromChange(e.target.value)}
                   className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
                 />
                 <span className="text-muted text-[10px] uppercase font-bold ml-1">To:</span>
                 <input
                   type="date"
-                  value={dateRangeHelper.dateRange.to}
+                  value={toDateInputValue(dateRangeHelper.dateRange.to)}
                   onChange={(e) => dateRangeHelper.handleToChange(e.target.value)}
                   className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
                 />
@@ -495,7 +496,7 @@ const PurchaseHistory = () => {
                           <span>Date</span>
                           <input
                             type="date"
-                            value={colFilterDate}
+                            value={toDateInputValue(colFilterDate)}
                             onChange={e => setColFilterDate(e.target.value)}
                             className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />

@@ -323,11 +323,8 @@ class WhatsAppQueueWorker {
       const useBusiness = await shouldRouteToBusiness();
       let status = await getWhatsAppStatus();
 
-      // If client is not ready, attempt headless init and leave items pending
+      // If client is not ready, leave items pending until user connects on UI
       if (!useBusiness && !status.isReady) {
-        if (!status.initializing) {
-          initClient().catch(() => {});
-        }
         const logNow = Date.now();
         if (!this.lastWasOffline || logNow - this.lastOfflineLogTime > 600000) {
           console.log(`[WhatsAppQueueWorker] WhatsApp client offline. Leaving ${pendingItems.length} item(s) pending in queue until user connects on UI.`);

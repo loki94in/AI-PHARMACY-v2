@@ -883,7 +883,8 @@ export const api = {
     barcodeText: string;
     qrDataUrl: string;
     code128DataUrl: string;
-  }>('/sales/invoice-barcode', { params: { invoiceNo } }).then(res => res.data),
+    pdfUrl: string;
+  }>(`/sales/invoice-barcode/${encodeURIComponent(invoiceNo)}`, { params: { invoiceNo } }).then(res => res.data),
 
   // Schedule H1 Regulatory Compliance API
   getComplianceDashboard: () => apiClient.get<{ success: boolean; todayH1Sales: number; monthlyH1Sales: number; pendingDoctorAssignments: number; totalComplianceLogs: number }>('/compliance/dashboard').then(res => res.data),

@@ -769,12 +769,14 @@ router.post('/manual', async (req, res) => {
 
     if (distId && invoice_no) {
       const existing = await db.get(
-        'SELECT id FROM purchases WHERE distributor_id = ? AND invoice_no = ?',
-        [distId, invoice_no]
+        `SELECT id FROM purchases 
+         WHERE (distributor_id = ? OR distributor_id IN (SELECT id FROM distributors WHERE LOWER(name) = LOWER(?))) 
+         AND LOWER(TRIM(invoice_no)) = LOWER(TRIM(?))`,
+        [distId, distName || '', invoice_no.trim()]
       );
       if (existing) {
         await db.run('ROLLBACK');
-        return res.status(400).json({ error: 'Invoice number already exists for this distributor.' });
+        return handleUpdatePurchaseFull(req, res, existing.id);
       }
     }
 
@@ -1118,8 +1120,8 @@ router.get('/items/all', async (req, res) => {
   }
 });
 
-router.put('/:id/full', async (req, res) => {
-  const { id } = req.params;
+async function handleUpdatePurchaseFull(req: express.Request, res: express.Response, targetId?: string | number) {
+  const id = targetId || req.params.id;
   const { distributor, distributor_id, invoice_no, date, cd_per, extra_credit, cn_amount, cn_number, reconcile_expiry_return_id, items } = req.body;
   let db;
   try {
@@ -1131,10 +1133,20 @@ router.put('/:id/full', async (req, res) => {
     for (const old of oldItems) {
       // We subtract the old quantity AND free_qty
       const oldTotalQty = (old.quantity || 0) + (old.free_qty || 0);
+      const batchVal = old.batch_no || '';
       await db.run(
-        'UPDATE inventory_master SET quantity = quantity - ? WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))',
-        [oldTotalQty, old.medicine_id, old.batch_no, old.batch_no]
+        `UPDATE inventory_master 
+         SET quantity = MAX(0, quantity - ?) 
+         WHERE medicine_id = ? AND (COALESCE(batch_no, '') = COALESCE(?, '') OR batch_no = ?)`,
+        [oldTotalQty, old.medicine_id, batchVal, old.batch_no]
       );
+      const invMasterRow = await db.get(
+        `SELECT id FROM inventory_master WHERE medicine_id = ? AND (COALESCE(batch_no, '') = COALESCE(?, '') OR batch_no = ?)`,
+        [old.medicine_id, batchVal, old.batch_no]
+      );
+      if (invMasterRow?.id) {
+        await refreshInventoryActiveStatus(db, invMasterRow.id);
+      }
     }
     // Delete old items
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
@@ -1150,7 +1162,7 @@ router.put('/:id/full', async (req, res) => {
       );
       if (existing) {
         await db.run('ROLLBACK');
-        return res.status(400).json({ error: 'Invoice number already exists for this distributor.' });
+        return res.status(400).json({ error: 'Invoice number already exists for another purchase bill.' });
       }
     }
 
@@ -1197,12 +1209,17 @@ router.put('/:id/full', async (req, res) => {
       [id]
     );
 
+    const nowLocal = new Date();
+    const localTimeStr = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}:${String(nowLocal.getSeconds()).padStart(2, '0')}`;
+    const rawDateStr = date && date.trim() ? date.trim() : `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const purchaseDate = rawDateStr.includes(':') ? rawDateStr : `${rawDateStr} ${localTimeStr}`;
+
     // 3. Update purchases record
     await db.run(
       `UPDATE purchases 
        SET distributor_id = ?, invoice_no = ?, date = ?, total_amount = ?, cgst_value = ?, sgst_value = ?, cn_amount = ?, cn_number = ?, original_amount = ? 
        WHERE id = ?`,
-      [distRow.id, invoice_no, date, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount, id]
+      [distRow.id, invoice_no, purchaseDate, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount, id]
     );
 
     // Re-apply credit reconciliation if necessary
@@ -1301,7 +1318,11 @@ router.put('/:id/full', async (req, res) => {
 
       // Update inventory_master (add new quantity and update cost_price, mrp, expiry_date)
       const totalQty = rawQty + rawFreeQty;
-      const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
+      const invRow = await db.get(
+        `SELECT id, quantity FROM inventory_master 
+         WHERE medicine_id = ? AND (COALESCE(batch_no, '') = COALESCE(?, '') OR batch_no = ?)`,
+        [medId, rawBatch, rawBatch]
+      );
       if (invRow) {
         await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
           [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
@@ -1321,6 +1342,7 @@ router.put('/:id/full', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    await rebuildPurchaseSummaryCache();
     triggerBackgroundSummaryRebuild();
 
     // Background enrichment for medicines in this purchase
@@ -1356,6 +1378,10 @@ router.put('/:id/full', async (req, res) => {
     }
     res.status(500).json({ error: error.message || 'Internal server error' });
   }
+}
+
+router.put('/:id/full', async (req, res) => {
+  return handleUpdatePurchaseFull(req, res);
 });
 
 router.put('/:id', async (req, res) => {

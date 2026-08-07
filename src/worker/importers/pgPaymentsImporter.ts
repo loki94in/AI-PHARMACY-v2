@@ -10,6 +10,7 @@ import { Database } from 'sqlite';
 import { distributorMap } from './pgMasterImporter.js';
 import { purchaseMap } from './pgPurchaseImporter.js';
 import { salesInvoiceMap } from './pgSalesImporter.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const paymentMap = new Map<string, number>(); // legacy payment_id → new id
@@ -34,13 +35,13 @@ export async function importPayment(row: Record<string, string | null>, db: Data
     distributor_id: distributorId,
     amount: parseFloat(row['amount'] || '0') || 0,
     payment_type: row['payment_type'] || null,
-    date: row['created_time'] || null,
+    date: normalizeDateOrRaw(row['created_time']),
     cheque_no: row['ch_no'] || null,
     cheque_bank: row['ch_bank'] || null,
-    cheque_date: row['ch_date'] || null,
+    cheque_date: normalizeDateOrRaw(row['ch_date']),
     upi_id: row['upi_id'] || null,
     legacy_id: legacyId,
-    business_date: row['business_date'] || row['created_time'] || null,
+    business_date: normalizeDateOrRaw(row['business_date'] || row['created_time']),
   });
 
   if (paymentBatch.length >= 500) {
@@ -93,7 +94,7 @@ export async function importPaymentDetail(row: Record<string, string | null>, db
     amount: parseFloat(row['amount'] || '0') || 0,
     discount: parseFloat(row['discount'] || '0') || 0,
     legacy_id: legacyId,
-    business_date: row['business_date'] || null,
+    business_date: normalizeDateOrRaw(row['business_date']),
   });
 
   if (paymentDetailBatch.length >= 1000) {

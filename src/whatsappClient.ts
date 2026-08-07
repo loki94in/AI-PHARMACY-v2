@@ -342,15 +342,44 @@ export async function initClient(): Promise<WAClient> {
     });
     activeClient = client;
 
+    let qrCount = 0;
+    let qrAutoStopTimer: NodeJS.Timeout | null = null;
+
     client.on('qr', (qr: string) => {
-      console.log('[WhatsApp] QR code received (standing by for scan)...');
+      qrCount++;
+      console.log(`[WhatsApp] QR code received (attempt ${qrCount}/5, standing by for scan)...`);
       currentQr = qr;
       isReady = false;
+
+      if (!qrAutoStopTimer) {
+        qrAutoStopTimer = setTimeout(() => {
+          console.log('[WhatsApp] QR scan timed out (2 minutes elapsed). Stopping browser process until manual connect.');
+          currentQr = null;
+          initializing = false;
+          isReady = false;
+          if (activeClient) {
+            activeClient.destroy().catch(() => {});
+            activeClient = null;
+          }
+          clientInstance = null;
+        }, 120_000);
+      }
+
+      if (qrCount >= 5) {
+        console.log('[WhatsApp] Reached max QR refresh attempts (5). Auto-stopping browser until manual connect.');
+        if (qrAutoStopTimer) clearTimeout(qrAutoStopTimer);
+        currentQr = null;
+        initializing = false;
+        isReady = false;
+        activeClient = null;
+        client.destroy().catch(() => {});
+      }
     });
 
     client.on('ready', async () => {
       console.log('WhatsApp Client is ready!');
       if (qrTimeout) clearTimeout(qrTimeout);
+      if (qrAutoStopTimer) clearTimeout(qrAutoStopTimer);
       clientInstance = client;
       activeClient = client;
       initializing = false;

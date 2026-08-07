@@ -34,7 +34,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getTodayString, getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
@@ -680,117 +680,145 @@ const InvestigationCenter = () => {
       <div className="glass-panel flex-1 flex flex-col overflow-hidden">
         {!editingType && (
           <>
-            {/* Top Control Header Bar — Matching Inventory page layout */}
-            <div className="px-3 py-2 border-b border-glass-border/30 flex items-center justify-between bg-bg2/40 shrink-0 select-none text-xs flex-wrap gap-2">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 font-bold text-text">
-                  <PackageSearch size={16} className="text-primary" />
-                  <span>Investigation Center</span>
-                </div>
-                <span className="text-muted border-l border-glass-border/30 pl-3">
-                  Showing <strong className="text-text font-bold font-mono">{items.length.toLocaleString()}</strong>
-                  {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} ledgers
-                </span>
+            {/* ── HERO HEADER ── */}
+            <div className="relative shrink-0 overflow-hidden border-b border-glass-border/30">
+              {/* Gradient background layer */}
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/8 via-bg2/60 to-transparent pointer-events-none" />
+              <div className="absolute top-0 left-0 w-48 h-full bg-primary/5 blur-3xl pointer-events-none" />
 
-                {/* Compact Inline Stat Badges */}
-                <div className="hidden lg:flex items-center gap-2 border-l border-glass-border/30 pl-3">
-                  <span className="px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-mono font-bold">
-                    Sales: {salesCount.toLocaleString()}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-green/10 border border-green/20 text-green text-[10px] font-mono font-bold">
-                    Purchases: {purchasesCount.toLocaleString()}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-mono font-bold">
-                    Adjustments: {adjustmentsCount.toLocaleString()}
-                  </span>
-                </div>
-              </div>
+              <div className="relative px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 select-none">
+                {/* Left: Brand + stats */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Icon + Title */}
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative shrink-0">
+                      <div className="absolute inset-0 bg-primary/20 rounded-xl blur-md" />
+                      <div className="relative p-1.5 rounded-xl bg-primary/15 border border-primary/25 shadow-inner">
+                        <PackageSearch size={15} className="text-primary" />
+                      </div>
+                    </div>
+                    <div>
+                      <h1 className="text-xs font-black text-text tracking-wide leading-none">Investigation Center</h1>
+                      <p className="text-[9px] text-muted font-medium leading-none mt-0.5">Stock Ledger · Audit Trail · Bill Correction</p>
+                    </div>
+                  </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                {/* Date Filter */}
-                <div className="flex items-center gap-1.5 bg-bg3/60 border border-glass-border/50 px-2 py-1 rounded-lg text-[10px] font-bold text-muted">
-                  <Calendar size={12} className="text-muted shrink-0" />
-                  <span className="text-[9px] uppercase">From</span>
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.from}
-                    onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-                    className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24"
-                  />
-                  <span className="text-[9px] uppercase">To</span>
-                  <input
-                    type="date"
-                    value={dateRangeHelper.dateRange.to}
-                    onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-                    className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24"
-                  />
-                  {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
-                    <button
-                      onClick={() => dateRangeHelper.clearFilters()}
-                      className="text-[9px] font-bold text-red hover:underline cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                  )}
+                  {/* Live count chip */}
+                  <div className="h-5 flex items-center gap-1.5 px-2.5 rounded-full bg-bg3/80 border border-glass-border/50 text-[10px] font-mono font-bold text-muted">
+                    {isFetching && items.length === 0
+                      ? <Loader2 size={9} className="animate-spin text-primary" />
+                      : <span className="text-text font-black">{items.length.toLocaleString()}</span>
+                    }
+                    {totalItems > 0 && <><span className="text-muted/50">/</span><span>{totalItems.toLocaleString()}</span></>}
+                    <span className="text-muted/60">ledgers</span>
+                  </div>
+
+                  {/* Compact type stat badges */}
+                  <div className="hidden lg:flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-mono font-bold">
+                      ↓ {salesCount.toLocaleString()} Sales
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-green/10 border border-green/20 text-green text-[10px] font-mono font-bold">
+                      ↑ {purchasesCount.toLocaleString()} Purchases
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-mono font-bold">
+                      ⚖ {adjustmentsCount.toLocaleString()} Adj
+                    </span>
+                  </div>
                 </div>
 
-                {/* Export CSV / PDF */}
-                <button
-                  onClick={() => handleExport('csv')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
-                  title="Export to CSV"
-                >
-                  <Download size={12} />
-                  CSV
-                </button>
-                <button
-                  onClick={() => handleExport('pdf')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-[10px] font-bold transition-all cursor-pointer"
-                  title="Export to PDF"
-                >
-                  <Download size={12} />
-                  PDF
-                </button>
+                {/* Right: Tools cluster */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Date range */}
+                  <div className="flex items-center gap-1.5 bg-bg3/60 border border-glass-border/50 px-2.5 py-1 rounded-xl text-[10px] font-bold text-muted">
+                    <Calendar size={11} className="text-primary shrink-0" />
+                    <span className="text-[9px] text-muted/60 uppercase font-bold">From</span>
+                    <input
+                      type="date"
+                      value={toDateInputValue(dateRangeHelper.dateRange.from)}
+                      onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
+                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24 cursor-pointer"
+                    />
+                    <span className="text-[9px] text-muted/60 uppercase font-bold">To</span>
+                    <input
+                      type="date"
+                      value={toDateInputValue(dateRangeHelper.dateRange.to)}
+                      onChange={e => dateRangeHelper.handleToChange(e.target.value)}
+                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24 cursor-pointer"
+                    />
+                    {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
+                      <button
+                        onClick={() => dateRangeHelper.clearFilters()}
+                        className="text-[9px] font-bold text-red hover:text-red/70 transition-colors cursor-pointer ml-0.5"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="w-px h-5 bg-glass-border/40 shrink-0" />
+
+                  {/* Export buttons */}
+                  <button
+                    onClick={() => handleExport('csv')}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-[10px] font-bold transition-all cursor-pointer"
+                    title="Export to CSV"
+                  >
+                    <Download size={11} />
+                    CSV
+                  </button>
+                  <button
+                    onClick={() => handleExport('pdf')}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-[10px] font-bold transition-all cursor-pointer"
+                    title="Export to PDF"
+                  >
+                    <Download size={11} />
+                    PDF
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Quick Column Filters Row */}
-            <div className="px-3 py-1.5 bg-bg2/25 border-b border-glass-border/30 flex flex-wrap items-center gap-2 shrink-0 select-none text-xs">
-              <div className="flex items-center gap-1 text-[10px] text-muted font-bold uppercase shrink-0">
-                <Sliders size={12} className="text-primary" />
-                Filters:
+            {/* ── FILTER BAR ── */}
+            <div className="px-3 py-2 bg-bg2/30 border-b border-glass-border/20 flex flex-wrap items-center gap-2 shrink-0 select-none">
+              {/* Label */}
+              <div className="flex items-center gap-1 text-[9px] text-muted/70 font-black uppercase tracking-widest shrink-0">
+                <Sliders size={10} className="text-primary" />
+                Filter
               </div>
 
               {/* Medicine Filter */}
-              <div className="relative w-40">
-                <Search className="absolute left-2.5 top-2 text-muted/50" size={11} />
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-green/50" size={10} />
                 <input
                   type="text"
                   placeholder="Medicine..."
                   value={colFilterMedicine}
                   onChange={e => setColFilterMedicine(e.target.value)}
-                  className="w-full bg-bg3 border border-glass-border/50 rounded-lg pl-7 pr-6 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                  className="w-40 bg-bg3/70 border border-glass-border/40 rounded-xl pl-7 pr-6 py-1 text-xs text-text placeholder:text-muted/30 focus:outline-none focus:border-green/40 focus:bg-green/5 transition-all"
                 />
                 {colFilterMedicine && (
-                  <button onClick={() => setColFilterMedicine('')} className="absolute right-2 top-2 text-muted hover:text-text cursor-pointer">
-                    <X size={10} />
+                  <button onClick={() => setColFilterMedicine('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                    <X size={9} />
                   </button>
                 )}
               </div>
 
               {/* Batch Filter */}
               {col('batch') && (
-                <div className="relative w-28">
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] text-sky-400/50 font-black">#</span>
                   <input
                     type="text"
                     placeholder="Batch..."
                     value={colFilterBatch}
                     onChange={e => setColFilterBatch(e.target.value)}
-                    className="w-full bg-bg3 border border-glass-border/50 rounded-lg px-2 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                    className="w-28 bg-bg3/70 border border-glass-border/40 rounded-xl pl-6 pr-6 py-1 text-xs text-text placeholder:text-muted/30 focus:outline-none focus:border-sky-400/40 focus:bg-sky-500/5 transition-all"
                   />
                   {colFilterBatch && (
-                    <button onClick={() => setColFilterBatch('')} className="absolute right-2 top-2 text-muted hover:text-text cursor-pointer">
-                      <X size={10} />
+                    <button onClick={() => setColFilterBatch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                      <X size={9} />
                     </button>
                   )}
                 </div>
@@ -798,17 +826,18 @@ const InvestigationCenter = () => {
 
               {/* Invoice Filter */}
               {col('invoice') && (
-                <div className="relative w-32">
+                <div className="relative">
+                  <FileText className="absolute left-2.5 top-1/2 -translate-y-1/2 text-accent/40" size={10} />
                   <input
                     type="text"
                     placeholder="Invoice / Ref..."
                     value={colFilterInvoice}
                     onChange={e => setColFilterInvoice(e.target.value)}
-                    className="w-full bg-bg3 border border-glass-border/50 rounded-lg px-2 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                    className="w-32 bg-bg3/70 border border-glass-border/40 rounded-xl pl-7 pr-6 py-1 text-xs text-text placeholder:text-muted/30 focus:outline-none focus:border-accent/40 focus:bg-accent/5 transition-all"
                   />
                   {colFilterInvoice && (
-                    <button onClick={() => setColFilterInvoice('')} className="absolute right-2 top-2 text-muted hover:text-text cursor-pointer">
-                      <X size={10} />
+                    <button onClick={() => setColFilterInvoice('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                      <X size={9} />
                     </button>
                   )}
                 </div>
@@ -816,38 +845,47 @@ const InvestigationCenter = () => {
 
               {/* Party Filter */}
               {col('party') && (
-                <div className="relative w-36">
+                <div className="relative">
+                  <Info className="absolute left-2.5 top-1/2 -translate-y-1/2 text-purple-400/40" size={10} />
                   <input
                     type="text"
                     placeholder="Party / Client..."
                     value={colFilterParty}
                     onChange={e => setColFilterParty(e.target.value)}
-                    className="w-full bg-bg3 border border-glass-border/50 rounded-lg px-2 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
+                    className="w-36 bg-bg3/70 border border-glass-border/40 rounded-xl pl-7 pr-6 py-1 text-xs text-text placeholder:text-muted/30 focus:outline-none focus:border-purple-400/40 focus:bg-purple-500/5 transition-all"
                   />
                   {colFilterParty && (
-                    <button onClick={() => setColFilterParty('')} className="absolute right-2 top-2 text-muted hover:text-text cursor-pointer">
-                      <X size={10} />
+                    <button onClick={() => setColFilterParty('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                      <X size={9} />
                     </button>
                   )}
                 </div>
               )}
 
-              {/* Type Dropdown */}
-              <div className="w-32">
-                <select
-                  value={colFilterType}
-                  onChange={e => setColFilterType(e.target.value)}
-                  className="w-full bg-bg3 border border-glass-border/50 rounded-lg px-2 py-1 text-xs text-text focus:outline-none focus:border-primary/50 cursor-pointer"
-                >
-                  <option value="All">All Types</option>
-                  <option value="Purchase">Purchases</option>
-                  <option value="Sale">Sales</option>
-                  <option value="Return">Returns</option>
-                  <option value="Adjustment">Adjustments</option>
-                </select>
+              {/* Segmented Type Tabs */}
+              <div className="flex items-center bg-bg3/60 border border-glass-border/40 rounded-xl overflow-hidden text-[10px] font-bold h-[26px] shrink-0">
+                {[
+                  { v: 'All', label: 'All' },
+                  { v: 'Purchase', label: 'Purchase', color: 'text-green' },
+                  { v: 'Sale', label: 'Sale', color: 'text-sky-400' },
+                  { v: 'Return', label: 'Return', color: 'text-purple-400' },
+                  { v: 'Adjustment', label: 'Adj', color: 'text-amber-500' },
+                ].map(({ v, label, color }) => (
+                  <button
+                    key={v}
+                    onClick={() => setColFilterType(v)}
+                    className={`px-2.5 h-full flex items-center transition-all cursor-pointer border-r border-glass-border/30 last:border-r-0 ${
+                      colFilterType === v
+                        ? 'bg-primary/15 text-primary shadow-inner'
+                        : `text-muted hover:text-text hover:bg-bg2/50 ${color || ''}`
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
-              {/* Columns selector and Reset */}
+              {/* Right: Reset + Column toggle */}
               <div className="ml-auto flex items-center gap-2">
                 {(colFilterMedicine || colFilterBatch || colFilterInvoice || colFilterParty || colFilterType !== 'All') && (
                   <button
@@ -858,9 +896,9 @@ const InvestigationCenter = () => {
                       setColFilterParty('');
                       setColFilterType('All');
                     }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red/10 border border-red/20 text-red hover:bg-red hover:text-white transition-all text-[10px] font-bold cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-red/10 border border-red/20 text-red hover:bg-red hover:text-white hover:shadow-[0_0_10px_rgba(239,68,68,0.3)] transition-all text-[10px] font-bold cursor-pointer"
                   >
-                    <RotateCcw size={11} />
+                    <RotateCcw size={10} />
                     Reset
                   </button>
                 )}
@@ -869,13 +907,13 @@ const InvestigationCenter = () => {
                 <div className="relative" ref={colMenuRef}>
                   <button
                     onClick={() => setShowColMenu(p => !p)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${showColMenu
-                        ? 'bg-primary/15 border-primary/45 text-primary'
-                        : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
-                      }`}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-bold transition-all cursor-pointer ${showColMenu
+                      ? 'bg-primary/15 border-primary/45 text-primary shadow-[0_0_8px_rgba(34,197,150,0.15)]'
+                      : 'bg-bg3/70 border-glass-border/50 text-muted hover:text-text hover:border-glass-border/70'
+                    }`}
                     title="Toggle columns"
                   >
-                    <Columns3 size={12} />
+                    <Columns3 size={11} />
                     Columns
                     {visibleCols.size < COL_KEYS.length && (
                       <span className="px-1.5 py-0 rounded-full bg-primary/20 text-primary text-[9px] font-mono shrink-0">
@@ -911,9 +949,9 @@ const InvestigationCenter = () => {
                             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/10 transition-colors text-left cursor-pointer"
                           >
                             <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${visibleCols.has(key)
-                                ? 'bg-primary border-primary'
-                                : 'bg-transparent border-glass-border/60'
-                              }`}>
+                              ? 'bg-primary border-primary'
+                              : 'bg-transparent border-glass-border/60'
+                            }`}>
                               {visibleCols.has(key) && <Check size={9} className="text-white" />}
                             </span>
                             <span className={`text-[11px] font-semibold ${visibleCols.has(key) ? 'text-text' : 'text-muted/60'}`}>
@@ -931,23 +969,37 @@ const InvestigationCenter = () => {
         )}
 
         {editingType ? (
-          /* CORRECTION WORKSPACE PANEL */
+          /* ── CORRECTION WORKSPACE PANEL ── */
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden animate-in fade-in duration-300">
-            <div className="p-3 border-b border-glass-border/30 bg-bg2/40 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2">
-                <Edit size={15} className="text-primary" />
-                <h2 className="text-xs font-black text-text uppercase tracking-wider">
-                  {editingType === 'inventory' ? 'Inventory Direct Correction' :
-                    editingType === 'sale' ? `Correcting Sales Invoice #${editingBillNo}` :
-                      `Correcting Purchase Bill #${editingBillNo}`}
-                </h2>
+            {/* Amber "Correction Mode" header strip */}
+            <div className="relative shrink-0 overflow-hidden border-b border-amber-500/30">
+              <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent pointer-events-none" />
+              <div className="absolute top-0 left-0 w-32 h-full bg-amber-500/8 blur-2xl pointer-events-none" />
+              <div className="relative px-4 py-2.5 flex justify-between items-center">
+                <div className="flex items-center gap-2.5">
+                  <div className="relative shrink-0">
+                    <div className="absolute inset-0 bg-amber-500/20 rounded-lg blur-sm" />
+                    <div className="relative p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30">
+                      <Edit size={13} className="text-amber-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-xs font-black text-text leading-none">
+                      {editingType === 'inventory' ? 'Inventory Direct Correction' :
+                        editingType === 'sale' ? `Correcting Sales Invoice #${editingBillNo}` :
+                          `Correcting Purchase Bill #${editingBillNo}`}
+                    </h2>
+                    <p className="text-[9px] text-amber-500/70 font-bold mt-0.5 uppercase tracking-wider">⚡ Correction Mode Active</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingType(null)}
+                  className="flex items-center gap-1.5 text-[11px] text-muted hover:text-text font-bold bg-bg3 border border-glass-border px-3 py-1.5 rounded-xl transition-all cursor-pointer hover:border-red/30 hover:text-red"
+                >
+                  <X size={12} />
+                  Discard Workspace
+                </button>
               </div>
-              <button
-                onClick={() => setEditingType(null)}
-                className="text-[11px] text-muted hover:text-text font-bold bg-bg3 border border-glass-border px-2.5 py-1 rounded-lg transition-all cursor-pointer"
-              >
-                Discard Workspace
-              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-bg2/10">
@@ -965,70 +1017,84 @@ const InvestigationCenter = () => {
                       const costDiff = editInventoryForm.cost_price - details.inventory.cost_price;
 
                       return (
-                        <div className="bg-bg2 border border-glass-border p-5 rounded-2xl flex flex-col gap-4 shadow-xl relative overflow-hidden">
-                          <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+                        <div className="bg-bg2 border border-amber-500/20 p-5 rounded-2xl flex flex-col gap-4 shadow-xl relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-40 h-40 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
 
-                          <div className="flex items-center justify-between border-b border-glass-border/30 pb-3">
+                          <div className="flex items-center justify-between border-b border-amber-500/15 pb-3">
                             <div className="flex items-center gap-2">
                               <Info size={14} className="text-amber-500" />
                               <h3 className="text-xs font-bold text-text uppercase tracking-wider">Adjustment Preview</h3>
                             </div>
-                            <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded-lg font-black uppercase">
+                            <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded-lg font-black uppercase animate-pulse">
                               Draft Mode
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             {/* Compare Box Qty */}
-                            <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
-                              <span className="text-[9px] text-muted font-black uppercase tracking-wider">Box Quantity</span>
+                            <div className="bg-bg3/40 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative hover:border-amber-500/20 transition-colors">
+                              <span className="text-[9px] text-muted font-black uppercase tracking-wider">Box Qty</span>
                               <div className="flex items-center gap-2 font-mono text-xs">
-                                <span className="text-red/70 line-through">{details.inventory.quantity}</span>
-                                <ChevronRight size={12} className="text-muted/60" />
-                                <span className={`font-black text-sm ${qtyDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                <span className="text-red/60 line-through">{details.inventory.quantity}</span>
+                                <ChevronRight size={11} className="text-muted/40" />
+                                <span className={`font-black text-sm ${qtyDiff !== 0 ? 'text-amber-400' : 'text-text'}`}>
                                   {editInventoryForm.quantity}
                                 </span>
                               </div>
                               {qtyDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${qtyDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                  }`}>
+                                <span className={`absolute top-2 right-2 text-[8px] font-black px-1.5 py-0.5 rounded-md ${qtyDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'}`}>
                                   {qtyDiff > 0 ? `+${qtyDiff}` : qtyDiff}
                                 </span>
                               )}
                             </div>
 
                             {/* Compare Loose Qty */}
-                            <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
-                              <span className="text-[9px] text-muted font-black uppercase tracking-wider">Loose Quantity</span>
+                            <div className="bg-bg3/40 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative hover:border-amber-500/20 transition-colors">
+                              <span className="text-[9px] text-muted font-black uppercase tracking-wider">Loose Qty</span>
                               <div className="flex items-center gap-2 font-mono text-xs">
-                                <span className="text-red/70 line-through">{details.inventory.loose_quantity}</span>
-                                <ChevronRight size={12} className="text-muted/60" />
-                                <span className={`font-black text-sm ${looseDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                <span className="text-red/60 line-through">{details.inventory.loose_quantity}</span>
+                                <ChevronRight size={11} className="text-muted/40" />
+                                <span className={`font-black text-sm ${looseDiff !== 0 ? 'text-amber-400' : 'text-text'}`}>
                                   {editInventoryForm.loose_quantity}
                                 </span>
                               </div>
                               {looseDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${looseDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                  }`}>
+                                <span className={`absolute top-2 right-2 text-[8px] font-black px-1.5 py-0.5 rounded-md ${looseDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'}`}>
                                   {looseDiff > 0 ? `+${looseDiff}` : looseDiff}
                                 </span>
                               )}
                             </div>
 
                             {/* Compare MRP */}
-                            <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
+                            <div className="bg-bg3/40 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative hover:border-amber-500/20 transition-colors">
                               <span className="text-[9px] text-muted font-black uppercase tracking-wider">MRP</span>
                               <div className="flex items-center gap-2 font-mono text-xs">
-                                <span className="text-red/70 line-through">₹{details.inventory.mrp}</span>
-                                <ChevronRight size={12} className="text-muted/60" />
-                                <span className={`font-black text-sm ${mrpDiff !== 0 ? 'text-green' : 'text-text'}`}>
+                                <span className="text-red/60 line-through">₹{details.inventory.mrp}</span>
+                                <ChevronRight size={11} className="text-muted/40" />
+                                <span className={`font-black text-sm ${mrpDiff !== 0 ? 'text-amber-400' : 'text-text'}`}>
                                   ₹{editInventoryForm.mrp}
                                 </span>
                               </div>
                               {mrpDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${mrpDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                  }`}>
+                                <span className={`absolute top-2 right-2 text-[8px] font-black px-1.5 py-0.5 rounded-md ${mrpDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'}`}>
                                   {mrpDiff > 0 ? `+₹${mrpDiff}` : `-₹${Math.abs(mrpDiff)}`}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Compare Cost */}
+                            <div className="bg-bg3/40 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative hover:border-amber-500/20 transition-colors">
+                              <span className="text-[9px] text-muted font-black uppercase tracking-wider">Cost Price</span>
+                              <div className="flex items-center gap-2 font-mono text-xs">
+                                <span className="text-red/60 line-through">₹{details.inventory.cost_price}</span>
+                                <ChevronRight size={11} className="text-muted/40" />
+                                <span className={`font-black text-sm ${costDiff !== 0 ? 'text-amber-400' : 'text-text'}`}>
+                                  ₹{editInventoryForm.cost_price}
+                                </span>
+                              </div>
+                              {costDiff !== 0 && (
+                                <span className={`absolute top-2 right-2 text-[8px] font-black px-1.5 py-0.5 rounded-md ${costDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'}`}>
+                                  {costDiff > 0 ? `+₹${costDiff}` : `-₹${Math.abs(costDiff)}`}
                                 </span>
                               )}
                             </div>
@@ -1454,20 +1520,59 @@ const InvestigationCenter = () => {
             </div>
           </div>
         ) : (
-          /* UNIFIED LEDGER TABLE — Direct Full Height flex-1 Container without nested p-4 */
+          /* ── UNIFIED LEDGER TABLE ── */
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {isFetching && items.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-muted animate-pulse">
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 size={32} className="animate-spin text-primary" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Loading Stock Ledger...</span>
+              /* Loading State */
+              <div className="h-full flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                      <Loader2 size={22} className="animate-spin text-primary" />
+                    </div>
+                    <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-lg animate-pulse" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-black text-text uppercase tracking-wider">Loading Stock Ledger</p>
+                    <p className="text-[10px] text-muted mt-1">Fetching transactions...</p>
+                  </div>
+                  {/* Stagger dots */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
                 </div>
               </div>
             ) : items.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center text-muted p-12">
-                <Package size={44} className="opacity-20 mb-3 animate-bounce" />
-                <h3 className="font-bold text-xs text-text">No ledger entries matches filters</h3>
-                <p className="text-[11px] max-w-sm mt-1 leading-relaxed">Try adjusting the calendar dates or column filters.</p>
+              /* Empty State */
+              <div className="h-full flex flex-col items-center justify-center text-center p-12 relative overflow-hidden">
+                {/* Subtle grid bg */}
+                <div className="absolute inset-0 opacity-[0.03]" style={{
+                  backgroundImage: 'linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)',
+                  backgroundSize: '24px 24px'
+                }} />
+                <div className="relative flex flex-col items-center gap-4">
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-3xl bg-muted/5 border border-glass-border/30 flex items-center justify-center">
+                      <PackageSearch size={28} className="text-muted/30" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                      <AlertTriangle size={11} className="text-amber-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-text">No ledger entries found</h3>
+                    <p className="text-xs text-muted mt-1 max-w-xs leading-relaxed">Try adjusting the calendar dates or column search filters to find transactions.</p>
+                  </div>
+                  {debouncedMedicine && debouncedMedicine.trim().length >= 2 && (
+                    <div className="flex flex-col items-center gap-1.5 bg-amber-500/5 px-4 py-3 rounded-xl border border-amber-500/20">
+                      <span className="text-xs text-amber-400 font-semibold">
+                        🔍 No results for "{debouncedMedicine}" — check spelling or try batch/invoice number.
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1476,51 +1581,46 @@ const InvestigationCenter = () => {
                   containerRef={parentRef}
                   className="border-t border-glass-border/30"
                   header={
-                    <tr className="flex items-center min-w-[1750px] bg-bg2 border-b border-glass-border/30 text-muted font-bold text-[10px] select-none py-3">
+                    <tr className="flex items-center min-w-[1750px] bg-bg2/90 backdrop-blur-sm border-b border-glass-border/40 text-muted font-bold text-[10px] select-none py-2.5 sticky top-0 z-10">
                       {/* Medicine Header — always visible */}
-                      <th className="px-4 text-left min-w-[180px] flex-1 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                      <th className="px-4 text-left min-w-[180px] flex-1 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
                         Medicine
                       </th>
-                      {/* Batch Header */}
                       {col('batch') && (
-                        <th className="px-3 text-left w-28 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                        <th className="px-3 text-left w-28 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
                           Batch
                         </th>
                       )}
-                      {/* Date Header */}
                       {col('date') && (
-                        <th className="px-3 text-left w-44 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                        <th className="px-3 text-left w-44 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
                           Date
                         </th>
                       )}
-                      {/* Invoice Header */}
                       {col('invoice') && (
-                        <th className="px-3 text-left w-32 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                        <th className="px-3 text-left w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
                           Invoice
                         </th>
                       )}
-                      {/* Party Header */}
                       {col('party') && (
-                        <th className="px-3 text-left w-40 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
+                        <th className="px-3 text-left w-40 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
                           Party
                         </th>
                       )}
-                      {/* Opening Stock Header */}
                       {col('openingStock') && (
-                        <th className="px-3 text-center w-32 shrink-0 min-w-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">
-                          Opening Stock
+                        <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">
+                          Opening
                         </th>
                       )}
-                      {col('purchase') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Purchase</th>}
-                      {col('sales') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Sales</th>}
-                      {col('purchaseReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Purchase Return</th>}
-                      {col('salesReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Sales Return</th>}
-                      {col('adj') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Adj</th>}
-                      {col('stockAudit') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Stock Audit</th>}
-                      {col('b2bSales') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">B2B Sales</th>}
-                      {col('closingStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Closing Stock</th>}
-                      {col('medicineStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black border-r border-glass-border/20">Medicine Stock</th>}
-                      <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-wider text-muted font-black">
+                      {col('purchase') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Purchase</th>}
+                      {col('sales') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Sales</th>}
+                      {col('purchaseReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Pur. Return</th>}
+                      {col('salesReturn') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Sale Return</th>}
+                      {col('adj') && <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Adj</th>}
+                      {col('stockAudit') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Stock Audit</th>}
+                      {col('b2bSales') && <th className="px-3 text-center w-28 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">B2B Sales</th>}
+                      {col('closingStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Closing</th>}
+                      {col('medicineStock') && <th className="px-3 text-center w-32 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black border-r border-glass-border/15">Med. Stock</th>}
+                      <th className="px-3 text-center w-24 shrink-0 uppercase text-[9px] tracking-widest text-muted/70 font-black">
                         Actions
                       </th>
                     </tr>
@@ -1529,42 +1629,52 @@ const InvestigationCenter = () => {
                     rowVirtualizer.getVirtualItems().map((virtualRow) => {
                       const item = items[virtualRow.index];
                       if (!item) return null;
+
+                      // Determine left-border accent color by type
+                      const accentClass =
+                        item.type === 'Sale' ? 'border-l-sky-500/60' :
+                        item.type === 'Purchase' ? 'border-l-green/60' :
+                        item.type === 'Adjustment' ? 'border-l-amber-500/60' :
+                        item.return_type === 'purchase' ? 'border-l-orange-500/60' :
+                        'border-l-purple-500/60';
+
                       return (
                         <VirtualRow
                           key={virtualRow.key}
                           ref={rowVirtualizer.measureElement}
                           start={virtualRow.start}
                           size={virtualRow.size}
-                          className="min-w-[1750px] border-b border-glass-border/20 hover:bg-bg2/40 transition-colors"
+                          className={`min-w-[1750px] border-b border-glass-border/15 border-l-2 ${accentClass} hover:bg-primary/3 transition-colors`}
                         >
-                          {/* Medicine Cell with visual icons & modern badges */}
-                          <td className="p-2 border-r border-glass-border/20 flex-1 min-w-[180px] text-text truncate" title={item.medicine_name}>
+                          {/* Medicine Cell */}
+                          <td className="p-2 border-r border-glass-border/15 flex-1 min-w-[180px] text-text truncate" title={item.medicine_name}>
                             <div className="flex items-center gap-2.5 truncate">
-                              <span className="shrink-0 p-1.5 rounded-xl bg-bg3/70 border border-glass-border/30 shadow-inner">
+                              <span className="shrink-0 p-1.5 rounded-lg bg-bg3/60 border border-glass-border/25">
                                 {getTypeIcon(item.type, item.return_type)}
                               </span>
                               <div className="truncate flex flex-col gap-0.5 min-w-0">
                                 <span className="font-bold text-text truncate text-xs">{item.medicine_name || 'System Activity'}</span>
-                                <span className="text-[9px] text-muted/80 font-black tracking-widest uppercase">
+                                <span className="text-[9px] text-muted/70 font-black tracking-widest uppercase">
                                   {item.type === 'Return' ? `${item.return_type} return` : item.type}
                                 </span>
                               </div>
-                              <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md border shrink-0 ${item.type === 'Sale' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' :
-                                  item.type === 'Purchase' ? 'bg-green/10 border-green/20 text-green' :
-                                    item.type === 'Adjustment' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
-                                      item.return_type === 'purchase' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
-                                        'bg-purple-500/10 border-purple-500/20 text-purple-400'
-                                }`}>
+                              <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md border shrink-0 ${
+                                item.type === 'Sale' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' :
+                                item.type === 'Purchase' ? 'bg-green/10 border-green/20 text-green' :
+                                item.type === 'Adjustment' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
+                                item.return_type === 'purchase' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
+                                'bg-purple-500/10 border-purple-500/20 text-purple-400'
+                              }`}>
                                 {item.type}
                               </span>
                             </div>
                           </td>
-                          {col('batch') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 font-mono font-bold text-muted truncate text-xs">{item.batch_no || 'N/A'}</td>}
-                          {col('date') && <td className="p-2 border-r border-glass-border/20 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate text-xs" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
+                          {col('batch') && <td className="p-2 border-r border-glass-border/15 w-28 shrink-0 font-mono font-bold text-muted truncate text-xs">{item.batch_no || 'N/A'}</td>}
+                          {col('date') && <td className="p-2 border-r border-glass-border/15 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate text-xs" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
 
                           {/* Invoice cell */}
                           {col('invoice') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 truncate text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 truncate text-xs">
                               {item.invoice_id || item.purchase_id ? (
                                 <button
                                   onClick={(e) => {
@@ -1583,14 +1693,14 @@ const InvestigationCenter = () => {
                           )}
 
                           {col('party') && (
-                            <td className="p-2 border-r border-glass-border/20 w-40 shrink-0 truncate text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-40 shrink-0 truncate text-xs">
                               <div className="truncate w-full text-muted font-medium">{item.party}</div>
                             </td>
                           )}
 
-                          {/* Quantities cells with beautiful typography */}
+                          {/* Opening Stock */}
                           {col('openingStock') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-muted">
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs text-muted">
                               <span className="text-text font-bold">{item.opening_qty || 0}</span>
                               {item.opening_loose > 0 && (
                                 <span className="text-[10px] text-muted font-normal ml-0.5">::{item.opening_loose}</span>
@@ -1599,7 +1709,7 @@ const InvestigationCenter = () => {
                           )}
 
                           {col('purchase') && (
-                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-24 shrink-0 text-center font-mono text-xs">
                               {item.type === 'Purchase' ? (
                                 <>
                                   <span className="text-green font-bold">{item.purchase_qty || 0}</span>
@@ -1608,13 +1718,13 @@ const InvestigationCenter = () => {
                                   )}
                                 </>
                               ) : (
-                                <span className="text-muted/40">0</span>
+                                <span className="text-muted/30">—</span>
                               )}
                             </td>
                           )}
 
                           {col('sales') && (
-                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-24 shrink-0 text-center font-mono text-xs">
                               {item.type === 'Sale' ? (
                                 <>
                                   <span className="text-sky-400 font-bold">{item.sale_qty || 0}</span>
@@ -1623,33 +1733,33 @@ const InvestigationCenter = () => {
                                   )}
                                 </>
                               ) : (
-                                <span className="text-muted/40">0</span>
+                                <span className="text-muted/30">—</span>
                               )}
                             </td>
                           )}
 
                           {col('purchaseReturn') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
                               {item.type === 'Return' && item.return_type === 'purchase' ? (
                                 <span className="text-orange-400 font-bold">{item.purchase_return_qty || 0}</span>
                               ) : (
-                                <span className="text-muted/40">0</span>
+                                <span className="text-muted/30">—</span>
                               )}
                             </td>
                           )}
 
                           {col('salesReturn') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
                               {item.type === 'Return' && item.return_type === 'sale' ? (
                                 <span className="text-purple-400 font-bold">{item.sales_return_qty || 0}</span>
                               ) : (
-                                <span className="text-muted/40">0</span>
+                                <span className="text-muted/30">—</span>
                               )}
                             </td>
                           )}
 
                           {col('adj') && (
-                            <td className="p-2 border-r border-glass-border/20 w-24 shrink-0 text-center font-mono text-xs">
+                            <td className="p-2 border-r border-glass-border/15 w-24 shrink-0 text-center font-mono text-xs">
                               {item.type === 'Adjustment' ? (
                                 <>
                                   <span className="text-amber-500 font-bold">{item.adj_qty || 0}</span>
@@ -1658,17 +1768,17 @@ const InvestigationCenter = () => {
                                   )}
                                 </>
                               ) : (
-                                <span className="text-muted/40">0</span>
+                                <span className="text-muted/30">—</span>
                               )}
                             </td>
                           )}
 
-                          {col('stockAudit') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
-                          {col('b2bSales') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
+                          {col('stockAudit') && <td className="p-2 border-r border-glass-border/15 w-28 shrink-0 text-center font-mono text-xs text-muted/30">—</td>}
+                          {col('b2bSales') && <td className="p-2 border-r border-glass-border/15 w-28 shrink-0 text-center font-mono text-xs text-muted/30">—</td>}
 
                           {col('closingStock') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-text">
-                              <span className="font-bold">{item.closing_qty || 0}</span>
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
+                              <span className="font-bold text-text">{item.closing_qty || 0}</span>
                               {item.closing_loose > 0 && (
                                 <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.closing_loose}</span>
                               )}
@@ -1676,15 +1786,15 @@ const InvestigationCenter = () => {
                           )}
 
                           {col('medicineStock') && (
-                            <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-text/80">
-                              <span className="font-bold">{item.medicine_stock_qty || 0}</span>
+                            <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
+                              <span className="font-bold text-text/80">{item.medicine_stock_qty || 0}</span>
                               {item.medicine_stock_loose > 0 && (
                                 <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.medicine_stock_loose}</span>
                               )}
                             </td>
                           )}
 
-                          {/* Action Button Adjust */}
+                          {/* Action Button — icon style */}
                           <td className="p-2 w-24 shrink-0 text-center">
                             {item.inventory_id ? (
                               <button
@@ -1692,13 +1802,14 @@ const InvestigationCenter = () => {
                                   e.stopPropagation();
                                   handleAdjustStock(item.inventory_id);
                                 }}
-                                className="px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-white hover:shadow-[0_0_10px_rgba(245,158,11,0.3)] text-amber-500 transition-all text-[10px] font-extrabold cursor-pointer"
+                                className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-white hover:shadow-[0_0_10px_rgba(245,158,11,0.4)] text-amber-500 transition-all text-[10px] font-extrabold cursor-pointer flex items-center gap-1 mx-auto"
                                 title="Direct Stock Master Adjustment"
                               >
+                                <Sliders size={9} />
                                 Adjust
                               </button>
                             ) : (
-                              <span className="text-[10px] text-muted/40 font-medium">N/A</span>
+                              <span className="text-[10px] text-muted/30 font-medium">N/A</span>
                             )}
                           </td>
                         </VirtualRow>

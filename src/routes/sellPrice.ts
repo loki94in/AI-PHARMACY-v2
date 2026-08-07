@@ -8,7 +8,7 @@ const router = express.Router();
 router.post('/bulk-update', async (req, res) => {
   let db;
   try {
-    const { items = [] } = req.body;
+    const items = Array.isArray(req.body) ? req.body : (req.body?.items || []);
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'items array is required' });
     }
@@ -36,23 +36,21 @@ router.post('/bulk-update', async (req, res) => {
         ? Math.max(0, parseInt(String(rawMaxStock), 10))
         : null;
 
-      const updates = ['sell_price = ?'];
-      const params: any[] = [validPrice];
+      await db.run('UPDATE medicines SET sell_price = ? WHERE id = ?', [validPrice, medId]);
 
-      if (parsedReorder !== null) {
-        updates.push('reorder_level = ?');
-        params.push(parsedReorder);
-      }
-      if (parsedMaxStock !== null) {
-        updates.push('max_stock_level = ?');
-        params.push(parsedMaxStock);
-      }
-
-      params.push(medId);
-      await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
-
-      if (parsedReorder !== null) {
-        await db.run('UPDATE inventory_master SET reorder_level = ? WHERE medicine_id = ?', [parsedReorder, medId]);
+      if (parsedReorder !== null || parsedMaxStock !== null) {
+        const invUpdates: string[] = [];
+        const invParams: any[] = [];
+        if (parsedReorder !== null) {
+          invUpdates.push('reorder_level = ?');
+          invParams.push(parsedReorder);
+        }
+        if (parsedMaxStock !== null) {
+          invUpdates.push('max_stock_level = ?');
+          invParams.push(parsedMaxStock);
+        }
+        invParams.push(medId);
+        await db.run(`UPDATE inventory_master SET ${invUpdates.join(', ')} WHERE medicine_id = ?`, invParams);
       }
     }
 
@@ -86,12 +84,13 @@ router.get('/by-invoice/:invoiceNo', async (req, res) => {
         COALESCE(pi.cost_price, m.rate, 0) as rate, 
         COALESCE(pi.mrp, m.mrp, 0) as mrp, 
         m.sell_price,
-        m.reorder_level,
-        m.max_stock_level
+        im.reorder_level,
+        im.max_stock_level
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
       JOIN medicines m ON pi.medicine_id = m.id
-      WHERE p.app_invoice_no = ? OR p.invoice_no = ?
+      LEFT JOIN inventory_master im ON m.id = im.medicine_id
+      WHERE LOWER(TRIM(COALESCE(p.app_invoice_no, ''))) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(p.invoice_no, ''))) = LOWER(TRIM(?))
     `, [invoiceNo, invoiceNo]);
 
     res.json({

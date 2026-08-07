@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ModuleSection } from './ModuleSection';
 import { api } from '../../../services/api';
 import { invalidateAfterStockWrite } from '../../../utils/cacheInvalidation';
+import { toDateInputValue } from '../../../utils/date';
 
 interface FileEntry {
   uploadedFileName: string;
@@ -455,7 +456,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                   <p className="text-xs text-muted">Sales and purchase reports will exclude transactions before this date. Pre-migration history stays in the database but won&apos;t appear in financial reports.</p>
                   <input
                     type="date"
-                    value={reportCutoverDate}
+                    value={toDateInputValue(reportCutoverDate)}
                     onChange={(e) => setReportCutoverDate(e.target.value)}
                     className="px-3 py-2 rounded-lg bg-bg border border-glass-border text-text text-sm"
                   />

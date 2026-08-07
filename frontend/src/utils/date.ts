@@ -25,6 +25,21 @@ export const getNDaysAgoString = (n: number): string => {
 };
 
 /**
+ * Coerces any date/datetime value (including SQLite "YYYY-MM-DD HH:mm:ss.SSS" timestamps)
+ * into the strict YYYY-MM-DD format required by <input type="date">'s value attribute.
+ * Returns '' for empty/invalid input so the browser doesn't reject an unparseable value.
+ */
+export const toDateInputValue = (dateVal: string | number | Date | null | undefined): string => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') {
+    const trimmed = dateVal.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  }
+  const d = parseLocalDate(dateVal);
+  return d ? getLocalDateString(d) : '';
+};
+
+/**
  * Safely parses any date string, timestamp, or Date object directly into PC local time (IST).
  * Guarantees zero UTC timezone shift for ISO YYYY-MM-DD or YYYY-MM-DD HH:mm:ss strings.
  */
@@ -40,7 +55,14 @@ export const parseLocalDate = (dateVal: string | number | Date | null | undefine
   const str = String(dateVal).trim();
   if (!str) return null;
 
-  // Parse YYYY-MM-DD or YYYY-MM-DD HH:mm:ss explicitly into local PC time (avoids UTC 00:00 -> 05:30 AM IST shift)
+  // If the string contains an explicit UTC marker (Z) or timezone offset (+HH:MM / -HH:MM),
+  // let standard JS Date handle it so it correctly converts UTC ISO timestamps to local PC time (e.g. IST).
+  if (/Z$|[+-]\d{2}:?\d{2}$/i.test(str)) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // Parse YYYY-MM-DD or YYYY-MM-DD HH:mm:ss explicitly into local PC time (avoids UTC 00:00 -> 05:30 AM IST shift for date-only strings)
   const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
   if (isoMatch) {
     const year = parseInt(isoMatch[1], 10);

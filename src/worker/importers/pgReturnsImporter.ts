@@ -9,6 +9,7 @@ import { Database } from 'sqlite';
 import { medicineMap, distributorMap, patientMap, customerMap } from './pgMasterImporter.js';
 import { purchaseMap, legacyBatchIdToNoMap } from './pgPurchaseImporter.js';
 import { salesInvoiceMap } from './pgSalesImporter.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const returnMap = new Map<string, number>(); // legacy return_order_id → new returns.id
@@ -59,7 +60,7 @@ export async function importReturnOrder(row: Record<string, string | null>, db: 
     return_no: returnNo,
     original_invoice_id: originalInvoiceId,
     type: returnType,
-    date: row['created_time'] || null,
+    date: normalizeDateOrRaw(row['created_time']),
     total_amount: parseFloat(row['amount'] || '0') || 0,
     cgst_value: parseFloat(row['cgst_value'] || '0') || 0,
     sgst_value: parseFloat(row['sgst_value'] || '0') || 0,
@@ -68,7 +69,7 @@ export async function importReturnOrder(row: Record<string, string | null>, db: 
     legacy_id: legacyId,
     return_sub_type: subType,
     raw_return_type: rawReturnType,
-    return_date_time: row['created_time'] || null,
+    return_date_time: normalizeDateOrRaw(row['created_time']),
   });
 
   if (returnBatch.length >= 500) {
@@ -184,7 +185,7 @@ export async function importStockEffect(row: Record<string, string | null>, db: 
     loose_quantity: parseInt(row['loose'] || '0') || 0,
     transaction_type: row['transaction_type'] || null,
     transaction_id: row['transaction_id'] || null,
-    business_date: row['business_date'] || null,
+    business_date: normalizeDateOrRaw(row['business_date']),
   });
 
   if (stockBatch.length >= 5000) {

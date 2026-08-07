@@ -337,12 +337,12 @@ export interface EnrichmentStatus {
 }
 
 let isEnrichmentRunning = false;
-let enrichmentStopRequested = false;
+let enrichmentStopRequested = true; // Permanently stopped by user request
 
 // Daily auto-enrichment quota — tracks how many items were auto-processed today
 // so background runs (triggered after catalog import) are capped at AUTO_DAILY_LIMIT.
 // Manual runs (user clicks Start Enrichment) bypass this counter entirely.
-const AUTO_DAILY_LIMIT = 10;
+const AUTO_DAILY_LIMIT = 0; // Disabled auto enrichment
 let autoEnrichedDate = ''; // 'YYYY-MM-DD' of the current day's run
 let autoEnrichedTodayCount = 0; // items processed today by auto-trigger
 
@@ -353,11 +353,12 @@ function todayStr(): string {
 }
 
 export function getEnrichmentRunningState(): boolean {
-  return isEnrichmentRunning;
+  return false;
 }
 
 export function requestEnrichmentStop(): void {
   enrichmentStopRequested = true;
+  isEnrichmentRunning = false;
 }
 
 export function isEnrichmentStopRequested(): boolean {

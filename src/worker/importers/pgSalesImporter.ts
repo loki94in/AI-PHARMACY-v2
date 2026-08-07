@@ -7,6 +7,7 @@
 import { Database } from 'sqlite';
 import { medicineMap, doctorMap, patientMap } from './pgMasterImporter.js';
 import { batchMap, legacyBatchIdToNoMap } from './pgPurchaseImporter.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const salesInvoiceMap = new Map<string, number>(); // legacy order_id → new sales_invoices.id
@@ -73,7 +74,7 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
   salesBatch.push({
     invoice_no: uniqueInvoice,
     customer_id: customerId || null,
-    date: row['created_time'] || null,
+    date: normalizeDateOrRaw(row['created_time']),
     total_amount,
     tax_amount: parseFloat(row['net_gst_value'] || '0') || 0,
     doctor_id: doctorId || null,
@@ -83,7 +84,7 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
     sgst_value: parseFloat(row['sgst_value'] || '0') || 0,
     igst_value: parseFloat(row['igst_value'] || '0') || 0,
     legacy_id: legacyId,
-    business_date: row['business_date'] || row['created_time'] || null,
+    business_date: normalizeDateOrRaw(row['business_date'] || row['created_time']),
     discount,
     subtotal: total_amount + discount,
   });

@@ -1,5 +1,6 @@
 import { Calendar, X, RotateCcw } from 'lucide-react';
 import { usePersistedDateRange } from '../hooks/usePersistedDateRange';
+import { toDateInputValue } from '../utils/date';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -131,7 +132,7 @@ export function DateRangeFilter({
             <span className="text-[10px] text-muted w-10">From</span>
             <input
               type="date"
-              value={currentValue.from}
+              value={toDateInputValue(currentValue.from)}
               onChange={e => h.handleFromChange(e.target.value)}
               min={h.minDate}
               max={h.maxDate}
@@ -144,7 +145,7 @@ export function DateRangeFilter({
             <span className="text-[10px] text-muted w-6">To</span>
             <input
               type="date"
-              value={currentValue.to}
+              value={toDateInputValue(currentValue.to)}
               onChange={e => h.handleToChange(e.target.value)}
               min={h.minDate}
               max={h.maxDate}

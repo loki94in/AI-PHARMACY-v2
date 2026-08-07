@@ -1,6 +1,7 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '../services/summaryCacheService.js';
 
 const router = express.Router();
 
@@ -1037,8 +1038,9 @@ router.put('/purchases/:purchaseId', async (req, res) => {
       if (netChange === 0) continue;
 
       const invRecord = await db.get(
-        'SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND batch_no = ?',
-        [entry.medicine_id, entry.batch_no]
+        `SELECT id, quantity FROM inventory_master 
+         WHERE medicine_id = ? AND (COALESCE(batch_no, '') = COALESCE(?, '') OR batch_no = ?)`,
+        [entry.medicine_id, entry.batch_no || '', entry.batch_no]
       );
 
       if (netChange < 0) {
@@ -1107,6 +1109,8 @@ router.put('/purchases/:purchaseId', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    await rebuildPurchaseSummaryCache();
+    triggerBackgroundSummaryRebuild();
     res.json({ success: true, message: 'Purchase bill corrected and inventory reconciled successfully', totalAmount });
   } catch (error) {
     if (db) {

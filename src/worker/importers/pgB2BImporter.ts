@@ -7,6 +7,7 @@
 import { Database } from 'sqlite';
 import { medicineMap, customerMap } from './pgMasterImporter.js';
 import { legacyBatchIdToNoMap } from './pgPurchaseImporter.js';
+import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
 
 // Maps for cross-referencing
 export const b2bInvoiceMap = new Map<string, number>(); // legacy b2b_order_id → new id
@@ -30,7 +31,7 @@ export async function importB2BSale(row: Record<string, string | null>, db: Data
   b2bBatch.push({
     invoice_no: row['invoice'] || legacyId,
     customer_id: customerId || null,
-    date: row['invoice_date'] || row['created_time'] || null,
+    date: normalizeDateOrRaw(row['invoice_date'] || row['created_time']),
     total_amount: parseFloat(row['amount'] || '0') || 0,
     cgst_value: parseFloat(row['cgst_value'] || '0') || 0,
     sgst_value: parseFloat(row['sgst_value'] || '0') || 0,
@@ -39,7 +40,7 @@ export async function importB2BSale(row: Record<string, string | null>, db: Data
     discount: 0,
     payment_medium: row['order_type'] || null,
     legacy_id: legacyId,
-    business_date: row['invoice_date'] || row['created_time'] || null,
+    business_date: normalizeDateOrRaw(row['invoice_date'] || row['created_time']),
   });
 
   if (b2bBatch.length >= 500) {

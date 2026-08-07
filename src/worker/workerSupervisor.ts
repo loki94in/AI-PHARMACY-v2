@@ -146,35 +146,16 @@ export class WorkerSupervisor {
   }
 
   private startHealthCheckLoop(): void {
-    if (this.healthCheckInterval) return;
-
-    this.healthCheckInterval = setInterval(() => {
-      const now = Date.now();
-      for (const [key, config] of Object.entries(this.workers)) {
-        if (!config.instance) continue;
-
-        // Send PING heartbeat request to the child process
-        try {
-          config.instance.send({ type: 'PING' });
-        } catch (err) {
-          console.error(`[WorkerSupervisor] Failed to send PING to ${config.name}:`, err);
-        }
-
-        // Check if the worker is unresponsive (missed pongs for over 45 seconds)
-        if (config.lastPongTime && now - config.lastPongTime > 45000) {
-          console.error(
-            `[WorkerSupervisor] ${config.name} is unresponsive (no heartbeat for ${
-              (now - config.lastPongTime) / 1000
-            }s). Forcefully terminating...`
-          );
-          try {
-            config.instance.kill('SIGKILL'); // Force terminate
-          } catch (killErr) {
-            console.error(`[WorkerSupervisor] Failed to kill frozen ${config.name}:`, killErr);
-          }
-        }
+    // Perform initial health check heartbeat scan on BOOT
+    const now = Date.now();
+    for (const [key, config] of Object.entries(this.workers)) {
+      if (!config.instance) continue;
+      try {
+        config.instance.send({ type: 'PING' });
+      } catch (err) {
+        console.error(`[WorkerSupervisor] Failed to send PING to ${config.name}:`, err);
       }
-    }, 15000); // Verify every 15 seconds
+    }
   }
 }
 

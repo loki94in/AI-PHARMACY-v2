@@ -47,20 +47,6 @@ router.get('/telegram-status', async (_req, res) => {
   res.json({ isReady: telegramBotService.isReady() });
 });
 
-// Get a setting value
-router.get('/:key', async (req, res) => {
-  const { key } = req.params;
-  try {
-    const db = await dbManager.getConnection();
-    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', key);
-    if (!row) return res.status(404).json({ error: 'Setting not found' });
-    res.json({ key, value: row.value });
-  } catch (error) {
-    console.error('Settings fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch setting' });
-  }
-});
-
 // Update or create a setting
 router.post('/', async (req, res) => {
   const { key, value } = req.body;
@@ -734,6 +720,22 @@ router.delete('/storage-locations/:id', async (req, res) => {
   } catch (error) {
     console.error('Failed to delete storage location:', error);
     res.status(500).json({ error: 'Failed to delete storage location' });
+  }
+});
+
+// Get a setting value
+// Catch-all — must stay last so it doesn't shadow the more specific GET routes above
+// (e.g. /registered-devices, /storage-locations), which Express would never reach otherwise.
+router.get('/:key', async (req, res) => {
+  const { key } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get('SELECT value FROM app_settings WHERE key = ?', key);
+    if (!row) return res.status(404).json({ error: 'Setting not found' });
+    res.json({ key, value: row.value });
+  } catch (error) {
+    console.error('Settings fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch setting' });
   }
 });
 

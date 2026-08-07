@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import Expiry from '../Expiry';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getTodayString, getNDaysAgoString } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import CustomerReturn from '../CustomerReturn';
 import CustomerReturnHistory from '../CustomerReturnHistory';
 import { CalendarDays, Users, History } from 'lucide-react';
@@ -891,7 +891,7 @@ const Returns: React.FC = () => {
                 <label className="text-muted w-7">From</label>
                 <input
                   type="date"
-                  value={dateFrom}
+                  value={toDateInputValue(dateFrom)}
                   min="2020-01-01"
                   max={getTodayString()}
                   onChange={e => handleDateFromChange(e.target.value)}
@@ -900,7 +900,7 @@ const Returns: React.FC = () => {
                 <label className="text-muted w-4">To</label>
                 <input
                   type="date"
-                  value={dateTo}
+                  value={toDateInputValue(dateTo)}
                   min="2020-01-01"
                   max={getTodayString()}
                   onChange={e => { setManualToDate(true); handleDateToChange(e.target.value); }}

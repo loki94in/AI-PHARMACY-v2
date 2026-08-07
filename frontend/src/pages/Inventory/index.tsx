@@ -505,9 +505,23 @@ const Inventory = () => {
           body={
             items.length === 0 ? (
               <tr className="flex items-center justify-center p-12 text-muted text-sm w-full absolute top-0 left-0">
-                <td className="flex flex-col items-center gap-3">
+                <td className="flex flex-col items-center gap-3 text-center">
                   <PackageSearch size={36} className="text-muted/30" />
-                  <span>No medicines found.</span>
+                  <span className="font-semibold text-text">No medicines match your search.</span>
+                  {colFilters.medicine.trim().length >= 2 && (
+                    <div className="flex flex-col items-center gap-2 mt-1">
+                      <span className="text-[13px] text-amber-400 font-medium">
+                        🔍 No exact match for "{colFilters.medicine}". Please check spelling or search by general name.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setColFilters({ ...colFilters, medicine: '' })}
+                        className="px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-[12px] font-bold transition-all"
+                      >
+                        Clear Search Filter
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (

@@ -8,6 +8,7 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { broadcastContactDataChanged, updateSettingsCache } from '../../utils/settingsSync';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
+import { toDateInputValue } from '../../utils/date';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -1841,7 +1842,7 @@ const Settings = () => {
                       id="customStartDate"
                       type="date"
                       className="premium-input w-full bg-bg text-xs border border-border"
-                      value={customStartDate}
+                      value={toDateInputValue(customStartDate)}
                       onChange={(e) => setCustomStartDate(e.target.value)}
                     />
                   </div>
@@ -1851,7 +1852,7 @@ const Settings = () => {
                       id="customEndDate"
                       type="date"
                       className="premium-input w-full bg-bg text-xs border border-border"
-                      value={customEndDate}
+                      value={toDateInputValue(customEndDate)}
                       onChange={(e) => setCustomEndDate(e.target.value)}
                     />
                   </div>

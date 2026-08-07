@@ -14,7 +14,7 @@ import { useFetchMode } from '../../hooks/useFetchMode';
 import { StagedQueueFloatingWidget } from '../../components/StagedQueueFloatingWidget';
 import { stagedQueueService, type StagedItem } from '../../services/stagedQueueService';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
-import { isExpiredDate } from '../../utils/date';
+import { isExpiredDate, toDateInputValue } from '../../utils/date';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -50,7 +50,7 @@ const UniversalMedicineEditModal = lazy(() => import('../../components/Universal
 
 const ModalSkeleton = () => (
   <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 fade-in">
-    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+    <div className="absolute inset-0 bg-bg/80 backdrop-blur-md" />
     <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden slide-up">
       <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
@@ -533,6 +533,7 @@ const POS = () => {
   // Patient autocomplete
   const [patientSuggestions, setPatientSuggestions] = useState<any[]>([]);
   const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
+  const [isPatientFuzzyMatch, setIsPatientFuzzyMatch] = useState(false);
   const [patientHighlightIndex, setPatientHighlightIndex] = useState(-1);
   const [discount, setDiscount] = useState(initialActiveTab.discount || 0);
   const [date, setDate] = useState(getLocalDateString());
@@ -1073,16 +1074,17 @@ const POS = () => {
     const currentQuery = patientName.trim();
     const delayDebounce = setTimeout(() => {
       api.getPatients({ q: currentQuery, limit: 8 })
-        .then((data: any[]) => {
-          if (Array.isArray(data)) {
-            const isFocused = document.activeElement && (
-              document.activeElement.getAttribute('aria-label') === 'Patient Name' ||
-              document.activeElement.id === 'patient-name-input'
-            );
-            if (isFocused && selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientName.trim() === currentQuery) {
-              setPatientSuggestions(data);
-              setShowPatientSuggestions(data.length > 0);
-            }
+        .then((data: any) => {
+          const list = Array.isArray(data) ? data : (data?.suggestions || []);
+          const isFuzzy = !Array.isArray(data) && Boolean(data?.isSuggestion);
+          const isFocused = document.activeElement && (
+            document.activeElement.getAttribute('aria-label') === 'Patient Name' ||
+            document.activeElement.id === 'patient-name-input'
+          );
+          if (isFocused && selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientName.trim() === currentQuery) {
+            setPatientSuggestions(list);
+            setIsPatientFuzzyMatch(isFuzzy);
+            setShowPatientSuggestions(list.length > 0);
           }
         })
         .catch(() => {});
@@ -2413,19 +2415,19 @@ const POS = () => {
   }, []);
 
   return (
-    <div className="h-full flex flex-col fade-in overflow-hidden pb-2 bg-bg text-text">
+    <div className="h-full flex flex-col fade-in overflow-hidden bg-bg text-text">
 
-      {/* Main Container: Split into Left Workspace and Right Sidebar */}
-      <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
-        
-        {/* LEFT WORKSPACE (approx 72-75% width) - Takes up full height */}
-        <div className="flex-1 flex flex-col gap-4 min-h-0 min-w-0">
-          
+      {/* Main Container: Split into Left Workspace (Cart & Search) and Right Checkout Terminal Sidebar */}
+      <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
+
+        {/* ── LEFT WORKSPACE (70% width) ── */}
+        <div className="flex-1 flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden">
+
           {/* Editing Bill Banner */}
           {editingInvoiceId && (
-            <div className="bg-amber-500/15 border border-amber-500/30 text-amber-500 px-4 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md animate-pulse">
+            <div className="bg-amber-500/15 border border-amber-500/30 text-amber-500 px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md animate-pulse">
               <div className="flex items-center gap-2">
-                <Edit size={16} />
+                <Edit size={15} />
                 <span>Editing Saved Bill #{editingInvoiceNo || editingInvoiceId} (Modifying Existing Bill)</span>
               </div>
               <button
@@ -2436,50 +2438,50 @@ const POS = () => {
                   clearCart();
                   toastEvent.trigger('Cancelled edit bill mode', 'info');
                 }}
-                className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-xl text-amber-300 text-[11px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
+                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-amber-300 text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
               >
-                Cancel Edit Mode
+                Cancel Edit
               </button>
             </div>
           )}
 
-          {/* Patient & Doctor Context Bar */}
-          <div className="glass-panel p-3 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-md rounded-2xl w-full min-w-0">
+          {/* Top Control Ribbon: Patient, WhatsApp, Doctor, Date, Tabs */}
+          <div className="glass-panel p-2.5 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-sm rounded-2xl w-full min-w-0 flex flex-col gap-2">
             {matchedRefill && (
-              <div className="mb-2.5 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold flex justify-between items-center">
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold flex justify-between items-center shadow-sm">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
+                  <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse" />
                   <span>
-                    <strong>{matchedRefill.patient_name}</strong> has a pending refill for <strong>{matchedRefill.medicine_name}</strong>. Add to this bill?
+                    <strong className="text-text">{matchedRefill.patient_name}</strong> has a pending refill for <strong className="text-violet-300">{matchedRefill.medicine_name}</strong>.
                   </span>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-1.5">
                   <button
                     onClick={handleAcceptRefill}
-                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-[11px] transition-all shadow-sm"
+                    className="px-3 py-1 bg-violet-500 hover:bg-violet-600 text-text rounded-lg font-bold text-[10px] transition-all shadow-sm cursor-pointer"
                   >
                     Accept
                   </button>
                   <button
                     onClick={() => { setDismissedRefillId(matchedRefill.id); setMatchedRefill(null); }}
-                    className="px-3 py-1 bg-white/5 hover:bg-white/10 text-muted hover:text-text rounded-lg font-bold text-[11px] transition-all border border-glass-border"
+                    className="px-2.5 py-1 bg-bg3/50 hover:bg-bg3 text-muted hover:text-text rounded-lg font-bold text-[10px] transition-all border border-glass-border cursor-pointer"
                   >
                     Ignore
                   </button>
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-              {/* Patient Name */}
-              <div ref={patientSectionRef} className="relative z-20">
-                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Patient / Customer</label>
-                <div className="flex gap-1.5 items-center">
-                  <input 
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+              {/* Patient Name (Span 4) */}
+              <div ref={patientSectionRef} className="md:col-span-4 relative z-20">
+                <div className="flex gap-1 items-center relative">
+                  <input
                     id="patient-name-input"
-                    type="text" 
+                    type="text"
                     autoComplete="off"
-                    className="premium-input text-sm font-semibold h-10 px-3.5 flex-1 w-full bg-bg2/50 border-border/80 rounded-xl" 
-                    placeholder="Walk-in Customer" 
+                    className="premium-input text-xs font-semibold h-8.5 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
+                    placeholder="Walk-in Customer"
                     value={patientName}
                     onChange={e => {
                       justSelectedPatientRef.current = false;
@@ -2517,6 +2519,11 @@ const POS = () => {
                   />
                   {showPatientSuggestions && (
                     <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
+                      {isPatientFuzzyMatch && (
+                        <div className="px-3 py-1.5 bg-amber-500/10 text-amber-400 text-[11px] font-bold border-b border-amber-500/20 flex items-center gap-1.5">
+                          <span>🔍</span> No exact match. Did you mean:
+                        </div>
+                      )}
                       {patientSuggestions.map((c, idx) => {
                         const hasCreditDue = (c.credit_balance && c.credit_balance > 0) || c.credit_enabled === 1;
                         return (
@@ -2534,7 +2541,7 @@ const POS = () => {
                               setShowPatientSuggestions(false);
                               setPatientHighlightIndex(-1);
                             }}
-                            className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
+                            className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
                               idx === patientHighlightIndex
                                 ? 'bg-primary/20 text-text font-bold'
                                 : hasCreditDue
@@ -2545,75 +2552,63 @@ const POS = () => {
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-semibold truncate">{c.name}</span>
                               {hasCreditDue && (
-                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[10px] font-bold leading-none">
-                                  ₹ Credit
-                                  {c.credit_balance > 0 && (
-                                    <span className="ml-0.5 opacity-80">₹{Number(c.credit_balance).toFixed(0)}</span>
-                                  )}
+                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[9px] font-bold">
+                                  Credit ₹{Number(c.credit_balance || 0).toFixed(0)}
                                 </span>
                               )}
                             </div>
-                            {c.phone && <span className="text-muted font-mono text-[13px] shrink-0">{c.phone}</span>}
+                            {c.phone && <span className="text-muted font-mono text-[11px] shrink-0">{c.phone}</span>}
                           </button>
                         );
                       })}
                     </div>
                   )}
-
-                  <button 
+                  <button
                     onClick={() => setShowPatientModal(true)}
-                    className="h-10 w-10 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0"
+                    className="h-8.5 w-8.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0 cursor-pointer"
                     title="Manage Patient Profile & Refills"
                   >
-                    <Plus size={16} className="stroke-[3]" />
+                    <Plus size={14} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
 
-              {/* WhatsApp Contact */}
-              <div>
-                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">WhatsApp Number</label>
-                <div className="flex gap-1.5">
-                  <input 
-                    type="text" 
-                    className="premium-input text-sm font-mono font-semibold h-10 px-3.5 w-full text-text bg-bg2/50 border-border/80 rounded-xl" 
-                    placeholder="9876543210"
+              {/* WhatsApp Contact (Span 3) */}
+              <div className="md:col-span-3">
+                <div className="flex gap-1 items-center">
+                  <input
+                    type="text"
+                    className="premium-input text-xs font-mono font-semibold h-8.5 px-3 w-full text-text bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
+                    placeholder="Mobile / WhatsApp..."
                     value={patientPhone}
                     onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
                     maxLength={10}
                     aria-label="Phone Number"
                   />
-                  <button 
+                  <button
                     onClick={() => setSendWhatsApp(!sendWhatsApp)}
-                    className={`h-10 px-3 rounded-xl border text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 transition-all select-none shrink-0 ${
-                      sendWhatsApp 
-                        ? 'bg-green/15 border-green/30 text-green hover:bg-green/25' 
+                    className={`h-8.5 px-2.5 rounded-xl border text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 transition-all select-none shrink-0 cursor-pointer ${
+                      sendWhatsApp
+                        ? 'bg-green/15 border-green/30 text-green hover:bg-green/25'
                         : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
                     }`}
                     title={sendWhatsApp ? "WhatsApp Notifications Active" : "WhatsApp Notifications Inactive"}
                   >
-                    {sendWhatsApp ? (
-                      <>
-                        <span className="h-1.5 w-1.5 rounded-full bg-green animate-pulse" />
-                        <span>WA: ON</span>
-                      </>
-                    ) : (
-                      <span>WA: OFF</span>
-                    )}
+                    <span className={`h-1.5 w-1.5 rounded-full ${sendWhatsApp ? 'bg-green animate-pulse' : 'bg-muted/40'}`} />
+                    <span>WA:{sendWhatsApp ? 'ON' : 'OFF'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Doctor */}
-              <div ref={doctorSectionRef} className="relative z-20">
-                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Prescribing Doctor</label>
-                <div className="flex gap-1.5 relative">
-                  <input 
+              {/* Doctor Picker (Span 3) */}
+              <div ref={doctorSectionRef} className="md:col-span-3 relative z-20">
+                <div className="flex gap-1 relative items-center">
+                  <input
                     type="text"
                     autoComplete="off"
                     aria-label="Prescribing Doctor"
-                    className="premium-input text-sm font-semibold h-10 pl-3.5 pr-7 bg-bg2/50 border-border/80 w-full text-text focus:border-sky rounded-xl"
-                    placeholder="Type or Select Doctor..."
+                    className="premium-input text-xs font-semibold h-8.5 pl-3 pr-6 bg-bg2/60 border-border/70 w-full text-text focus:border-sky rounded-xl placeholder:text-muted/40"
+                    placeholder="Select Doctor..."
                     value={doctor}
                     onChange={e => {
                       justSelectedDoctorRef.current = false;
@@ -2654,12 +2649,6 @@ const POS = () => {
                     }}
                     title="Select or Type Doctor Name"
                   />
-                  <span className="absolute inset-y-0 right-12 pr-2 flex items-center pointer-events-none text-muted">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </span>
-                  
                   {isDoctorDropdownOpen && (
                     <div ref={doctorSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl">
                       {filteredDoctors.length > 0 ? (
@@ -2676,7 +2665,7 @@ const POS = () => {
                               setIsDoctorDropdownOpen(false);
                               setDoctorHighlightIndex(-1);
                             }}
-                            className={`w-full text-left px-3.5 py-2.5 text-[16px] border-b border-border/10 transition-all font-semibold ${
+                            className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all font-semibold ${
                               idx === doctorHighlightIndex
                                 ? 'bg-sky/20 text-text font-bold'
                                 : 'text-text hover:bg-sky/10'
@@ -2686,30 +2675,29 @@ const POS = () => {
                           </button>
                         ))
                       ) : (
-                        <div className="px-3.5 py-2.5 text-[16px] text-muted italic">
-                          Press Enter to add custom: "{doctor}"
+                        <div className="px-3 py-2 text-xs text-muted italic">
+                          Press Enter to add: "{doctor}"
                         </div>
                       )}
                     </div>
                   )}
-                  <button 
+                  <button
                     onClick={() => setShowDoctorModal(true)}
                     aria-label="Register New Doctor"
-                    className="h-10 w-10 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0"
+                    className="h-8.5 w-8.5 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0 cursor-pointer"
                     title="Register New Doctor"
                   >
-                    <Plus size={16} className="stroke-[3]" />
+                    <Plus size={14} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
 
-              {/* Date */}
-              <div>
-                <label className="text-[11px] font-extrabold text-muted uppercase tracking-wider block mb-1">Billing Date</label>
-                <input 
-                  type="date" 
-                  className="premium-input text-sm font-semibold h-10 px-3.5 text-text w-full font-mono bg-bg2/50 border-border/80 rounded-xl" 
-                  value={date}
+              {/* Billing Date (Span 2) */}
+              <div className="md:col-span-2">
+                <input
+                  type="date"
+                  className="premium-input text-xs font-semibold h-8.5 px-2.5 text-text w-full font-mono bg-bg2/60 border-border/70 rounded-xl"
+                  value={toDateInputValue(date)}
                   onChange={e => setDate(e.target.value)}
                   aria-label="Transaction Date"
                 />
@@ -2717,26 +2705,26 @@ const POS = () => {
             </div>
           </div>
 
-          {/* A. Search & Scan Medicine Area (Header) */}
-          <div className="glass-panel p-4 flex flex-col gap-3 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-md w-full min-w-0 overflow-hidden">
+          {/* A. Search & Scan Medicine Bar */}
+          <div className="glass-panel p-2.5 flex items-center gap-2 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-sm rounded-2xl w-full min-w-0">
             {!inventoryIndexReady && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
-                <Loader2 size={14} className="animate-spin shrink-0" />
-                <span>Preparing medicine index…</span>
+              <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
+                <Loader2 size={13} className="animate-spin shrink-0" />
+                <span>Preparing index…</span>
               </div>
             )}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 w-full">
               <div ref={productSearchRef} className="relative flex-1">
-                <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-muted">
-                  {inventoryIndexReady ? <Search size={18} /> : <Loader2 size={18} className="animate-spin" />}
+                <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted">
+                  {inventoryIndexReady ? <Search size={15} /> : <Loader2 size={15} className="animate-spin text-primary" />}
                 </span>
                 <input
                   type="text"
                   autoComplete="off"
                   aria-label="Search medicine by name, composition, batch, or price"
-                  placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price..." : "Warming up search index..."}
+                  placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price... (Ctrl + K)" : "Warming up search index..."}
                   disabled={!inventoryIndexReady}
-                  className="premium-input w-full text-sm pl-10 pr-4 py-2.5 bg-bg2/40 border-border/60 text-text rounded-2xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait"
+                  className="premium-input w-full text-xs pl-9 pr-8 py-2 bg-bg2/50 border-border/60 text-text rounded-xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait font-medium"
                   value={searchTerm}
                   onFocus={() => {
                     if (searchTerm.trim().length >= 2) {
@@ -2746,6 +2734,7 @@ const POS = () => {
                   onChange={e => {
                     const val = e.target.value;
                     setSearchTerm(val);
+                    setSearchHighlightIndex(-1);
                     if (val.trim().length >= 2) {
                       setShowSearchDropdown(true);
                     } else {
@@ -2760,10 +2749,10 @@ const POS = () => {
                     } else if (e.key === 'ArrowUp') {
                       e.preventDefault();
                       setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                    } else if (e.key === 'Enter' || e.key === 'Tab') {
-                      if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
-                        e.preventDefault();
-                        const item = searchResults[searchHighlightIndex];
+                    } else if ((e.key === 'Enter' || e.key === 'Tab') && searchHighlightIndex >= 0) {
+                      e.preventDefault();
+                      const item = searchResults[searchHighlightIndex];
+                      if (item) {
                         fetchDetailsAndAddToCart(item);
                         setSearchTerm('');
                         setSearchResults([]);
@@ -2771,14 +2760,23 @@ const POS = () => {
                         setShowSearchDropdown(false);
                       }
                     } else if (e.key === 'Escape') {
-                      setSearchResults([]);
-                      setSearchHighlightIndex(-1);
                       setShowSearchDropdown(false);
+                      setSearchHighlightIndex(-1);
                     }
                   }}
                 />
-                
-                {/* Empty inventory fallback dropdown */}
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setShowSearchDropdown(false);
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-1 cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
                 {showSearchDropdown && searchTerm.trim().length >= 3 && searchResults.length === 0 && (
                   <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
@@ -3086,9 +3084,9 @@ const POS = () => {
                 type="button"
                 aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
-                className="premium-btn bg-primary text-text shadow-[0_4px_14px_rgba(59,130,246,0.25)] hover:bg-teal-500 transition-all flex items-center gap-2 px-5 h-10.5 rounded-2xl shrink-0"
+                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-text shadow-[0_4px_14px_rgba(59,130,246,0.25)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 px-5 h-10 rounded-xl shrink-0 font-bold text-xs"
               >
-                <Camera size={18} />
+                <Camera size={16} />
                 <span>AI Camera Scan</span>
               </button>
             </div>
@@ -3731,101 +3729,136 @@ const POS = () => {
             </div>
           </div>
           
-          {/* Section 3: Checkout Summary & Total */}
-          <div className="glass-panel p-4 bg-glass-bg border-glass-border flex flex-col md:flex-row items-center justify-between gap-4 shrink-0 shadow-lg rounded-2xl">
-            <div className="flex items-center gap-2 text-xs text-text uppercase tracking-wider shrink-0 font-bold">
-              <span>💳</span> Payment & Checkout
+        </div>
+
+        {/* ── RIGHT CHECKOUT TERMINAL SIDEBAR (30% width) ── */}
+        <div className="w-[330px] lg:w-[370px] shrink-0 h-full flex flex-col justify-between p-4 bg-bg2/90 border border-glass-border/40 rounded-2xl shadow-xl overflow-y-auto custom-scrollbar gap-4">
+
+          {/* Section 1: Customer Profile Overview */}
+          <div className="flex flex-col gap-2 border-b border-glass-border/30 pb-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <UserCheck size={13} className="text-primary" />
+                Customer Context
+              </span>
+              {selectedCustomerId && (
+                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">
+                  Registered
+                </span>
+              )}
             </div>
-            
-            <div className="flex flex-1 flex-col md:flex-row items-center gap-6 justify-end w-full">
-              {/* Subtotal & Discount */}
-              <div className="flex items-center gap-4 text-xs">
-                <div className="text-muted">
-                  Subtotal: <span className="font-mono text-text font-semibold ml-1">₹{Math.round(subtotal)}</span>
-                </div>
-                
-                <div className="flex items-center gap-2 text-muted">
-                  <span>Discount %:</span>
-                  <input 
-                    type="number" 
-                    className="premium-input text-xs py-0.5 px-1.5 w-14 text-center font-mono bg-bg border-border rounded-lg" 
+            <div className="flex items-center justify-between bg-bg3/40 border border-glass-border/30 p-2.5 rounded-xl">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-text truncate">{patientName || 'Walk-in Customer'}</span>
+                <span className="text-[10px] text-muted font-mono">{patientPhone || 'No phone entered'}</span>
+              </div>
+              {patientPhone && (
+                <span className="text-[9px] font-bold text-green bg-green/10 px-2 py-1 rounded-lg border border-green/20">
+                  WA Ready
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Section 2: Bill Summary Breakdown */}
+          <div className="flex flex-col gap-3">
+            <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+              <FileText size={13} className="text-primary" />
+              Bill Breakdown
+            </span>
+
+            <div className="flex flex-col gap-2 text-xs bg-bg3/30 border border-glass-border/25 p-3 rounded-xl">
+              <div className="flex justify-between items-center text-muted">
+                <span>Subtotal</span>
+                <span className="font-mono font-bold text-text">₹{Math.round(subtotal)}</span>
+              </div>
+
+              <div className="flex justify-between items-center text-muted">
+                <span>Discount Override (%)</span>
+                <div className="relative w-16">
+                  <input
+                    type="number"
                     value={discount === 0 || discount === undefined || discount === null ? '' : discount}
                     onChange={e => setDiscount(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
-                    min="0"
-                    max="100"
+                    placeholder="0"
+                    className="w-full bg-bg2 border border-glass-border rounded-lg px-2 py-1 font-mono font-bold text-center text-text text-xs focus:outline-none focus:border-primary/50"
                   />
                 </div>
-
-                {discountAmount > 0 && (
-                  <div className="text-amber-500 font-bold bg-amber-500/5 px-2.5 py-1 rounded-lg border border-amber-500/20 text-xs">
-                    Discount: -₹{Math.round(discountAmount)}
-                  </div>
-                )}
               </div>
 
-              {/* Payment selector */}
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Method:</span>
-                <div className="flex bg-bg3 border border-border rounded-xl p-1 gap-1">
-                  {[
-                    { id: 'CASH', label: '💵 Cash', activeClass: 'bg-green/15 text-green border-green/30' },
-                    { id: 'UPI', label: '📱 UPI', activeClass: 'bg-primary/15 text-primary border-primary/30' },
-                    { id: 'CREDIT', label: '💳 Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/30' }
-                  ].map(item => (
-                    <label key={item.id} className="relative cursor-pointer select-none">
-                      <input 
-                        type="radio" 
-                        name="payment_medium" 
-                        value={item.id} 
-                        checked={paymentMedium === item.id} 
-                        onChange={e => setPaymentMedium(e.target.value)}
-                        className="sr-only peer"
-                      />
-                      <span className={`py-1 px-3.5 rounded-lg text-[10px] uppercase font-bold tracking-wider block border transition-all ${
-                        paymentMedium === item.id 
-                          ? `${item.activeClass} border shadow-sm` 
-                          : 'border-transparent text-muted hover:text-text hover:bg-bg2/40'
-                      }`}>
-                        {item.label}
-                      </span>
-                    </label>
-                  ))}
+              {discountAmount > 0 && (
+                <div className="flex justify-between items-center text-amber-500 font-bold bg-amber-500/10 p-2 rounded-lg border border-amber-500/20 text-xs">
+                  <span>Savings Applied</span>
+                  <span className="font-mono">-₹{Math.round(discountAmount)}</span>
                 </div>
-              </div>
-
-              {/* Grand Total & Save Buttons */}
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="flex items-baseline gap-2 mr-1">
-                  <span className="text-xs font-extrabold text-primary uppercase tracking-wider">Total:</span>
-                  <span className="font-mono text-xl font-black text-primary">₹{grandTotal}</span>
-                </div>
-
-                <button 
-                  onClick={() => handleCompleteSale(undefined, true)}
-                  disabled={cart.length === 0}
-                  title="Save bill directly without popup"
-                  className={`py-2 px-4 text-xs flex items-center gap-1.5 font-bold uppercase tracking-wider rounded-xl transition-all h-9 select-none ${
-                    cart.length === 0 
-                      ? 'bg-bg3 border border-border text-muted cursor-not-allowed' 
-                      : 'bg-sky text-text hover:bg-sky/90 shadow-[0_4px_14px_rgba(14,165,233,0.25)] hover:-translate-y-0.5'
-                  }`}
-                >
-                  <Zap size={14} /> Direct Save
-                </button>
-
-                <button 
-                  onClick={() => handleCompleteSale(undefined, false)}
-                  disabled={cart.length === 0}
-                  className={`py-2 px-4 text-xs flex items-center gap-1.5 font-bold uppercase tracking-wider rounded-xl transition-all h-9 select-none ${
-                    cart.length === 0 
-                      ? 'bg-bg3 border border-border text-muted cursor-not-allowed' 
-                      : 'bg-green text-text hover:bg-emerald-600 shadow-[0_4px_14px_rgba(16,185,129,0.25)] hover:-translate-y-0.5'
-                  }`}
-                >
-                  <CheckCircle size={14} /> Save Bill (Ctrl+S)
-                </button>
-              </div>
+              )}
             </div>
+          </div>
+
+          {/* Section 3: Payment Medium Grid */}
+          <div className="flex flex-col gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+              <Sparkles size={13} className="text-primary" />
+              Payment Method
+            </span>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { id: 'CASH', label: '💵 Cash', activeClass: 'bg-green/15 text-green border-green/30' },
+                { id: 'UPI', label: '📱 UPI', activeClass: 'bg-primary/15 text-primary border-primary/30' },
+                { id: 'CREDIT', label: '📜 Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/30' }
+              ].map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setPaymentMedium(item.id)}
+                  className={`py-2 px-2 rounded-xl text-[10px] font-extrabold uppercase border text-center transition-all cursor-pointer ${
+                    paymentMedium === item.id
+                      ? `${item.activeClass} shadow-sm ring-1 ring-primary/20`
+                      : 'bg-bg3/40 border-glass-border/30 text-muted hover:text-text hover:bg-bg3'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 4: Net Amount Hero Box */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-transparent border border-primary/25 shadow-inner flex flex-col gap-1 my-1">
+            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Net Payable</span>
+            <div className="flex items-baseline justify-between">
+              <span className="text-2xl font-black font-mono text-primary">₹{grandTotal.toLocaleString()}</span>
+              <span className="text-[10px] text-muted font-bold uppercase">Taxes Included</span>
+            </div>
+          </div>
+
+          {/* Section 5: Action Buttons */}
+          <div className="flex flex-col gap-2 pt-1">
+            <button
+              onClick={() => handleCompleteSale(undefined, false)}
+              disabled={cart.length === 0}
+              className={`w-full py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
+                cart.length === 0
+                  ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
+                  : 'bg-green text-text hover:bg-emerald-600 shadow-[0_0_20px_rgba(16,185,129,0.35)] hover:-translate-y-0.5'
+              }`}
+            >
+              <CheckCircle size={16} />
+              Save Bill & Print (Ctrl+S)
+            </button>
+
+            <button
+              onClick={() => handleCompleteSale(undefined, true)}
+              disabled={cart.length === 0}
+              className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                cart.length === 0
+                  ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
+                  : 'bg-sky/20 border border-sky/30 text-sky hover:bg-sky/30'
+              }`}
+            >
+              <Zap size={14} /> Direct Save
+            </button>
           </div>
         </div>
       </div>

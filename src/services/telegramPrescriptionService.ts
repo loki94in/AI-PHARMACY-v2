@@ -69,11 +69,8 @@ class TelegramPrescriptionService {
   private readonly CART_EXPIRY_HOURS = 24; // Cart expires after 24 hours
 
   constructor() {
-    // Start cleanup interval for expired carts
-    const interval = setInterval(() => this.cleanupExpiredCarts(), 60 * 60 * 1000); // Every hour
-    if (interval.unref) {
-      interval.unref();
-    }
+    // Perform cleanup for expired carts on BOOT
+    this.cleanupExpiredCarts();
   }
 
   /**

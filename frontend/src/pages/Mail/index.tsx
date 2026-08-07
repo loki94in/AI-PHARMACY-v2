@@ -354,10 +354,18 @@ const Mail = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // Trigger a background IMAP delta sync
+  // Trigger a background IMAP delta sync (only if credentials are saved)
   const triggerSync = useCallback(async () => {
     if (syncInProgress.current || isOffline) return;
-    checkImapStatus();
+    try {
+      const statusRes = await api.getImapStatus();
+      if (!statusRes?.isConfigured) {
+        // Stop IMAP sync if user has not saved credentials
+        return;
+      }
+    } catch {
+      return;
+    }
     syncInProgress.current = true;
     setSyncing(true);
     try {
@@ -404,17 +412,17 @@ const Mail = () => {
       syncDelay = setTimeout(() => triggerSync(), 1500);
     }
 
-    // Periodic background refresh: re-read local DB every 30s (silent, no loading indicator).
+    // Periodic background refresh: re-read local DB every 360s (silent, no loading indicator).
     // Paused while this page isn't the one visible.
     let refreshInterval: ReturnType<typeof setInterval> | undefined;
     if (inboxRefreshControl.shouldFetch && pageActive) {
-      refreshInterval = setInterval(() => silentRefreshLocal(), 30000);
+      refreshInterval = setInterval(() => silentRefreshLocal(), 360000);
     }
 
-    // Periodic IMAP sync every 2 minutes. Paused while this page isn't the one visible.
+    // Periodic IMAP sync every 720s (12 minutes). Paused while this page isn't the one visible.
     let syncInterval: ReturnType<typeof setInterval> | undefined;
     if (imapSyncControl.shouldFetch && pageActive) {
-      syncInterval = setInterval(() => triggerSync(), 120000);
+      syncInterval = setInterval(() => triggerSync(), 720000);
     }
 
     return () => {

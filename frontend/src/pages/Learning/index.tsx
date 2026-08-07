@@ -561,13 +561,10 @@ const Learning: React.FC = () => {
         }
       };
       fetchQR();
-      timer = setInterval(fetchQR, 5000);
     }
-    return () => clearInterval(timer);
   }, [settingsData?.whatsapp_enabled, waStatus.isReady, qrPollControl.shouldFetch, qrPollActive]);
 
   useEffect(() => {
-    let timer: any;
     if (settingsData?.telegram_enabled === 'true' && qrPollActive) {
       const fetchTgStatus = async () => {
         try {
@@ -579,11 +576,9 @@ const Learning: React.FC = () => {
         }
       };
       fetchTgStatus();
-      timer = setInterval(fetchTgStatus, 5000);
     } else {
       setTgReady(false);
     }
-    return () => clearInterval(timer);
   }, [settingsData?.telegram_enabled, qrPollActive]);
 
   const handleReconnect = async () => {
@@ -746,10 +741,6 @@ const Learning: React.FC = () => {
       }
     };
     initPr();
-
-    if (!healthPollActive) return;
-    const interval = setInterval(checkPrHealth, 180000); // Poll every 3 minutes
-    return () => clearInterval(interval);
   }, [healthPollActive]);
 
   const handleToggleDoctorSummary = async (doc: any) => {

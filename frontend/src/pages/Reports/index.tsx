@@ -29,7 +29,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { getTodayString, getNDaysAgoString } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 
 // Module-level cache for instant report hydration on tab switches / re-mounts
@@ -701,7 +701,7 @@ const Reports = () => {
                   type="date"
                   min="2020-01-01"
                   className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold cursor-pointer"
-                  value={fromDate}
+                  value={toDateInputValue(fromDate)}
                   onChange={(e) => handleFromDateChange(e.target.value)}
                   aria-label="From Date"
                 />
@@ -713,7 +713,7 @@ const Reports = () => {
                   min="2020-01-01"
                   disabled={!manualToDate}
                   className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold disabled:opacity-50 cursor-pointer"
-                  value={toDate}
+                  value={toDateInputValue(toDate)}
                   onChange={(e) => handleToDateChange(e.target.value)}
                   aria-label="To Date"
                 />

@@ -482,10 +482,6 @@ server.on('error', (err: any) => {
 
               const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
               checkShortageRequestsAndNotifyAdmin(db).catch(err => console.error('[Boot] Shortage check failed:', err));
-              // Run shortage check every 1 hour
-              setInterval(() => {
-                checkShortageRequestsAndNotifyAdmin().catch(err => console.error('[Cron] Hourly shortage check failed:', err));
-              }, 60 * 60 * 1000);
             }
           })(),
 
@@ -493,10 +489,6 @@ server.on('error', (err: any) => {
           (async () => {
             const { monthlyReportService } = await import('./services/monthlyReportService.js');
             monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Boot] Monthly report check failed:', err));
-            // Check every 1 hour for 1st / 15th of month scheduled report dispatches
-            setInterval(() => {
-              monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Cron] Hourly monthly report check failed:', err));
-            }, 60 * 60 * 1000);
           })(),
 
 
@@ -665,8 +657,8 @@ async function setupCrons(db: any) {
     }
   });
 
-  // Nightly 9:30 PM backup
-  cron.schedule('30 21 * * *', async () => {
+  // Nightly 9:59 PM backup
+  cron.schedule('59 21 * * *', async () => {
     try {
       const mode = await getBackendFetchMode('bg.nightlyBackup', 'off');
       if (mode === 'off') {
@@ -688,8 +680,8 @@ async function setupCrons(db: any) {
     }
   });
 
-  // Periodic Pharmarack catalog sync every 15 minutes (WhatsApp OCR Pipeline)
-  cron.schedule('*/15 * * * *', async () => {
+  // Periodic Pharmarack catalog sync every 35 minutes (WhatsApp OCR Pipeline)
+  cron.schedule('*/35 * * * *', async () => {
     try {
       const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
       if (mode === 'off') {

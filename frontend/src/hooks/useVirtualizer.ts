@@ -16,7 +16,10 @@ export function useVirtualizer<TScrollElement extends Element, TItemElement exte
       // If measurement is invalid (0 or negative, which happens when tab is hidden or during mounting transition),
       // fallback to estimateSize to prevent rows from collapsing to y=0.
       if (measured === undefined || measured === null || measured <= 0) {
-        const index = instance.indexFromElement(element);
+        // Read the index attribute directly instead of instance.indexFromElement(), which
+        // logs a console.warn when the attribute is momentarily absent during this transition.
+        const attr = element.getAttribute(instance.options.indexAttribute ?? 'data-index');
+        const index = attr !== null ? parseInt(attr, 10) : instance.indexFromElement(element);
         return instance.options.estimateSize(index);
       }
 

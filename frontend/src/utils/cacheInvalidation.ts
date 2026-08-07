@@ -26,7 +26,12 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
 
   keys.forEach(key => {
     queryClient.invalidateQueries({ queryKey: [key] });
+    queryClient.resetQueries({ queryKey: [key] });
   });
+
+  // Explicitly remove stale infinite query caches for sells and inventory
+  queryClient.removeQueries({ queryKey: ['sells-list'] });
+  queryClient.removeQueries({ queryKey: ['inventory-list'] });
 
   // Silently background-refetch all currently-mounted (active) stale queries immediately.
   // Unmounted pages will refetch on next visit while showing cached data — no wipe, no spinner.

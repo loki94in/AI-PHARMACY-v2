@@ -65,7 +65,7 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
           }
         }
       } catch {}
-    }, 10000);
+    }, 300000);
     return () => clearInterval(interval);
   }, []);
 

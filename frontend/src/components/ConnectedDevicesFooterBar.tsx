@@ -23,7 +23,7 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
   const [editName, setEditName] = useState('');
   const [waReady, setWaReady] = useState<boolean | null>(null);
 
-  const fetchStatus = useCallback(async () => {
+  const fetchDevicesStatus = useCallback(async () => {
     try {
       if (typeof api.getRegisteredDevices === 'function') {
         const res = await api.getRegisteredDevices();
@@ -31,6 +31,13 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
           setDevices(res.devices);
         }
       }
+    } catch {
+      // Ignore background fetch errors
+    }
+  }, []);
+
+  const fetchWhatsAppStatus = useCallback(async () => {
+    try {
       if (typeof api.getWhatsAppStatus === 'function') {
         const waRes = await api.getWhatsAppStatus();
         setWaReady(!!waRes?.isReady);
@@ -41,10 +48,15 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
   }, []);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 10000); // 10s auto-refresh
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    fetchDevicesStatus();
+    fetchWhatsAppStatus();
+    const devInterval = setInterval(fetchDevicesStatus, 120000); // Every 120 seconds
+    const waInterval = setInterval(fetchWhatsAppStatus, 520000);  // Every 520 seconds
+    return () => {
+      clearInterval(devInterval);
+      clearInterval(waInterval);
+    };
+  }, [fetchDevicesStatus, fetchWhatsAppStatus]);
 
   const handleSaveRename = async (token: string) => {
     if (!editName.trim()) return;

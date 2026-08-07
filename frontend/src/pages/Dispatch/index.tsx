@@ -13,6 +13,7 @@ import {
 } from '../../utils/pageModuleCaches';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
 import { sanitizePhoneInput } from '../../utils/phone';
+import { toDateInputValue } from '../../utils/date';
 
 interface DispatchOrder {
   id: number;
@@ -598,7 +599,7 @@ const Dispatch = () => {
             ) : (
               <input
                 type="date"
-                value={selectedDate}
+                value={toDateInputValue(selectedDate)}
                 onChange={e => setSelectedDate(e.target.value)}
                 className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-bg border border-glass-border text-text"
               />

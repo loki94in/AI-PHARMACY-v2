@@ -30,11 +30,8 @@ export class BackupRecoveryService {
   private static instance: BackupRecoveryService;
 
   private constructor() {
-    // Start background resilience scan for pending uploads
-    const interval = setInterval(() => this.retryPendingUploads(), 60 * 60 * 1000); // Every hour
-    if (interval.unref) {
-      interval.unref();
-    }
+    // Run resilience scan for pending uploads on BOOT
+    this.retryPendingUploads();
   }
 
   public static getInstance(): BackupRecoveryService {

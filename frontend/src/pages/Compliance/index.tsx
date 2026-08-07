@@ -4,7 +4,7 @@ import {
   AlertTriangle, RefreshCw, CheckCircle, Filter, Edit3, ChevronRight, Check, X
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { formatDisplayDate } from '../../utils/date';
+import { formatDisplayDate, toDateInputValue } from '../../utils/date';
 
 interface ComplianceLog {
   id: number;
@@ -249,7 +249,7 @@ const CompliancePage: React.FC = () => {
             <label className="block text-[10px] font-bold text-muted uppercase mb-1">Start Date</label>
             <input
               type="date"
-              value={startDate}
+              value={toDateInputValue(startDate)}
               onChange={(e) => setStartDate(e.target.value)}
               className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
             />
@@ -259,7 +259,7 @@ const CompliancePage: React.FC = () => {
             <label className="block text-[10px] font-bold text-muted uppercase mb-1">End Date</label>
             <input
               type="date"
-              value={endDate}
+              value={toDateInputValue(endDate)}
               onChange={(e) => setEndDate(e.target.value)}
               className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
             />
