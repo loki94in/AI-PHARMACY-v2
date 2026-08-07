@@ -32,6 +32,8 @@ router.get('/patients', async (req, res) => {
         query += ' LIMIT ?';
         params.push(limitVal);
       }
+    } else {
+      query += ' LIMIT 1000';
     }
     
     const patients = await db.all(query, params);
@@ -114,7 +116,7 @@ router.delete('/patients/:id', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const customers = await db.all('SELECT * FROM customers ORDER BY id DESC');
+    const customers = await db.all('SELECT * FROM customers ORDER BY id DESC LIMIT 1000');
         res.json(customers);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -182,7 +184,7 @@ router.get('/:id/history', async (req, res) => {
 router.get('/doctors', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const doctors = await db.all('SELECT * FROM doctors ORDER BY name ASC');
+    const doctors = await db.all('SELECT * FROM doctors ORDER BY name ASC LIMIT 1000');
         res.json(doctors);
   } catch (error) {
     console.error('Failed to fetch doctors:', error);

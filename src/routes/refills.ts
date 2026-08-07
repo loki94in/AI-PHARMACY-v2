@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
     const refills = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
-       ORDER BY pr.next_refill_date ASC`
+       ORDER BY pr.next_refill_date ASC LIMIT 1000`
     );
         res.json(refills);
   } catch (err) {
@@ -288,7 +288,7 @@ router.get('/panel', async (req, res) => {
          FROM inventory_master 
          GROUP BY medicine_id
        ) inv ON inv.medicine_id = pr.medicine_id
-       ORDER BY pr.next_refill_date ASC`
+       ORDER BY pr.next_refill_date ASC LIMIT 1000`
     );
 
     const patientGroups: Record<string, any> = {};

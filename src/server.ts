@@ -238,7 +238,14 @@ const frontendCandidates = [
 
 const frontendDist = frontendCandidates.find(dir => fs.existsSync(path.join(dir, 'index.html'))) || frontendCandidates[0];
 
-app.use(express.static(frontendDist));
+app.use(express.static(frontendDist, {
+  maxAge: '1d',
+  setHeaders: (res, filePath) => {
+    if (filePath.includes('assets') || /\.(js|css|woff2?)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  }
+}));
 app.use((req, res, next) => {
   // Let unmatched /api/* or /ws requests fall through to API/404 handlers
   if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
@@ -326,7 +333,7 @@ export function extractMedicinesWithPython(messageText: string): Promise<string[
     });
 }
 
-const PORT = process.env.PORT || 5174;
+const PORT = config.port;
 
 // Start HTTP server immediately to accept requests in <20ms
 const server = app.listen(PORT, async () => {

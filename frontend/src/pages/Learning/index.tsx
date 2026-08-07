@@ -114,6 +114,17 @@ const Learning: React.FC = () => {
 
   const queryClient = useQueryClient();
 
+  // ponytail: stagger initial mount fetches — doctors + settings are the core data the page
+  // needs to function (used across tabs and to drive WhatsApp/Telegram/Pharmarack polling),
+  // so they load immediately. Distributor "profiles" data (list + detail) and the supplementary
+  // learning stats are secondary/tab-specific, so they're delayed ~500ms to reduce initial
+  // network saturation and get the page interactive faster.
+  const [showSecondaryData, setShowSecondaryData] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSecondaryData(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Doctors Query with module caching
   const { data: doctorsList = cachedDoctorsList, isLoading: loadingDoctors } = useApiQuery<any[]>(
     'crm-doctors',
@@ -129,7 +140,7 @@ const Learning: React.FC = () => {
     }
   );
 
-  // Profiles Query with module caching
+  // Profiles Query with module caching — secondary, delayed ~500ms after mount
   const { data: profiles = cachedProfiles, isLoading: loadingProfiles, isError: profilesError, refetch: refetchProfiles } = useApiQuery<LearningProfileSummary[]>(
     'learning-profiles',
     async () => {
@@ -143,6 +154,7 @@ const Learning: React.FC = () => {
       staleTime: 30000,
       // Re-validate when the user returns to this tab from another page
       refetchOnWindowFocus: true,
+      enabled: showSecondaryData,
     }
   );
 
@@ -170,6 +182,7 @@ const Learning: React.FC = () => {
   );
 
   // Intelligent Suggestions stats (live counts, replaces hardcoded placeholder numbers)
+  // Secondary/supplementary display data — delayed ~500ms after mount
   const { data: learningStats, isLoading: loadingLearningStats } = useApiQuery<{
     activeOcrCorrections: number;
     learnedRxCombos: number;
@@ -182,11 +195,12 @@ const Learning: React.FC = () => {
     },
     {
       staleTime: 60000,
-      refetchOnWindowFocus: false
+      refetchOnWindowFocus: false,
+      enabled: showSecondaryData,
     }
   );
 
-  // Profile Detail Query with module caching and instant hydration
+  // Profile Detail Query with module caching and instant hydration — secondary, delayed ~500ms after mount
   const { data: serverProfileDetail, isLoading: loadingDetail, isError: detailError, refetch: refetchDetail } = useApiQuery<any>(
     ['learning-profile-detail', selectedProfileId],
     async () => {
@@ -199,7 +213,7 @@ const Learning: React.FC = () => {
       return data;
     },
     {
-      enabled: !!selectedProfileId,
+      enabled: showSecondaryData && !!selectedProfileId,
       staleTime: 300000,
       refetchOnWindowFocus: false
     }

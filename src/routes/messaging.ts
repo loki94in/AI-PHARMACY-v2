@@ -91,7 +91,7 @@ router.post('/login-window', async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 2500));
 
       console.log('[WhatsApp] Launching Chrome for WhatsApp login from:', chromePath);
-      const authPath = path.resolve(process.cwd(), '.wwebjs_auth', 'session');
+      const authPath = path.resolve(getAppDataDir(), '.wwebjs_auth', 'session');
       const lockFiles = ['lockfile', 'SingletonLock', 'DevToolsActivePort'];
       for (const lf of lockFiles) {
         const p = path.join(authPath, lf);
@@ -439,7 +439,7 @@ router.get('/ignored-phones', async (req, res) => {
   try {
     const { dbManager } = await import('../database/connection.js');
     const db = await dbManager.getConnection();
-    const rows = await db.all('SELECT phone, reason, added_at FROM ignored_whatsapp_numbers');
+    const rows = await db.all('SELECT phone, reason, added_at FROM ignored_whatsapp_numbers ORDER BY added_at DESC LIMIT 1000');
     res.json(rows);
   } catch (err: any) {
     console.error('Error fetching ignored phones:', err);

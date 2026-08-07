@@ -24,7 +24,7 @@
 #define MyAppPublisher "AI Pharmacy Team"
 #define MyAppURL       "https://github.com/loki94in/AI-PHARMACY-v2"
 #define MyAppExeName   "PharmacyOS.exe"
-#define MyAppPort      "5174"
+#define MyAppPort      "5175"
 
 [Setup]
 AppId={{E3A1F2B4-7C8D-4E5F-9A0B-1C2D3E4F5A6B}
@@ -173,10 +173,10 @@ end;
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  if IsPortInUse(5174) then begin
+  if IsPortInUse(5175) then begin
     if MsgBox(
-      'Port 5174 is currently in use.' + #13#10 +
-      'AI Pharmacy OS needs port 5174 to run.' + #13#10#13#10 +
+      'Port 5175 is currently in use.' + #13#10 +
+      'AI Pharmacy OS needs port 5175 to run.' + #13#10#13#10 +
       'Continue installing anyway?',
       mbConfirmation, MB_YESNO) = IDNO then
       Result := False;

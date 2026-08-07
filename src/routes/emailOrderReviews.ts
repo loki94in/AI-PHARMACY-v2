@@ -12,11 +12,11 @@ router.get('/', async (req, res) => {
     let rows;
     if (status && typeof status === 'string') {
       rows = await db.all(
-        'SELECT * FROM email_order_reviews WHERE status = ? ORDER BY created_at DESC, id DESC',
+        'SELECT * FROM email_order_reviews WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT 1000',
         [status]
       );
     } else {
-      rows = await db.all('SELECT * FROM email_order_reviews ORDER BY created_at DESC, id DESC');
+      rows = await db.all('SELECT * FROM email_order_reviews ORDER BY created_at DESC, id DESC LIMIT 1000');
     }
     res.json(rows);
   } catch (err) {

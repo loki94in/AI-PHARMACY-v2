@@ -31,7 +31,7 @@ export const getNDaysAgoString = (n: number): string => {
 export const parseLocalDate = (dateVal: string | number | Date | null | undefined): Date | null => {
   if (!dateVal) return null;
   if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? null : dateVal;
-  
+
   if (typeof dateVal === 'number') {
     const d = new Date(dateVal);
     return isNaN(d.getTime()) ? null : d;

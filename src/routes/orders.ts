@@ -85,9 +85,9 @@ router.get('/', async (_req, res) => {
     await initOrdersTable(db);
     let orders;
     try {
-      orders = await db.all('SELECT * FROM special_orders ORDER BY date DESC');
+      orders = await db.all('SELECT * FROM special_orders ORDER BY date DESC LIMIT 1000');
     } catch (_) {
-      orders = await db.all('SELECT * FROM special_orders ORDER BY id DESC');
+      orders = await db.all('SELECT * FROM special_orders ORDER BY id DESC LIMIT 1000');
     }
     res.json(orders);
   } catch (err) {

@@ -100,7 +100,7 @@ export default function CustomerReturnHistory() {
     <div className="space-y-6 flex flex-col h-full overflow-hidden">
       <div className="flex justify-between items-end shrink-0">
         <div>
-          <button 
+          <button
             onClick={() => setSearchParams({ tab: 'customer' })}
             className="text-muted hover:text-text text-sm flex items-center gap-1 mb-2 transition-colors cursor-pointer bg-transparent border-0"
           >
@@ -125,7 +125,7 @@ export default function CustomerReturnHistory() {
             className="w-full pl-9 pr-4 py-2 bg-black/20 border border-glass-border rounded-xl text-sm text-white placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
           />
         </div>
-        
+
         {/* Date Filters */}
         <div className="flex items-center gap-2 border-r border-glass-border/30 pr-4">
           <div className="flex items-center gap-1.5">

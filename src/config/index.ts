@@ -115,13 +115,16 @@ export interface AppConfig {
   openFdaApiKey?: string;
 }
 
+const defaultPort = isPackagedApp() ? 5175 : 5174;
+const resolvedPort = parseInt(process.env.PORT || String(defaultPort), 10);
+
 export const config: AppConfig = {
-  port: parseInt(process.env.PORT || '5174', 10),
+  port: resolvedPort,
   get dbPath() { return process.env.DB_PATH || path.join(appDataDir, 'data', 'app.db'); },
   uploadDir: process.env.UPLOAD_DIR || path.join(appDataDir, 'uploads'),
   tempDir: process.env.TEMP_DIR || path.join(appDataDir, 'uploads', 'temp'),
   backupDir: process.env.BACKUP_DIR || path.join(appDataDir, 'backup'),
-  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5174',
+  corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${resolvedPort}`,
   taxRate: parseFloat(process.env.TAX_RATE || '0.05'),
   maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE || '50', 10) * 1024 * 1024, // 50MB default
   nodeEnv: process.env.NODE_ENV || 'development',

@@ -102,6 +102,26 @@ const calculateSalesGstAndTotals = async (
   let totalSgst = 0;
   const itemTaxBreakdowns: GstItemBreakdown[] = [];
 
+  const missingInventoryIds = items
+    .filter(item => {
+      const c = Number(item.cgst_per !== undefined ? item.cgst_per : (item.cgst !== undefined ? item.cgst : NaN));
+      const s = Number(item.sgst_per !== undefined ? item.sgst_per : (item.sgst !== undefined ? item.sgst : NaN));
+      return (isNaN(c) || isNaN(s) || (c === 0 && s === 0)) && item.inventory_id;
+    })
+    .map(item => item.inventory_id);
+
+  const medTaxMap = new Map<number, { cgst_per: number; sgst_per: number }>();
+  if (missingInventoryIds.length > 0) {
+    const placeholders = missingInventoryIds.map(() => '?').join(',');
+    const rows = await db.all(
+      `SELECT im.id as inventory_id, m.cgst_per, m.sgst_per FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+      missingInventoryIds
+    );
+    for (const r of rows) {
+      medTaxMap.set(r.inventory_id, { cgst_per: r.cgst_per, sgst_per: r.sgst_per });
+    }
+  }
+
   for (const item of items) {
     const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0, inventory_id } = item;
     const q = Number(quantity);
@@ -117,10 +137,7 @@ const calculateSalesGstAndTotals = async (
     let sgstPer = Number(item.sgst_per !== undefined ? item.sgst_per : (item.sgst !== undefined ? item.sgst : NaN));
 
     if ((isNaN(cgstPer) || isNaN(sgstPer) || (cgstPer === 0 && sgstPer === 0)) && inventory_id) {
-      const medTax = await db.get(
-        `SELECT m.cgst_per, m.sgst_per FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-        [inventory_id]
-      );
+      const medTax = medTaxMap.get(inventory_id);
       if (medTax) {
         if (isNaN(cgstPer) || cgstPer === 0) cgstPer = Number(medTax.cgst_per) || 0;
         if (isNaN(sgstPer) || sgstPer === 0) sgstPer = Number(medTax.sgst_per) || 0;
@@ -218,9 +235,10 @@ router.post('/', async (req, res) => {
     }
 
     db = await dbManager.getConnection();
-    
+    const conn: Database = db;
+
     // Start transaction to enforce atomicity
-    await db.run('BEGIN IMMEDIATE TRANSACTION');
+    await conn.run('BEGIN IMMEDIATE TRANSACTION');
 
     // Resolve or auto-create customer/patient
     let customerId = patient_id || null;
@@ -305,10 +323,37 @@ router.post('/', async (req, res) => {
       );
     }
 
+    // Batch-fetch stock for all items that already carry an inventory_id, in one query.
+    // Items without an inventory_id resolve dynamically below and get added to the same
+    // map on first lookup, so every item (regardless of path) shares one consistent,
+    // sequentially-updated view of stock — required so two cart lines referencing the
+    // same batch see each other's deduction before their own insufficient-stock check.
+    const stockMap = new Map<number, any>();
+    const knownInventoryIds = items.map((it: any) => it.inventory_id).filter(Boolean);
+    if (knownInventoryIds.length > 0) {
+      const placeholders = knownInventoryIds.map(() => '?').join(',');
+      const rows = await db.all(
+        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+        knownInventoryIds
+      );
+      for (const r of rows) stockMap.set(r.inventory_id, r);
+    }
+    const getStock = async (id: number) => {
+      if (stockMap.has(id)) return stockMap.get(id);
+      const row = await conn.get(
+        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
+        [id]
+      );
+      if (row) stockMap.set(id, row);
+      return row;
+    };
+
     // Insert line items and update inventory
     for (const item of items) {
       let { inventory_id, quantity, unit_price, loose_qty = 0, medicine_name, batch_no, expiry_date, mrp } = item;
-      
+
       if (!inventory_id) {
         // Strict inventory-only sales: never auto-create medicines or fabricate stock.
         // Resolve the item to an existing inventory row or reject the whole sale.
@@ -340,11 +385,7 @@ router.post('/', async (req, res) => {
       }
 
       // Stock Level Verification before processing decrement (strips + loose counted as one pool)
-      const currentStock = await db.get(
-        `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
-         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-        [inventory_id]
-      );
+      const currentStock = await getStock(inventory_id);
       if (!currentStock) {
         throw new Error(`Inventory item ID ${inventory_id} does not exist.`);
       }
@@ -385,6 +426,9 @@ router.post('/', async (req, res) => {
       if (decrementResult.changes === 0) {
         throw new Error(`Failed to decrement stock for inventory ID ${inventory_id}`);
       }
+      // Keep the shared stock map in sync so a later item referencing the same
+      // inventory_id sees this decrement instead of stale pre-batch quantities.
+      stockMap.set(inventory_id, { ...currentStock, quantity: newStock.quantity, loose_quantity: newStock.loose_quantity });
       await refreshInventoryActiveStatus(db, inventory_id);
       await recordStockLedger(db, {
         medicine_id: currentStock.medicine_id, batch_no: currentStock.batch_no,
@@ -394,7 +438,7 @@ router.post('/', async (req, res) => {
 
       // Handle refill logic if enabled
       if (refillEnabled && inventory_id) {
-        const invRecord = await db.get('SELECT medicine_id FROM inventory_master WHERE id = ?', [inventory_id]);
+        const invRecord = currentStock;
         if (invRecord && invRecord.medicine_id) {
           const nextDate = new Date();
           nextDate.setDate(nextDate.getDate() + Number(refillDays));
@@ -597,21 +641,45 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // Match special orders for each item in the saved POS bill
+    // Match special orders for each item in the saved POS bill.
+    // One batched SELECT for all distinct medicine names, then a per-item lookup
+    // against an in-memory index. consumedIds tracks orders already fulfilled
+    // earlier in this same request, replicating the old fresh-per-item-query
+    // behavior where a fulfilled order dropped out of subsequent items' matches.
     const matchedSpecialOrders: any[] = [];
     try {
+      const distinctMedNames = Array.from(new Set(
+        items.map((it: any) => (it.medicine_name || '').trim()).filter(Boolean)
+      ));
+      const specialOrdersByName = new Map<string, any[]>();
+      if (distinctMedNames.length > 0) {
+        const lowerNames = distinctMedNames.map(n => n.toLowerCase());
+        const placeholders = lowerNames.map(() => '?').join(',');
+        const allMatching = await db.all(
+          `SELECT id as order_id, product as medicine, qty as qty_ordered, requester, phone as customer_phone, status as order_status,
+                  LOWER(TRIM(product)) as product_key, LOWER(TRIM(medicine_name)) as medicine_name_key
+           FROM special_orders
+           WHERE (LOWER(TRIM(product)) IN (${placeholders}) OR LOWER(TRIM(medicine_name)) IN (${placeholders}))
+             AND status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`,
+          [...lowerNames, ...lowerNames]
+        );
+        for (const row of allMatching) {
+          for (const key of new Set([row.product_key, row.medicine_name_key].filter(Boolean))) {
+            if (!specialOrdersByName.has(key)) specialOrdersByName.set(key, []);
+            specialOrdersByName.get(key)!.push(row);
+          }
+        }
+      }
+      const consumedOrderIds = new Set<number>();
+
       for (const item of items) {
         const medName = (item.medicine_name || '').trim();
         if (medName) {
-          const matching = await db.all(
-            `SELECT id as order_id, product as medicine, qty as qty_ordered, requester, phone as customer_phone, status as order_status
-             FROM special_orders
-             WHERE (LOWER(TRIM(product)) = LOWER(TRIM(?)) OR LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)))
-               AND status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`,
-            [medName, medName]
-          );
+          const matching = (specialOrdersByName.get(medName.toLowerCase()) || [])
+            .filter(m => !consumedOrderIds.has(m.order_id));
           if (matching && matching.length > 0) {
             for (const m of matching) {
+              consumedOrderIds.add(m.order_id);
               const specMsg = `Hi ${m.requester || 'Customer'}, your special order for *${m.medicine}* (Qty: ${item.quantity || 1}) has been billed & fulfilled. Thank you!`;
               matchedSpecialOrders.push({
                 ...m,
@@ -1866,14 +1934,23 @@ router.put('/:id', async (req, res) => {
 
     // If items changed, reverse old stock and replace
     if (Array.isArray(items)) {
-      // Reverse old stock (strips + loose as one pool, same as the original sale deduction)
+      // Reverse old stock (strips + loose as one pool, same as the original sale deduction).
+      // Batch-fetch once, restore through an in-memory map so multiple old lines on the
+      // same inventory_id accumulate correctly instead of racing on stale reads.
       const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
-      for (const oi of oldItems) {
-        const oldStock = await db.get(
-          `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
-           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-          [oi.inventory_id]
+      const oldInventoryIds = oldItems.map((oi: any) => oi.inventory_id).filter(Boolean);
+      const oldStockMap = new Map<number, any>();
+      if (oldInventoryIds.length > 0) {
+        const placeholders = oldInventoryIds.map(() => '?').join(',');
+        const rows = await db.all(
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+          oldInventoryIds
         );
+        for (const r of rows) oldStockMap.set(r.inventory_id, r);
+      }
+      for (const oi of oldItems) {
+        const oldStock = oldStockMap.get(oi.inventory_id);
         if (!oldStock) continue;
         const restored = applyStockDelta(
           { quantity: oldStock.quantity, loose_quantity: oldStock.loose_quantity },
@@ -1885,6 +1962,7 @@ router.put('/:id', async (req, res) => {
           quantity: Number(oi.quantity), loose_quantity: Number(oi.loose_qty || 0),
           transaction_type: 'sale_edit_restore', transaction_id: id
         });
+        oldStockMap.set(oi.inventory_id, { ...oldStock, quantity: restored.quantity, loose_quantity: restored.loose_quantity });
       }
 
       // Delete old items
@@ -1894,15 +1972,26 @@ router.put('/:id', async (req, res) => {
       const gstCalc = await calculateSalesGstAndTotals(db, items, Number(discount || 0));
       const { subtotal, total, tax, roff, totalCgst, totalSgst, itemTaxBreakdowns } = gstCalc;
 
+      // Batch-fetch stock for the new item set the same way the checkout endpoint does —
+      // one query, then an in-memory map kept in sync after each decrement so two new
+      // lines sharing an inventory_id still see each other's deduction.
+      const newInventoryIds = items.map((it: any) => it.inventory_id).filter(Boolean);
+      const editStockMap = new Map<number, any>();
+      if (newInventoryIds.length > 0) {
+        const placeholders = newInventoryIds.map(() => '?').join(',');
+        const rows = await db.all(
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+          newInventoryIds
+        );
+        for (const r of rows) editStockMap.set(r.inventory_id, r);
+      }
+
       for (const item of items) {
         const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, discount_per = 0 } = item;
 
         // Stock Level & Expiry Verification (strips + loose counted as one pool)
-        const currentStock = await db.get(
-          `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
-           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-          [inventory_id]
-        );
+        const currentStock = editStockMap.get(inventory_id);
         const pSize = currentStock ? currentStock.pack_size : 10;
         const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
         const availableTotalUnits = currentStock ? (currentStock.quantity * pSize + currentStock.loose_quantity) : 0;
@@ -1941,6 +2030,7 @@ router.put('/:id', async (req, res) => {
           quantity: -Number(quantity), loose_quantity: -Number(loose_qty),
           transaction_type: 'sale_edit', transaction_id: id
         });
+        editStockMap.set(inventory_id, { ...currentStock, quantity: newStock.quantity, loose_quantity: newStock.loose_quantity });
       }
 
       await db.run(
@@ -1967,54 +2057,69 @@ router.put('/:id', async (req, res) => {
 
 // Delete a sale invoice (reverses stock)
 router.delete('/:id', async (req, res) => {
-  let db;
   try {
-    db = await dbManager.getConnection();
     const { id } = req.params;
+    let notFound = false;
 
-    const existing = await db.get('SELECT * FROM sales_invoices WHERE id = ?', [id]);
-    if (!existing) {
-            return res.status(404).json({ error: 'Invoice not found' });
-    }
+    await dbManager.transaction(async (db) => {
+      const existing = await db.get('SELECT * FROM sales_invoices WHERE id = ?', [id]);
+      if (!existing) {
+        notFound = true;
+        return;
+      }
 
-    // Reverse stock (strips + loose as one pool)
-    const items = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
-    for (const item of items) {
-      const stock = await db.get(
-        `SELECT im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
-         FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-        [item.inventory_id]
-      );
-      if (!stock) continue;
-      const restored = applyStockDelta(
-        { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
-        Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size
-      );
-      await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.inventory_id]);
-      await recordStockLedger(db, {
-        medicine_id: stock.medicine_id, batch_no: stock.batch_no,
-        quantity: Number(item.quantity), loose_quantity: Number(item.loose_qty || 0),
-        transaction_type: 'sale_delete_restore', transaction_id: id
-      });
-    }
+      // Reverse stock (strips + loose as one pool)
+      const items = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [id]);
+      const inventoryIds = items.map((i: any) => i.inventory_id).filter(Boolean);
+      const stockMap = new Map<number, any>();
 
-    // Delete items then invoice
-    await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
-    await db.run('DELETE FROM sales_invoices WHERE id = ?', [id]);
+      if (inventoryIds.length > 0) {
+        const placeholders = inventoryIds.map(() => '?').join(',');
+        const stocks = await db.all(
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+           FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+          inventoryIds
+        );
+        for (const s of stocks) stockMap.set(s.inventory_id, s);
+      }
 
-    // Recalculate customer credit balance if invoice was associated with a customer
-    if (existing.customer_id) {
-      const unpaidRow = await db.get(
-        `SELECT COALESCE(SUM(total_amount), 0) as total 
-         FROM sales_invoices 
-         WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
-        [existing.customer_id]
-      );
-      const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
-      await db.run(
-        'UPDATE customers SET credit_balance = ? WHERE id = ?',
-        [newBalance, existing.customer_id]
-      );
+      for (const item of items) {
+        const stock = stockMap.get(item.inventory_id);
+        if (!stock) continue;
+        const restored = applyStockDelta(
+          { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
+          Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size
+        );
+        await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.inventory_id]);
+        await recordStockLedger(db, {
+          medicine_id: stock.medicine_id, batch_no: stock.batch_no,
+          quantity: Number(item.quantity), loose_quantity: Number(item.loose_qty || 0),
+          transaction_type: 'sale_delete_restore', transaction_id: id
+        });
+      }
+
+      // Delete items then invoice
+      await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [id]);
+      await db.run('DELETE FROM sales_invoices WHERE id = ?', [id]);
+
+      // Recalculate customer credit balance if invoice was associated with a customer
+      if (existing.customer_id) {
+        const unpaidRow = await db.get(
+          `SELECT COALESCE(SUM(total_amount), 0) as total 
+           FROM sales_invoices 
+           WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
+          [existing.customer_id]
+        );
+        const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
+        await db.run(
+          'UPDATE customers SET credit_balance = ? WHERE id = ?',
+          [newBalance, existing.customer_id]
+        );
+      }
+    });
+
+    if (notFound) {
+      return res.status(404).json({ error: 'Invoice not found' });
     }
 
     inventoryCache.invalidate();
@@ -2039,19 +2144,27 @@ router.delete('/hold/:id', async (req, res) => {
     if (heldBill && heldBill.cart_data) {
       try {
         const items = JSON.parse(heldBill.cart_data);
+        const restoreIds = items.filter((it: any) => it.id && typeof it.id === 'number' && it.id < 1000000).map((it: any) => it.id);
+        const heldStockMap = new Map<number, any>();
+        if (restoreIds.length > 0) {
+          const placeholders = restoreIds.map(() => '?').join(',');
+          const rows = await db.all(
+            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+            restoreIds
+          );
+          for (const r of rows) heldStockMap.set(r.inventory_id, r);
+        }
         for (const item of items) {
           if (item.id && typeof item.id === 'number' && item.id < 1000000) {
-            const stock = await db.get(
-              `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
-               FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-              [item.id]
-            );
+            const stock = heldStockMap.get(item.id);
             if (!stock) continue;
             const restored = applyStockDelta(
               { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
               Number(item.qty || 0), Number(item.looseQty || 0), stock.pack_size
             );
             await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.id]);
+            heldStockMap.set(item.id, { ...stock, quantity: restored.quantity, loose_quantity: restored.loose_quantity });
           }
         }
       } catch (e) { console.error('Failed to parse held bill cart_data:', e); }
@@ -2127,13 +2240,21 @@ router.post('/sync', async (req, res) => {
         );
         const invoiceId = result.lastID;
 
+        const syncInventoryIds = items.map((it: any) => it.inventory_id).filter(Boolean);
+        const syncStockMap = new Map<number, any>();
+        if (syncInventoryIds.length > 0) {
+          const placeholders = syncInventoryIds.map(() => '?').join(',');
+          const rows = await db.all(
+            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
+            syncInventoryIds
+          );
+          for (const r of rows) syncStockMap.set(r.inventory_id, r);
+        }
+
         for (const item of items) {
           const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
-          const currentStock = await db.get(
-            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
-             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
-            [inventory_id]
-          );
+          const currentStock = syncStockMap.get(inventory_id);
           if (!currentStock) {
             throw new Error(`Inventory item ID ${inventory_id} does not exist during direct sync.`);
           }
@@ -2153,6 +2274,7 @@ router.post('/sync', async (req, res) => {
             -Number(quantity), -Number(loose_qty), pSize
           );
           await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
+          syncStockMap.set(inventory_id, { ...currentStock, quantity: newStock.quantity, loose_quantity: newStock.loose_quantity });
         }
         stagedCount++;
       } else {

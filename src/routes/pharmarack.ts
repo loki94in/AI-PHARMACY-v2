@@ -327,6 +327,7 @@ router.get('/distributors', async (req, res) => {
       FROM distributors d
       LEFT JOIN distributor_learning_profiles p ON d.id = p.distributor_id
       ORDER BY d.name ASC
+      LIMIT 1000
     `);
 
     const stores = rows.map((s: any) => {

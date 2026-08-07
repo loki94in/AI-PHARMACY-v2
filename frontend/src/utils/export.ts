@@ -1,6 +1,3 @@
-import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
-
 export interface ExportColumn {
   key: string;
   label: string;
@@ -60,7 +57,9 @@ export function exportToCSV(data: any[], columns: ExportColumn[], filename: stri
   }
 }
 
-export function exportToPDF(data: any[], columns: ExportColumn[], filename: string, title: string, options?: ExportOptions) {
+export async function exportToPDF(data: any[], columns: ExportColumn[], filename: string, title: string, options?: ExportOptions) {
+  const { jsPDF } = await import('jspdf');
+  await import('jspdf-autotable');
   const itemsPerPage = options?.itemsPerPage || 30;
   const isSplit = options?.split && data.length > itemsPerPage;
   const tableColumn = columns.map(c => c.label);

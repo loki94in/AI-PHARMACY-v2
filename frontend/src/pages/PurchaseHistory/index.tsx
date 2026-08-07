@@ -36,7 +36,7 @@ let cachedTransactions: PurchaseTransaction[] | null = null;
 
 const PurchaseHistory = () => {
   const navigate = useNavigate();
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [colFilterId, setColFilterId] = useState('');
   const [colFilterDistributor, setColFilterDistributor] = useState('');
@@ -333,21 +333,19 @@ const PurchaseHistory = () => {
       <div className="flex border-b border-glass-border/30 mb-0 select-none">
         <button
           onClick={() => setActiveTab('history')}
-          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
-            activeTab === 'history'
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${activeTab === 'history'
               ? 'border-primary text-primary'
               : 'border-transparent text-muted hover:text-text'
-          }`}
+            }`}
         >
           Purchase History
         </button>
         <button
           onClick={() => setActiveTab('reconciliation')}
-          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
-            activeTab === 'reconciliation'
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === 'reconciliation'
               ? 'border-primary text-primary'
               : 'border-transparent text-muted hover:text-text'
-          }`}
+            }`}
         >
           Reconcile Distributor Orders
           {getUnreconciledCount() > 0 && (
@@ -603,9 +601,9 @@ const PurchaseHistory = () => {
                               <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="Edit Purchase">
                                 <Edit size={16} />
                               </button>
-                              <button 
+                              <button
                                 onClick={() => {
-                                  if(window.confirm('Are you sure you want to delete this purchase? This will reduce the stock in inventory.')) {
+                                  if (window.confirm('Are you sure you want to delete this purchase? This will reduce the stock in inventory.')) {
                                     api.deletePurchase(tx.id).then(() => {
                                       alert('Purchase deleted and stock reverted');
                                       fetchHistory();
@@ -834,9 +832,8 @@ const PurchaseHistory = () => {
               <div className="bg-bg3 p-4 rounded-xl border border-glass-border">
                 <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1">Reconciliation Status</h4>
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                    selectedOrder.is_saved ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Matched' ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Bounced' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-red/10 text-red border border-red/20'
-                  }`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${selectedOrder.is_saved ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Matched' ? 'bg-green/10 text-green border border-green/20' : selectedOrder.status === 'Bounced' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'bg-red/10 text-red border border-red/20'
+                    }`}>
                     <CheckCircle size={12} />
                     {selectedOrder.is_saved ? 'Reconciled & Saved' : selectedOrder.status === 'Matched' ? 'Matched Purchase' : selectedOrder.status === 'Bounced' ? 'Bounced Items Detected' : 'Missing Invoice Bill'}
                   </span>
@@ -905,25 +902,25 @@ const PurchaseHistory = () => {
                 &times;
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-bg3 p-4 rounded-xl border border-glass-border">
-                 <div>
-                    <span className="text-xs text-muted block mb-1">Invoice No.</span>
-                    <strong className="text-text text-sm font-mono">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
-                 </div>
-                 <div>
-                    <span className="text-xs text-muted block mb-1">Date</span>
-                    <strong className="text-text text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
-                 </div>
-                 <div>
-                    <span className="text-xs text-muted block mb-1">Distributor</span>
-                    <strong className="text-text text-sm">{viewPurchase.purchase.distributor_name}</strong>
-                 </div>
-                 <div>
-                    <span className="text-xs text-muted block mb-1">Total Amount</span>
-                    <strong className="text-green text-sm font-bold font-mono">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
-                 </div>
+                <div>
+                  <span className="text-xs text-muted block mb-1">Invoice No.</span>
+                  <strong className="text-text text-sm font-mono">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span className="text-xs text-muted block mb-1">Date</span>
+                  <strong className="text-text text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
+                </div>
+                <div>
+                  <span className="text-xs text-muted block mb-1">Distributor</span>
+                  <strong className="text-text text-sm">{viewPurchase.purchase.distributor_name}</strong>
+                </div>
+                <div>
+                  <span className="text-xs text-muted block mb-1">Total Amount</span>
+                  <strong className="text-green text-sm font-bold font-mono">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
+                </div>
               </div>
 
               {viewPurchase.purchase.cn_amount > 0 && (
@@ -992,7 +989,7 @@ const PurchaseHistory = () => {
                 </div>
               </div>
             </div>
-            
+
             <div className="p-5 border-t border-glass-border bg-bg2 flex justify-end gap-3">
               <button
                 onClick={() => setViewPurchase(null)}

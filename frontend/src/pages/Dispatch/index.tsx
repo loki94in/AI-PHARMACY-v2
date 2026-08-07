@@ -133,9 +133,18 @@ const Dispatch = () => {
     }
   }, []);
 
+  // ponytail: stagger initial mount fetches — the delivery/order list is the core visible
+  // data for this page, so it loads immediately. WhatsApp message history is secondary
+  // (supplementary log data below the main queue), so it's delayed ~500ms to reduce
+  // network saturation and get the page interactive faster.
+  const [showMessageData, setShowMessageData] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShowMessageData(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     fetchAll();
-    fetchMessageDates();
     const handlePhoneUpdate = () => {
       clearDispatchPageCache();
       fetchAll();
@@ -148,6 +157,11 @@ const Dispatch = () => {
       window.removeEventListener('settings-updated', handlePhoneUpdate);
     };
   }, [fetchAll, fetchMessageDates]);
+
+  useEffect(() => {
+    if (!showMessageData) return;
+    fetchMessageDates();
+  }, [showMessageData, fetchMessageDates]);
 
   useEffect(() => {
     if (selectedDate) {

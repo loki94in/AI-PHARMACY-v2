@@ -9,7 +9,7 @@ const router = express.Router();
 const getDistributorsHandler = async (req: express.Request, res: express.Response) => {
   try {
     const db = await dbManager.getConnection();
-    const distributors = await db.all('SELECT * FROM distributors ORDER BY name');
+    const distributors = await db.all('SELECT * FROM distributors ORDER BY name LIMIT 1000');
     res.json(distributors);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -152,7 +152,7 @@ router.get('/:id/pending-returns', async (req, res) => {
        FROM expiry_returns_tracking ert
        LEFT JOIN returns r ON ert.return_id = r.id
        WHERE ert.distributor_id = ? AND ert.status IN ('pending', 'overdue')
-       ORDER BY ert.return_date ASC`,
+       ORDER BY ert.return_date ASC LIMIT 1000`,
       [id]
     );
     res.json(pendingReturns);

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  Search, 
-  Edit, 
-  Clock, 
-  Trash2, 
-  Check, 
-  AlertTriangle, 
+import {
+  Search,
+  Edit,
+  Clock,
+  Trash2,
+  Check,
+  AlertTriangle,
   Package,
   Loader2,
   Columns3,
@@ -137,20 +137,20 @@ const InvestigationCenter = () => {
 
   // Column Visibility — persisted in localStorage
   const COL_KEYS = [
-    { key: 'batch',          label: 'Batch' },
-    { key: 'date',           label: 'Date' },
-    { key: 'invoice',        label: 'Invoice' },
-    { key: 'party',          label: 'Party' },
-    { key: 'openingStock',   label: 'Opening Stock' },
-    { key: 'purchase',       label: 'Purchase' },
-    { key: 'sales',          label: 'Sales' },
+    { key: 'batch', label: 'Batch' },
+    { key: 'date', label: 'Date' },
+    { key: 'invoice', label: 'Invoice' },
+    { key: 'party', label: 'Party' },
+    { key: 'openingStock', label: 'Opening Stock' },
+    { key: 'purchase', label: 'Purchase' },
+    { key: 'sales', label: 'Sales' },
     { key: 'purchaseReturn', label: 'Purchase Return' },
-    { key: 'salesReturn',    label: 'Sales Return' },
-    { key: 'adj',            label: 'Adj' },
-    { key: 'stockAudit',     label: 'Stock Audit' },
-    { key: 'b2bSales',       label: 'B2B Sales' },
-    { key: 'closingStock',   label: 'Closing Stock' },
-    { key: 'medicineStock',  label: 'Medicine Stock' },
+    { key: 'salesReturn', label: 'Sales Return' },
+    { key: 'adj', label: 'Adj' },
+    { key: 'stockAudit', label: 'Stock Audit' },
+    { key: 'b2bSales', label: 'B2B Sales' },
+    { key: 'closingStock', label: 'Closing Stock' },
+    { key: 'medicineStock', label: 'Medicine Stock' },
   ] as const;
   type ColKey = typeof COL_KEYS[number]['key'];
 
@@ -272,7 +272,7 @@ const InvestigationCenter = () => {
       if (filters.batchNo) cleanFilters.batchNo = filters.batchNo;
       if (filters.reference) cleanFilters.reference = filters.reference;
       if (filters.party) cleanFilters.party = filters.party;
-      
+
       const response = await api.getInvestigationTimeline(cleanFilters);
       return {
         data: response.data || [],
@@ -386,7 +386,7 @@ const InvestigationCenter = () => {
           invalidateAfterStockWrite(queryClient);
 
           // Refresh local POS inventory search cache
-          api.getCompactInventory().catch(() => {});
+          api.getCompactInventory().catch(() => { });
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to update inventory', 'error');
         }
@@ -584,7 +584,7 @@ const InvestigationCenter = () => {
           invalidateAfterStockWrite(queryClient);
 
           // Refresh local POS inventory search cache
-          api.getCompactInventory().catch(() => {});
+          api.getCompactInventory().catch(() => { });
         } catch (err: any) {
           showToast(err.response?.data?.error || 'Failed to save correction.', 'error');
         }
@@ -646,14 +646,14 @@ const InvestigationCenter = () => {
             </div>
             <p className="text-xs text-muted leading-relaxed">{confirmModal.message}</p>
             <div className="flex justify-end gap-3 mt-2">
-              <button 
-                onClick={() => setConfirmModal(null)} 
+              <button
+                onClick={() => setConfirmModal(null)}
                 disabled={isSaving}
                 className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={async () => {
                   if (isSaving) return;
                   try {
@@ -664,7 +664,7 @@ const InvestigationCenter = () => {
                   } finally {
                     setIsSaving(false);
                   }
-                }} 
+                }}
                 disabled={isSaving}
                 className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
@@ -691,7 +691,7 @@ const InvestigationCenter = () => {
                   Showing <strong className="text-text font-bold font-mono">{items.length.toLocaleString()}</strong>
                   {totalItems > 0 && <> of <strong className="text-text font-bold font-mono">{totalItems.toLocaleString()}</strong></>} ledgers
                 </span>
-                
+
                 {/* Compact Inline Stat Badges */}
                 <div className="hidden lg:flex items-center gap-2 border-l border-glass-border/30 pl-3">
                   <span className="px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-mono font-bold">
@@ -760,7 +760,7 @@ const InvestigationCenter = () => {
                 <Sliders size={12} className="text-primary" />
                 Filters:
               </div>
-              
+
               {/* Medicine Filter */}
               <div className="relative w-40">
                 <Search className="absolute left-2.5 top-2 text-muted/50" size={11} />
@@ -869,11 +869,10 @@ const InvestigationCenter = () => {
                 <div className="relative" ref={colMenuRef}>
                   <button
                     onClick={() => setShowColMenu(p => !p)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
-                      showColMenu
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${showColMenu
                         ? 'bg-primary/15 border-primary/45 text-primary'
                         : 'bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60'
-                    }`}
+                      }`}
                     title="Toggle columns"
                   >
                     <Columns3 size={12} />
@@ -911,14 +910,13 @@ const InvestigationCenter = () => {
                             onClick={() => toggleCol(key)}
                             className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/10 transition-colors text-left cursor-pointer"
                           >
-                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                              visibleCols.has(key)
+                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${visibleCols.has(key)
                                 ? 'bg-primary border-primary'
                                 : 'bg-transparent border-glass-border/60'
-                            }`}>
+                              }`}>
                               {visibleCols.has(key) && <Check size={9} className="text-white" />}
                             </span>
-                            <span className={`text-[11px] font-semibold ${ visibleCols.has(key) ? 'text-text' : 'text-muted/60' }`}>
+                            <span className={`text-[11px] font-semibold ${visibleCols.has(key) ? 'text-text' : 'text-muted/60'}`}>
                               {label}
                             </span>
                           </button>
@@ -939,13 +937,13 @@ const InvestigationCenter = () => {
               <div className="flex items-center gap-2">
                 <Edit size={15} className="text-primary" />
                 <h2 className="text-xs font-black text-text uppercase tracking-wider">
-                  {editingType === 'inventory' ? 'Inventory Direct Correction' : 
-                   editingType === 'sale' ? `Correcting Sales Invoice #${editingBillNo}` : 
-                   `Correcting Purchase Bill #${editingBillNo}`}
+                  {editingType === 'inventory' ? 'Inventory Direct Correction' :
+                    editingType === 'sale' ? `Correcting Sales Invoice #${editingBillNo}` :
+                      `Correcting Purchase Bill #${editingBillNo}`}
                 </h2>
               </div>
-              <button 
-                onClick={() => setEditingType(null)} 
+              <button
+                onClick={() => setEditingType(null)}
                 className="text-[11px] text-muted hover:text-text font-bold bg-bg3 border border-glass-border px-2.5 py-1 rounded-lg transition-all cursor-pointer"
               >
                 Discard Workspace
@@ -955,10 +953,10 @@ const InvestigationCenter = () => {
             <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-bg2/10">
               {editingType === 'inventory' && (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full items-start">
-                  
+
                   {/* Left Panel: Form & Preview (Col span 8) */}
                   <div className="lg:col-span-8 flex flex-col gap-6 w-full animate-in fade-in slide-in-from-left-4 duration-300">
-                    
+
                     {/* Before vs After Preview Card with Diff Badges */}
                     {details && details.inventory && (() => {
                       const qtyDiff = editInventoryForm.quantity - details.inventory.quantity;
@@ -969,7 +967,7 @@ const InvestigationCenter = () => {
                       return (
                         <div className="bg-bg2 border border-glass-border p-5 rounded-2xl flex flex-col gap-4 shadow-xl relative overflow-hidden">
                           <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
-                          
+
                           <div className="flex items-center justify-between border-b border-glass-border/30 pb-3">
                             <div className="flex items-center gap-2">
                               <Info size={14} className="text-amber-500" />
@@ -979,7 +977,7 @@ const InvestigationCenter = () => {
                               Draft Mode
                             </span>
                           </div>
-                          
+
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                             {/* Compare Box Qty */}
                             <div className="bg-bg3/30 border border-glass-border/20 rounded-xl p-3.5 flex flex-col gap-2 relative group hover:border-glass-border/40 transition-colors">
@@ -992,9 +990,8 @@ const InvestigationCenter = () => {
                                 </span>
                               </div>
                               {qtyDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
-                                  qtyDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                }`}>
+                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${qtyDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                                  }`}>
                                   {qtyDiff > 0 ? `+${qtyDiff}` : qtyDiff}
                                 </span>
                               )}
@@ -1011,9 +1008,8 @@ const InvestigationCenter = () => {
                                 </span>
                               </div>
                               {looseDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
-                                  looseDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                }`}>
+                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${looseDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                                  }`}>
                                   {looseDiff > 0 ? `+${looseDiff}` : looseDiff}
                                 </span>
                               )}
@@ -1030,9 +1026,8 @@ const InvestigationCenter = () => {
                                 </span>
                               </div>
                               {mrpDiff !== 0 && (
-                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${
-                                  mrpDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
-                                }`}>
+                                <span className={`absolute top-2.5 right-2.5 text-[8px] font-black px-1.5 py-0.5 rounded-md ${mrpDiff > 0 ? 'bg-green/10 text-green border border-green/20' : 'bg-red/10 text-red border border-red/20'
+                                  }`}>
                                   {mrpDiff > 0 ? `+₹${mrpDiff}` : `-₹${Math.abs(mrpDiff)}`}
                                 </span>
                               )}
@@ -1057,7 +1052,7 @@ const InvestigationCenter = () => {
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">Box Quantity</label>
-                          <input 
+                          <input
                             type="number"
                             value={editInventoryForm.quantity}
                             onChange={e => setEditInventoryForm(prev => ({ ...prev, quantity: Math.max(0, Number(e.target.value)) }))}
@@ -1066,7 +1061,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">Loose Quantity</label>
-                          <input 
+                          <input
                             type="number"
                             value={editInventoryForm.loose_quantity}
                             onChange={e => setEditInventoryForm(prev => ({ ...prev, loose_quantity: Math.max(0, Number(e.target.value)) }))}
@@ -1075,7 +1070,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">Batch Number</label>
-                          <input 
+                          <input
                             type="text"
                             value={editInventoryForm.batch_no}
                             onChange={e => setEditInventoryForm(prev => ({ ...prev, batch_no: e.target.value }))}
@@ -1084,7 +1079,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">Expiry Date</label>
-                          <input 
+                          <input
                             type="text"
                             placeholder="MM/YY"
                             value={editInventoryForm.expiry_date}
@@ -1094,7 +1089,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">MRP (₹)</label>
-                          <input 
+                          <input
                             type="number"
                             value={editInventoryForm.mrp}
                             onChange={e => setEditInventoryForm(prev => ({ ...prev, mrp: Math.max(0, Number(e.target.value)) }))}
@@ -1103,7 +1098,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold text-muted uppercase">Cost Price (₹)</label>
-                          <input 
+                          <input
                             type="number"
                             value={editInventoryForm.cost_price}
                             onChange={e => setEditInventoryForm(prev => ({ ...prev, cost_price: Math.max(0, Number(e.target.value)) }))}
@@ -1112,7 +1107,7 @@ const InvestigationCenter = () => {
                         </div>
                         <div className="flex flex-col gap-1.5 sm:col-span-2 md:col-span-3">
                           <label className="text-[10px] font-bold text-muted uppercase">Rack Location</label>
-                          <input 
+                          <input
                             type="text"
                             placeholder="e.g. Rack A1, Shelf 2"
                             value={editInventoryForm.rack_location}
@@ -1123,14 +1118,14 @@ const InvestigationCenter = () => {
                       </div>
 
                       <div className="flex justify-end gap-3 border-t border-glass-border/30 pt-4">
-                        <button 
-                          onClick={() => setEditingType(null)} 
+                        <button
+                          onClick={() => setEditingType(null)}
                           className="px-4 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
                         >
                           Discard
                         </button>
-                        <button 
-                          onClick={saveInventoryAdjustment} 
+                        <button
+                          onClick={saveInventoryAdjustment}
                           className="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.2)] cursor-pointer"
                         >
                           Save Stock Adjustments
@@ -1142,7 +1137,7 @@ const InvestigationCenter = () => {
                   {/* Right Panel: Audit Logs Timeline (Col span 4) */}
                   <div className="lg:col-span-4 bg-glass-bg border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl self-stretch min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
-                    
+
                     <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
                       <History size={14} className="text-primary animate-pulse" />
                       <h3 className="text-xs font-bold text-text uppercase tracking-wider">Audit Trail / History</h3>
@@ -1165,19 +1160,18 @@ const InvestigationCenter = () => {
 
                             return (
                               <div key={log.id || idx} className="relative flex flex-col gap-1 text-[11px] animate-in fade-in duration-300">
-                                <span className={`absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-bg2 ${
-                                  isCorrection ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' :
-                                  isPositive ? 'bg-green shadow-[0_0_8px_rgba(34,197,150,0.5)]' :
-                                  isNegative ? 'bg-red shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
-                                  'bg-primary shadow-[0_0_8px_rgba(34,197,150,0.5)]'
-                                }`} />
-                                
+                                <span className={`absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-bg2 ${isCorrection ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' :
+                                    isPositive ? 'bg-green shadow-[0_0_8px_rgba(34,197,150,0.5)]' :
+                                      isNegative ? 'bg-red shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
+                                        'bg-primary shadow-[0_0_8px_rgba(34,197,150,0.5)]'
+                                  }`} />
+
                                 <div className="flex justify-between items-center text-[9px] font-bold text-muted uppercase tracking-wider">
                                   <span className={
                                     isCorrection ? 'text-amber-500' :
-                                    isPositive ? 'text-green' :
-                                    isNegative ? 'text-red' :
-                                    'text-primary'
+                                      isPositive ? 'text-green' :
+                                        isNegative ? 'text-red' :
+                                          'text-primary'
                                   }>
                                     {action.replace(/_/g, ' ')}
                                   </span>
@@ -1198,16 +1192,16 @@ const InvestigationCenter = () => {
 
               {(editingType === 'sale' || editingType === 'purchase') && (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full items-start">
-                  
+
                   {/* Left Panel: Autocomplete and Item List (Col span 8) */}
                   <div className="lg:col-span-8 flex flex-col gap-4 w-full animate-in fade-in slide-in-from-left-4 duration-300">
-                    
+
                     {/* Medicine Search Card */}
                     <div className="bg-bg2 border border-glass-border p-4 rounded-2xl shadow-xl flex flex-col gap-3">
                       <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Search & Add Medicines</label>
                       <div className="relative" ref={medicineSearchRef}>
                         <Search className="absolute left-3 top-3.5 text-muted" size={14} />
-                        <input 
+                        <input
                           type="text"
                           placeholder="Search medicine to add to this transaction..."
                           value={searchMedicineQuery}
@@ -1267,9 +1261,8 @@ const InvestigationCenter = () => {
                                         New Item
                                       </span>
                                     ) : qtyDiff !== 0 ? (
-                                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md border uppercase shrink-0 ${
-                                        qtyDiff > 0 ? 'bg-green/10 text-green border-green/20' : 'bg-red/10 text-red border-red/20'
-                                      }`}>
+                                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md border uppercase shrink-0 ${qtyDiff > 0 ? 'bg-green/10 text-green border-green/20' : 'bg-red/10 text-red border-red/20'
+                                        }`}>
                                         {qtyDiff > 0 ? `+${qtyDiff} Added` : `${qtyDiff} Reduced`}
                                       </span>
                                     ) : null}
@@ -1280,7 +1273,7 @@ const InvestigationCenter = () => {
                                     </span>
                                   </div>
                                 </div>
-                                
+
                                 <div className="flex flex-wrap items-center gap-4 shrink-0 justify-between sm:justify-end">
                                   {/* Quantity Stepper */}
                                   <div className="flex items-center gap-2">
@@ -1293,7 +1286,7 @@ const InvestigationCenter = () => {
                                       >
                                         <Minus size={11} />
                                       </button>
-                                      <input 
+                                      <input
                                         type="number"
                                         value={item.quantity}
                                         onChange={e => handleItemQtyChange(index, Math.max(0, Number(e.target.value)))}
@@ -1321,7 +1314,7 @@ const InvestigationCenter = () => {
                                         >
                                           <Minus size={11} />
                                         </button>
-                                        <input 
+                                        <input
                                           type="number"
                                           value={item.loose_qty}
                                           onChange={e => handleItemLooseQtyChange(index, Math.max(0, Number(e.target.value)))}
@@ -1419,7 +1412,7 @@ const InvestigationCenter = () => {
                           <span className="text-muted">Discount Override</span>
                           <div className="relative w-24">
                             <span className="absolute left-2.5 top-1.5 text-[10px] text-muted">₹</span>
-                            <input 
+                            <input
                               type="number"
                               value={billDiscount}
                               onChange={e => setBillDiscount(Math.max(0, Number(e.target.value)))}
@@ -1440,15 +1433,15 @@ const InvestigationCenter = () => {
 
                     {/* Actions Grid */}
                     <div className="flex flex-col gap-2.5 pt-2">
-                      <button 
-                        onClick={saveBillCorrections} 
+                      <button
+                        onClick={saveBillCorrections}
                         className="w-full py-2.5 rounded-xl bg-primary text-white hover:bg-primary/95 transition-all text-xs font-bold shadow-[0_0_15px_rgba(34,197,150,0.35)] cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <Check size={14} />
                         Save Corrections
                       </button>
-                      <button 
-                        onClick={() => setEditingType(null)} 
+                      <button
+                        onClick={() => setEditingType(null)}
                         className="w-full py-2.5 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border transition-colors text-xs font-bold cursor-pointer"
                       >
                         Discard Workspace
@@ -1556,25 +1549,24 @@ const InvestigationCenter = () => {
                                   {item.type === 'Return' ? `${item.return_type} return` : item.type}
                                 </span>
                               </div>
-                              <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md border shrink-0 ${
-                                item.type === 'Sale' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' :
-                                item.type === 'Purchase' ? 'bg-green/10 border-green/20 text-green' :
-                                item.type === 'Adjustment' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
-                                item.return_type === 'purchase' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
-                                'bg-purple-500/10 border-purple-500/20 text-purple-400'
-                              }`}>
+                              <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-md border shrink-0 ${item.type === 'Sale' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' :
+                                  item.type === 'Purchase' ? 'bg-green/10 border-green/20 text-green' :
+                                    item.type === 'Adjustment' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
+                                      item.return_type === 'purchase' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' :
+                                        'bg-purple-500/10 border-purple-500/20 text-purple-400'
+                                }`}>
                                 {item.type}
                               </span>
                             </div>
                           </td>
                           {col('batch') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 font-mono font-bold text-muted truncate text-xs">{item.batch_no || 'N/A'}</td>}
                           {col('date') && <td className="p-2 border-r border-glass-border/20 w-44 shrink-0 font-mono whitespace-nowrap text-muted truncate text-xs" title={formatDate(item.date)}>{formatDate(item.date)}</td>}
-                          
+
                           {/* Invoice cell */}
                           {col('invoice') && (
                             <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 truncate text-xs">
                               {item.invoice_id || item.purchase_id ? (
-                                <button 
+                                <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (item.type === 'Sale') handleStartSaleBillEdit(item);
@@ -1673,7 +1665,7 @@ const InvestigationCenter = () => {
 
                           {col('stockAudit') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
                           {col('b2bSales') && <td className="p-2 border-r border-glass-border/20 w-28 shrink-0 text-center font-mono text-xs text-muted/30">0</td>}
-                          
+
                           {col('closingStock') && (
                             <td className="p-2 border-r border-glass-border/20 w-32 shrink-0 text-center font-mono text-xs text-text">
                               <span className="font-bold">{item.closing_qty || 0}</span>

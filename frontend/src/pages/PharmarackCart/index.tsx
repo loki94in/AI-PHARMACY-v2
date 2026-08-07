@@ -1898,13 +1898,39 @@ export default function PharmarackCart() {
     }
   };
 
+  // ponytail: stagger initial mount fetches — the live cart (plus its "already sent" badge
+  // map) is the primary visible data, so it loads immediately. Pending special orders/refills
+  // load shortly after, and sales reorder suggestions (lowest priority, sidebar-only) load last.
+  // This 3-tier order (cart -> pending -> suggestions) avoids saturating the network with 5+
+  // parallel requests on mount and gets the cart interactive sooner.
+  const [showPendingTier, setShowPendingTier] = useState(false);
+  const [showSuggestionsTier, setShowSuggestionsTier] = useState(false);
+
   useEffect(() => {
     fetchCart();
+    fetchLatestSentMap();
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowPendingTier(true), 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSuggestionsTier(true), 600);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!showPendingTier) return;
     fetchPendingOrders();
     fetchPendingRefills();
-    fetchLatestSentMap();
+  }, [showPendingTier]);
+
+  useEffect(() => {
+    if (!showSuggestionsTier) return;
     fetchReorderSuggestions();
-  }, []);
+  }, [showSuggestionsTier]);
 
   // Re-fetch pending special orders whenever any page creates/updates an order.
   // This clears the module-level cache so stale data is never shown.

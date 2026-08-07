@@ -22,6 +22,7 @@ router.get('/orders', async (_req, res) => {
       FROM dispatch_orders d
       LEFT JOIN delivery_boys db ON d.delivery_boy_id = db.id
       ORDER BY d.created_at DESC
+      LIMIT 1000
     `);
         res.json(orders);
   } catch (err) {

@@ -227,6 +227,7 @@ router.get('/profiles', async (req, res) => {
       ) dhf_agg ON d.id = dhf_agg.distributor_id
       LEFT JOIN distributor_historical_files dhf ON dhf.id = dhf_agg.max_id
       ORDER BY d.name ASC
+      LIMIT 1000
     `);
     res.json({ success: true, profiles });
   } catch (error: any) {

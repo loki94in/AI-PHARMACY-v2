@@ -108,7 +108,19 @@ let cachedDoctors: any[] | null = null;
 let cachedCommonCombinations: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
-const groupBatches = (items: any[]): any[] => {
+// E3: hard cap on recursive nesting so pathological/cyclic `alternatives`
+// data can never cause runaway recursion.
+const GROUP_BATCHES_MAX_DEPTH = 3;
+
+// Per-call memoization: keyed by medicine id, but only reused when the exact
+// same input array reference is seen again (so results never go stale) —
+// avoids recomputing the same medicine's alternatives subtree repeatedly
+// within a single groupBatches() invocation/render cycle.
+const groupBatchesInternal = (
+  items: any[],
+  depth: number,
+  cache: Map<number, { input: any[]; output: any[] }>
+): any[] => {
   const grouped: any[] = [];
   const map = new Map<number, any>();
 
@@ -116,6 +128,17 @@ const groupBatches = (items: any[]): any[] => {
   // batches that still have strips beat loose-only batches; among those, earliest expiry wins.
   const fefoRank = (stripQty: number, exp?: string) =>
     `${Number(stripQty) > 0 ? 0 : 1}|${exp || '9999-12'}`;
+
+  const groupAlternatives = (medId: number, altItems: any[]): any[] => {
+    if (depth >= GROUP_BATCHES_MAX_DEPTH) return [];
+    const cached = cache.get(medId);
+    if (cached && cached.input === altItems) {
+      return cached.output;
+    }
+    const output = groupBatchesInternal(altItems, depth + 1, cache);
+    cache.set(medId, { input: altItems, output });
+    return output;
+  };
 
   for (const item of items) {
     // Exclude expired batches strictly from POS sales
@@ -132,7 +155,7 @@ const groupBatches = (items: any[]): any[] => {
         __fefoRank: fefoRank(stripQty, item.expiry_date)
       };
       if (item.alternatives && Array.isArray(item.alternatives)) {
-        copy.alternatives = groupBatches(item.alternatives);
+        copy.alternatives = groupAlternatives(medId, item.alternatives);
       } else {
         copy.alternatives = [];
       }
@@ -158,11 +181,17 @@ const groupBatches = (items: any[]): any[] => {
       }
 
       if (item.alternatives && Array.isArray(item.alternatives) && item.alternatives.length > 0) {
-        existing.alternatives = groupBatches([...existing.alternatives, ...item.alternatives]);
+        existing.alternatives = depth >= GROUP_BATCHES_MAX_DEPTH
+          ? existing.alternatives
+          : groupBatchesInternal([...existing.alternatives, ...item.alternatives], depth + 1, cache);
       }
     }
   }
   return grouped;
+};
+
+const groupBatches = (items: any[]): any[] => {
+  return groupBatchesInternal(items, 0, new Map<number, { input: any[]; output: any[] }>());
 };
 
 // Stable empty array reference to prevent reference-mismatch state updates
@@ -218,8 +247,9 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
 const POS = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const initialTabs = getInitialPOSTabs();
-  const initialActiveTabId = getInitialPOSActiveTabId(initialTabs);
+
+  const [initialTabs] = useState(() => getInitialPOSTabs());
+  const [initialActiveTabId] = useState(() => getInitialPOSActiveTabId(initialTabs));
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -377,8 +407,12 @@ const POS = () => {
         try {
           // Multi-medicine array from CRM "Bill Now / Sell → POS"
           if (Array.isArray(prefill.medicines) && prefill.medicines.length > 0) {
-            const cartItems: any[] = [];
-            for (const med of prefill.medicines) {
+            // D2: resolve every medicine's lookup concurrently instead of one
+            // sequential await per item. Each item keeps its own try/catch so a
+            // single failed/unmatched lookup still falls back to a "special
+            // request" cart line instead of aborting the whole batch, and
+            // Promise.all preserves the original input order in the result.
+            const cartItems: any[] = await Promise.all(prefill.medicines.map(async (med: any) => {
               const targetName = med.medicineName || med.medicine_name || '';
               const targetQty = Number(med.quantity_needed || med.qty) || 1;
               try {
@@ -390,7 +424,7 @@ const POS = () => {
                   const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
                     ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
                     : 0;
-                  cartItems.push({
+                  return {
                     id: m.id,
                     name: m.name,
                     batch: m.batch_no || m.batch_number || 'AUTO',
@@ -403,24 +437,9 @@ const POS = () => {
                     looseQty: 0,
                     discount: autoDisc,
                     packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 10
-                  });
-                } else {
-                  cartItems.push({
-                    id: 'special_' + Date.now() + '_' + Math.random(),
-                    name: targetName || 'Special Request Medicine',
-                    batch: 'SPECIAL',
-                    expiry: '12/28',
-                    mrp: 100,
-                    qty: targetQty,
-                    quantity: targetQty,
-                    unitPrice: 100,
-                    looseQty: 0,
-                    discount: 0,
-                    packSize: 1
-                  });
+                  };
                 }
-              } catch {
-                cartItems.push({
+                return {
                   id: 'special_' + Date.now() + '_' + Math.random(),
                   name: targetName || 'Special Request Medicine',
                   batch: 'SPECIAL',
@@ -432,9 +451,23 @@ const POS = () => {
                   looseQty: 0,
                   discount: 0,
                   packSize: 1
-                });
+                };
+              } catch {
+                return {
+                  id: 'special_' + Date.now() + '_' + Math.random(),
+                  name: targetName || 'Special Request Medicine',
+                  batch: 'SPECIAL',
+                  expiry: '12/28',
+                  mrp: 100,
+                  qty: targetQty,
+                  quantity: targetQty,
+                  unitPrice: 100,
+                  looseQty: 0,
+                  discount: 0,
+                  packSize: 1
+                };
               }
-            }
+            }));
             if (cartItems.length > 0) {
               cartGenerationRef.current += 1;
               setCart(cartItems);
@@ -512,10 +545,21 @@ const POS = () => {
   const combinationsControl = useFetchMode('pos.combinations');
   const doctorsControl = useFetchMode('pos.doctors');
 
+  // B1: the cart itself loads immediately (lazy-initialized from localStorage,
+  // no network call). These three non-essential mount fetches (special orders,
+  // common combinations, doctors list) are staggered ~500ms after mount so
+  // they don't all compete with the cart/checkout UI for bandwidth/CPU on
+  // initial page load.
+  const [mountFetchesReady, setMountFetchesReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setMountFetchesReady(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const { data: specialOrders = [] } = useApiQuery<any[]>(
     'pos-special-orders',
     () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
-    { enabled: specialOrdersControl.shouldFetch }
+    { enabled: mountFetchesReady && specialOrdersControl.shouldFetch }
   );
 
   const matchedCustomerOrders = useMemo(() => {
@@ -578,7 +622,7 @@ const POS = () => {
         return topItems;
       }
     },
-    { enabled: combinationsControl.shouldFetch }
+    { enabled: mountFetchesReady && combinationsControl.shouldFetch }
   );
 
   const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
@@ -633,8 +677,15 @@ const POS = () => {
     localStorage.setItem('pos_draft_tabs', JSON.stringify(tabs));
   }, [tabs]);
 
-  // Auto-initialize with an empty row if the cart is completely empty
+  // E4+E5+E13: merged empty-row management. These two [cart]-only effects used
+  // to run back-to-back on every cart change, causing an extra intermediate
+  // render pass between them. Their trigger conditions are mutually exclusive
+  // (the "cart totally empty" branch only fires when there are zero non-empty
+  // rows, the "append" branch only fires when the last row IS a filled/non-empty
+  // row) so combining them into one effect — in the same original order —
+  // produces the exact same state transitions with a single effect pass.
   useEffect(() => {
+    // 1) Auto-initialize with an empty row if the cart is completely empty
     const validItems = cart.filter(item => !item.isEmptyRow);
     if (validItems.length === 0 && (cart.length !== 1 || !cart[0].isEmptyRow)) {
       setCart([{
@@ -649,11 +700,10 @@ const POS = () => {
         packSize: 10,
         isEmptyRow: true
       }]);
+      return;
     }
-  }, [cart]);
 
-  // Automatically append a new empty row at the bottom if the last row is filled
-  useEffect(() => {
+    // 2) Automatically append a new empty row at the bottom if the last row is filled
     if (cart.length > 0) {
       const lastItem = cart[cart.length - 1];
       if (!lastItem.isEmptyRow && lastItem.name) {
@@ -814,7 +864,7 @@ const POS = () => {
   const { data: doctorsList } = useApiQuery<any[]>(
     'crm-doctors',
     () => api.getDoctors(),
-    { enabled: doctorsControl.shouldFetch }
+    { enabled: mountFetchesReady && doctorsControl.shouldFetch }
   );
 
   const defaultDoctors = useMemo(() => [
@@ -852,17 +902,26 @@ const POS = () => {
 
   // Load doctor suggestions when doctor ID changes
   useEffect(() => {
+    let active = true;
     if (selectedDoctorId) {
-      api.getDoctorSuggestions(selectedDoctorId)
-        .then((data: any[]) => {
-          if (Array.isArray(data)) {
-            setDoctorSuggestions(data);
-          }
-        })
-        .catch(err => {
-          console.error('Failed to fetch doctor suggestions:', err);
-          setDoctorSuggestions(EMPTY_ARRAY);
-        });
+      const timer = setTimeout(() => {
+        api.getDoctorSuggestions(selectedDoctorId)
+          .then((data: any[]) => {
+            if (active && Array.isArray(data)) {
+              setDoctorSuggestions(data);
+            }
+          })
+          .catch(err => {
+            if (active) {
+              console.error('Failed to fetch doctor suggestions:', err);
+              setDoctorSuggestions(EMPTY_ARRAY);
+            }
+          });
+      }, 200);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
     } else {
       setDoctorSuggestions(EMPTY_ARRAY);
     }
@@ -953,6 +1012,26 @@ const POS = () => {
     setDoctorHighlightIndex(-1);
   });
 
+  // Inventory cache readiness + version (moved up so the shared memoized
+  // mapping below can depend on cacheVersion before it is used by either
+  // the row-level or header search-result dropdowns).
+  const [inventoryIndexReady, setInventoryIndexReady] = useState(() => isCompactInventoryCacheReady());
+  const [cacheVersion, setCacheVersion] = useState(0);
+
+  // E2/E11: shared memoized inventory mapping. This full-array map/copy only
+  // reruns when the compact inventory cache actually changes (cacheVersion),
+  // not on every keystroke — both search dropdowns below consume this same
+  // reference instead of each doing their own `.map()` per render.
+  const mappedInventory = useMemo(() => {
+    const compactInventory = getCompactInventoryCache();
+    return compactInventory.map(item => ({
+      ...item,
+      medicine_name: item.name,
+      quantity: item.stock_qty,
+      alternatives: []
+    }));
+  }, [cacheVersion]);
+
   // Local row search autocomplete
   useEffect(() => {
     const term = rowSearchTerm.trim();
@@ -962,19 +1041,11 @@ const POS = () => {
       return;
     }
 
-    const compactInventory = getCompactInventoryCache();
-    const mapped = compactInventory.map(item => ({
-      ...item,
-      medicine_name: item.name,
-      quantity: item.stock_qty,
-      alternatives: []
-    }));
-
-    const filtered = filterLocalInventory(term, mapped);
+    const filtered = filterLocalInventory(term, mappedInventory);
     const grouped = groupBatches(filtered);
     setRowSearchResults(grouped);
     setRowSearchHighlightIndex(-1);
-  }, [rowSearchTerm, activeRowSearchIndex]);
+  }, [rowSearchTerm, activeRowSearchIndex, mappedInventory]);
 
   // Synchronize selection refs to avoid closure staleness in async callbacks
   useEffect(() => {
@@ -1020,6 +1091,10 @@ const POS = () => {
     return () => clearTimeout(delayDebounce);
   }, [patientName, selectedCustomerId]);
 
+  // C4: cache the refills panel result set once and filter it client-side on
+  // subsequent patientName keystrokes, instead of re-hitting the API per keystroke.
+  const refillsPanelCacheRef = useRef<any[] | null>(null);
+
   // Search for pending refills matching the patient's name to display the name-match alert banner
   useEffect(() => {
     if (patientName.trim().length < 2) {
@@ -1028,25 +1103,28 @@ const POS = () => {
     }
     const delayCheck = setTimeout(async () => {
       try {
-        const response = await apiClient.get('/refills/panel');
-        if (response.data && Array.isArray(response.data)) {
-          const match = response.data.find((group: any) => 
-            group.patient_name.toLowerCase().trim() === patientName.toLowerCase().trim()
-          );
-          if (match && match.medicines.length > 0) {
-            // Find a medicine in the group that is ready (or override set) and not checked out
-            const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
-            if (med && med.id !== dismissedRefillId) {
-              setMatchedRefill({
-                id: med.id,
-                patient_name: match.patient_name,
-                patient_phone: match.patient_phone,
-                medicine_id: med.medicine_id,
-                medicine_name: med.medicine_name,
-                quantity: med.quantity_needed || 10
-              });
-              return;
-            }
+        let panelData = refillsPanelCacheRef.current;
+        if (!panelData) {
+          const response = await apiClient.get('/refills/panel');
+          panelData = Array.isArray(response.data) ? response.data : [];
+          refillsPanelCacheRef.current = panelData;
+        }
+        const match = panelData.find((group: any) =>
+          group.patient_name.toLowerCase().trim() === patientName.toLowerCase().trim()
+        );
+        if (match && match.medicines.length > 0) {
+          // Find a medicine in the group that is ready (or override set) and not checked out
+          const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
+          if (med && med.id !== dismissedRefillId) {
+            setMatchedRefill({
+              id: med.id,
+              patient_name: match.patient_name,
+              patient_phone: match.patient_phone,
+              medicine_id: med.medicine_id,
+              medicine_name: med.medicine_name,
+              quantity: med.quantity_needed || 10
+            });
+            return;
           }
         }
         setMatchedRefill(null);
@@ -1093,6 +1171,9 @@ const POS = () => {
 
       setActiveRefillId(matchedRefill.id);
       toastEvent.trigger(`Added refill medication: ${matchedRefill.medicine_name}`, 'success', '/pos');
+      // Invalidate the cached refills panel so a subsequent name search reflects
+      // this refill's now-changed (checked-out) status instead of stale cached data.
+      refillsPanelCacheRef.current = null;
     } catch (err) {
       console.error('Failed to accept refill:', err);
     }
@@ -1240,9 +1321,6 @@ const POS = () => {
   // Local autocomplete (replaces React Query useApiQuery to eliminate layout shift and latency)
   const isSearchLoading = false;
 
-  const [inventoryIndexReady, setInventoryIndexReady] = useState(() => isCompactInventoryCacheReady());
-  const [cacheVersion, setCacheVersion] = useState(0);
-
   useEffect(() => {
     const handler = () => {
       setInventoryIndexReady(true);
@@ -1271,15 +1349,7 @@ const POS = () => {
       return;
     }
 
-    const compactInventory = getCompactInventoryCache();
-    const mapped = compactInventory.map(item => ({
-      ...item,
-      medicine_name: item.name,
-      quantity: item.stock_qty,
-      alternatives: []
-    }));
-
-    const filtered = filterLocalInventory(term, mapped);
+    const filtered = filterLocalInventory(term, mappedInventory);
     const groupedData = groupBatches(filtered);
 
     // Premium Barcode Auto-Add Feature:
@@ -1299,7 +1369,7 @@ const POS = () => {
     setSearchHighlightIndex(-1);
     setOnlineResults([]);
     setSearchingOnline(false);
-  }, [searchTerm, cacheVersion]);
+  }, [searchTerm, mappedInventory]);
 
   // Universal Edit state
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);

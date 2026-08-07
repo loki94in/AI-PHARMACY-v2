@@ -98,112 +98,184 @@ router.post('/save', async (req, res) => {
   const payload = req.body;
   if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload required' });
   try {
-    const db = await dbManager.getConnection();
-    await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
-    const entries = Object.entries(payload);
-    const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token'];
+    await dbManager.transaction(async (db) => {
+      await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
+      const entries = Object.entries(payload);
+      const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token'];
 
-    for (const [k, v] of entries) {
-      if (k === 'pharmarack_mode') {
-        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', ['pharmarack_mode', 'Live']);
-        continue;
-      }
-      const valStr = v !== undefined && v !== null ? String(v).trim() : '';
-      if (protectedKeys.includes(k) && valStr === '') {
-        const existing = await db.get("SELECT value FROM app_settings WHERE key = ? AND value IS NOT NULL AND value != ''", [k]);
-        if (existing) continue;
-      }
-      await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [k, v ?? '']);
-    }
+      const upsertStmt = await db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)');
+      const checkProtectedStmt = await db.prepare("SELECT value FROM app_settings WHERE key = ? AND value IS NOT NULL AND value != ''");
 
-    // Synchronize store name aliases if any store name key was provided
-    const pharmacyNameVal = payload['shop_name'] || payload['pharmacy_name'] || payload['store_name'] || payload['medical_name'];
-    if (pharmacyNameVal) {
-      const val = String(pharmacyNameVal).trim();
-      if (val) {
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_name', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_name', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_name', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('medical_name', ?)", [val]);
-      }
-    }
+      try {
+        for (const [k, v] of entries) {
+          if (k === 'pharmarack_mode') {
+            await upsertStmt.run(['pharmarack_mode', 'Live']);
+            continue;
+          }
+          const valStr = v !== undefined && v !== null ? String(v).trim() : '';
+          if (protectedKeys.includes(k) && valStr === '') {
+            const existing = await checkProtectedStmt.get([k]);
+            if (existing) continue;
+          }
+          await upsertStmt.run([k, v ?? '']);
+        }
 
-    // Synchronize store phone aliases if any store phone key was provided
-    const pharmacyPhoneVal = payload['shop_phone'] || payload['phone'] || payload['store_phone'] || payload['pharmacy_phone'];
-    if (pharmacyPhoneVal) {
-      const val = String(pharmacyPhoneVal).trim();
-      if (val) {
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_phone', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmacy_phone', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_phone', ?)", [val]);
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('phone', ?)", [val]);
+        // Synchronize store name aliases if any store name key was provided
+        const pharmacyNameVal = payload['shop_name'] || payload['pharmacy_name'] || payload['store_name'] || payload['medical_name'];
+        if (pharmacyNameVal) {
+          const val = String(pharmacyNameVal).trim();
+          if (val) {
+            await upsertStmt.run(['shop_name', val]);
+            await upsertStmt.run(['pharmacy_name', val]);
+            await upsertStmt.run(['store_name', val]);
+            await upsertStmt.run(['medical_name', val]);
+          }
+        }
+
+        // Synchronize store phone aliases if any store phone key was provided
+        const pharmacyPhoneVal = payload['shop_phone'] || payload['phone'] || payload['store_phone'] || payload['pharmacy_phone'];
+        if (pharmacyPhoneVal) {
+          const val = String(pharmacyPhoneVal).trim();
+          if (val) {
+            await upsertStmt.run(['shop_phone', val]);
+            await upsertStmt.run(['pharmacy_phone', val]);
+            await upsertStmt.run(['store_phone', val]);
+            await upsertStmt.run(['phone', val]);
+          }
+        }
+      } finally {
+        await upsertStmt.finalize();
+        await checkProtectedStmt.finalize();
       }
-    }
+
+      // Sync delivery boys to single DB source location (delivery_boys table)
+      const selectBoyStmt = await db.prepare(
+        "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE ? OR id = ? ORDER BY id ASC LIMIT 1"
+      );
+      const updateBoyStmt = await db.prepare(
+        'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?'
+      );
+      const insertBoyStmt = await db.prepare(
+        'INSERT INTO delivery_boys (name, whatsapp_number, is_active) VALUES (?, ?, 1)'
+      );
+
+      try {
+        const boy1Name = payload['delivery_boy_name'] || payload['delivery_boy_1_name'];
+        const boy1Phone = payload['delivery_boy_whatsapp'] || payload['delivery_boy_phone'];
+        if (boy1Phone !== undefined && String(boy1Phone).trim() !== '') {
+          const nameToUse = String(boy1Name || '').trim() || 'Delivery Staff 1';
+          const phoneStr = String(boy1Phone || '').trim();
+
+          const existing1 = await selectBoyStmt.get([nameToUse, 'Delivery Staff 1%', 1]);
+
+          if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
+            if (existing1) {
+              await updateBoyStmt.run([nameToUse, phoneStr, existing1.id]);
+            } else {
+              await insertBoyStmt.run([nameToUse, phoneStr]);
+            }
+          }
+        }
+
+        const boy2Name = payload['delivery_boy_name_2'] || payload['delivery_boy_2_name'];
+        const boy2Phone = payload['delivery_boy_whatsapp_2'];
+        if (boy2Phone !== undefined && String(boy2Phone).trim() !== '') {
+          const nameToUse = String(boy2Name || '').trim() || 'Delivery Staff 2';
+          const phoneStr = String(boy2Phone || '').trim();
+
+          const existing2 = await selectBoyStmt.get([nameToUse, 'Delivery Staff 2%', 2]);
+
+          if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
+            if (existing2) {
+              await updateBoyStmt.run([nameToUse, phoneStr, existing2.id]);
+            } else {
+              await insertBoyStmt.run([nameToUse, phoneStr]);
+            }
+          }
+        }
+      } finally {
+        await selectBoyStmt.finalize();
+        await updateBoyStmt.finalize();
+        await insertBoyStmt.finalize();
+      }
+
+      // A2: Upsert the owner contact atomically within the same transaction, mirroring the
+      // upsert semantics of POST /api/contacts (src/routes/contacts.ts) for type='owner' —
+      // dedupe by phone+type first, then name+type; only overwrite fields with non-empty values.
+      // This replaces the frontend's separate api.saveContact(...) HTTP call.
+      const ownerPhoneRaw = payload['owner_whatsapp_number'] || payload['phone'];
+      if (ownerPhoneRaw !== undefined && String(ownerPhoneRaw).trim() !== '') {
+        await db.run(`
+          CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT DEFAULT 'general',
+            phone TEXT,
+            email TEXT,
+            address TEXT,
+            gstin TEXT,
+            notes TEXT,
+            alias_names TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+
+        const ownerName = String(
+          payload['pharmacy_name'] || payload['shop_name'] || payload['store_name'] || payload['medical_name'] || 'Pharmacy Owner'
+        ).trim() || 'Pharmacy Owner';
+        const ownerCleanPhone = String(ownerPhoneRaw).replace(/\D/g, '');
+        const ownerEmail = payload['email'] ? String(payload['email']).trim() : '';
+        const ownerAddress = payload['address'] ? String(payload['address']).trim() : '';
+        const ownerGstin = payload['gstin'] ? String(payload['gstin']).trim() : '';
+
+        let existingOwner = ownerCleanPhone
+          ? await db.get('SELECT id FROM contacts WHERE phone = ? AND type = ?', [ownerCleanPhone, 'owner'])
+          : undefined;
+        if (!existingOwner) {
+          existingOwner = await db.get('SELECT id FROM contacts WHERE LOWER(name) = LOWER(?) AND type = ?', [ownerName, 'owner']);
+        }
+
+        if (existingOwner) {
+          await db.run(
+            `UPDATE contacts
+             SET name = ?,
+                 phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                 email = CASE WHEN ? != '' THEN ? ELSE email END,
+                 address = CASE WHEN ? != '' THEN ? ELSE address END,
+                 gstin = CASE WHEN ? != '' THEN ? ELSE gstin END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [
+              ownerName,
+              ownerCleanPhone, ownerCleanPhone,
+              ownerEmail, ownerEmail,
+              ownerAddress, ownerAddress,
+              ownerGstin, ownerGstin,
+              existingOwner.id
+            ]
+          );
+        } else {
+          await db.run(
+            `INSERT INTO contacts (name, type, phone, email, address, gstin) VALUES (?, ?, ?, ?, ?, ?)`,
+            [ownerName, 'owner', ownerCleanPhone, ownerEmail, ownerAddress, ownerGstin]
+          );
+        }
+      }
+    });
+
+
 
     if (payload['email_retention_limit'] !== undefined) {
       try {
+        const db = await dbManager.getConnection();
         const { emailService } = await import('../services/emailService.js');
         emailService.pruneOldEmails(db).catch(err => console.error('Pruning after settings update failed:', err));
-      } catch (err) {}
+      } catch (err) { }
     }
 
     const keys = Object.keys(payload);
-
-
-    // Sync delivery boys to single DB source location (delivery_boys table)
-    const boy1Name = payload['delivery_boy_name'] || payload['delivery_boy_1_name'];
-    const boy1Phone = payload['delivery_boy_whatsapp'] || payload['delivery_boy_phone'];
-    if (boy1Phone !== undefined && String(boy1Phone).trim() !== '') {
-      const nameToUse = String(boy1Name || '').trim() || 'Delivery Staff 1';
-      const phoneStr = String(boy1Phone || '').trim();
-
-      const existing1 = await db.get(
-        "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 1%' OR id = 1 ORDER BY id ASC LIMIT 1",
-        [nameToUse]
-      );
-
-      if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
-        if (existing1) {
-          await db.run(
-            'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?',
-            [nameToUse, phoneStr, existing1.id]
-          );
-        } else {
-          await db.run(
-            'INSERT INTO delivery_boys (name, whatsapp_number, is_active) VALUES (?, ?, 1)',
-            [nameToUse, phoneStr]
-          );
-        }
-      }
-    }
-
-    const boy2Name = payload['delivery_boy_name_2'] || payload['delivery_boy_2_name'];
-    const boy2Phone = payload['delivery_boy_whatsapp_2'];
-    if (boy2Phone !== undefined && String(boy2Phone).trim() !== '') {
-      const nameToUse = String(boy2Name || '').trim() || 'Delivery Staff 2';
-      const phoneStr = String(boy2Phone || '').trim();
-
-      const existing2 = await db.get(
-        "SELECT id FROM delivery_boys WHERE name = ? OR name LIKE 'Delivery Staff 2%' OR id = 2 ORDER BY id ASC LIMIT 1",
-        [nameToUse]
-      );
-
-      if (phoneStr && phoneStr.replace(/\D/g, '').length >= 10) {
-        if (existing2) {
-          await db.run(
-            'UPDATE delivery_boys SET name = ?, whatsapp_number = ?, is_active = 1 WHERE id = ?',
-            [nameToUse, phoneStr, existing2.id]
-          );
-        } else {
-          await db.run(
-            'INSERT INTO delivery_boys (name, whatsapp_number, is_active) VALUES (?, ?, 1)',
-            [nameToUse, phoneStr]
-          );
-        }
-      }
-    }
-
-
 
     // If telegram settings changed, trigger hot-reload of Telegram bot service
     const hasTelegramKey = keys.some(k => k === 'telegram_enabled' || k === 'telegram_token' || k === 'telegram_chat_id');
@@ -309,6 +381,7 @@ router.get('/distributors', async (_req, res) => {
       FROM distributors d
       LEFT JOIN distributor_learning_profiles p ON d.id = p.distributor_id
       ORDER BY d.name ASC
+      LIMIT 1000
     `);
     res.json({ success: true, data: list });
   } catch (error: any) {
@@ -387,7 +460,7 @@ router.post('/distributors', async (req, res) => {
         'INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)',
         [targetId]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     const saved = await db.get('SELECT * FROM distributors WHERE id = ?', [targetId]);
     res.json({ success: true, data: saved });
@@ -470,7 +543,7 @@ router.post('/distributors/merge', async (req, res) => {
       const cleanPhone = String(primary.phone).replace(/\D/g, '');
       try {
         await db.run("UPDATE pharmarack_distributors SET phone = ? WHERE LOWER(store_name) LIKE ?", [cleanPhone, `%${primary.name.toLowerCase().trim()}%`]);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     res.json({ success: true, message: `Successfully merged ${secondaryIds.length} duplicate distributor(s) into '${primary.name}'`, primaryId });

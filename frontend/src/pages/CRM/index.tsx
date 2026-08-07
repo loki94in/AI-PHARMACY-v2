@@ -374,6 +374,8 @@ const RefillsSection: React.FC = () => {
     }
   };
 
+  const searchDebounceRef = useRef<{ [key: number]: any }>({});
+
   const handleMedicineSearch = (idx: number, term: string) => {
     setMedicineRows(prev => {
       const updated = [...prev];
@@ -386,7 +388,13 @@ const RefillsSection: React.FC = () => {
       };
       return updated;
     });
-    fetchSuggestions(idx, term);
+
+    if (searchDebounceRef.current[idx]) {
+      clearTimeout(searchDebounceRef.current[idx]);
+    }
+    searchDebounceRef.current[idx] = setTimeout(() => {
+      fetchSuggestions(idx, term);
+    }, 300);
   };
 
   const selectMedicine = (idx: number, s: MedicineSuggestion) => {
@@ -430,14 +438,16 @@ const RefillsSection: React.FC = () => {
     const intervalDays = getEffectiveIntervalDays();
     setSubmitting(true);
     try {
-      for (const row of validRows) {
-        await apiClient.post('/refills', {
-          patient_name: addPatientName.trim(),
-          patient_phone: addPatientPhone.trim(),
-          medicine_id: row.medicineId,
-          refill_interval_days: intervalDays
-        });
-      }
+      await Promise.all(
+        validRows.map(row =>
+          apiClient.post('/refills', {
+            patient_name: addPatientName.trim(),
+            patient_phone: addPatientPhone.trim(),
+            medicine_id: row.medicineId,
+            refill_interval_days: intervalDays
+          })
+        )
+      );
       toastEvent.trigger(`Refill registered for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
       setShowAddModal(false);
       setAddPatientName('');
@@ -1211,7 +1221,20 @@ const DistributorMessagesSection: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [retrying, setRetrying] = useState<number | null>(null);
+
+  const searchDebounceRef = useRef<any>(null);
+
+  const handleSearchChange = (term: string) => {
+    setSearch(term);
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(term);
+    }, 300);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1220,14 +1243,14 @@ const DistributorMessagesSection: React.FC = () => {
         params: {
           type: typeFilter !== 'all' ? typeFilter : undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
-          search: search || undefined,
+          search: debouncedSearch || undefined,
           limit: 200
         }
       }));
       setLogs(Array.isArray(r.data) ? r.data : []);
     } catch { toastEvent.trigger('Failed to load messages', 'error', '/crm'); }
     finally { setLoading(false); }
-  }, [typeFilter, statusFilter, search]);
+  }, [typeFilter, statusFilter, debouncedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1262,7 +1285,7 @@ const DistributorMessagesSection: React.FC = () => {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => handleSearchChange(e.target.value)}
             placeholder="Search recipient or message…"
             className="w-full pl-8 pr-3 py-2 bg-bg2 border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
           />
@@ -3783,31 +3806,57 @@ const CustomerCreditSection: React.FC = () => {
     }
   }, []);
 
-  // Handle ESC key to close viewInvoice modal
+  // Handle ESC key to close viewInvoice modal.
+  // Handler reads the latest value via ref so the effect can attach the
+  // listener once ([]) instead of re-attaching on every open/close.
+  const viewInvoiceRef = useRef(viewInvoice);
   useEffect(() => {
-    if (!viewInvoice) return;
+    viewInvoiceRef.current = viewInvoice;
+  }, [viewInvoice]);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && viewInvoiceRef.current) {
         setViewInvoice(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewInvoice]);
+  }, []);
+
+  // Tracks the currently selected customer id via ref (not state) so it can be
+  // read synchronously before the list fetch resolves, without adding
+  // `selectedCustomer` to loadCreditCustomers' deps (which would re-trigger the
+  // mount effect below on every customer click).
+  const selectedCustomerIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomer?.id ?? null;
+  }, [selectedCustomer]);
 
   const loadCreditCustomers = useCallback(async () => {
     setLoading(true);
+    const previousId = selectedCustomerIdRef.current;
     try {
-      const res = await apiClient.get<CreditCustomerItem[]>('/crm/credit-customers');
+      // Fetch the customer list and the previously-selected customer's invoice
+      // history concurrently instead of waiting for the list before starting
+      // the history fetch — they're independent once the id is already known.
+      const [res, invoicesRes] = await Promise.all([
+        apiClient.get<CreditCustomerItem[]>('/crm/credit-customers'),
+        previousId
+          ? apiClient.get<any[]>(`/crm/${previousId}/history`).catch(() => null)
+          : Promise.resolve(null)
+      ]);
       const data = Array.isArray(res.data) ? res.data : [];
       setCustomers(data);
       if (data.length > 0) {
-        setSelectedCustomer(prev => {
-          const match = data.find(c => c.id === prev?.id);
-          const active = match || data[0];
+        const match = data.find(c => c.id === previousId);
+        const active = match || data[0];
+        setSelectedCustomer(active);
+        if (active.id === previousId && invoicesRes) {
+          setCustomerInvoices(Array.isArray(invoicesRes.data) ? invoicesRes.data : []);
+        } else {
           loadCustomerInvoices(active.id);
-          return active;
-        });
+        }
       }
     } catch {
       toastEvent.trigger('Failed to load credit customers', 'error', '/crm');

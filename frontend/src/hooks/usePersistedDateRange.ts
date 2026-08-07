@@ -31,7 +31,7 @@ export function usePersistedDateRange({
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored);
-        
+
         // 1. futurePresets === true (Expiry page) -> restore verbatim, never roll.
         if (futurePresets) {
           return {
@@ -93,7 +93,7 @@ export function usePersistedDateRange({
           manualTo: !!parsed.manualTo,
         };
       }
-    } catch {}
+    } catch { }
     return {
       dateRange: { from: defaultFrom, to: defaultTo },
       manualTo: false,
@@ -126,7 +126,7 @@ export function usePersistedDateRange({
           const parsed = JSON.parse(e.newValue);
           setDateRange({ from: parsed.from ?? defaultFrom, to: parsed.to ?? defaultTo });
           setManualToDate(!!parsed.manualTo);
-        } catch {}
+        } catch { }
       }
     };
     window.addEventListener('storage', handler);

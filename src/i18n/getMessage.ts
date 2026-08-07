@@ -1,11 +1,27 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { getTemplate } from '../database/messageDAO.js';
 
-// Load the whole JSON once at module init
-const messagesPath = join(process.cwd(), 'src', 'i18n', 'messages.json');
-const raw = readFileSync(messagesPath, 'utf8');
-const ALL_MESSAGES: Record<string, Record<string, Record<string, string>>> = JSON.parse(raw);
+const require = createRequire(import.meta.url);
+
+// Load the JSON at module init (bundled by esbuild via require)
+let ALL_MESSAGES: Record<string, Record<string, Record<string, string>>> = {};
+try {
+  ALL_MESSAGES = require('./messages.json');
+} catch (_) {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const messagesPath = join(__dirname, 'messages.json');
+    if (existsSync(messagesPath)) {
+      ALL_MESSAGES = JSON.parse(readFileSync(messagesPath, 'utf8'));
+    }
+  } catch (err) {
+    console.error('[i18n] Failed to load messages.json:', err);
+  }
+}
 
 /**
  * Get a localized string.

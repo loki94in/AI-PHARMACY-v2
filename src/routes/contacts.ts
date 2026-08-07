@@ -41,6 +41,7 @@ router.get('/', async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
     query += ' ORDER BY name ASC';
+    query += search ? ' LIMIT 100' : ' LIMIT 1000';
 
     const contacts = await db.all(query, params);
     res.json({ success: true, count: contacts.length, data: contacts });

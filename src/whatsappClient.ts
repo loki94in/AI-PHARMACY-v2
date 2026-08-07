@@ -8,6 +8,7 @@ import { eventService } from './services/eventService.js';
 import { dbManager } from './database/connection.js';
 import { config as appConfig, getAppDataDir } from './config/index.js';
 import { whatsappBusinessService } from './services/whatsappBusinessService.js';
+import { cleanProfileLockFiles } from './services/tokenRefreshScheduler.js';
 
 // whatsapp-web.js uses CommonJS default export, so Client is a value not a type.
 // Use InstanceType<typeof Client> to get the correct instance type.
@@ -118,7 +119,8 @@ function cleanupProfileLocks() {
 
   try {
     if (process.platform === 'win32') {
-      const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*wwebjs_auth*session*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
+      const filterPattern = sessionPath.replace(/\\/g, '*').replace(/\//g, '*');
+      const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*${filterPattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
       execSync(cmd, { stdio: 'ignore' });
       console.log('[WhatsApp Init] Stale WhatsApp browser processes terminated.');
     }
@@ -126,18 +128,9 @@ function cleanupProfileLocks() {
     console.warn('[WhatsApp Init] Could not check/kill running browser processes (non-fatal):', err.message);
   }
 
-  const filesToClean = ['lockfile', 'SingletonLock', 'DevToolsActivePort'];
-  for (const file of filesToClean) {
-    const filePath = path.join(sessionPath, file);
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        console.log(`[WhatsApp Init] Cleaned stale lock file: ${file}`);
-      } catch (err: any) {
-        console.warn(`[WhatsApp Init] Could not delete lock file ${file}: ${err.message}`);
-      }
-    }
-  }
+  // Delegate to the canonical lock-file cleanup (tokenRefreshScheduler.ts) — its 7-file
+  // list is a superset of the 3 this used to clean locally, so nothing is lost.
+  cleanProfileLockFiles(sessionPath);
 }
 
 /** Shared ignore-check used by the message_create handler (mirrors whatsappIntentService's own copy, used for the raw client event path). */

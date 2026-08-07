@@ -80,6 +80,20 @@ export class WorkerSupervisor {
     config.spawnTime = Date.now();
     config.lastPongTime = Date.now();
 
+    if (process.env.SINGLE_PROCESS_WORKERS === 'true') {
+      console.log(`[WorkerSupervisor] Running ${config.name} in-process (Low-RAM Single Process mode)...`);
+      if (config.role === 'catalog') {
+        import('./catalogWorker.js').then(m => {
+          if (m.startWorker) m.startWorker();
+        }).catch(err => console.error('[WorkerSupervisor] Inline catalog worker error:', err));
+      } else if (config.role === 'email') {
+        import('./emailPoller.js').then(m => {
+          if (m.startEmailPoller) m.startEmailPoller();
+        }).catch(err => console.error('[WorkerSupervisor] Inline email poller error:', err));
+      }
+      return;
+    }
+
     try {
       // Fork the child process inheriting environment and execution loaders (tsx etc.)
       const child = fork(forkTarget, [], {

@@ -73,8 +73,13 @@ function copyProfileFolder(src: string, dest: string) {
 export async function killOrphanChromeProcesses(keyword: string = 'pharmarack_profile'): Promise<void> {
   if (process.platform !== 'win32') return;
   try {
-    const execResult = await execAsync(`wmic process where "name='chrome.exe' and CommandLine like '%${keyword}%'" get ProcessId`).catch(async () => {
-      return await execAsync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name='chrome.exe' and commandline like '%${keyword}%'\\" | Select-Object -ExpandProperty ProcessId"`).catch(() => ({ stdout: '' }));
+    const resolvedPath = path.isAbsolute(keyword)
+      ? keyword
+      : path.join(getAppDataDir(), 'data', keyword);
+    const filterPattern = resolvedPath.replace(/\\/g, '%').replace(/\//g, '%');
+
+    const execResult = await execAsync(`wmic process where "name='chrome.exe' and CommandLine like '%${filterPattern}%'" get ProcessId`).catch(async () => {
+      return await execAsync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name='chrome.exe' and commandline like '%${filterPattern}%'\\" | Select-Object -ExpandProperty ProcessId"`).catch(() => ({ stdout: '' }));
     });
 
     const stdout = execResult.stdout || '';
@@ -331,6 +336,9 @@ export class TokenRefreshScheduler {
             '--disable-default-apps',
             '--no-first-run',
             '--mute-audio',
+            '--single-process',
+            '--no-zygote',
+            '--js-flags=--max-old-space-size=128',
             '--window-position=-10000,-10000'
           ]
         });
@@ -354,6 +362,9 @@ export class TokenRefreshScheduler {
             '--disable-default-apps',
             '--no-first-run',
             '--mute-audio',
+            '--single-process',
+            '--no-zygote',
+            '--js-flags=--max-old-space-size=128',
             '--window-position=-10000,-10000'
           ]
         });

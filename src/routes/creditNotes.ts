@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
       params.push(status);
     }
 
-    query += ' ORDER BY cn.cn_date DESC';
+    query += ' ORDER BY cn.cn_date DESC LIMIT 1000';
 
     const creditNotes = await db.all(query, params);
         res.json(creditNotes);

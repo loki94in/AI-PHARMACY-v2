@@ -94,14 +94,34 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    // Prefetch all other page chunks in the background after initial render to make page transitions instant
-    const timer = setTimeout(() => {
-      Object.keys(pageImports).forEach((key) => {
-        try {
-          pageImports[key]();
-        } catch (err) {
+    // Prefetch all other page chunks in the background after initial render to make page transitions instant.
+    // Staggered in small batches (instead of firing all ~20 chunks at once) to avoid network saturation and
+    // to keep heavy, rarely-needed chunks (e.g. the Migration page's Framer Motion dependency) from loading
+    // immediately alongside everything else.
+    const PREFETCH_BATCH_SIZE = 5;
+    const PREFETCH_BATCH_DELAY_MS = 200;
+    const pageKeys = Object.keys(pageImports);
+    const batches: string[][] = [];
+    for (let i = 0; i < pageKeys.length; i += PREFETCH_BATCH_SIZE) {
+      batches.push(pageKeys.slice(i, i + PREFETCH_BATCH_SIZE));
+    }
+
+    const batchTimers: ReturnType<typeof setTimeout>[] = [];
+
+    const prefetchChunk = (key: string) =>
+      Promise.resolve()
+        .then(() => pageImports[key]())
+        .catch((err) => {
           console.warn(`Failed to prefetch page chunk: ${key}`, err);
-        }
+        });
+
+    const timer = setTimeout(() => {
+      batches.forEach((batch, batchIndex) => {
+        batchTimers.push(
+          setTimeout(() => {
+            Promise.all(batch.map(prefetchChunk));
+          }, batchIndex * PREFETCH_BATCH_DELAY_MS)
+        );
       });
     }, 1500);
 
@@ -130,6 +150,7 @@ function App() {
 
     return () => {
       clearTimeout(timer);
+      batchTimers.forEach((t) => clearTimeout(t));
       clearTimeout(dataTimer);
     };
   }, []);

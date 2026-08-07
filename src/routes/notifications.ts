@@ -4,6 +4,8 @@ import { dbManager } from '../database/connection.js';
 import QRCode from 'qrcode';
 import os from 'os';
 
+import { config } from '../config/index.js';
+
 const router = express.Router();
 
 // Get server connection info (IPs, Port, pre-generated QR code) for mobile app setup
@@ -22,7 +24,7 @@ router.get('/notifications/connection-info', async (req, res) => {
       }
     }
 
-    const port = process.env.PORT || 3000;
+    const port = config.port;
     const serverUrls = ips.map(ip => `http://${ip}:${port}`);
 
     // If no external IPs found, fall back to localhost

@@ -242,45 +242,54 @@ export class BackupRecoveryService {
     let gdriveUploaded = uploadLog[filename].gdrive || false;
     let telegramUploaded = uploadLog[filename].telegram || false;
 
-    // 1. Google Drive Upload
-    if (gdriveEnabled && !gdriveUploaded) {
-      try {
-        console.log(`[Backup] Uploading ${filename} to Google Drive...`);
-        const success = await this.uploadToGoogleDrive(archivePath, filename);
-        if (success) {
-          gdriveUploaded = true;
-          uploadLog[filename].gdrive = true;
-          console.log(`[Backup] ${filename} successfully uploaded to Google Drive.`);
-          if (notifsEnabled) {
-            this.broadcastNotification('backup_upload_gdrive', `Google Drive upload completed: ${filename}`);
+    // Google Drive and Telegram are independent destinations (different services,
+    // different credentials, no data dependency) — upload to both concurrently
+    // instead of waiting for Drive to finish before starting Telegram. Each branch
+    // only ever writes its own uploadLog[filename] field, so there's no shared
+    // mutable state to race on.
+    await Promise.all([
+      // 1. Google Drive Upload
+      (async () => {
+        if (!(gdriveEnabled && !gdriveUploaded)) return;
+        try {
+          console.log(`[Backup] Uploading ${filename} to Google Drive...`);
+          const success = await this.uploadToGoogleDrive(archivePath, filename);
+          if (success) {
+            gdriveUploaded = true;
+            uploadLog[filename].gdrive = true;
+            console.log(`[Backup] ${filename} successfully uploaded to Google Drive.`);
+            if (notifsEnabled) {
+              this.broadcastNotification('backup_upload_gdrive', `Google Drive upload completed: ${filename}`);
+            }
+          } else {
+            console.warn(`[Backup] Google Drive upload failed for ${filename}. Will retry later.`);
           }
-        } else {
-          console.warn(`[Backup] Google Drive upload failed for ${filename}. Will retry later.`);
+        } catch (err) {
+          console.error(`[Backup] Google Drive upload error for ${filename}:`, err);
         }
-      } catch (err) {
-        console.error(`[Backup] Google Drive upload error for ${filename}:`, err);
-      }
-    }
+      })(),
 
-    // 2. Telegram Upload
-    if (telegramEnabled && !telegramUploaded) {
-      try {
-        console.log(`[Backup] Sending ${filename} to Telegram...`);
-        const success = await this.uploadToTelegram(archivePath, filename);
-        if (success) {
-          telegramUploaded = true;
-          uploadLog[filename].telegram = true;
-          console.log(`[Backup] ${filename} successfully sent to Telegram.`);
-          if (notifsEnabled) {
-            this.broadcastNotification('backup_upload_telegram', `Telegram backup completed: ${filename}`);
+      // 2. Telegram Upload
+      (async () => {
+        if (!(telegramEnabled && !telegramUploaded)) return;
+        try {
+          console.log(`[Backup] Sending ${filename} to Telegram...`);
+          const success = await this.uploadToTelegram(archivePath, filename);
+          if (success) {
+            telegramUploaded = true;
+            uploadLog[filename].telegram = true;
+            console.log(`[Backup] ${filename} successfully sent to Telegram.`);
+            if (notifsEnabled) {
+              this.broadcastNotification('backup_upload_telegram', `Telegram backup completed: ${filename}`);
+            }
+          } else {
+            console.warn(`[Backup] Telegram upload failed for ${filename}. Will retry later.`);
           }
-        } else {
-          console.warn(`[Backup] Telegram upload failed for ${filename}. Will retry later.`);
+        } catch (err) {
+          console.error(`[Backup] Telegram upload error for ${filename}:`, err);
         }
-      } catch (err) {
-        console.error(`[Backup] Telegram upload error for ${filename}:`, err);
-      }
-    }
+      })()
+    ]);
 
     // Save updated log
     await this.setSetting('backup_upload_log', JSON.stringify(uploadLog));

@@ -441,6 +441,8 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_purchases_distributor_id ON purchases (distributor_id);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_status_date ON patient_refills (status, next_refill_date);
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
+    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name);
+    CREATE INDEX IF NOT EXISTS idx_delivery_boys_lookup ON delivery_boys (name, id, is_active);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_phone ON patient_refills (patient_phone);
     CREATE INDEX IF NOT EXISTS idx_patient_refills_next_refill ON patient_refills (next_refill_date);
 

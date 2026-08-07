@@ -26,6 +26,15 @@ const generateUUID = () => {
   });
 };
 
+// Split an array into fixed-size chunks, preserving order.
+const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
+
 interface Medicine {
   id: number;
   name: string;
@@ -429,6 +438,17 @@ const Purchases: React.FC = () => {
 
   const queryClient = useQueryClient();
 
+  // B4: the distributor list and the active tab's draft/bill (loaded synchronously
+  // from initialTabs above) are needed immediately for the form to be usable.
+  // Everything else non-essential (purchase history, pending returns, distributor
+  // mapping lookups, catalog pre-hydration) is staggered ~500ms after mount so it
+  // doesn't compete with the initial paint / first-interaction fetches.
+  const [deferredFetchesReady, setDeferredFetchesReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setDeferredFetchesReady(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const { data: distributors = [] } = useApiQuery<Distributor[]>(
     'distributors',
     () => api.getDistributors().then(res => Array.isArray(res) ? res : (res?.data || []))
@@ -436,7 +456,8 @@ const Purchases: React.FC = () => {
 
   const { data: purchaseHistory = [] } = useApiQuery<PurchaseHistory[]>(
     'purchase-history',
-    () => api.getPurchases({ limit: 5000 }).then(res => Array.isArray(res) ? res : [])
+    () => api.getPurchases({ limit: 5000 }).then(res => Array.isArray(res) ? res : []),
+    { enabled: deferredFetchesReady }
   );
 
   const [selectedDistributor, setSelectedDistributor] = useState<number | null>(initialActiveTab?.selectedDistributor || null);
@@ -444,7 +465,7 @@ const Purchases: React.FC = () => {
   const { data: pendingReturns = [] } = useApiQuery<any[]>(
     ['pending-returns', selectedDistributor],
     () => api.getPendingReturns(selectedDistributor!),
-    { enabled: !!selectedDistributor }
+    { enabled: deferredFetchesReady && !!selectedDistributor }
   );
   const [distributorSearch, setDistributorSearch] = useState(initialActiveTab?.distributorSearch || '');
   const [showDistributorDropdown, setShowDistributorDropdown] = useState(false);
@@ -494,6 +515,11 @@ const Purchases: React.FC = () => {
   const [onlyMappedFilter, setOnlyMappedFilter] = useState(false);
 
   useEffect(() => {
+    // B4: distributor-mapping lookups are non-essential at mount; wait for the
+    // staggered-fetch window before firing (and before wiring up the listeners
+    // that re-fire it).
+    if (!deferredFetchesReady) return;
+
     const fetchMappings = () => {
       api.getPharmarackDistributorMappings()
         .then(res => {
@@ -518,7 +544,7 @@ const Purchases: React.FC = () => {
       window.removeEventListener('phone-numbers-updated', handleDistributorUpdate);
       window.removeEventListener('contacts-updated', handleDistributorUpdate);
     };
-  }, [queryClient]);
+  }, [queryClient, deferredFetchesReady]);
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditItem, setUniversalEditItem] = useState<any>(null);
@@ -532,69 +558,100 @@ const Purchases: React.FC = () => {
     }));
   };
 
+  // E6: refs for tab-sync fields that are NOT in the effect's dependency
+  // array below. Updated unconditionally on every render so they always hold
+  // the latest value by the time the effect runs (avoids stale-closure reads
+  // even though changes to these alone won't re-trigger the effect).
+  const distributorSearchRef = useRef(distributorSearch);
+  const grnNoRef = useRef(grnNo);
+  const invoiceDateRef = useRef(invoiceDate);
+  const globalCdPerRef = useRef(globalCdPer);
+  const extraCreditRef = useRef(extraCredit);
+  const cnAmountRef = useRef(cnAmount);
+  const cnNumberRef = useRef(cnNumber);
+  const reconcileExpiryReturnIdRef = useRef(reconcileExpiryReturnId);
+  const sourceFilenameRef = useRef(sourceFilename);
+  const sourceFileHeadersRef = useRef(sourceFileHeaders);
+  const mappingConfigRef = useRef(mappingConfig);
+  const editPurchaseIdRef = useRef(editPurchaseId);
+
+  distributorSearchRef.current = distributorSearch;
+  grnNoRef.current = grnNo;
+  invoiceDateRef.current = invoiceDate;
+  globalCdPerRef.current = globalCdPer;
+  extraCreditRef.current = extraCredit;
+  cnAmountRef.current = cnAmount;
+  cnNumberRef.current = cnNumber;
+  reconcileExpiryReturnIdRef.current = reconcileExpiryReturnId;
+  sourceFilenameRef.current = sourceFilename;
+  sourceFileHeadersRef.current = sourceFileHeaders;
+  mappingConfigRef.current = mappingConfig;
+  editPurchaseIdRef.current = editPurchaseId;
+
   // Sync current active inputs into tabs array
+  // E6: reduced from 15 dependencies to the 4 that are load-bearing
+  // (activeTabId identifies which tab entry to update; items, selectedDistributor
+  // and invoiceNo are the fields that change on essentially every meaningful
+  // edit to the bill). The remaining fields are read from the refs above, so
+  // the effect still writes a complete, current snapshot whenever it runs.
   useEffect(() => {
     setTabs(prev => {
       const idx = prev.findIndex(t => t.id === activeTabId);
       if (idx === -1) return prev;
       const t = prev[idx];
+      const distributorSearchVal = distributorSearchRef.current;
+      const grnNoVal = grnNoRef.current;
+      const invoiceDateVal = invoiceDateRef.current;
+      const globalCdPerVal = globalCdPerRef.current;
+      const extraCreditVal = extraCreditRef.current;
+      const cnAmountVal = cnAmountRef.current;
+      const cnNumberVal = cnNumberRef.current;
+      const reconcileExpiryReturnIdVal = reconcileExpiryReturnIdRef.current;
+      const sourceFilenameVal = sourceFilenameRef.current;
+      const sourceFileHeadersVal = sourceFileHeadersRef.current;
+      const mappingConfigVal = mappingConfigRef.current;
+      const editPurchaseIdVal = editPurchaseIdRef.current;
       if (
         t.selectedDistributor !== selectedDistributor ||
-        t.distributorSearch !== distributorSearch ||
+        t.distributorSearch !== distributorSearchVal ||
         t.invoiceNo !== invoiceNo ||
-        t.grnNo !== grnNo ||
-        t.invoiceDate !== invoiceDate ||
-        t.globalCdPer !== globalCdPer ||
-        t.extraCredit !== extraCredit ||
-        t.cnAmount !== cnAmount ||
-        t.cnNumber !== cnNumber ||
-        t.reconcileExpiryReturnId !== reconcileExpiryReturnId ||
+        t.grnNo !== grnNoVal ||
+        t.invoiceDate !== invoiceDateVal ||
+        t.globalCdPer !== globalCdPerVal ||
+        t.extraCredit !== extraCreditVal ||
+        t.cnAmount !== cnAmountVal ||
+        t.cnNumber !== cnNumberVal ||
+        t.reconcileExpiryReturnId !== reconcileExpiryReturnIdVal ||
         t.items !== items ||
-        t.sourceFilename !== sourceFilename ||
-        t.sourceFileHeaders !== sourceFileHeaders ||
-        t.mappingConfig !== mappingConfig ||
-        t.editPurchaseId !== editPurchaseId
+        t.sourceFilename !== sourceFilenameVal ||
+        t.sourceFileHeaders !== sourceFileHeadersVal ||
+        t.mappingConfig !== mappingConfigVal ||
+        t.editPurchaseId !== editPurchaseIdVal
       ) {
         const next = [...prev];
         next[idx] = {
           ...t,
           selectedDistributor,
-          distributorSearch,
+          distributorSearch: distributorSearchVal,
           invoiceNo,
-          grnNo,
-          invoiceDate,
-          globalCdPer,
-          extraCredit,
-          cnAmount,
-          cnNumber,
-          reconcileExpiryReturnId,
+          grnNo: grnNoVal,
+          invoiceDate: invoiceDateVal,
+          globalCdPer: globalCdPerVal,
+          extraCredit: extraCreditVal,
+          cnAmount: cnAmountVal,
+          cnNumber: cnNumberVal,
+          reconcileExpiryReturnId: reconcileExpiryReturnIdVal,
           items,
-          sourceFilename,
-          sourceFileHeaders,
-          mappingConfig,
-          editPurchaseId
+          sourceFilename: sourceFilenameVal,
+          sourceFileHeaders: sourceFileHeadersVal,
+          mappingConfig: mappingConfigVal,
+          editPurchaseId: editPurchaseIdVal
         };
         return next;
       }
       return prev;
     });
-  }, [
-    selectedDistributor,
-    distributorSearch,
-    invoiceNo,
-    grnNo,
-    invoiceDate,
-    globalCdPer,
-    extraCredit,
-    cnAmount,
-    cnNumber,
-    reconcileExpiryReturnId,
-    items,
-    sourceFilename,
-    sourceFileHeaders,
-    mappingConfig,
-    activeTabId
-  ]);
+  }, [activeTabId, items, selectedDistributor, invoiceNo]);
 
   // Persist tabs and activeTabId to localStorage
   useEffect(() => {
@@ -1060,7 +1117,10 @@ const Purchases: React.FC = () => {
   const searchTimeoutRef = React.useRef<any>(null);
 
   // Pre-hydrate master catalog in background on mount
+  // B4: non-essential background warm-up; staggered along with the other
+  // deferred fetches so it doesn't compete with the form's initial fetches.
   useEffect(() => {
+    if (!deferredFetchesReady) return;
     if (cachedMasterCatalog.length === 0 && !isMasterCatalogHydrating) {
       isMasterCatalogHydrating = true;
       api.catalogSearch('').then(list => {
@@ -1073,7 +1133,7 @@ const Purchases: React.FC = () => {
         isMasterCatalogHydrating = false;
       });
     }
-  }, []);
+  }, [deferredFetchesReady]);
 
   const searchMedicines = useCallback((term: string, index: number) => {
     if (searchTimeoutRef.current) {
@@ -1317,70 +1377,52 @@ const Purchases: React.FC = () => {
           const updatedItems: BillItem[] = loadedItems.map(item => ({ ...item, original_name: item.medicine_name }));
           let hasChanges = false;
           
-          for (let i = 0; i < updatedItems.length; i++) {
-            const mName = updatedItems[i].original_name;
-            if (!mName) continue;
-            try {
-              // 1. Check for learned mapping first
-              const learned = await api.getLearnedMapping(mName);
-              if (learned && learned.success && learned.mapped && learned.medicine) {
-                const match = learned.medicine;
-                updatedItems[i].medicine_id = match.id;
-                updatedItems[i].medicine_name = match.name;
-                updatedItems[i].manufacturer = match.manufacturer;
-                updatedItems[i].mrp = updatedItems[i].mrp || match.mrp || 0;
-                updatedItems[i].rate = updatedItems[i].rate || match.rate || 0;
-                updatedItems[i].cgst_per = updatedItems[i].cgst_per || match.cgst_per || 0;
-                updatedItems[i].sgst_per = updatedItems[i].sgst_per || match.sgst_per || 0;
-                updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
-                hasChanges = true;
-                continue;
-              }
+          // D3: resolve items with bounded concurrency (batches of 5) instead of
+          // fully sequential awaits, so large bills don't crawl through one lookup
+          // at a time while also avoiding unbounded parallel hits on the local DB.
+          const RESOLUTION_CONCURRENCY = 5;
+          const indexChunks = chunkArray(updatedItems.map((_, idx) => idx), RESOLUTION_CONCURRENCY);
 
-              // 2. Fallback to catalog search for EXACT matches or FUZZY matches
-              let searchResults = [];
+          for (const indexChunk of indexChunks) {
+            await Promise.all(indexChunk.map(async (i) => {
+              const mName = updatedItems[i].original_name;
+              if (!mName) return;
               try {
-                searchResults = await api.catalogSearch(mName);
-              } catch (e) {
-                searchResults = [];
-              }
-              
-              let matchedList = searchResults || [];
-              let bestMatch = null;
-
-              // Check for exact match first
-              if (matchedList.length > 0) {
-                bestMatch = matchedList.find((m: any) => m.name && m.name.toLowerCase() === mName.toLowerCase());
-              }
-
-              // If no exact match, calculate similarities and find the best one >= 0.60
-              if (!bestMatch && matchedList.length > 0) {
-                const scored = matchedList.map((m: any) => ({
-                  item: m,
-                  score: calculateSimilarity(mName, m.name)
-                })).filter((s: any) => s.score >= 0.60);
-                
-                if (scored.length > 0) {
-                  scored.sort((a: any, b: any) => b.score - a.score);
-                  bestMatch = scored[0].item;
+                // 1. Check for learned mapping first
+                const learned = await api.getLearnedMapping(mName);
+                if (learned && learned.success && learned.mapped && learned.medicine) {
+                  const match = learned.medicine;
+                  updatedItems[i].medicine_id = match.id;
+                  updatedItems[i].medicine_name = match.name;
+                  updatedItems[i].manufacturer = match.manufacturer;
+                  updatedItems[i].mrp = updatedItems[i].mrp || match.mrp || 0;
+                  updatedItems[i].rate = updatedItems[i].rate || match.rate || 0;
+                  updatedItems[i].cgst_per = updatedItems[i].cgst_per || match.cgst_per || 0;
+                  updatedItems[i].sgst_per = updatedItems[i].sgst_per || match.sgst_per || 0;
+                  updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
+                  hasChanges = true;
+                  return;
                 }
-              }
 
-              // If still no match, try searching for the first word/token of length >= 3
-              if (!bestMatch) {
-                const parts = mName.split(/[\s\-]+/);
-                let tokens = parts[0];
-                const genericPrefixes = ['tab', 'tabs', 'cap', 'caps', 'inj', 'syp', 'susp', 'tablet', 'capsule', 'injection', 'syrup', 'drop', 'drops', 'ointment', 'cream', 'gel'];
-                if (tokens && (genericPrefixes.includes(tokens.toLowerCase()) || tokens.length < 3) && parts.length > 1) {
-                  tokens = parts[1];
+                // 2. Fallback to catalog search for EXACT matches or FUZZY matches
+                let searchResults = [];
+                try {
+                  searchResults = await api.catalogSearch(mName);
+                } catch (e) {
+                  searchResults = [];
                 }
-                if (tokens && tokens.length >= 3) {
-                  let tokenResults = [];
-                  try {
-                    tokenResults = await api.catalogSearch(tokens);
-                  } catch (e) {}
-                  
-                  const scored = (tokenResults || []).map((m: any) => ({
+
+                let matchedList = searchResults || [];
+                let bestMatch = null;
+
+                // Check for exact match first
+                if (matchedList.length > 0) {
+                  bestMatch = matchedList.find((m: any) => m.name && m.name.toLowerCase() === mName.toLowerCase());
+                }
+
+                // If no exact match, calculate similarities and find the best one >= 0.60
+                if (!bestMatch && matchedList.length > 0) {
+                  const scored = matchedList.map((m: any) => ({
                     item: m,
                     score: calculateSimilarity(mName, m.name)
                   })).filter((s: any) => s.score >= 0.60);
@@ -1390,29 +1432,55 @@ const Purchases: React.FC = () => {
                     bestMatch = scored[0].item;
                   }
                 }
-              }
 
-              if (bestMatch) {
-                updatedItems[i].medicine_id = bestMatch.id;
-                updatedItems[i].medicine_name = bestMatch.name;
-                updatedItems[i].manufacturer = bestMatch.manufacturer;
-                updatedItems[i].mrp = updatedItems[i].mrp || bestMatch.mrp || 0;
-                updatedItems[i].rate = updatedItems[i].rate || bestMatch.rate || 0;
-                updatedItems[i].cgst_per = updatedItems[i].cgst_per || bestMatch.cgst_per || 0;
-                updatedItems[i].sgst_per = updatedItems[i].sgst_per || bestMatch.sgst_per || 0;
-                updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
-                hasChanges = true;
-              } else {
-                // Suggest the original parsed name so it is visible and user can modify/correct it
-                updatedItems[i].medicine_id = null;
-                updatedItems[i].medicine_name = mName;
-                updatedItems[i].manufacturer = '';
-                updatedItems[i].amount = 0;
-                hasChanges = true;
+                // If still no match, try searching for the first word/token of length >= 3
+                if (!bestMatch) {
+                  const parts = mName.split(/[\s\-]+/);
+                  let tokens = parts[0];
+                  const genericPrefixes = ['tab', 'tabs', 'cap', 'caps', 'inj', 'syp', 'susp', 'tablet', 'capsule', 'injection', 'syrup', 'drop', 'drops', 'ointment', 'cream', 'gel'];
+                  if (tokens && (genericPrefixes.includes(tokens.toLowerCase()) || tokens.length < 3) && parts.length > 1) {
+                    tokens = parts[1];
+                  }
+                  if (tokens && tokens.length >= 3) {
+                    let tokenResults = [];
+                    try {
+                      tokenResults = await api.catalogSearch(tokens);
+                    } catch (e) {}
+
+                    const scored = (tokenResults || []).map((m: any) => ({
+                      item: m,
+                      score: calculateSimilarity(mName, m.name)
+                    })).filter((s: any) => s.score >= 0.60);
+
+                    if (scored.length > 0) {
+                      scored.sort((a: any, b: any) => b.score - a.score);
+                      bestMatch = scored[0].item;
+                    }
+                  }
+                }
+
+                if (bestMatch) {
+                  updatedItems[i].medicine_id = bestMatch.id;
+                  updatedItems[i].medicine_name = bestMatch.name;
+                  updatedItems[i].manufacturer = bestMatch.manufacturer;
+                  updatedItems[i].mrp = updatedItems[i].mrp || bestMatch.mrp || 0;
+                  updatedItems[i].rate = updatedItems[i].rate || bestMatch.rate || 0;
+                  updatedItems[i].cgst_per = updatedItems[i].cgst_per || bestMatch.cgst_per || 0;
+                  updatedItems[i].sgst_per = updatedItems[i].sgst_per || bestMatch.sgst_per || 0;
+                  updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
+                  hasChanges = true;
+                } else {
+                  // Suggest the original parsed name so it is visible and user can modify/correct it
+                  updatedItems[i].medicine_id = null;
+                  updatedItems[i].medicine_name = mName;
+                  updatedItems[i].manufacturer = '';
+                  updatedItems[i].amount = 0;
+                  hasChanges = true;
+                }
+              } catch (err) {
+                console.error('Error auto-resolving medicine:', mName, err);
               }
-            } catch (err) {
-              console.error('Error auto-resolving medicine:', mName, err);
-            }
+            }));
           }
           if (hasChanges) {
             setItems(updatedItems);
@@ -1524,7 +1592,7 @@ const Purchases: React.FC = () => {
     setItems([...items, createEmptyItem()]);
   };
 
-  const calculateTotals = () => {
+  const memoizedTotals = useMemo(() => {
     let grossAmount = 0;
     let totalCd = 0;
     let subtotal = 0; // Taxable Amount (after CD)
@@ -1564,7 +1632,9 @@ const Purchases: React.FC = () => {
       totalSgst,
       grandTotal,
     };
-  };
+  }, [items, cnAmount]);
+
+  const calculateTotals = () => memoizedTotals;
 
   const savePurchase = async () => {
     // If already saving but stuck >5s, force-reset and allow retry

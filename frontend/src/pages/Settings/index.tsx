@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { sanitizePhoneInput } from '../../utils/phone';
@@ -177,6 +177,25 @@ const Settings = () => {
     return 'Notification' in window && Notification.permission === 'granted';
   });
   const [waStatus, setWaStatus] = useState({ isReady: false, qrUrl: null as string | null, message: '' });
+  // C5: track whether the WhatsApp settings panel (below) is actually scrolled into view, so
+  // the QR-polling effect can skip network calls entirely while the user isn't looking at it —
+  // this Settings page has no accordion/tab state, so visibility is observed directly via
+  // IntersectionObserver rather than a pre-existing "expanded section" flag.
+  const waSectionRef = useRef<HTMLDivElement | null>(null);
+  const [waSectionVisible, setWaSectionVisible] = useState(false);
+  useEffect(() => {
+    const el = waSectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setWaSectionVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setWaSectionVisible(entry.isIntersecting),
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const [waBusinessTestResult, setWaBusinessTestResult] = useState<{ success?: boolean; phone?: string; name?: string; error?: string } | null>(null);
   const [waBusinessTesting, setWaBusinessTesting] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
@@ -202,6 +221,17 @@ const Settings = () => {
   const [deletingLocId, setDeletingLocId] = useState<number | null>(null);
   const [storageLocSaving, setStorageLocSaving] = useState(false);
 
+  // ponytail: stagger initial mount fetches — the settings form (useSettingsQuery below) is the
+  // core data the page needs to render and become interactive, so it loads immediately.
+  // Storage locations, session refresh audit logs, and the backup list/schedule are secondary
+  // diagnostic/history data, so they're delayed ~500ms to get the form interactive sooner and
+  // reduce initial network saturation. Mirrors the same pattern used in Learning/index.tsx.
+  const [showSecondaryData, setShowSecondaryData] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSecondaryData(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const fetchStorageLocations = async () => {
     setStorageLocLoading(true);
     try {
@@ -214,7 +244,9 @@ const Settings = () => {
     }
   };
 
-  useEffect(() => { fetchStorageLocations(); }, []);
+  useEffect(() => {
+    if (showSecondaryData) fetchStorageLocations();
+  }, [showSecondaryData]);
 
   const handleSaveStorageLoc = async () => {
     if (!storageLocForm.name.trim()) {
@@ -293,8 +325,8 @@ const Settings = () => {
   };
 
   useEffect(() => {
-    fetchSessionLogs();
-  }, []);
+    if (showSecondaryData) fetchSessionLogs();
+  }, [showSecondaryData]);
 
   const handleManualReauth = async () => {
     setReauthLoading(true);
@@ -311,13 +343,17 @@ const Settings = () => {
     }
   };
 
-  // Generic helper to update settings fields
-  const updateSetting = <K extends keyof SettingsData>(key: K, value: SettingsData[K] | ((prevVal: SettingsData[K]) => SettingsData[K])) => {
+  // Generic helper to update settings fields.
+  // Wrapped in useCallback (stable identity across renders — setSettings from useState is
+  // itself stable and the update uses the functional form, so the dependency array is empty)
+  // to avoid re-rendering child components that receive it (or the mapped setters derived
+  // from it) as a prop.
+  const updateSetting = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K] | ((prevVal: SettingsData[K]) => SettingsData[K])) => {
     setSettings(prev => ({
       ...prev,
       [key]: typeof value === 'function' ? (value as Function)(prev[key]) : value
     }));
-  };
+  }, []);
 
   // Mapped setters for backward compatibility with minimum code churn
   const setPharmacyName = (val: string | ((p: string) => string)) => updateSetting('pharmacyName', val);
@@ -622,7 +658,7 @@ const Settings = () => {
 
   useEffect(() => {
     let timer: any;
-    if (whatsappEnabled && !waStatus.isReady && pageActive) {
+    if (whatsappEnabled && !waStatus.isReady && pageActive && waSectionVisible) {
       const fetchQR = async () => {
         if (document.visibilityState !== 'visible') return;
         try {
@@ -648,7 +684,7 @@ const Settings = () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
-  }, [whatsappEnabled, waStatus.isReady, pageActive]);
+  }, [whatsappEnabled, waStatus.isReady, pageActive, waSectionVisible]);
 
   const handleSaveSettings = async () => {
     if (!settingsHydrated) {
@@ -713,23 +749,18 @@ const Settings = () => {
 
     try {
       await apiClient.post('/settings/save', payload);
-      updateSettingsCache(queryClient, payload as Record<string, string>);
-      if (ownerWhatsappNumber || phone) {
-        try {
-          await api.saveContact({
-            name: pharmacyName || 'Pharmacy Owner',
-            type: 'owner',
-            phone: ownerWhatsappNumber || phone,
-            email: email || undefined,
-            address: address || undefined,
-            gstin: gstin || undefined
-          });
-        } catch (_) {}
-      }
-      await broadcastContactDataChanged(queryClient);
-      window.dispatchEvent(new CustomEvent('settings-updated'));
-      window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
       toastEvent.trigger('Settings saved successfully', 'success');
+      updateSettingsCache(queryClient, payload as Record<string, string>);
+
+      // Run secondary sync and broadcasts asynchronously in background.
+      // NOTE: the owner contact upsert now happens atomically inside the backend's
+      // /settings/save transaction (see src/routes/settings.ts), so the separate
+      // api.saveContact(...) HTTP call that used to run here has been removed.
+      (async () => {
+        await broadcastContactDataChanged(queryClient);
+        window.dispatchEvent(new CustomEvent('settings-updated'));
+        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
+      })();
     } catch (error) {
       console.error('Failed to save settings', error);
       toastEvent.trigger('Failed to save settings', 'error');
@@ -881,17 +912,19 @@ const Settings = () => {
     }
   };
 
-  // Backup list React Query
+  // Backup list React Query — secondary, delayed ~500ms after mount
   const { data: backupListData, isLoading: backupListLoading } = useApiQuery<{ backups: { filename: string; sizeBytes: number; createdAt: string }[] }>(
     'backup-list',
-    () => apiClient.get('/utilities/backup/list').then(res => res.data)
+    () => apiClient.get('/utilities/backup/list').then(res => res.data),
+    { enabled: showSecondaryData }
   );
   const backupList = backupListData?.backups || [];
 
-  // Backup schedule React Query
+  // Backup schedule React Query — secondary, delayed ~500ms after mount
   const { data: serverBackupSchedule } = useApiQuery<{ frequency: string }>(
     'backup-schedule',
-    () => apiClient.get('/utilities/backup/schedule').then(res => res.data)
+    () => apiClient.get('/utilities/backup/schedule').then(res => res.data),
+    { enabled: showSecondaryData }
   );
 
   useEffect(() => {
@@ -1356,7 +1389,7 @@ const Settings = () => {
 
 
       {/* ─── Notifications ─── */}
-      <div className="glass-panel p-6">
+      <div className="glass-panel p-6" ref={waSectionRef}>
         <h3 className="font-bold flex items-center gap-2 mb-6">
           <Bell size={18} className="text-primary" />
           Notifications

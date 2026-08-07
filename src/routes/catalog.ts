@@ -265,7 +265,7 @@ router.post('/catalog/import', async (req, res) => {
 router.get('/jobs', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const jobs = await db.all('SELECT * FROM catalog_jobs ORDER BY created_at DESC');
+    const jobs = await db.all('SELECT * FROM catalog_jobs ORDER BY created_at DESC LIMIT 1000');
     await dbManager.close();
     res.json(jobs);
   } catch (error) {
@@ -312,7 +312,7 @@ router.get('/catalog/reviews/pending', async (req, res) => {
     const db = await dbManager.getConnection();
     const source = req.query.source || 'whatsapp';
     const reviews = await db.all(
-      'SELECT * FROM staged_medicine_reviews WHERE status = ? AND source = ? ORDER BY id DESC',
+      'SELECT * FROM staged_medicine_reviews WHERE status = ? AND source = ? ORDER BY id DESC LIMIT 1000',
       ['pending', source]
     );
 

@@ -280,7 +280,7 @@ router.get('/lookup-purchases', async (req, res) => {
       query += ` AND pi.batch_no LIKE ?`;
       params.push(`%${batch}%`);
     }
-    query += ` ORDER BY p.date DESC`;
+    query += ` ORDER BY p.date DESC LIMIT 100`;
 
     const purchaseRecords = await db.all(query, params);
         res.json(purchaseRecords);
