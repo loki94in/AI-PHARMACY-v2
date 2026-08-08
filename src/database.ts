@@ -179,14 +179,19 @@ export async function ensureMedicinesFts(db: any): Promise<'ok' | 'repaired' | '
 export async function ensureSchema(dbPath: string) {
   const db = await dbManager.getConnection();
 
-  // Ensure app_settings table exists for schema version tracking
+  // Ensure app_settings and schema_migrations tables exist for schema version tracking
   await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
+  await db.run('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, migrated_at DATETIME DEFAULT CURRENT_TIMESTAMP)');
 
   // Fast-path: skip entire DDL wall if schema is already at current version AND key tables exist
   try {
     const versionRow = await db.get("SELECT value FROM app_settings WHERE key = 'schema_version'");
+    const migrationRow = await db.get("SELECT MAX(version) as version FROM schema_migrations");
     const tableCheck = await db.get("SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name IN ('inventory_master', 'purchase_items', 'sale_items', 'distributors')");
     if (versionRow && parseInt(versionRow.value, 10) >= CURRENT_SCHEMA_VERSION && tableCheck && tableCheck.c >= 4) {
+      if (!migrationRow || !migrationRow.version) {
+        await db.run('INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)', [CURRENT_SCHEMA_VERSION]);
+      }
       console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} already applied, skipping DDL (fast boot).`);
       // Still verify the FTS index: a broken one blocks every write to `medicines`,
       // and that damage can happen long after the schema version was recorded.
@@ -2030,6 +2035,7 @@ export async function ensureSchema(dbPath: string) {
 
   // Stamp schema version so subsequent boots skip all DDL
   await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('schema_version', ?)", [String(CURRENT_SCHEMA_VERSION)]);
+  await db.run("INSERT OR REPLACE INTO schema_migrations (version) VALUES (?)", [CURRENT_SCHEMA_VERSION]);
   console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} applied successfully.`);
 
   // ponytail: don't close — we reuse the dbManager shared connection
