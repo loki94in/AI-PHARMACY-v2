@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dbManager } from '../database/connection.js';
+import { verifyPassword } from '../utils/password.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,7 +52,7 @@ router.post('/admin/login', async (req, res) => {
     const dbPassword = passRow?.value || 'admin123';
     const dbUniqueKey = keyRow?.value || 'KEY-ADM-837261';
 
-    if (username !== dbUsername || password !== dbPassword || uniqueKey !== dbUniqueKey) {
+    if (username !== dbUsername || !verifyPassword(password, dbPassword) || uniqueKey !== dbUniqueKey) {
       return res.status(401).json({ error: 'Invalid admin credentials or unique key.' });
     }
 

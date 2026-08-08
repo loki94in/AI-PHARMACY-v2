@@ -8,6 +8,7 @@ import { telegramBotService } from '../telegramBot.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
 import { getAppDataDir } from '../config/index.js';
 import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
+import { hashPassword } from '../utils/password.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,7 +104,11 @@ router.post('/save', async (req, res) => {
             const existing = await checkProtectedStmt.get([k]);
             if (existing) continue;
           }
-          await upsertStmt.run([k, v ?? '']);
+          let finalVal = v ?? '';
+          if (k === 'admin_password' && finalVal && !String(finalVal).startsWith('pbkdf2:')) {
+            finalVal = hashPassword(String(finalVal));
+          }
+          await upsertStmt.run([k, finalVal]);
         }
 
         // Synchronize store name aliases if any store name key was provided
