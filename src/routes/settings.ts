@@ -80,6 +80,36 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Update or create a single setting (alias endpoint)
+router.post('/save-single', async (req, res) => {
+  const { key, value } = req.body;
+  if (!key) return res.status(400).json({ error: 'key required' });
+  try {
+    const db = await dbManager.getConnection();
+    const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
+
+    const nameKeys = ['shop_name', 'pharmacy_name', 'store_name', 'medical_name'];
+    if (nameKeys.includes(key) && saveValue) {
+      for (const nk of nameKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [nk, saveValue]);
+      }
+    }
+
+    const phoneKeys = ['shop_phone', 'pharmacy_phone', 'store_phone', 'phone'];
+    if (phoneKeys.includes(key) && saveValue) {
+      for (const pk of phoneKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [pk, saveValue]);
+      }
+    }
+
+    res.json({ success: true, key, value: saveValue });
+  } catch (error) {
+    console.error('Settings save-single error:', error);
+    res.status(500).json({ error: 'Failed to save setting' });
+  }
+});
+
 // Generic settings save (upsert multiple keys)
 router.post('/save', async (req, res) => {
   const payload = req.body;

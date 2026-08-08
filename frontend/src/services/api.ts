@@ -316,6 +316,8 @@ interface AppSettings {
 
 // API methods mapping
 export const api = {
+  checkReady: () => apiClient.get('/health/ready'),
+  saveSingleSetting: (key: string, value: string) => apiClient.post('/settings/save-single', { key, value }),
   getDashboard: () => apiClient.get<DashboardStats>('/dashboard').then(res => res.data),
   dismissDashboardAlert: (id: number) => apiClient.delete(`/dashboard/alerts/${id}`).then(res => res.data),
   getCompactInventory: () => apiClient.get<any[]>('/medicines/compact').then(res => {

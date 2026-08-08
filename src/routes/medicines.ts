@@ -368,8 +368,8 @@ router.delete('/medicines/:id', async (req, res) => {
 });
 
 // Dynamic Online Search using OpenFDA API fallback
-router.get('/online-search', async (req, res) => {
-  const query = (req.query.q as string || '').trim();
+const handleOnlineSearch: express.RequestHandler = async (req, res) => {
+  const query = ((req.query.q || req.query.query) as string || '').trim();
   if (!query || query.length < 2) {
     return res.json([]);
   }
@@ -394,10 +394,13 @@ router.get('/online-search', async (req, res) => {
     console.error('Online search endpoint failed:', error);
     res.status(500).json({ error: 'Internal server error during online search' });
   }
-});
+};
+
+router.get('/online-search', handleOnlineSearch);
+router.get('/medicines/online-search', handleOnlineSearch);
 
 // Auto-enrich composition by saving to database
-router.post('/auto-enrich', async (req, res) => {
+const handleAutoEnrich: express.RequestHandler = async (req, res) => {
   const { name, api_reference, manufacturer } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Medicine name is required' });
@@ -435,7 +438,10 @@ router.post('/auto-enrich', async (req, res) => {
     console.error('Auto enrichment save failed:', error);
     res.status(500).json({ error: 'Internal server error saving enrichment' });
   }
-});
+};
+
+router.post('/auto-enrich', handleAutoEnrich);
+router.post('/medicines/auto-enrich', handleAutoEnrich);
 
 // GET unique manufacturers list matching search term
 router.get('/manufacturers', async (req, res) => {
