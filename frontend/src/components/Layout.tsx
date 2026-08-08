@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
@@ -39,7 +40,9 @@ import {
   Truck,
   Package,
   Download,
+  Keyboard,
 } from 'lucide-react';
+import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { 
   ChevronLeft as ChevronLeftIcon, 
@@ -966,17 +969,57 @@ const Topbar = ({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Listen to Escape key to close open header panels
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+
+  // Global App-Wide Keyboard Shortcuts System (Ctrl+S, Escape, Ctrl+/, ?)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const targetTag = (e.target as HTMLElement)?.tagName?.toUpperCase();
+      const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(targetTag);
+
+      // 1. Intercept Ctrl + S or Cmd + S globally
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        e.stopPropagation();
+        shortcutEvent.triggerSave();
+        return;
+      }
+
+      // 2. Intercept Escape globally
       if (e.key === 'Escape') {
+        if (showShortcutHelp) {
+          setShowShortcutHelp(false);
+          return;
+        }
         setShowPanel(false);
         setShowDevicesPopover(false);
+        shortcutEvent.triggerCloseModal();
+        return;
+      }
+
+      // 3. Intercept Ctrl + / or ? to toggle Keyboard Shortcuts Cheat Sheet
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        setShowShortcutHelp(prev => !prev);
+        return;
+      }
+      if (e.key === '?' && !isInputFocused) {
+        e.preventDefault();
+        setShowShortcutHelp(prev => !prev);
+        return;
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    const unsubscribeHelp = shortcutEvent.subscribeToggleHelp(() => {
+      setShowShortcutHelp(prev => !prev);
+    });
+
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown, true);
+      unsubscribeHelp();
+    };
+  }, [showShortcutHelp]);
 
   // Listen for toast events — show flash AND add to panel
   useEffect(() => {
@@ -1288,6 +1331,21 @@ const Topbar = ({
               />
             )}
           </div>
+
+          {/* Keyboard Shortcuts button */}
+          <button
+            onClick={() => setShowShortcutHelp(true)}
+            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
+            aria-label="Keyboard Shortcuts"
+            title="Keyboard Shortcuts Cheat Sheet (Ctrl + /)"
+          >
+            <Keyboard size={18} />
+          </button>
+
+          <KeyboardShortcutsModal
+            isOpen={showShortcutHelp}
+            onClose={() => setShowShortcutHelp(false)}
+          />
 
           {/* Theme toggle */}
           <button
@@ -2223,6 +2281,94 @@ export const Layout = ({
         </div>
       </div>
     </div>
+  );
+};
+
+const KeyboardShortcutsModal = ({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) => {
+  const [filterCategory, setFilterCategory] = useState<string>('All');
+  if (!isOpen) return null;
+
+  const categories = ['All', 'Global', 'POS', 'Learning', 'CRM', 'Purchases', 'Settings'];
+  const filtered = filterCategory === 'All'
+    ? SHORTCUT_DIRECTORY
+    : SHORTCUT_DIRECTORY.filter(s => s.category === filterCategory);
+
+  return createPortal(
+    <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
+      <div className="bg-bg border border-glass-border w-full max-w-2xl rounded-3xl p-6 space-y-4 text-left shadow-2xl">
+        <div className="flex justify-between items-center border-b border-glass-border pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-sky-500/10 text-sky border border-sky-500/20">
+              <Keyboard size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-text">Keyboard Shortcuts Cheat Sheet</h3>
+              <p className="text-[11px] text-muted">Essential shortcuts for fast on-premise navigation & control</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-muted hover:text-text transition-all"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Category Tabs */}
+        <div className="flex gap-1.5 border-b border-glass-border/30 pb-2 flex-wrap">
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setFilterCategory(cat)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                filterCategory === cat
+                  ? 'bg-sky-500/20 text-sky border border-sky-500/30'
+                  : 'text-muted hover:text-text hover:bg-bg3/60'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Shortcuts Directory Grid */}
+        <div className="max-h-80 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+          {filtered.map((item, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between p-3 rounded-xl bg-bg2/40 border border-glass-border/30 hover:bg-bg2/60 transition-colors"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-sky-500/10 text-sky border border-sky-500/20">
+                  {item.category}
+                </span>
+                <span className="text-xs font-semibold text-text">{item.description}</span>
+              </div>
+              <kbd className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border font-mono text-[11px] font-bold text-sky drop-shadow-sm">
+                {item.key}
+              </kbd>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-between items-center pt-2 border-t border-glass-border/30">
+          <span className="text-[10px] text-muted">Press <kbd className="px-1.5 py-0.5 rounded bg-bg border border-glass-border font-mono">Esc</kbd> anytime to close this helper or any active popup</span>
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg bg-sky hover:bg-sky-400 text-white text-xs font-bold transition-all active:scale-95"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 };
 

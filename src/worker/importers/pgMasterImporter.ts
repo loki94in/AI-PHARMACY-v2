@@ -11,6 +11,7 @@
 import { Database } from 'sqlite';
 import { normalizeDistributorName } from '../../utils/migrationValidation.js';
 import { parsePackSizeFromPackaging } from '../../utils/packaging.js';
+import { sanitizeDoctorName } from '../../utils/doctorUtils.js';
 
 // In-memory lookup maps (legacy_id → new SQLite id)
 export const categoryMap = new Map<string, string>();       // legacy_id → category_name
@@ -154,8 +155,10 @@ export async function importDoctor(row: Record<string, string | null>, db: Datab
   const deleted = row['deleted'];
   if (!legacyId || !name || deleted === 't') return;
 
+  const cleanName = sanitizeDoctorName(name) || name.trim();
+
   doctorBatch.push({
-    name,
+    name: cleanName,
     degree: row['qualification'] || row['doctor_qualifications'] || null,
     reg_no: row['registration_no'] || null,
     hospital: row['doctor_hospital'] || null,
@@ -176,12 +179,18 @@ export async function flushDoctors(db: Database) {
   try {
     for (const d of doctorBatch) {
       try {
-        const result = await db.run(
-          `INSERT INTO doctors (name, degree, reg_no, hospital, phone, address, legacy_id, speciality)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [d.name, d.degree, d.reg_no, d.hospital, d.phone, d.address, d.legacy_id, d.speciality]
-        );
-        doctorMap.set(d.legacy_id, result.lastID!);
+        const cleanName = sanitizeDoctorName(d.name) || d.name.trim();
+        const existing = await db.get('SELECT id FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?)', [cleanName]);
+        if (existing) {
+          doctorMap.set(d.legacy_id, existing.id);
+        } else {
+          const result = await db.run(
+            `INSERT INTO doctors (name, degree, reg_no, hospital, phone, address, legacy_id, speciality)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [cleanName, d.degree, d.reg_no, d.hospital, d.phone, d.address, d.legacy_id, d.speciality]
+          );
+          doctorMap.set(d.legacy_id, result.lastID!);
+        }
       } catch (err: any) {
         console.warn(`[Migration] Skipped doctor ${d.name}: ${err.message}`);
       }

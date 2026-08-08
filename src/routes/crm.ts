@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendDailyDoctorReports } from '../services/doctorReportingService.js';
 import { getMessage } from '../i18n/getMessage.js';
+import { sanitizeDoctorName } from '../utils/doctorUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -210,14 +211,32 @@ router.get('/doctors', async (req, res) => {
 router.post('/doctors', async (req, res) => {
   const { name, speciality, phone, hospital, degree, reg_no, send_daily_summary } = req.body;
   if (!name) return res.status(400).json({ error: 'Doctor name is required' });
+  const cleanName = sanitizeDoctorName(name) || name.trim();
   try {
     const db = await dbManager.getConnection();
-    await db.run(
+    const existing = await db.get('SELECT * FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?)', [cleanName]);
+    if (existing) {
+      // Update existing doctor instead of creating duplicate Dr. vs non-Dr entry
+      await db.run(
+        `UPDATE doctors 
+         SET speciality = COALESCE(NULLIF(?, ''), speciality),
+             phone = COALESCE(NULLIF(?, ''), phone),
+             hospital = COALESCE(NULLIF(?, ''), hospital),
+             degree = COALESCE(NULLIF(?, ''), degree),
+             reg_no = COALESCE(NULLIF(?, ''), reg_no),
+             send_daily_summary = CASE WHEN ? = 1 THEN 1 ELSE send_daily_summary END
+         WHERE id = ?`,
+        [speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0, existing.id]
+      );
+      return res.json({ success: true, message: 'Doctor profile updated', doctorId: existing.id });
+    }
+
+    const result = await db.run(
       `INSERT INTO doctors (name, speciality, phone, hospital, degree, reg_no, send_daily_summary)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0]
+      [cleanName, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0]
     );
-    res.json({ success: true, message: 'Doctor added successfully' });
+    res.json({ success: true, message: 'Doctor added successfully', doctorId: result.lastID });
   } catch (error) {
     console.error('Failed to add doctor:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -229,13 +248,14 @@ router.put('/doctors/:id', async (req, res) => {
   const { id } = req.params;
   const { name, speciality, phone, hospital, degree, reg_no, send_daily_summary } = req.body;
   if (!name) return res.status(400).json({ error: 'Doctor name is required' });
+  const cleanName = sanitizeDoctorName(name) || name.trim();
   try {
     const db = await dbManager.getConnection();
     await db.run(
       `UPDATE doctors 
        SET name = ?, speciality = ?, phone = ?, hospital = ?, degree = ?, reg_no = ?, send_daily_summary = ?
        WHERE id = ?`,
-      [name, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0, id]
+      [cleanName, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0, id]
     );
     const updated = await db.get('SELECT * FROM doctors WHERE id = ?', id);
     res.json({ success: true, doctor: updated });

@@ -59,14 +59,19 @@ export function registerProcessGuardian(): void {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? (reason.stack || '') : '';
 
-    // Suppress benign Puppeteer/whatsapp-web.js internal rejections from crashing the process
+    // Suppress benign Puppeteer/whatsapp-web.js/Pharmarack internal rejections when user or browser closes manually
     if (
       message.includes('detached Frame') ||
       message.includes('Execution context was destroyed') ||
-      message.includes('Session closed. Most likely the page has been closed') ||
-      message.includes('Target closed')
+      message.includes('Session closed') ||
+      message.includes('Target closed') ||
+      message.includes('Protocol error') ||
+      message.includes('Connection closed') ||
+      message.includes('Browser has been disconnected') ||
+      message.includes('Navigation failed because browser has disconnected') ||
+      message.includes('WebSocket is not open')
     ) {
-      console.warn('[ProcessGuardian] Suppressed benign Puppeteer/WA rejection:', message);
+      console.warn('[ProcessGuardian] Suppressed benign browser exit rejection:', message);
       return;
     }
 

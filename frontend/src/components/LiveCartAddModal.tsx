@@ -50,6 +50,44 @@ const getDistributorColorIndex = (name: string | undefined): number => {
   return Math.abs(hash) % DISTRIBUTOR_COLORS.length;
 };
 
+// Filter out emails, DL numbers, phone numbers, and GSTINs from being parsed as distributor names
+export const isValidDistributorName = (name: string | null | undefined): boolean => {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (!trimmed || trimmed.length < 2) return false;
+
+  // 1. Filter out emails (e.g. ctinvoice@gmail.com)
+  if (trimmed.includes('@') || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return false;
+  }
+
+  // 2. Filter out Drug License labels & numbers (e.g. DL, DL NO, DL-12345, DRUG LIC NO)
+  if (/^(DL|DL\s*NO|DL\s*NUMBER|DL\s*NUM|DRUG\s*LIC|DRUG\s*LICENSE)\b/i.test(trimmed) || /^DL\s*[-/:]?\s*\d+/i.test(trimmed)) {
+    return false;
+  }
+  if (/^DL\b/i.test(trimmed) && trimmed.length <= 5) {
+    return false;
+  }
+
+  // 3. Filter out pure phone numbers (e.g. +919876543210, 9876543210)
+  const numericOnly = trimmed.replace(/\D/g, '');
+  if (numericOnly.length >= 10 && numericOnly.length <= 13 && trimmed.replace(/[\d\s+\-()]/g, '').length === 0) {
+    return false;
+  }
+
+  // 4. Filter out GSTIN numbers (e.g. 27AAAAA0000A1Z5)
+  if (/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/i.test(trimmed)) {
+    return false;
+  }
+
+  // 5. Filter out raw date formats or invoice prefixes
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(trimmed) || /^INV[-/]?\d+$/i.test(trimmed)) {
+    return false;
+  }
+
+  return true;
+};
+
 const getStockStyle = (stockStr: string | undefined): string => {
   if (!stockStr) return 'bg-bg3 text-muted border border-border';
   const stock = stockStr.trim();
@@ -1603,7 +1641,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-blue-400' : 'text-blue-300'}`} title={medName}>
                                 {medName}
                               </div>
-                              {recon.extracted_distributor ? (
+                              {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
                                 <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border mt-0.5 truncate max-w-[140px] ${reconDistColor.badge}`}>
                                   {recon.extracted_distributor}
                                 </span>

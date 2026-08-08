@@ -42,6 +42,7 @@ import {
 import { sanitizeMultiPhoneInput } from '../../utils/phone';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { shortcutEvent } from '../../services/keyboardShortcuts';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getNDaysAgoString, formatDisplayDate } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
@@ -84,13 +85,17 @@ let cachedServerSettings: any = null;
 let cachedProfiles: LearningProfileSummary[] = [];
 const cachedProfileDetailsMap: Record<number, any> = {};
 
+const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors', 'operations'];
+
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const normalizeTab = (t: string | null) => {
     if (!t) return 'clinical';
-    if (t === 'distributor_layouts' || t === 'distributors') return 'distributors';
-    if (t === 'messaging' || t === 'ingestion' || t === 'operations' || t === 'integrations') return 'operations';
-    return t;
+    const lower = t.toLowerCase();
+    if (lower === 'distributor_layouts' || lower === 'distributors') return 'distributors';
+    if (lower === 'messaging' || lower === 'ingestion' || lower === 'operations' || lower === 'integrations') return 'operations';
+    if (VALID_LEARNING_TABS.includes(lower)) return lower;
+    return 'clinical'; // Fallback to clinical so page never renders blank on unexpected tab params
   };
   const [activeTab, setActiveTab] = useState<string>(normalizeTab(searchParams.get('tab')));
 
@@ -290,6 +295,20 @@ const Learning: React.FC = () => {
   const [mergeSecondaryIds, setMergeSecondaryIds] = useState<number[]>([]);
   const [mergingDistributors, setMergingDistributors] = useState(false);
   const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
+  const [pharmarackCatalogList, setPharmarackCatalogList] = useState<any[]>([]);
+  const [mergeNewName, setMergeNewName] = useState<string>('');
+
+  useEffect(() => {
+    if (showMergeDistModal) {
+      apiClient.get('/distributors/pharmarack-list')
+        .then(res => {
+          if (res.data && res.data.distributors) {
+            setPharmarackCatalogList(res.data.distributors);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [showMergeDistModal]);
 
   const handleMergeDistributors = async () => {
     if (!mergePrimaryId || mergeSecondaryIds.length === 0) {
@@ -300,15 +319,19 @@ const Learning: React.FC = () => {
     try {
       const res = await apiClient.post('/learning/profiles/merge', {
         primaryId: mergePrimaryId,
-        secondaryIds: mergeSecondaryIds
+        secondaryIds: mergeSecondaryIds,
+        newName: mergeNewName.trim() || undefined
       });
       if (res.data && res.data.success) {
         toastEvent.trigger(res.data.message || 'Distributors merged successfully', 'success');
         setShowMergeDistModal(false);
         setMergePrimaryId(null);
         setMergeSecondaryIds([]);
+        setMergeNewName('');
         queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+        queryClient.invalidateQueries({ queryKey: ['distributors'] });
         if (mergePrimaryId) {
+          delete cachedProfileDetailsMap[mergePrimaryId];
           setSelectedProfileId(mergePrimaryId);
           queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', mergePrimaryId] });
         }
@@ -318,6 +341,43 @@ const Learning: React.FC = () => {
       toastEvent.trigger(err?.response?.data?.error || 'Failed to merge distributors', 'error');
     } finally {
       setMergingDistributors(false);
+    }
+  };
+
+  const handleDeleteDistributorProfile = async () => {
+    if (!selectedProfileId || !selectedProfile?.distributor) return;
+    const distName = selectedProfile.distributor.name;
+    if (!window.confirm(`Are you sure you want to delete distributor "${distName}"? This will remove the distributor profile and its configuration from the application.`)) return;
+
+    try {
+      const res = await apiClient.delete(`/distributors/${selectedProfileId}`);
+      if (res.data && res.data.success) {
+        toastEvent.trigger(`Distributor "${distName}" deleted successfully`, 'success');
+        delete cachedProfileDetailsMap[selectedProfileId];
+        const distIdToDelete = selectedProfileId;
+        setSelectedProfile(null);
+        setSelectedProfileId(null);
+
+        const distIndex = cachedProfiles.findIndex(p => p.distributor_id === distIdToDelete);
+        if (distIndex !== -1) {
+          cachedProfiles.splice(distIndex, 1);
+        }
+
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('ai_pharmacy_distributors_sync');
+            bc.postMessage({ type: 'DISTRIBUTOR_UPDATED', id: distIdToDelete });
+            bc.close();
+          } catch (_) {}
+        }
+
+        window.dispatchEvent(new CustomEvent('contacts-updated', { detail: { id: distIdToDelete } }));
+        queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+        queryClient.invalidateQueries({ queryKey: ['distributors'] });
+      }
+    } catch (err: any) {
+      console.error('Failed to delete distributor:', err);
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to delete distributor', 'error');
     }
   };
 
@@ -439,8 +499,7 @@ const Learning: React.FC = () => {
     }
   }, [serverProfileDetail, selectedProfileId]);
 
-  // Live sync: invalidate profiles + profile detail whenever distributors change
-  // (via POST /distributors, PUT /distributors/:id, DELETE /distributors/:id)
+  // Live sync: real-time synchronization across on-premise tabs & devices whenever distributors change
   useEffect(() => {
     const baseUrl = (import.meta as any).env?.VITE_API_URL || window.location.origin;
     const cleanBase = baseUrl.replace(/\/$/, '');
@@ -448,17 +507,39 @@ const Learning: React.FC = () => {
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let bc: BroadcastChannel | null = null;
 
+    const purgeAndInvalidate = (distId?: number) => {
+      if (distId) {
+        delete cachedProfileDetailsMap[distId];
+      } else {
+        Object.keys(cachedProfileDetailsMap).forEach(key => delete cachedProfileDetailsMap[Number(key)]);
+      }
+      queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['learning-profile-detail'] });
+      queryClient.invalidateQueries({ queryKey: ['distributors'] });
+    };
+
+    // 1. Cross-tab BroadcastChannel for 0ms same-machine sync
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('ai_pharmacy_distributors_sync');
+        bc.onmessage = (msg) => {
+          if (msg.data?.type === 'DISTRIBUTOR_UPDATED') {
+            purgeAndInvalidate(msg.data?.id);
+          }
+        };
+      } catch (_) {}
+    }
+
+    // 2. On-premise local server SSE stream for multi-device / network sync
     const connect = () => {
       es = new EventSource(sseUrl);
       es.onmessage = (event) => {
         try {
-          const { type } = JSON.parse(event.data);
-          if (type === 'distributors_updated') {
-            queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
-            if (selectedProfileId) {
-              queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfileId] });
-            }
+          const data = JSON.parse(event.data);
+          if (data?.type === 'distributors_updated') {
+            purgeAndInvalidate(data.payload?.id);
           }
         } catch (_) {}
       };
@@ -469,13 +550,53 @@ const Learning: React.FC = () => {
       };
     };
 
+    // 3. Same-window custom event listeners
+    const handleLocalEvent = (e: Event) => {
+      const custom = e as CustomEvent;
+      purgeAndInvalidate(custom.detail?.id);
+    };
+
+    window.addEventListener('contacts-updated', handleLocalEvent);
+    window.addEventListener('phone-numbers-updated', handleLocalEvent);
+
     connect();
     return () => {
       es?.close();
       if (retryTimer) clearTimeout(retryTimer);
+      if (bc) bc.close();
+      window.removeEventListener('contacts-updated', handleLocalEvent);
+      window.removeEventListener('phone-numbers-updated', handleLocalEvent);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient]);
+
+  // Keyboard Shortcut Event Subscriptions (Ctrl+S to save, Esc to close modals)
+  useEffect(() => {
+    const unsubClose = shortcutEvent.subscribeCloseModal(() => {
+      setShowMergeDistModal(false);
+      setShowAddDistModal(false);
+      setShowAddDocModal(false);
+    });
+
+    const unsubSave = shortcutEvent.subscribeSave(() => {
+      if (showMergeDistModal && mergePrimaryId && mergeSecondaryIds.length > 0) {
+        handleMergeDistributors();
+        return;
+      }
+      if (showAddDistModal) {
+        handleAddDistributor();
+        return;
+      }
+      if (showAddDocModal) {
+        handleSaveDoctor();
+        return;
+      }
+    });
+
+    return () => {
+      unsubClose();
+      unsubSave();
+    };
+  }, [showMergeDistModal, showAddDistModal, showAddDocModal, mergePrimaryId, mergeSecondaryIds]);
 
   const checkPrHealth = async () => {
     setCheckingPrHealth(true);
@@ -1522,12 +1643,22 @@ const Learning: React.FC = () => {
                         </div>
                         <p className="text-[10px] text-muted">Layout configuration rules & extraction parameters</p>
                       </div>
-                      <button
-                        onClick={resetProfile}
-                        className="px-2 py-1 bg-red/10 hover:bg-red/20 border border-red/20 text-red hover:text-red border-red-500/20 rounded-lg text-[9px] font-bold uppercase transition-all"
-                      >
-                        Reset Profile
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={resetProfile}
+                          className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber rounded-lg text-[9px] font-bold uppercase transition-all"
+                          title="Reset layout rules & historical files for this distributor"
+                        >
+                          Reset Rules
+                        </button>
+                        <button
+                          onClick={handleDeleteDistributorProfile}
+                          className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red rounded-lg text-[9px] font-bold uppercase transition-all flex items-center gap-1"
+                          title="Delete distributor profile from application"
+                        >
+                          <Trash2 size={11} /> Delete Distributor
+                        </button>
+                      </div>
                     </div>
 
                     {/* Scrollable Rules Editor */}
@@ -1594,14 +1725,40 @@ const Learning: React.FC = () => {
                                 };
                                 const res = await apiClient.put(`/distributors/${selectedProfile.distributor.id}`, updatedDistributor);
                                 const savedDist = res.data?.data || updatedDistributor;
-                                setSelectedProfile({
+                                const updatedFullProfile = {
                                   ...selectedProfile,
                                   distributor: savedDist
-                                });
-                                window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
-                                window.dispatchEvent(new CustomEvent('contacts-updated'));
+                                };
+                                setSelectedProfile(updatedFullProfile);
+
+                                if (selectedProfile.distributor?.id) {
+                                  cachedProfileDetailsMap[selectedProfile.distributor.id] = updatedFullProfile;
+                                  queryClient.setQueryData(['learning-profile-detail', selectedProfile.distributor.id], updatedFullProfile);
+                                }
+
+                                const distIndex = cachedProfiles.findIndex(p => p.distributor_id === savedDist.id);
+                                if (distIndex !== -1) {
+                                  cachedProfiles[distIndex] = {
+                                    ...cachedProfiles[distIndex],
+                                    distributor_name: savedDist.name,
+                                    distributor_phone: savedDist.phone,
+                                    distributor_email: savedDist.email
+                                  };
+                                }
+
+                                if (typeof BroadcastChannel !== 'undefined') {
+                                  try {
+                                    const bc = new BroadcastChannel('ai_pharmacy_distributors_sync');
+                                    bc.postMessage({ type: 'DISTRIBUTOR_UPDATED', id: savedDist.id });
+                                    bc.close();
+                                  } catch (_) {}
+                                }
+
+                                window.dispatchEvent(new CustomEvent('phone-numbers-updated', { detail: { id: savedDist.id } }));
+                                window.dispatchEvent(new CustomEvent('contacts-updated', { detail: { id: savedDist.id } }));
                                 toastEvent.trigger('Distributor profile updated', 'success');
                                 queryClient.invalidateQueries({ queryKey: ['learning-profiles'] });
+                                queryClient.invalidateQueries({ queryKey: ['learning-profile-detail', selectedProfile.distributor.id] });
                                 queryClient.invalidateQueries({ queryKey: ['distributors'] });
                               } catch (err) {
                                 console.error(err);
@@ -2715,15 +2872,17 @@ const Learning: React.FC = () => {
             <div className="flex justify-end gap-2.5 pt-2 border-t border-glass-border/30">
               <button
                 onClick={() => setShowAddDocModal(false)}
-                className="px-3.5 py-2 rounded-lg bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold transition-all active:scale-95"
+                className="px-3.5 py-2 rounded-lg bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold transition-all active:scale-95 flex items-center gap-1"
               >
-                Cancel
+                <span>Cancel</span>
+                <kbd className="text-[9px] px-1 py-0.5 rounded bg-black/20 text-muted font-mono">Esc</kbd>
               </button>
               <button
                 onClick={handleSaveDoctor}
-                className="px-4 py-2 rounded-lg bg-sky hover:bg-sky-400 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-sky/10"
+                className="px-4 py-2 rounded-lg bg-sky hover:bg-sky-400 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-sky/10 flex items-center gap-1.5"
               >
-                {editingDoctorId ? 'Update Doctor' : 'Add Doctor'}
+                <span>{editingDoctorId ? 'Update Doctor' : 'Add Doctor'}</span>
+                <kbd className="text-[9px] px-1 py-0.5 rounded bg-black/30 text-white/90 font-mono">Ctrl+S</kbd>
               </button>
             </div>
           </div>
@@ -2731,15 +2890,20 @@ const Learning: React.FC = () => {
         document.body
       )}
 
-      {/* Merge Duplicate Distributors Modal */}
+      {/* Merge Duplicate Distributors Modal - Side-by-Side Left/Right & Pharmarack Resolver */}
       {showMergeDistModal && createPortal(
         <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 text-left">
-          <div className="bg-bg border border-glass-border w-full max-w-lg rounded-3xl p-6 space-y-4 text-left shadow-2xl">
-            <div className="flex justify-between items-center border-b border-glass-border pb-2.5">
-              <h3 className="font-bold text-sm text-text flex items-center gap-2">
-                <GitMerge size={16} className="text-amber" />
-                Merge Duplicate Distributor Profiles
-              </h3>
+          <div className="bg-bg border border-glass-border w-full max-w-4xl rounded-3xl p-6 space-y-4 text-left shadow-2xl">
+            <div className="flex justify-between items-center border-b border-glass-border pb-3">
+              <div>
+                <h3 className="font-bold text-sm text-text flex items-center gap-2">
+                  <GitMerge size={18} className="text-amber" />
+                  Merge & Resolve Distributor Conflicts
+                </h3>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Consolidate duplicate distributor records into a master distributor profile and map to official Pharmarack catalog names.
+                </p>
+              </div>
               <button
                 onClick={() => setShowMergeDistModal(false)}
                 className="p-1 rounded hover:bg-white/10 text-muted hover:text-text transition-all"
@@ -2748,37 +2912,127 @@ const Learning: React.FC = () => {
               </button>
             </div>
 
-            <div className="space-y-4 py-1 text-left">
-              <p className="text-xs text-muted leading-relaxed">
-                Consolidate duplicate distributor records into a single master distributor. All historical bills, purchase orders, returns, payment receipts, and learned invoice OCR rules will be safely re-linked.
-              </p>
+            {/* Side-by-Side Left & Right Comparison Layout */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 py-1 text-left">
+              
+              {/* Left Column: Select Master (Primary) */}
+              <div className="space-y-3.5 p-3.5 bg-sky-500/5 border border-sky-500/20 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-sky uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-sky text-white text-[9px] flex items-center justify-center font-mono">L</span>
+                    Primary Master Distributor (To Keep)
+                  </label>
+                  {mergePrimaryId && (
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-sky/10 text-sky border border-sky/20">
+                      ID: {mergePrimaryId}
+                    </span>
+                  )}
+                </div>
 
-              {/* Step 1: Pick Master */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-sky uppercase tracking-wider">1. Select Primary Master Distributor (To Keep)</label>
                 <select
-                  className="premium-input w-full text-xs"
+                  className="premium-input w-full text-xs font-semibold"
                   value={mergePrimaryId || ''}
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
-                    setMergePrimaryId(isNaN(val) ? null : val);
-                    setMergeSecondaryIds(prev => prev.filter(id => id !== val));
+                    const selId = isNaN(val) ? null : val;
+                    setMergePrimaryId(selId);
+                    setMergeSecondaryIds(prev => prev.filter(id => id !== selId));
+                    const selected = profiles.find(p => p.distributor_id === selId);
+                    if (selected) {
+                      setMergeNewName(selected.distributor_name);
+                    }
                   }}
                 >
                   <option value="">-- Choose Master Distributor --</option>
                   {profiles.map(p => (
                     <option key={p.distributor_id} value={p.distributor_id}>
-                      {p.distributor_name} {p.distributor_phone ? `(${p.distributor_phone})` : ''} — [ID: {p.distributor_id}]
+                      {p.distributor_name} {p.distributor_phone ? `(${p.distributor_phone})` : ''}
                     </option>
                   ))}
                 </select>
+
+                {/* Master Details & Pharmarack Name Resolver */}
+                {mergePrimaryId && (
+                  <div className="space-y-3 border-t border-glass-border/40 pt-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Consolidated Store Name</label>
+                      <input
+                        type="text"
+                        className="premium-input w-full text-xs"
+                        placeholder="Enter master distributor name"
+                        value={mergeNewName}
+                        onChange={(e) => setMergeNewName(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Pharmarack Catalog Auto-Matcher */}
+                    <div className="space-y-1.5 bg-bg3/40 p-2.5 rounded-xl border border-glass-border/30">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-emerald-400 uppercase tracking-wider">Pharmarack Catalog Resolution</span>
+                        {pharmarackCatalogList.length > 0 && (
+                          <span className="text-muted font-mono">{pharmarackCatalogList.length} catalog items</span>
+                        )}
+                      </div>
+
+                      {pharmarackCatalogList.length > 0 ? (
+                        <div className="space-y-1">
+                          <select
+                            className="premium-input w-full text-[11px]"
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setMergeNewName(e.target.value);
+                              }
+                            }}
+                          >
+                            <option value="">-- Select Pharmarack Store Name --</option>
+                            {pharmarackCatalogList.map(pr => (
+                              <option key={pr.id || pr.store_name} value={pr.store_name}>
+                                {pr.store_name} {pr.phone ? `(${pr.phone})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {mergeNewName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const match = pharmarackCatalogList.find(pr => 
+                                  pr.store_name.toLowerCase().includes(mergeNewName.toLowerCase()) ||
+                                  mergeNewName.toLowerCase().includes(pr.store_name.toLowerCase())
+                                );
+                                if (match) setMergeNewName(match.store_name);
+                              }}
+                              className="text-[9px] text-sky hover:underline font-bold"
+                            >
+                              Auto-match best Pharmarack name
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-muted italic">No external Pharmarack catalog items stored. Master name will be used directly.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Step 2: Pick Duplicates */}
-              {mergePrimaryId !== null && (
-                <div className="space-y-2 pt-2 border-t border-glass-border/40">
-                  <label className="text-[10px] font-bold text-amber uppercase tracking-wider">2. Select Duplicate Distributors (To Merge & Remove)</label>
-                  <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 bg-bg3/40 border border-glass-border/40 rounded-xl custom-scrollbar">
+              {/* Right Column: Select Duplicates (Secondary) */}
+              <div className="space-y-3.5 p-3.5 bg-amber-500/5 border border-amber-500/20 rounded-2xl flex flex-col h-full min-h-0">
+                <div className="flex items-center justify-between shrink-0">
+                  <label className="text-[11px] font-bold text-amber uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-amber text-white text-[9px] flex items-center justify-center font-mono">R</span>
+                    Duplicate / Migrated Records (To Merge & Remove)
+                  </label>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber border border-amber-500/20">
+                    Selected: {mergeSecondaryIds.length}
+                  </span>
+                </div>
+
+                {!mergePrimaryId ? (
+                  <div className="flex-1 flex items-center justify-center p-6 text-center text-muted text-xs border border-dashed border-glass-border/40 rounded-xl">
+                    Select a Primary Master Distributor on the Left to choose duplicates to merge.
+                  </div>
+                ) : (
+                  <div className="flex-1 max-h-60 overflow-y-auto space-y-1.5 p-2 bg-bg3/40 border border-glass-border/40 rounded-xl custom-scrollbar">
                     {profiles
                       .filter(p => p.distributor_id !== mergePrimaryId)
                       .map(p => {
@@ -2810,26 +3064,34 @@ const Learning: React.FC = () => {
                         );
                       })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-2 border-t border-glass-border/30">
-              <button
-                onClick={() => setShowMergeDistModal(false)}
-                disabled={mergingDistributors}
-                className="px-3.5 py-2 rounded-lg bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleMergeDistributors}
-                disabled={mergingDistributors || !mergePrimaryId || mergeSecondaryIds.length === 0}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-amber-600/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              >
-                {mergingDistributors ? <RefreshCw size={13} className="animate-spin" /> : <GitMerge size={13} />}
-                {mergingDistributors ? 'Merging Profiles...' : `Merge (${mergeSecondaryIds.length}) into Master`}
-              </button>
+            <div className="flex justify-between items-center pt-3 border-t border-glass-border/30">
+              <span className="text-[10px] text-muted">
+                {mergePrimaryId && mergeSecondaryIds.length > 0
+                  ? `Merging ${mergeSecondaryIds.length} duplicate distributor(s) into '${mergeNewName || 'Master'}'`
+                  : 'Select master distributor on Left and duplicates on Right to merge'}
+              </span>
+              <div className="flex gap-2.5">
+                <button
+                  onClick={() => setShowMergeDistModal(false)}
+                  disabled={mergingDistributors}
+                  className="px-3.5 py-2 rounded-lg bg-bg3 hover:bg-bg2 border border-glass-border text-muted hover:text-text text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleMergeDistributors}
+                  disabled={mergingDistributors || !mergePrimaryId || mergeSecondaryIds.length === 0}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all active:scale-95 shadow-md shadow-amber-600/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {mergingDistributors ? <RefreshCw size={13} className="animate-spin" /> : <GitMerge size={13} />}
+                  {mergingDistributors ? 'Merging Profiles...' : `Merge (${mergeSecondaryIds.length}) into Master`}
+                </button>
+              </div>
             </div>
           </div>
         </div>,

@@ -1261,7 +1261,35 @@ const Purchases: React.FC = () => {
     }
   }, [activeSearchIndex, searchResults.length]);
 
-  const handleRowInputKeyDown = (e: React.KeyboardEvent, index: number, _fieldName: string) => {
+  const handleRowInputKeyDown = (e: React.KeyboardEvent, index: number, fieldName: string) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const targetIndex = index + 1;
+      if (targetIndex < items.length) {
+        const el = document.querySelector(`input[data-row-index="${targetIndex}"][data-field="${fieldName}"]`) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const targetIndex = index - 1;
+      if (targetIndex >= 0) {
+        const el = document.querySelector(`input[data-row-index="${targetIndex}"][data-field="${fieldName}"]`) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+
     if (e.key === 'Enter') {
       e.preventDefault();
       const targetIndex = index + 1;
@@ -2750,6 +2778,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="text"
+                      data-row-index={index}
+                      data-field="batch_no"
                       value={item.batch_no}
                       onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'batch_no')}
@@ -2759,6 +2789,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="text"
+                      data-row-index={index}
+                      data-field="expiry_date"
                       placeholder="MM/YY"
                       value={item.expiry_date}
                       onChange={(e) => updateItem(index, 'expiry_date', e.target.value)}
@@ -2791,6 +2823,8 @@ const Purchases: React.FC = () => {
                     <div className="flex items-center bg-white/10 border border-white/20 rounded px-1.5 py-1 w-20 max-w-[80px] h-8 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-all">
                       <input
                         type="number"
+                        data-row-index={index}
+                        data-field="rate"
                         value={item.rate}
                         onChange={(e) => updateItem(index, 'rate', e.target.value)}
                         onKeyDown={(e) => handleRowInputKeyDown(e, index, 'rate')}
@@ -2812,6 +2846,8 @@ const Purchases: React.FC = () => {
                   >
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="mrp"
                       value={item.mrp}
                       onChange={(e) => updateItem(index, 'mrp', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
@@ -2831,6 +2867,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="qty"
                       value={item.qty}
                       onChange={(e) => updateItem(index, 'qty', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'qty')}
@@ -2840,6 +2878,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="free_qty"
                       value={item.free_qty}
                       onChange={(e) => updateItem(index, 'free_qty', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'free_qty')}
@@ -2849,6 +2889,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="sgst_per"
                       value={item.sgst_per}
                       onChange={(e) => updateItem(index, 'sgst_per', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'sgst_per')}
@@ -2858,6 +2900,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="cgst_per"
                       value={item.cgst_per}
                       onChange={(e) => updateItem(index, 'cgst_per', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cgst_per')}
@@ -2867,6 +2911,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="cd_per"
                       value={item.cd_per}
                       onChange={(e) => updateItem(index, 'cd_per', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cd_per')}
@@ -2876,6 +2922,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="cd_rs"
                       value={item.cd_rs}
                       onChange={(e) => updateItem(index, 'cd_rs', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'cd_rs')}
@@ -2885,6 +2933,8 @@ const Purchases: React.FC = () => {
                   <td className="py-2.5 px-1">
                     <input
                       type="number"
+                      data-row-index={index}
+                      data-field="additional_discount"
                       value={item.additional_discount}
                       onChange={(e) => updateItem(index, 'additional_discount', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'additional_discount')}

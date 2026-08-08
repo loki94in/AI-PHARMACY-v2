@@ -1,4 +1,5 @@
 import { extractCleanEmail } from './emailSanitizer.js';
+import { isValidDistributorName } from './nameNormalizer.js';
 
 export interface SyncDistributorParams {
   id?: number;
@@ -20,7 +21,8 @@ export interface SyncDistributorParams {
  * across distributors, pharmarack_distributor_mappings, and contacts tables in SQLite.
  */
 export async function syncDistributorPhoneAcrossTables(db: any, params: SyncDistributorParams) {
-  const distName = (params.name || params.store_name || '').trim();
+  const rawDistName = (params.name || params.store_name || '').trim();
+  const distName = isValidDistributorName(rawDistName) ? rawDistName : '';
   const phoneInput = params.phone !== undefined && params.phone !== null && String(params.phone).trim() !== ''
     ? params.phone
     : (params.contact !== undefined && params.contact !== null && String(params.contact).trim() !== ''

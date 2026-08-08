@@ -1,4 +1,5 @@
 import { normalizeDistributorName } from './migrationValidation.js';
+import { isValidDistributorName } from './nameNormalizer.js';
 
 const normalizedCache = new Map<string, number>();
 
@@ -19,7 +20,8 @@ export async function findOrCreateDistributor(
   },
   name: string
 ): Promise<{ id: number }> {
-  const trimmed = String(name || '').trim() || 'Unknown Supplier';
+  const rawTrimmed = String(name || '').trim();
+  const trimmed = isValidDistributorName(rawTrimmed) ? rawTrimmed : 'Unknown Supplier';
   const norm = normalizeDistributorName(trimmed);
 
   if (norm && normalizedCache.has(norm)) {

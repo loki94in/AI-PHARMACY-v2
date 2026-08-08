@@ -191,7 +191,7 @@ function App() {
           </Routes>
         </Layout>
       </Suspense>
-      <Agentation key={theme} />
+      {import.meta.env.DEV && <Agentation key={theme} />}
     </BrowserRouter>
   );
 }

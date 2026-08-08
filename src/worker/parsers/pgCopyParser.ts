@@ -23,7 +23,7 @@ export type TableEndHandler = (table: string, rowCount: number) => Promise<void>
  * Example: COPY public.medicine (medicine_id, created_time, ...) FROM stdin;
  */
 export function parseCopyHeader(line: string): { table: string; columns: string[] } | null {
-  const match = line.match(/^COPY\s+public\.(\w+)\s*\(([^)]+)\)\s*FROM\s+stdin\s*;/i);
+  const match = line.match(/^COPY\s+(?:(?:"?\w+"?\.)?"?(\w+)"?)\s*\(([^)]+)\)\s*FROM\s+stdin\s*;/i);
   if (!match) return null;
 
   const table = match[1];

@@ -1099,7 +1099,7 @@ async function streamPgDump(
 
   for await (const line of rl) {
     // Check for COPY header
-    if (line.startsWith('COPY public.')) {
+    if (line.toUpperCase().startsWith('COPY ')) {
       const parsed = parseCopyHeader(line);
       if (parsed && handlers[parsed.table]) {
         currentTable = parsed.table;

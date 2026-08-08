@@ -48,14 +48,19 @@ export function clearSalesMap() {
 // ─── Orders → sales_invoices ────────────────────────────────
 let salesBatch: any[] = [];
 
+const COMPLETED_STATUSES = new Set([
+  'BILL', 'DELIVERED', 'COMPLETED', 'BILLED', 'CLOSED', 'PAID', 'SETTLED',
+  'FULFILLED', 'DISPATCHED', 'SUCCESS', 'FINALIZE', 'FINALIZED', 'FINAL', 'DONE', 'OK'
+]);
+
 export async function importOrder(row: Record<string, string | null>, db: Database) {
   const legacyId = row['order_id'];
-  const deleted = row['deleted'];
-  if (!legacyId || deleted === 't') return;
+  const deleted = (row['deleted'] || '').trim().toLowerCase();
+  if (!legacyId || deleted === 't' || deleted === 'true' || deleted === '1') return;
 
-  // Only import completed bills
-  const status = row['order_status'];
-  if (status && status !== 'BILL' && status !== 'DELIVERED' && status !== 'COMPLETED') return;
+  // Only import completed/valid bills (allow missing status or any valid completed order status)
+  const status = (row['order_status'] || '').trim().toUpperCase();
+  if (status && !COMPLETED_STATUSES.has(status)) return;
 
   // Resolve patient → customer
   const legacyPatientId = row['patient_id'];

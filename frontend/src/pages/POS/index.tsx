@@ -546,6 +546,42 @@ const POS = () => {
   const combinationsControl = useFetchMode('pos.combinations');
   const doctorsControl = useFetchMode('pos.doctors');
 
+  const handlePosRowInputKeyDown = (e: React.KeyboardEvent, index: number, fieldName: string) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const targetIndex = index + 1;
+      if (targetIndex < cart.length) {
+        const el = (
+          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
+          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
+        ) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const targetIndex = index - 1;
+      if (targetIndex >= 0) {
+        const el = (
+          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
+          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
+        ) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+  };
+
   // B1: the cart itself loads immediately (lazy-initialized from localStorage,
   // no network call). These three non-essential mount fetches (special orders,
   // common combinations, doctors list) are staggered ~500ms after mount so
@@ -932,6 +968,7 @@ const POS = () => {
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
   const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
   const [activeRowSearchIndex, setActiveRowSearchIndex] = useState<number | null>(null);
   const [rowSearchTerm, setRowSearchTerm] = useState('');
@@ -1216,6 +1253,20 @@ const POS = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
+
+      // F2 or Ctrl + K: Expand & Focus Medicine Search
+      if (e.key === 'F2' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) {
+        e.preventDefault();
+        setIsSearchExpanded(true);
+        setTimeout(() => {
+          const input = productSearchRef.current?.querySelector('input');
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }, 50);
+        return;
+      }
 
       // Ctrl + S: Save Bill or Save Profile
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -2417,11 +2468,11 @@ const POS = () => {
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden bg-bg text-text">
 
-      {/* Main Container: Split into Left Workspace (Cart & Search) and Right Checkout Terminal Sidebar */}
-      <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
+      {/* Main Container: Stacked — Cart workspace on top, Checkout bar at bottom */}
+      <div className="flex-1 flex flex-col gap-0 overflow-hidden min-h-0">
 
-        {/* ── LEFT WORKSPACE (70% width) ── */}
-        <div className="flex-1 flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden">
+        {/* ── TOP WORKSPACE (full width) ── */}
+        <div className="flex-1 flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden p-3">
 
           {/* Editing Bill Banner */}
           {editingInvoiceId && (
@@ -2706,81 +2757,124 @@ const POS = () => {
           </div>
 
           {/* A. Search & Scan Medicine Bar */}
-          <div className="glass-panel p-2.5 flex items-center gap-2 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-sm rounded-2xl w-full min-w-0">
+          <div className="glass-panel p-2 flex items-center gap-2 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-sm rounded-2xl w-full min-w-0 transition-all duration-300">
             {!inventoryIndexReady && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
                 <Loader2 size={13} className="animate-spin shrink-0" />
                 <span>Preparing index…</span>
               </div>
             )}
-            <div className="flex items-center gap-2 w-full">
-              <div ref={productSearchRef} className="relative flex-1">
-                <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted">
-                  {inventoryIndexReady ? <Search size={15} /> : <Loader2 size={15} className="animate-spin text-primary" />}
+            
+            {!isSearchExpanded && !searchTerm ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSearchExpanded(true);
+                  setTimeout(() => {
+                    const input = productSearchRef.current?.querySelector('input');
+                    input?.focus();
+                  }, 50);
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary transition-all shadow-sm cursor-pointer group"
+                title="Search Medicine (Click or press F2 / Ctrl + K)"
+              >
+                <Search size={15} className="text-primary group-hover:scale-110 transition-transform" />
+                <span className="text-xs font-bold">Search Medicine</span>
+                <span className="text-[10px] font-mono font-bold bg-primary/15 border border-primary/30 px-1.5 py-0.5 rounded text-primary">
+                  F2 / Ctrl+K
                 </span>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  aria-label="Search medicine by name, composition, batch, or price"
-                  placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price... (Ctrl + K)" : "Warming up search index..."}
-                  disabled={!inventoryIndexReady}
-                  className="premium-input w-full text-xs pl-9 pr-8 py-2 bg-bg2/50 border-border/60 text-text rounded-xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait font-medium"
-                  value={searchTerm}
-                  onFocus={() => {
-                    if (searchTerm.trim().length >= 2) {
-                      setShowSearchDropdown(true);
-                    }
-                  }}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setSearchTerm(val);
-                    setSearchHighlightIndex(-1);
-                    if (val.trim().length >= 2) {
-                      setShowSearchDropdown(true);
-                    } else {
-                      setShowSearchDropdown(false);
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (searchResults.length === 0) return;
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
-                    } else if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                    } else if ((e.key === 'Enter' || e.key === 'Tab') && searchHighlightIndex >= 0) {
-                      e.preventDefault();
-                      const item = searchResults[searchHighlightIndex];
-                      if (item) {
-                        fetchDetailsAndAddToCart(item);
-                        setSearchTerm('');
-                        setSearchResults([]);
-                        setSearchHighlightIndex(-1);
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 w-full animate-in fade-in duration-200">
+                <div ref={productSearchRef} className="relative flex-1">
+                  <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted">
+                    {inventoryIndexReady ? <Search size={15} /> : <Loader2 size={15} className="animate-spin text-primary" />}
+                  </span>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    aria-label="Search medicine by name, composition, batch, or price"
+                    placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price... (Ctrl + K)" : "Warming up search index..."}
+                    disabled={!inventoryIndexReady}
+                    className="premium-input w-full text-xs pl-9 pr-14 py-2 bg-bg2/50 border-border/60 text-text rounded-xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait font-medium"
+                    value={searchTerm}
+                    onFocus={() => {
+                      setIsSearchExpanded(true);
+                      if (searchTerm.trim().length >= 2) {
+                        setShowSearchDropdown(true);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!searchTerm.trim()) {
+                        setTimeout(() => setIsSearchExpanded(false), 250);
+                      }
+                    }}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setSearchTerm(val);
+                      setSearchHighlightIndex(-1);
+                      if (val.trim().length >= 2) {
+                        setShowSearchDropdown(true);
+                      } else {
                         setShowSearchDropdown(false);
                       }
-                    } else if (e.key === 'Escape') {
-                      setShowSearchDropdown(false);
-                      setSearchHighlightIndex(-1);
-                    }
-                  }}
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchTerm('');
-                      setShowSearchDropdown(false);
                     }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-1 cursor-pointer"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-                {showSearchDropdown && searchTerm.trim().length >= 3 && searchResults.length === 0 && (
-                  <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
-                    {suggestions.length > 0 && (
-                      <div className="p-3 border-b border-border/30 bg-violet-500/5">
+                    onKeyDown={e => {
+                      if (searchResults.length === 0) return;
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                      } else if ((e.key === 'Enter' || e.key === 'Tab') && searchHighlightIndex >= 0) {
+                        e.preventDefault();
+                        const item = searchResults[searchHighlightIndex];
+                        if (item) {
+                          fetchDetailsAndAddToCart(item);
+                          setSearchTerm('');
+                          setSearchResults([]);
+                          setSearchHighlightIndex(-1);
+                          setShowSearchDropdown(false);
+                        }
+                      } else if (e.key === 'Escape') {
+                        setShowSearchDropdown(false);
+                        setSearchHighlightIndex(-1);
+                        if (!searchTerm.trim()) setIsSearchExpanded(false);
+                      }
+                    }}
+                  />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          setShowSearchDropdown(false);
+                        }}
+                        className="text-muted hover:text-text p-1 cursor-pointer"
+                        title="Clear text"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchTerm('');
+                        setShowSearchDropdown(false);
+                        setIsSearchExpanded(false);
+                      }}
+                      className="text-muted hover:text-text p-1 cursor-pointer rounded hover:bg-bg3"
+                      title="Collapse search bar"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {showSearchDropdown && searchTerm.trim().length >= 3 && searchResults.length === 0 && (
+                    <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
+                      {suggestions.length > 0 && (
+                        <div className="p-3 border-b border-border/30 bg-violet-500/5">
                         <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
                         <div className="flex gap-2 flex-wrap">
                           {suggestions.map((sug) => (
@@ -3078,7 +3172,9 @@ const POS = () => {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
+            )}
               
               <button 
                 type="button"
@@ -3089,7 +3185,6 @@ const POS = () => {
                 <Camera size={16} />
                 <span>AI Camera Scan</span>
               </button>
-            </div>
 
             {/* Combined Single Line Doctor & Prescription Suggestions Bar */}
             <div className="border-t border-border/30 pt-1.5 flex items-center gap-2 w-full min-w-0 overflow-hidden">
@@ -3544,6 +3639,8 @@ const POS = () => {
                                 <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 h-7">
                                   <input 
                                     id={`row-qty-input-${cart.indexOf(item)}`}
+                                    data-pos-row-index={cart.indexOf(item)}
+                                    data-pos-field="qty"
                                     type="number" 
                                     className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-text focus:outline-none"
                                     value={item.qty !== undefined && item.qty !== null ? item.qty : ''}
@@ -3552,7 +3649,9 @@ const POS = () => {
                                     placeholder="0"
                                     disabled={item.isEmptyRow}
                                     onKeyDown={e => {
-                                      if (e.key === 'Enter') {
+                                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                        handlePosRowInputKeyDown(e, cart.indexOf(item), 'qty');
+                                      } else if (e.key === 'Enter') {
                                         e.preventDefault();
                                         const looseInput = document.getElementById(`row-loose-input-${cart.indexOf(item)}`);
                                         if (looseInput) {
@@ -3579,6 +3678,8 @@ const POS = () => {
                                 <div className="flex items-center gap-1 bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20 rounded-lg px-2 py-0.5 h-7">
                                   <input 
                                     id={`row-loose-input-${cart.indexOf(item)}`}
+                                    data-pos-row-index={cart.indexOf(item)}
+                                    data-pos-field="looseQty"
                                     type="number" 
                                     className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-amber-500 focus:outline-none"
                                     value={item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : ''}
@@ -3587,7 +3688,9 @@ const POS = () => {
                                     placeholder="0"
                                     disabled={item.isEmptyRow}
                                     onKeyDown={e => {
-                                      if (e.key === 'Enter') {
+                                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                        handlePosRowInputKeyDown(e, cart.indexOf(item), 'looseQty');
+                                      } else if (e.key === 'Enter') {
                                         e.preventDefault();
                                         const currentIdx = cart.indexOf(item);
                                         const nextIdx = currentIdx + 1;
@@ -3669,6 +3772,9 @@ const POS = () => {
                         {/* Discount */}
                         <td className="py-1 px-2.5 text-center">
                           <input 
+                            id={`row-disc-input-${cart.indexOf(item)}`}
+                            data-pos-row-index={cart.indexOf(item)}
+                            data-pos-field="discount"
                             type="number" 
                             className={`w-14 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
                             value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
@@ -3676,18 +3782,31 @@ const POS = () => {
                             min="0"
                             max="100"
                             disabled={item.isEmptyRow}
+                            onKeyDown={e => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
+                              }
+                            }}
                           />
                         </td>
 
                         {/* MRP */}
                         <td className="py-1 px-2.5 text-right">
                           <input 
+                            id={`row-mrp-input-${cart.indexOf(item)}`}
+                            data-pos-row-index={cart.indexOf(item)}
+                            data-pos-field="mrp"
                             type="number" 
                             className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
                             onChange={e => updateCartItem(item.id, 'mrp', Math.max(0, Number(e.target.value)))}
                             disabled={item.isEmptyRow}
+                            onKeyDown={e => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                handlePosRowInputKeyDown(e, cart.indexOf(item), 'mrp');
+                              }
+                            }}
                           />
                         </td>
 
@@ -3731,133 +3850,92 @@ const POS = () => {
           
         </div>
 
-        {/* ── RIGHT CHECKOUT TERMINAL SIDEBAR (30% width) ── */}
-        <div className="w-[330px] lg:w-[370px] shrink-0 h-full flex flex-col justify-between p-4 bg-bg2/90 border border-glass-border/40 rounded-2xl shadow-xl overflow-y-auto custom-scrollbar gap-4">
+        {/* ── BOTTOM CHECKOUT BAR (full width horizontal strip) ── */}
+        <div className="shrink-0 w-full flex flex-row items-center gap-2 px-3 py-1.5 bg-bg2/95 border-t border-glass-border/50 shadow-[0_-4px_16px_rgba(0,0,0,0.14)] overflow-x-auto">
 
-          {/* Section 1: Customer Profile Overview */}
-          <div className="flex flex-col gap-2 border-b border-glass-border/30 pb-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <UserCheck size={13} className="text-primary" />
-                Customer Context
+          {/* Section 1: Customer (single line) */}
+          <div className="flex items-center gap-1.5 min-w-[130px] border-r border-glass-border/30 pr-2.5 shrink-0">
+            <UserCheck size={12} className="text-primary shrink-0" />
+            <div className="flex flex-col leading-tight">
+              <span className="text-[10px] font-bold text-text truncate max-w-[110px]">{patientName || 'Walk-in'}</span>
+              <span className="text-[9px] text-muted font-mono truncate">
+                {patientPhone || '—'}
+                {patientPhone && <span className="ml-1 text-green font-bold">· WA</span>}
+                {selectedCustomerId && <span className="ml-1 text-primary font-bold">· Reg</span>}
               </span>
-              {selectedCustomerId && (
-                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">
-                  Registered
-                </span>
-              )}
-            </div>
-            <div className="flex items-center justify-between bg-bg3/40 border border-glass-border/30 p-2.5 rounded-xl">
-              <div className="flex flex-col">
-                <span className="text-xs font-bold text-text truncate">{patientName || 'Walk-in Customer'}</span>
-                <span className="text-[10px] text-muted font-mono">{patientPhone || 'No phone entered'}</span>
-              </div>
-              {patientPhone && (
-                <span className="text-[9px] font-bold text-green bg-green/10 px-2 py-1 rounded-lg border border-green/20">
-                  WA Ready
-                </span>
-              )}
             </div>
           </div>
 
-          {/* Section 2: Bill Summary Breakdown */}
-          <div className="flex flex-col gap-3">
-            <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-              <FileText size={13} className="text-primary" />
-              Bill Breakdown
-            </span>
-
-            <div className="flex flex-col gap-2 text-xs bg-bg3/30 border border-glass-border/25 p-3 rounded-xl">
-              <div className="flex justify-between items-center text-muted">
-                <span>Subtotal</span>
-                <span className="font-mono font-bold text-text">₹{Math.round(subtotal)}</span>
-              </div>
-
-              <div className="flex justify-between items-center text-muted">
-                <span>Discount Override (%)</span>
-                <div className="relative w-16">
-                  <input
-                    type="number"
-                    value={discount === 0 || discount === undefined || discount === null ? '' : discount}
-                    onChange={e => setDiscount(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
-                    placeholder="0"
-                    className="w-full bg-bg2 border border-glass-border rounded-lg px-2 py-1 font-mono font-bold text-center text-text text-xs focus:outline-none focus:border-primary/50"
-                  />
-                </div>
-              </div>
-
-              {discountAmount > 0 && (
-                <div className="flex justify-between items-center text-amber-500 font-bold bg-amber-500/10 p-2 rounded-lg border border-amber-500/20 text-xs">
-                  <span>Savings Applied</span>
-                  <span className="font-mono">-₹{Math.round(discountAmount)}</span>
-                </div>
-              )}
-            </div>
+          {/* Section 2: Bill Breakdown (single line) */}
+          <div className="flex items-center gap-2 min-w-[200px] border-r border-glass-border/30 pr-2.5 shrink-0">
+            <FileText size={11} className="text-muted shrink-0" />
+            <span className="text-[9px] text-muted">Sub:</span>
+            <span className="font-mono font-bold text-text text-[10px]">₹{Math.round(subtotal)}</span>
+            <span className="text-[9px] text-muted ml-1">Disc%</span>
+            <input
+              type="number"
+              value={discount === 0 || discount === undefined || discount === null ? '' : discount}
+              onChange={e => setDiscount(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
+              placeholder="0"
+              className="w-10 bg-bg border border-glass-border rounded px-1 py-0 font-mono font-bold text-center text-text text-[10px] focus:outline-none focus:border-primary/50 h-5"
+            />
+            {discountAmount > 0 && (
+              <span className="font-mono font-bold text-amber-500 text-[10px]">-₹{Math.round(discountAmount)}</span>
+            )}
           </div>
 
-          {/* Section 3: Payment Medium Grid */}
-          <div className="flex flex-col gap-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-              <Sparkles size={13} className="text-primary" />
-              Payment Method
-            </span>
-
-            <div className="grid grid-cols-3 gap-1.5">
-              {[
-                { id: 'CASH', label: '💵 Cash', activeClass: 'bg-green/15 text-green border-green/30' },
-                { id: 'UPI', label: '📱 UPI', activeClass: 'bg-primary/15 text-primary border-primary/30' },
-                { id: 'CREDIT', label: '📜 Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/30' }
-              ].map(item => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setPaymentMedium(item.id)}
-                  className={`py-2 px-2 rounded-xl text-[10px] font-extrabold uppercase border text-center transition-all cursor-pointer ${
-                    paymentMedium === item.id
-                      ? `${item.activeClass} shadow-sm ring-1 ring-primary/20`
-                      : 'bg-bg3/40 border-glass-border/30 text-muted hover:text-text hover:bg-bg3'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+          {/* Section 3: Payment Method (single row) */}
+          <div className="flex items-center gap-1 border-r border-glass-border/30 pr-2.5 shrink-0">
+            {[
+              { id: 'CASH', label: '💵 Cash', activeClass: 'bg-green/15 text-green border-green/40' },
+              { id: 'UPI', label: '📱 UPI', activeClass: 'bg-primary/15 text-primary border-primary/40' },
+              { id: 'CREDIT', label: '📜 Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/40' }
+            ].map(pm => (
+              <button
+                key={pm.id}
+                type="button"
+                onClick={() => setPaymentMedium(pm.id)}
+                className={`py-0.5 px-1.5 rounded text-[9px] font-extrabold uppercase border text-center transition-all cursor-pointer ${
+                  paymentMedium === pm.id
+                    ? `${pm.activeClass} ring-1 ring-primary/20`
+                    : 'bg-bg3/40 border-glass-border/30 text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                {pm.label}
+              </button>
+            ))}
           </div>
 
-          {/* Section 4: Net Amount Hero Box */}
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-transparent border border-primary/25 shadow-inner flex flex-col gap-1 my-1">
-            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Net Payable</span>
-            <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-black font-mono text-primary">₹{grandTotal.toLocaleString()}</span>
-              <span className="text-[10px] text-muted font-bold uppercase">Taxes Included</span>
-            </div>
+          {/* Section 4: Net Payable (compact) */}
+          <div className="flex items-baseline gap-1.5 px-2.5 py-1 rounded-lg bg-primary/5 border border-primary/20 shrink-0">
+            <span className="text-[9px] font-black text-primary uppercase tracking-widest">Total</span>
+            <span className="text-lg font-black font-mono text-primary leading-none">₹{grandTotal.toLocaleString()}</span>
           </div>
 
           {/* Section 5: Action Buttons */}
-          <div className="flex flex-col gap-2 pt-1">
-            <button
-              onClick={() => handleCompleteSale(undefined, false)}
-              disabled={cart.length === 0}
-              className={`w-full py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg ${
-                cart.length === 0
-                  ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
-                  : 'bg-green text-text hover:bg-emerald-600 shadow-[0_0_20px_rgba(16,185,129,0.35)] hover:-translate-y-0.5'
-              }`}
-            >
-              <CheckCircle size={16} />
-              Save Bill & Print (Ctrl+S)
-            </button>
-
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             <button
               onClick={() => handleCompleteSale(undefined, true)}
               disabled={cart.length === 0}
-              className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`py-1 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer border ${
                 cart.length === 0
-                  ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
-                  : 'bg-sky/20 border border-sky/30 text-sky hover:bg-sky/30'
+                  ? 'bg-bg3 border-glass-border text-muted cursor-not-allowed'
+                  : 'bg-sky/15 border-sky/30 text-sky hover:bg-sky/25'
               }`}
             >
-              <Zap size={14} /> Direct Save
+              <Zap size={12} /> Direct Save
+            </button>
+            <button
+              onClick={() => handleCompleteSale(undefined, false)}
+              disabled={cart.length === 0}
+              className={`py-1.5 px-4 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
+                cart.length === 0
+                  ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
+                  : 'bg-green text-text hover:bg-emerald-600 shadow-[0_0_14px_rgba(16,185,129,0.3)] hover:-translate-y-px'
+              }`}
+            >
+              <CheckCircle size={13} />
+              Save & Print (Ctrl+S)
             </button>
           </div>
         </div>

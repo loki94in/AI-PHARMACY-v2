@@ -319,25 +319,46 @@ router.post('/profiles/:distributorId/reset', async (req, res) => {
 
 // POST /api/learning/profiles/merge - merge duplicate distributor profiles into one primary distributor
 router.post('/profiles/merge', async (req, res) => {
-  const { primaryId, secondaryIds } = req.body;
+  const { primaryId, secondaryIds, newName } = req.body;
   if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
     return res.status(400).json({ error: 'primaryId and secondaryIds array are required' });
   }
   try {
     const db = await dbManager.getConnection();
-    const primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    let primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
     if (!primary) return res.status(404).json({ error: 'Primary distributor not found' });
+
+    // Optionally rename primary distributor to Pharmarack/custom name during merge
+    if (newName && typeof newName === 'string' && newName.trim() && newName.trim() !== primary.name) {
+      const cleanNewName = newName.trim();
+      await db.run('UPDATE distributors SET name = ? WHERE id = ?', [cleanNewName, primaryId]);
+      primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    }
 
     const placeholders = secondaryIds.map(() => '?').join(',');
     const params = [primaryId, ...secondaryIds];
 
-    // Re-link all related tables
-    await db.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-    await db.run(`UPDATE purchase_orders SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-    await db.run(`UPDATE returns SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-    await db.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-    await db.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-    await db.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    // Re-link all related tables safely (verifying column exists first)
+    const tablesToRelink = [
+      'purchases',
+      'purchase_orders',
+      'returns',
+      'distributor_payments',
+      'distributor_payment_details',
+      'distributor_historical_files',
+      'distributor_medicine_aliases'
+    ];
+
+    for (const tbl of tablesToRelink) {
+      try {
+        const info = await db.all(`PRAGMA table_info(${tbl})`);
+        if (info && info.some((c: any) => c.name === 'distributor_id')) {
+          await db.run(`UPDATE ${tbl} SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        }
+      } catch (_e) {
+        // Ignore if table or column doesn't exist
+      }
+    }
 
     // Clean up secondary profiles
     await db.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
@@ -354,7 +375,7 @@ router.post('/profiles/merge', async (req, res) => {
       } catch (_) {}
     }
 
-    res.json({ success: true, message: `Successfully merged ${secondaryIds.length} distributor profile(s) into '${primary.name}'`, primaryId });
+    res.json({ success: true, message: `Successfully merged ${secondaryIds.length} distributor profile(s) into '${primary.name}'`, primaryId, primaryName: primary.name });
   } catch (error: any) {
     console.error('Failed to merge learning profiles:', error);
     res.status(500).json({ error: 'Failed to merge learning profiles: ' + error.message });
