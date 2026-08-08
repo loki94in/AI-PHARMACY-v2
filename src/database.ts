@@ -322,7 +322,16 @@ export async function ensureSchema(dbPath: string) {
       date DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       total_amount REAL,
-      tax_amount REAL
+      tax_amount REAL,
+      net_profit REAL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS stock_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      medicine_id INTEGER,
+      batch_no TEXT,
+      quantity INTEGER,
+      transaction_type TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS sale_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -762,6 +771,7 @@ export async function ensureSchema(dbPath: string) {
     ['sales_invoices', 'discount', 'ALTER TABLE sales_invoices ADD COLUMN discount REAL DEFAULT 0'],
     ['sales_invoices', 'subtotal', 'ALTER TABLE sales_invoices ADD COLUMN subtotal REAL DEFAULT 0'],
     ['sales_invoices', 'payment_status', 'ALTER TABLE sales_invoices ADD COLUMN payment_status TEXT DEFAULT \'PAID\''],
+    ['sales_invoices', 'net_profit', 'ALTER TABLE sales_invoices ADD COLUMN net_profit REAL DEFAULT 0'],
     ['sales_invoices', 'updated_at', 'ALTER TABLE sales_invoices ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP'],
     ['sale_items', 'mrp', 'ALTER TABLE sale_items ADD COLUMN mrp REAL'],
     ['sale_items', 'batch_no', 'ALTER TABLE sale_items ADD COLUMN batch_no TEXT'],

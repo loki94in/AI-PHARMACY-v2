@@ -88,7 +88,7 @@ router.post('/save', async (req, res) => {
     await dbManager.transaction(async (db) => {
       await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
       const entries = Object.entries(payload);
-      const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token'];
+      const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token', 'gmail_pass', 'telegram_token'];
 
       const upsertStmt = await db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)');
       const checkProtectedStmt = await db.prepare("SELECT value FROM app_settings WHERE key = ? AND value IS NOT NULL AND value != ''");
