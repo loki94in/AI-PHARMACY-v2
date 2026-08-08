@@ -1891,6 +1891,25 @@ export const Layout = ({
 
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
   const [compactCacheLoaded, setCompactCacheLoaded] = useState(() => isCompactInventoryCacheReady());
+  const [isSystemReady, setIsSystemReady] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkReadiness = async () => {
+      try {
+        const res = await apiClient.get('/api/health/ready');
+        if (mounted) {
+          setIsSystemReady(res.data?.ready !== false);
+        }
+      } catch (err: any) {
+        if (mounted && err?.response?.status === 503) {
+          setIsSystemReady(false);
+        }
+      }
+    };
+    checkReadiness();
+    return () => { mounted = false; };
+  }, []);
 
   // Priority 0 on cold boot: compact inventory cache before other startup polls
   useEffect(() => {
@@ -2201,6 +2220,14 @@ export const Layout = ({
         onClose={() => setMobileNavOpen(false)}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {!isSystemReady && (
+          <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-600 dark:text-amber-400 px-4 py-2 text-xs font-semibold flex items-center justify-between shrink-0 z-global-modal">
+            <div className="flex items-center gap-2">
+              <RefreshCw size={14} className="animate-spin text-amber-500" />
+              <span>Database initialization in progress — verifying schemas & integrity...</span>
+            </div>
+          </div>
+        )}
         <Topbar
           theme={theme}
           setTheme={setTheme}
