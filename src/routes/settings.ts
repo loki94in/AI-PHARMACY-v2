@@ -258,47 +258,50 @@ router.post('/save', async (req, res) => {
 
 
 
-    if (payload['email_retention_limit'] !== undefined) {
-      try {
-        const db = await dbManager.getConnection();
-        const { emailService } = await import('../services/emailService.js');
-        emailService.pruneOldEmails(db).catch(err => console.error('Pruning after settings update failed:', err));
-      } catch (err) { }
-    }
+    res.json({ success: true, message: 'Settings saved' });
 
-    const keys = Object.keys(payload);
-
-    // If telegram settings changed, trigger hot-reload of Telegram bot service
-    const hasTelegramKey = keys.some(k => k === 'telegram_enabled' || k === 'telegram_token' || k === 'telegram_chat_id');
-    if (hasTelegramKey) {
-      telegramBotService.initializeOrReloadBot().catch(err => {
-        console.error('[Telegram] Failed to reload bot after settings update:', err);
-      });
-    }
-
-    // If WhatsApp settings changed, hot-reload WhatsApp connection state
-    const hasWhatsappKey = keys.some(k => k === 'whatsapp_enabled' || k === 'whatsapp_preferred_system' || k === 'wa_business_enabled');
-    if (hasWhatsappKey) {
-      (async () => {
+    // Run secondary service hot-reloads asynchronously in background without delaying HTTP response
+    setImmediate(async () => {
+      if (payload['email_retention_limit'] !== undefined) {
         try {
-          const { initClient, destroyClient, shouldRouteToBusiness } = await import('../whatsappClient.js');
+          const db = await dbManager.getConnection();
+          const { emailService } = await import('../services/emailService.js');
+          emailService.pruneOldEmails(db).catch(err => console.error('Pruning after settings update failed:', err));
+        } catch (err) { }
+      }
+
+      const keys = Object.keys(payload);
+
+      // If telegram settings changed, trigger hot-reload of Telegram bot service
+      const hasTelegramKey = keys.some(k => k === 'telegram_enabled' || k === 'telegram_token' || k === 'telegram_chat_id');
+      if (hasTelegramKey) {
+        telegramBotService.initializeOrReloadBot().catch(err => {
+          console.error('[Telegram] Failed to reload bot after settings update:', err);
+        });
+      }
+
+      // If WhatsApp settings changed, hot-reload WhatsApp connection state
+      const hasWhatsappKey = keys.some(k => k === 'whatsapp_enabled' || k === 'whatsapp_preferred_system' || k === 'wa_business_enabled');
+      if (hasWhatsappKey) {
+        try {
+          const { initClient, destroyClient, shouldRouteToBusiness, hasSavedSession } = await import('../whatsappClient.js');
           const enabled = payload['whatsapp_enabled'] === 'true';
           const useBusiness = await shouldRouteToBusiness();
 
           if (useBusiness || !enabled) {
             console.log('[Settings] WhatsApp Business API preferred or WhatsApp Web disabled. Shutting down automated client...');
             await destroyClient();
-          } else {
-            console.log('[Settings] Automated WhatsApp Web enabled. Re-initializing client...');
+          } else if (hasSavedSession()) {
+            console.log('[Settings] Automated WhatsApp Web enabled with existing session. Re-initializing client...');
             await initClient().catch(err => console.error('[Settings] WhatsApp Web initialization failed:', err));
+          } else {
+            console.log('[Settings] Automated WhatsApp Web enabled, but no saved session exists. Standing down until manual connect.');
           }
         } catch (err) {
           console.error('[Settings] Failed to hot-reload WhatsApp config:', err);
         }
-      })();
-    }
-
-    res.json({ success: true, message: 'Settings saved' });
+      }
+    });
   } catch (error) {
     console.error('Bulk settings save error:', error);
     res.status(500).json({ error: 'Failed to save settings' });

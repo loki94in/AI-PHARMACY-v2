@@ -37,7 +37,7 @@ function findChromePath() {
   return null;
 }
 
-// Get current WhatsApp authentication status and QR code
+// Get current WhatsApp authentication status and QR code (read-only)
 router.get('/qr', async (req, res) => {
   try {
     if (isLoginWindowActive) {
@@ -56,14 +56,22 @@ router.get('/qr', async (req, res) => {
       const qrUrl = await QRCode.toDataURL(currentQr);
       return res.json({ isReady: false, qrUrl });
     }
-    
-    // Trigger initialization if it hasn't started or QR isn't ready
-    initClient().catch(console.error);
-    
-    res.json({ isReady: false, qrUrl: null, message: 'Initializing WhatsApp client. Waiting for QR...' });
+
+    res.json({ isReady: false, qrUrl: null, message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
   } catch (err) {
-    console.error('QR generation error:', err);
-    res.status(500).json({ error: 'Failed to generate QR code' });
+    console.error('QR check error:', err);
+    res.status(500).json({ error: 'Failed to check QR status' });
+  }
+});
+
+// Explicitly trigger WhatsApp QR code initialization upon user request
+router.post('/connect', async (req, res) => {
+  try {
+    initClient({ forceQr: true }).catch(console.error);
+    res.json({ success: true, message: 'Initializing WhatsApp QR code scan...' });
+  } catch (err: any) {
+    console.error('[WhatsApp Connect] Error:', err);
+    res.status(500).json({ error: 'Failed to initialize WhatsApp connection' });
   }
 });
 

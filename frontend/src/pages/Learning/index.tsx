@@ -36,7 +36,8 @@ import {
   GitMerge,
   Building2,
   ExternalLink,
-  AlertCircle
+  AlertCircle,
+  QrCode
 } from 'lucide-react';
 import { sanitizeMultiPhoneInput } from '../../utils/phone';
 import { api, apiClient } from '../../services/api';
@@ -580,6 +581,17 @@ const Learning: React.FC = () => {
       setTgReady(false);
     }
   }, [settingsData?.telegram_enabled, qrPollActive]);
+
+  const handleConnectWa = async () => {
+    try {
+      setWaStatus({ isReady: false, qrUrl: null, message: 'Initializing WhatsApp QR Code scan...' });
+      await apiClient.post('/messaging/connect');
+      toastEvent.trigger('Generating WhatsApp QR Code...', 'info');
+    } catch (error) {
+      console.error('Failed to start WhatsApp QR scan', error);
+      toastEvent.trigger('Failed to start WhatsApp connection', 'error');
+    }
+  };
 
   const handleReconnect = async () => {
     try {
@@ -1812,9 +1824,15 @@ const Learning: React.FC = () => {
                                   </button>
                                 </div>
                               ) : (
-                                <div className="flex flex-col items-center text-muted">
-                                  <RefreshCw className="animate-spin text-sky mb-2" size={16} />
-                                  <span className="text-[9px] font-bold">Awaiting QR...</span>
+                                <div className="flex flex-col items-center justify-center h-full gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleConnectWa}
+                                    className="text-[9px] font-extrabold bg-sky/20 text-sky px-3 py-1.5 rounded-lg hover:bg-sky/30 transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
+                                  >
+                                    <QrCode size={12} />
+                                    <span>Connect (Scan QR)</span>
+                                  </button>
                                 </div>
                               )}
                             </div>

@@ -19,6 +19,18 @@ const __dirname = path.dirname(__filename);
 const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
 const WWEBJS_AUTH_DIR = path.resolve(getAppDataDir(), '.wwebjs_auth');
 
+/** Helper to check if an authenticated WhatsApp session folder exists on disk */
+export function hasSavedSession(): boolean {
+  const sessionPath = path.join(WWEBJS_AUTH_DIR, 'session');
+  if (!fs.existsSync(sessionPath)) return false;
+  try {
+    const files = fs.readdirSync(sessionPath);
+    return files.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Helper to detect Puppeteer detached frame or destroyed context errors */
 export function isPuppeteerDetachedError(msg?: string): boolean {
   if (!msg) return false;
@@ -290,15 +302,25 @@ async function syncWhatsappData(client: WAClient) {
 }
 
 /** Initialize the WhatsApp client and return it */
-export async function initClient(): Promise<WAClient> {
+export async function initClient(options: { forceQr?: boolean } = {}): Promise<WAClient | null> {
+  const forceQr = options.forceQr ?? false;
+
   if (clientInstance) return clientInstance;
+
+  // Unless user explicitly requested connection (forceQr=true) OR an existing saved session exists on disk,
+  // do NOT launch Puppeteer / Chrome to generate unsolicited QR codes.
+  if (!forceQr && !hasSavedSession()) {
+    console.log('[WhatsApp] Auto-init skipped: No saved session on disk. Standing down until explicit user connection.');
+    return null;
+  }
+
   if (initializing) {
-    return new Promise<WAClient>((resolve, reject) => {
+    return new Promise<WAClient | null>((resolve, reject) => {
       let attempts = 0;
       const check = () => {
         attempts++;
         if (clientInstance) resolve(clientInstance);
-        else if (!initializing && attempts > 10) reject(new Error('WhatsApp client initialization failed'));
+        else if (!initializing && attempts > 10) resolve(null);
         else if (attempts > 300) reject(new Error('WhatsApp client initialization timed out (15s)'));
         else setTimeout(check, 50);
       };
@@ -346,6 +368,18 @@ export async function initClient(): Promise<WAClient> {
     let qrAutoStopTimer: NodeJS.Timeout | null = null;
 
     client.on('qr', (qr: string) => {
+      // If user did not explicitly request QR scan and no valid saved session exists, stop immediately
+      if (!forceQr && !hasSavedSession()) {
+        console.log('[WhatsApp] Unsolicited QR event suppressed. Stopping client until explicit user connection.');
+        if (qrAutoStopTimer) clearTimeout(qrAutoStopTimer);
+        currentQr = null;
+        initializing = false;
+        isReady = false;
+        activeClient = null;
+        client.destroy().catch(() => {});
+        return;
+      }
+
       qrCount++;
       console.log(`[WhatsApp] QR code received (attempt ${qrCount}/5, standing by for scan)...`);
       currentQr = qr;
@@ -733,8 +767,11 @@ export async function sendMessage(
 
     const useBusiness = await shouldRouteToBusiness();
     if (!useBusiness && (!isReady || !clientInstance)) {
+      if (!hasSavedSession()) {
+        throw new Error('WhatsApp is not connected. Please connect WhatsApp in Learning or Settings before sending messages.');
+      }
       try {
-        console.log('[WhatsApp Client] Client not ready on sendMessage call. Initializing headless WhatsApp client...');
+        console.log('[WhatsApp Client] Client not ready on sendMessage call. Initializing saved session...');
         await initClient();
       } catch (initErr) {
         console.error('[WhatsApp Client] Auto-initialization failed during send:', initErr);

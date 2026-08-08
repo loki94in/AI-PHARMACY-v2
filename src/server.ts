@@ -40,24 +40,38 @@ let schemaReady = false;
  * would fall through to a real runtime import that has nothing to resolve
  * against once everything is bundled into one file.
  */
+const registeredLazyRoutes: Array<() => Promise<any>> = [];
+
 function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.RequestHandler {
   let router: express.Router | null = null;
   let loadPromise: Promise<express.Router> | null = null;
-  return (req, res, next) => {
-    if (process.env.NODE_ENV !== 'production') {
-      loader().then(m => m.default(req, res, next)).catch(next);
-      return;
-    }
-    if (router) return router(req, res, next);
+  const preload = () => {
+    if (router) return Promise.resolve(router);
     if (!loadPromise) {
       loadPromise = loader().then(m => {
         router = m.default;
         return router!;
       });
     }
-    loadPromise.then(r => r(req, res, next)).catch(next);
+    return loadPromise;
+  };
+  registeredLazyRoutes.push(preload);
+  return (req, res, next) => {
+    if (process.env.NODE_ENV !== 'production') {
+      loader().then(m => m.default(req, res, next)).catch(next);
+      return;
+    }
+    if (router) return router(req, res, next);
+    preload().then(r => r(req, res, next)).catch(next);
   };
 }
+
+// Background route pre-warming for instant response times in production / executable build
+setImmediate(() => {
+  Promise.allSettled(registeredLazyRoutes.map(fn => fn())).then(() => {
+    console.log('[Server] Background route pre-warming complete. All API routes cached in memory.');
+  });
+});
 
 // Register process-level crash handler (logs to crash_log, exits(1) for watchdog restart)
 registerProcessGuardian();

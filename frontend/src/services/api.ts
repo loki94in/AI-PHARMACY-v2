@@ -638,6 +638,7 @@ export const api = {
 
   // WhatsApp Custom UI
   getWhatsappStatus: () => apiClient.get('/messaging/qr').then(res => res.data),
+  connectWhatsapp: () => apiClient.post('/messaging/connect').then(res => res.data),
   reconnectWhatsapp: () => apiClient.post('/messaging/reconnect').then(res => res.data),
   logoutWhatsapp: () => apiClient.post('/messaging/logout').then(res => res.data),
   launchWhatsappLoginWindow: () => apiClient.post('/messaging/login-window').then(res => res.data),
