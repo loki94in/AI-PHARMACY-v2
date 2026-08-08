@@ -927,17 +927,28 @@ const Topbar = ({
 
   useEffect(() => {
     if (!compactCacheLoaded) return;
-    // Services status: Poll every 360 seconds (360,000 ms)
+    // Services status: Poll every 30 seconds
     fetchServicesStatus();
-    const sInterval = setInterval(fetchServicesStatus, 360000);
+    const sInterval = setInterval(fetchServicesStatus, 30000);
 
-    // WhatsApp queue status: Poll every 480 seconds (480,000 ms)
+    // WhatsApp queue status: Poll every 30 seconds
     fetchWhatsAppQueueStatus();
-    const qInterval = setInterval(fetchWhatsAppQueueStatus, 480000);
+    const qInterval = setInterval(fetchWhatsAppQueueStatus, 30000);
+
+    const handleRefreshStatus = () => {
+      fetchServicesStatus();
+    };
+
+    window.addEventListener('focus', handleRefreshStatus);
+    window.addEventListener('refresh-pharmarack-cart', handleRefreshStatus);
+    window.addEventListener('pharmarack-auth-changed', handleRefreshStatus);
 
     return () => {
       clearInterval(sInterval);
       clearInterval(qInterval);
+      window.removeEventListener('focus', handleRefreshStatus);
+      window.removeEventListener('refresh-pharmarack-cart', handleRefreshStatus);
+      window.removeEventListener('pharmarack-auth-changed', handleRefreshStatus);
     };
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
 

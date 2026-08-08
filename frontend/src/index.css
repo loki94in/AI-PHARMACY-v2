@@ -3,7 +3,13 @@
 @tailwind utilities;
 
 .z-toast {
-  z-index: 10020 !important;
+  z-index: 10050 !important;
+}
+.z-submodal {
+  z-index: 10015 !important;
+}
+.z-global-modal {
+  z-index: 10000 !important;
 }
 .z-dropdown {
   z-index: 999 !important;

@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 30;
+const CURRENT_SCHEMA_VERSION = 31;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -530,6 +530,20 @@ export async function ensureSchema(dbPath: string) {
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(distributor_id) REFERENCES distributors(id)
     );
+
+    CREATE TABLE IF NOT EXISTS precalculated_stock_metrics (
+      medicine_id INTEGER PRIMARY KEY,
+      total_units_pool INTEGER DEFAULT 0,
+      low_stock_flag INTEGER DEFAULT 0,
+      daily_sales_velocity REAL DEFAULT 0,
+      burn_rate_ratio REAL DEFAULT 0,
+      heavy_sell_flag INTEGER DEFAULT 0,
+      suggested_refill_qty INTEGER DEFAULT 0,
+      metrics_json TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_metrics_low_stock ON precalculated_stock_metrics(low_stock_flag);
+    CREATE INDEX IF NOT EXISTS idx_stock_metrics_heavy_sell ON precalculated_stock_metrics(heavy_sell_flag);
   `);
 
     const profileCols = await db.all("PRAGMA table_info(distributor_learning_profiles)").catch(() => []);

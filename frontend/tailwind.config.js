@@ -53,8 +53,9 @@ export default {
         'drawer': '9000',
         'modal': '9999',
         'global-modal': '10000',
-        'camera': '10010',
-        'toast': '10020',
+        'submodal': '10015',
+        'camera': '10030',
+        'toast': '10050',
       }
     },
   },

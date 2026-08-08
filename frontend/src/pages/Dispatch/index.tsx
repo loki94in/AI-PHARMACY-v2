@@ -745,7 +745,7 @@ const Dispatch = () => {
       )}
       {/* Delivery Boys Management Modal */}
       {showBoysModal && createPortal(
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[99999] flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-global-modal flex items-center justify-center p-4 overflow-y-auto">
           <div className="glass-panel p-6 w-full max-w-lg space-y-4 max-h-[90vh] flex flex-col border border-sky-500/30 shadow-[0_0_50px_rgba(0,0,0,0.8)] animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between shrink-0 border-b border-glass-border pb-3">
               <h3 className="font-bold flex items-center gap-2 text-sm text-text">

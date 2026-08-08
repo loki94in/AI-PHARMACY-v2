@@ -1397,7 +1397,7 @@ const Reports = () => {
 
       {/* EXPORT COMPLETE REPORT MODAL DIALOG */}
       {showExportModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-bg2 border border-glass-border rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-glass-border/40 pb-3">
               <div className="flex items-center gap-2.5">

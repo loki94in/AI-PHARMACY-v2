@@ -1058,7 +1058,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
         {/* Duplicate Item Resolution Overlay */}
         {duplicateMatch && pendingItemToAdd && (
-          <div className="absolute inset-0 z-modal flex items-center justify-center p-6 bg-black/80 backdrop-blur-md rounded-3xl transition-all duration-300 animate-in fade-in">
+          <div className="absolute inset-0 z-submodal flex items-center justify-center p-6 bg-black/80 backdrop-blur-md rounded-3xl transition-all duration-300 animate-in fade-in">
             <div className="bg-bg2 border border-glass-border p-6 rounded-3xl max-w-md w-full space-y-4 shadow-2xl">
               <div className="flex items-center gap-2 text-amber-400">
                 <AlertTriangle size={20} />

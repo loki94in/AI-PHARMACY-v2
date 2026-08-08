@@ -180,7 +180,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
   const activeList = activeTab === 'sales' ? sales : purchases;
 
   return createPortal(
-    <div className="fixed inset-0 z-modal flex items-center justify-center p-4 sm:p-6 fade-in">
+    <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 sm:p-6 fade-in">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 

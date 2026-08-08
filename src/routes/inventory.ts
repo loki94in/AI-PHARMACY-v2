@@ -959,4 +959,43 @@ router.get('/therapeutic-search', async (req, res) => {
   }
 });
 
+// Pre-Calculated Background Cache Metrics Endpoint (Sub-2ms response)
+router.get('/precalculated-metrics', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const { low_stock_only, heavy_sell_only, limit = '100' } = req.query;
+
+    let whereClause = '';
+    const conditions: string[] = [];
+
+    if (low_stock_only === 'true') {
+      conditions.push('psm.low_stock_flag = 1');
+    }
+    if (heavy_sell_only === 'true') {
+      conditions.push('psm.heavy_sell_flag = 1');
+    }
+    if (conditions.length > 0) {
+      whereClause = 'WHERE ' + conditions.join(' AND ');
+    }
+
+    const rows = await db.all(`
+      SELECT 
+        psm.*,
+        m.name as medicine_name,
+        m.manufacturer,
+        m.packaging
+      FROM precalculated_stock_metrics psm
+      JOIN medicines m ON m.id = psm.medicine_id
+      ${whereClause}
+      ORDER BY psm.burn_rate_ratio DESC, psm.updated_at DESC
+      LIMIT ?
+    `, [parseInt(String(limit), 10) || 100]);
+
+    res.json({ success: true, count: rows.length, data: rows });
+  } catch (err: any) {
+    console.error('Error fetching precalculated metrics:', err);
+    res.status(500).json({ error: 'Failed to fetch precalculated metrics: ' + err.message });
+  }
+});
+
 export default router;

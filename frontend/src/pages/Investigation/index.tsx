@@ -638,7 +638,7 @@ const InvestigationCenter = () => {
 
       {/* Confirmation Modal — portalled to document.body to escape overflow-hidden stacking context */}
       {confirmModal && confirmModal.show && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-submodal bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-bg2 border border-glass-border max-w-md w-full rounded-2xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-3 text-amber-500">
               <AlertTriangle size={24} />

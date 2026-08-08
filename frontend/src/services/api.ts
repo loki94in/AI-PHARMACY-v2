@@ -599,10 +599,15 @@ export const api = {
     apiClient.post('/pharmarack/cart/notify-manual', data).then(res => res.data),
   getPharmarackDistributors: () => apiClient.get('/pharmarack/distributors').then(res => res.data),
   getPharmarackDistributorMappings: () => apiClient.get<{ success: boolean; mappings: { store_name: string; distributor_id: number; phone?: string; distributor_name?: string }[] }>('/pharmarack/distributor-mappings').then(res => res.data),
-  checkPharmarackSession: () => apiClient.get('/pharmarack/session-status').then(res => res.data),
+  checkPharmarackSession: () => apiClient.get('/pharmarack/session-status').then(res => {
+    window.dispatchEvent(new CustomEvent('pharmarack-auth-changed'));
+    return res.data;
+  }),
   checkPharmarackOverstock: (data: { productName: string; company?: string; packaging?: string; distributorStoreId?: number; requestedQty?: number }) =>
     apiClient.post('/pharmarack/check-overstock', data).then(res => res.data),
+  getImapStatus: () => apiClient.get('/email/status').then(res => res.data),
   getPharmarackAutoRefillSuggestions: () => apiClient.get('/pharmarack/auto-refill-suggestions').then(res => res.data),
+  getPrecalculatedMetrics: (params?: { low_stock_only?: boolean; heavy_sell_only?: boolean; limit?: number }) => apiClient.get('/inventory/precalculated-metrics', { params }).then(res => res.data),
   getPharmarackLiveCartSummary: () => apiClient.get('/pharmarack/live-cart-summary').then(res => res.data),
   launchPharmarackLoginWindow: () => apiClient.post('/pharmarack/login-window').then(res => res.data),
   

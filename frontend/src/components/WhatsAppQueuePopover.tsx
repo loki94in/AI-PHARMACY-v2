@@ -219,7 +219,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
       <div className="relative bg-bg border border-glass-border/40 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scaleIn">
         
         {/* Header */}
@@ -508,7 +508,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
         {/* Edit Phone Item Modal Overlay */}
         {editingItem && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-submodal bg-black/60 flex items-center justify-center p-4">
             <form onSubmit={handleSaveEditItem} className="bg-bg border border-glass-border/40 p-4 rounded-2xl max-w-md w-full space-y-3 shadow-2xl">
               <h4 className="text-xs font-bold text-text">Edit Phone & Resend Item #{editingItem.id}</h4>
               <div>

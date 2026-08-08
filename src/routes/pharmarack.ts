@@ -2545,36 +2545,37 @@ router.get('/auto-refill-suggestions', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
 
-    // Query medicines with low current stock (<= 5) and positive sales history in last 30 days
-    const rows = await db.all(`
+    // Fast <2ms query against pre-calculated background cache table
+    let rows = await db.all(`
       SELECT 
         m.id as medicine_id,
         m.name as medicine_name,
         m.manufacturer,
         m.packaging,
-        COALESCE(SUM(inv.quantity), 0) as current_stock,
-        MAX(inv.reorder_level) as reorder_level,
-        MAX(m.max_stock_level) as max_stock_level,
-        (
-          SELECT COALESCE(SUM(si.quantity), 0)
-          FROM sale_items si
-          JOIN sales_invoices sinv ON si.invoice_id = sinv.id
-          WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = m.id)
-          AND sinv.date >= datetime('now', '-30 days')
-        ) as sales_30d
-      FROM medicines m
-      LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
-      GROUP BY m.id
-      HAVING (current_stock <= COALESCE(reorder_level, 5) OR current_stock = 0) AND sales_30d > 0
-      ORDER BY sales_30d DESC
+        psm.total_units_pool as current_stock,
+        psm.low_stock_flag,
+        psm.daily_sales_velocity,
+        psm.burn_rate_ratio,
+        psm.heavy_sell_flag,
+        psm.suggested_refill_qty
+      FROM precalculated_stock_metrics psm
+      JOIN medicines m ON m.id = psm.medicine_id
+      WHERE (psm.low_stock_flag = 1 OR psm.heavy_sell_flag = 1)
+      ORDER BY psm.burn_rate_ratio DESC, psm.daily_sales_velocity DESC
       LIMIT 25
     `);
 
+    // Fallback trigger if cache table is empty on first boot
+    if (rows.length === 0) {
+      import('../worker/stockCalculatorWorker.js')
+        .then(w => w.recalculateTargetedStockMetrics())
+        .catch(err => console.error('Failed to trigger background stock calculation:', err));
+    }
+
     const suggestions = rows.map(r => {
-      const sales30d = Number(r.sales_30d || 0);
       const stock = Number(r.current_stock || 0);
-      const cap = r.max_stock_level ? Number(r.max_stock_level) : Math.max(10, Math.ceil(sales30d * 1.25));
-      const recQty = Math.max(1, cap - stock);
+      const sales30d = Math.round(Number(r.daily_sales_velocity || 0) * 30);
+      const recQty = Number(r.suggested_refill_qty) > 0 ? Number(r.suggested_refill_qty) : Math.max(1, 10 - stock);
 
       return {
         medicine_id: r.medicine_id,
@@ -2583,7 +2584,7 @@ router.get('/auto-refill-suggestions', async (_req, res) => {
         packaging: r.packaging || '',
         current_stock: stock,
         sales_30d: sales30d,
-        reorder_level: r.reorder_level || 5,
+        reorder_level: 5,
         recommended_qty: recQty
       };
     });

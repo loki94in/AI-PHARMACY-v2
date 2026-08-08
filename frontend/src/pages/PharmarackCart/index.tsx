@@ -3460,7 +3460,7 @@ export default function PharmarackCart() {
 
       {/* Missing Delivery Boy Confirmation Modal */}
       {showMissingBoyModal && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden animate-scale-up">
             <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between bg-bg3/40">
               <div className="flex items-center gap-2.5">

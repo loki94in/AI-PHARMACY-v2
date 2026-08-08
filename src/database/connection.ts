@@ -231,6 +231,9 @@ class DatabaseManager {
           import('../services/expiryAlertService.js')
             .then(m => m.triggerExpiryCacheRebuildDebounced(inventoryIds))
             .catch(err => console.error('Failed to trigger expiry cache rebuild:', err));
+          import('../worker/stockCalculatorWorker.js')
+            .then(m => m.triggerPreCalculatedStockRebuildDebounced(inventoryIds))
+            .catch(err => console.error('Failed to trigger precalculated stock rebuild:', err));
         }
       }
       return originalRun(sql, ...params);
