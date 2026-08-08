@@ -1,5 +1,5 @@
 import { emailService } from '../services/emailService.js';
-
+import { dbManager } from '../database/connection.js';
 
 /**
  * Email Poller Worker
@@ -7,14 +7,35 @@ import { emailService } from '../services/emailService.js';
  */
 
 /**
- * Start the email poller
- * This function initializes and starts the email polling service
+ * Start the email poller — config-gated.
+ * Reads gmail credentials from app_settings. If unconfigured, exits silently
+ * without opening any network sockets or setting up any timers.
  */
-export function startEmailPoller() {
-  // Start polling with default 5-minute interval
+export async function startEmailPoller(): Promise<void> {
+  // [EMAIL POLLER GATER] Check DB credentials before starting any network connections
+  try {
+    const db = await dbManager.getConnection();
+    const gmailUser = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
+    const gmailAuthMethod = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
+    const gmailPass = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
+
+    const user = gmailUser?.value?.trim();
+    const authMethod = gmailAuthMethod?.value?.trim() || 'password';
+    const pass = gmailPass?.value?.trim();
+
+    if (!user || (authMethod === 'password' && !pass)) {
+      console.log('[EMAIL POLLER GATER] Email credentials are not configured. Background IMAP poller remains silent.');
+      return; // Exit without opening any network sockets or starting any intervals
+    }
+  } catch (dbErr) {
+    console.warn('[EMAIL POLLER GATER] Could not check email credentials — poller will not start:', dbErr);
+    return;
+  }
+
+  // Credentials present — proceed with IMAP polling
   emailService.startPolling(5);
   emailService.pruneOldEmails().catch(err => console.error('[EmailPoller] Prune on startup failed:', err));
-  console.log('Email poller worker started');
+  console.log('[EmailPoller] Email poller worker started.');
 }
 
 /**

@@ -1,4 +1,4 @@
-import { isValidDistributorName, sanitizeDistributorName } from '../src/utils/nameNormalizer';
+import { isValidDistributorName, sanitizeDistributorName } from '../src/utils/nameNormalizer.js';
 
 describe('Distributor Name Sanitization Tests', () => {
   it('should reject email addresses as distributor names', () => {

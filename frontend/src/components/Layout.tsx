@@ -851,6 +851,7 @@ const Topbar = ({
   const [servicesStatus, setServicesStatus] = useState<{
     pharmarack: { connected: boolean; isRefreshing: boolean; lastError: string | null };
     whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number };
+    gaters?: { automation: boolean; whatsapp: boolean; telegram: boolean; email: boolean };
   } | null>(null);
 
   const [waQueueDetail, setWaQueueDetail] = useState<{
@@ -1191,6 +1192,18 @@ const Topbar = ({
                 : 'Re-auth'}
             </span>
           </Link>
+
+          {/* Background Silence Status Indicator — driven by gater flags, no new polling */}
+          {servicesStatus?.gaters && !servicesStatus.gaters.automation && (
+            <Link
+              to="/settings"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-slate-500/20"
+              title="Background automation is OFF — all background tasks are silent. Click to configure in Settings."
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
+              <span>Silent</span>
+            </Link>
+          )}
 
           {/* WhatsApp Connection & Background Queue Status (Live Header Pill with Auto-Hide & Inline Play/Pause) */}
           {queuePillVisible && (

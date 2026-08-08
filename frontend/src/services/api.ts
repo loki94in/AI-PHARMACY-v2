@@ -367,7 +367,7 @@ export const api = {
   createSale: (data: SalePayload) => apiClient.post('/sales', data).then(res => res.data),
   holdBill: (data: SalePayload) => apiClient.post('/sales/hold', data).then(res => res.data),
   getHeldBills: () => apiClient.get('/sales/hold').then(res => res.data),
-  restoreHeldBill: (id: number) => apiClient.post(`/sales/hold/${id}/restore`).then(res => res.data),
+  // ponytail: restoreHeldBill removed — never called; restore flow uses getHeldBills() + DELETE /hold/:id
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
   
   // Verification Layer APIs

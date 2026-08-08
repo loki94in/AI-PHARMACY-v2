@@ -2111,27 +2111,34 @@ const POS = () => {
     });
   };
   
-  // Calculations
-  const subtotal = cart.reduce((sum, item) => {
-    if (item.isEmptyRow) return sum;
-    const unitRate = item.packSize > 0 ? item.mrp / item.packSize : item.mrp;
-    const itemTotalBeforeDiscount = (item.mrp * item.qty) + (unitRate * (item.looseQty || 0));
-    return sum + itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
-  }, 0);
-  
-  const discountAmount = subtotal * (discount / 100);
-  const grandTotal = Math.round(subtotal - discountAmount);
+  // Calculations — memoized so math only runs when cart contents or bill-level discount change,
+  // not on every unrelated re-render (keystrokes in search, modal state updates, etc.)
+  const { subtotal, discountAmount, grandTotal, totalCost } = useMemo(() => {
+    let sub = 0;
+    let cost = 0;
+    for (const item of cart) {
+      if (item.isEmptyRow) continue;
+      const unitRate = item.packSize > 0 ? item.mrp / item.packSize : item.mrp;
+      const itemTotalBeforeDiscount = (item.mrp * item.qty) + (unitRate * (item.looseQty || 0));
+      sub += itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
 
-  const totalCost = cart.reduce((sum, item) => {
-    if (item.isEmptyRow) return sum;
-    const itemCost = item.costPrice != null ? item.costPrice : (item.mrp * 0.7);
-    const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
-    return sum + (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
-  }, 0);
+      const itemCost = item.costPrice != null ? item.costPrice : (item.mrp * 0.7);
+      const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
+      cost += (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
+    }
+    const discAmt = sub * (discount / 100);
+    return {
+      subtotal: sub,
+      discountAmount: discAmt,
+      grandTotal: Math.round(sub - discAmt),
+      totalCost: cost,
+    };
+  }, [cart, discount]);
 
   const hasValidItems = cart.some(item => !item.isEmptyRow && ((item.name && item.name.trim() !== '') || (item.medicine_name && item.medicine_name.trim() !== '')));
   const profitOrLoss = grandTotal - totalCost;
   const isLoss = hasValidItems && profitOrLoss < -0.001; // Loss greater than 0.1 paise
+
 
   const [showPhonePromptModal, setShowPhonePromptModal] = useState(false);
   const [promptPhoneValue, setPromptPhoneValue] = useState('');

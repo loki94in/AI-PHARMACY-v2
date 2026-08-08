@@ -23,6 +23,21 @@ router.get('/services-status', async (_req, res) => {
     // 3. System internet status
     const internetConnected = true;
 
+    // 4. Config-gater flags — read in one batch query, no polling loop
+    const gaterRows: Array<{ key: string; value: string }> = await db.all(
+      "SELECT key, value FROM app_settings WHERE key IN ('automation_enabled','whatsapp_enabled','telegram_enabled','gmail_user','gmail_pass','gmail_auth_method')"
+    );
+    const gaterMap: Record<string, string> = {};
+    for (const row of gaterRows) gaterMap[row.key] = row.value;
+
+    const automationEnabled = gaterMap['automation_enabled'] === 'true';
+    const whatsappEnabled   = gaterMap['whatsapp_enabled']   === 'true';
+    const telegramEnabled   = gaterMap['telegram_enabled']   === 'true';
+    const gmailUser         = (gaterMap['gmail_user'] || '').trim();
+    const gmailAuthMethod   = gaterMap['gmail_auth_method'] || 'password';
+    const gmailPass         = (gaterMap['gmail_pass'] || '').trim();
+    const emailConfigured   = !!gmailUser && (gmailAuthMethod !== 'password' || !!gmailPass);
+
     res.json({
       success: true,
       timestamp: Date.now(),
@@ -44,6 +59,13 @@ router.get('/services-status', async (_req, res) => {
           isSyncing: waStatus.isSyncing,
           pendingQueueCount: waStatus.pendingQueueCount,
           hasQr: waStatus.hasQr
+        },
+        // Config-gater states — consumed by Layout.tsx status indicators (no extra polling)
+        gaters: {
+          automation: automationEnabled,
+          whatsapp: whatsappEnabled,
+          telegram: telegramEnabled,
+          email: emailConfigured,
         }
       }
     });
@@ -51,6 +73,7 @@ router.get('/services-status', async (_req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // POST /api/system/refresh-services
 router.post('/refresh-services', async (_req, res) => {

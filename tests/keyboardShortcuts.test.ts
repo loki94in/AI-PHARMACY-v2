@@ -1,4 +1,4 @@
-import { shortcutEvent, SHORTCUT_DIRECTORY } from '../frontend/src/services/keyboardShortcuts';
+import { shortcutEvent, SHORTCUT_DIRECTORY } from '../frontend/src/services/keyboardShortcuts.js';
 
 describe('Keyboard Shortcuts Event Bus Tests', () => {
   let listeners: Record<string, Function[]> = {};
@@ -37,11 +37,11 @@ describe('Keyboard Shortcuts Event Bus Tests', () => {
   });
 
   it('should contain global shortcuts in directory', () => {
-    const saveShortcut = SHORTCUT_DIRECTORY.find(s => s.key === 'Ctrl + S');
+    const saveShortcut = SHORTCUT_DIRECTORY.find((s: any) => s.key === 'Ctrl + S');
     expect(saveShortcut).toBeDefined();
     expect(saveShortcut?.category).toBe('Global');
 
-    const escShortcut = SHORTCUT_DIRECTORY.find(s => s.key === 'Esc');
+    const escShortcut = SHORTCUT_DIRECTORY.find((s: any) => s.key === 'Esc');
     expect(escShortcut).toBeDefined();
   });
 

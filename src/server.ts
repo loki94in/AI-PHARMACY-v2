@@ -574,7 +574,7 @@ server.on('error', (err: any) => {
           console.log('[Boot] Background initialization sequence completed');
         });
 
-        // WhatsApp Queue Worker (started always, lazy-loaded)
+        // WhatsApp Queue Worker — self-gating: only starts 30s interval if whatsapp_enabled + automation_enabled
         import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
 
         // Push notification event listener (lazy-loaded)

@@ -15,9 +15,12 @@
     "watch-catalog": "tsx ./src/cli/watchCatalog.ts",
     "build": "tsc -p tsconfig.json",
     "build:client": "npm run build --prefix frontend",
+    "build:client:clean": "node -e \"const fs=require('fs'),p=require('path');const d=p.join(process.cwd(),'frontend','dist');try{fs.rmSync(d,{recursive:true,force:true});console.log('Cleared frontend/dist')}catch(e){}\" && npm run build --prefix frontend",
     "build:all": "npm run build:client && npm run build",
+    "build:all:clean": "npm run build:client:clean && npm run build",
     "build:bundle": "node scripts/buildBundle.cjs",
-    "build:exe": "npm run build:all && npm run build:bundle && node scripts/buildSea.cjs"
+    "build:exe": "npm run build:all:clean && npm run build:bundle && node scripts/buildSea.cjs",
+    "build:exe:clean": "npm run build:all:clean && npm run build:bundle && node scripts/buildSea.cjs"
   },
   "dependencies": {
     "@types/compression": "^1.8.1",

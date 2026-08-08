@@ -832,6 +832,7 @@ export async function sendMessage(
             console.log('[WhatsApp] Attempting automatic client re-initialization and retry...');
             try {
               const freshClient = await initClient();
+              if (!freshClient) throw new Error('Re-initialization returned null client.');
               await doSend(freshClient);
               console.log('[WhatsApp] Automatic re-initialization and message send retry succeeded!');
             } catch (retryErr: any) {

@@ -31,12 +31,8 @@ async function main() {
   if (role === 'email') {
     const { startEmailPoller } = await import('./worker/emailPoller.js');
     console.log('[EmailPoller Runner] Background email poller initialized.');
-    try {
-      startEmailPoller();
-    } catch (err) {
-      console.error('[EmailPoller Runner] Fatal error during initialization:', err);
-      process.exit(1);
-    }
+    await startEmailPoller();
+
     process.on('message', (msg: any) => {
       if (msg && msg.type === 'PING') process.send?.({ type: 'PONG' });
     });

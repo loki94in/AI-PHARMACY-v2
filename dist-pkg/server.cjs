@@ -7963,6 +7963,7 @@ __export(whatsappClient_exports, {
   getChats: () => getChats,
   getMessageMedia: () => getMessageMedia,
   getWhatsAppStatus: () => getWhatsAppStatus,
+  hasSavedSession: () => hasSavedSession,
   hashMessageBody: () => hashMessageBody,
   initClient: () => initClient,
   isPuppeteerDetachedError: () => isPuppeteerDetachedError,
@@ -7972,6 +7973,16 @@ __export(whatsappClient_exports, {
   setIsReady: () => setIsReady,
   shouldRouteToBusiness: () => shouldRouteToBusiness
 });
+function hasSavedSession() {
+  const sessionPath = import_path14.default.join(WWEBJS_AUTH_DIR, "session");
+  if (!import_fs12.default.existsSync(sessionPath)) return false;
+  try {
+    const files = import_fs12.default.readdirSync(sessionPath);
+    return files.length > 0;
+  } catch {
+    return false;
+  }
+}
 function isPuppeteerDetachedError(msg) {
   if (!msg) return false;
   const str = String(msg);
@@ -8169,15 +8180,20 @@ async function syncWhatsappData(client) {
     isSyncing = false;
   }
 }
-async function initClient() {
+async function initClient(options = {}) {
+  const forceQr = options.forceQr ?? false;
   if (clientInstance) return clientInstance;
+  if (!forceQr && !hasSavedSession()) {
+    console.log("[WhatsApp] Auto-init skipped: No saved session on disk. Standing down until explicit user connection.");
+    return null;
+  }
   if (initializing) {
     return new Promise((resolve, reject) => {
       let attempts = 0;
       const check = () => {
         attempts++;
         if (clientInstance) resolve(clientInstance);
-        else if (!initializing && attempts > 10) reject(new Error("WhatsApp client initialization failed"));
+        else if (!initializing && attempts > 10) resolve(null);
         else if (attempts > 300) reject(new Error("WhatsApp client initialization timed out (15s)"));
         else setTimeout(check, 50);
       };
@@ -8217,6 +8233,17 @@ async function initClient() {
     let qrCount = 0;
     let qrAutoStopTimer = null;
     client.on("qr", (qr) => {
+      if (!forceQr && !hasSavedSession()) {
+        console.log("[WhatsApp] Unsolicited QR event suppressed. Stopping client until explicit user connection.");
+        if (qrAutoStopTimer) clearTimeout(qrAutoStopTimer);
+        currentQr = null;
+        initializing = false;
+        isReady = false;
+        activeClient = null;
+        client.destroy().catch(() => {
+        });
+        return;
+      }
       qrCount++;
       console.log(`[WhatsApp] QR code received (attempt ${qrCount}/5, standing by for scan)...`);
       currentQr = qr;
@@ -8541,8 +8568,11 @@ async function sendMessage(to, mediaPath, caption, file) {
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 1e4)}`;
     const useBusiness = await shouldRouteToBusiness();
     if (!useBusiness && (!isReady || !clientInstance)) {
+      if (!hasSavedSession()) {
+        throw new Error("WhatsApp is not connected. Please connect WhatsApp in Learning or Settings before sending messages.");
+      }
       try {
-        console.log("[WhatsApp Client] Client not ready on sendMessage call. Initializing headless WhatsApp client...");
+        console.log("[WhatsApp Client] Client not ready on sendMessage call. Initializing saved session...");
         await initClient();
       } catch (initErr) {
         console.error("[WhatsApp Client] Auto-initialization failed during send:", initErr);
@@ -8594,6 +8624,7 @@ async function sendMessage(to, mediaPath, caption, file) {
             console.log("[WhatsApp] Attempting automatic client re-initialization and retry...");
             try {
               const freshClient = await initClient();
+              if (!freshClient) throw new Error("Re-initialization returned null client.");
               await doSend(freshClient);
               console.log("[WhatsApp] Automatic re-initialization and message send retry succeeded!");
             } catch (retryErr) {
@@ -17881,8 +17912,8 @@ function registerProcessGuardian() {
   process.on("unhandledRejection", async (reason) => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack || "" : "";
-    if (message.includes("detached Frame") || message.includes("Execution context was destroyed") || message.includes("Session closed. Most likely the page has been closed") || message.includes("Target closed")) {
-      console.warn("[ProcessGuardian] Suppressed benign Puppeteer/WA rejection:", message);
+    if (message.includes("detached Frame") || message.includes("Execution context was destroyed") || message.includes("Session closed") || message.includes("Target closed") || message.includes("Protocol error") || message.includes("Connection closed") || message.includes("Browser has been disconnected") || message.includes("Navigation failed because browser has disconnected") || message.includes("WebSocket is not open")) {
+      console.warn("[ProcessGuardian] Suppressed benign browser exit rejection:", message);
       return;
     }
     console.error("[ProcessGuardian] CRITICAL \u2014 Unhandled Rejection:", reason);
@@ -18309,6 +18340,20 @@ var init_getMessage = __esm({
   }
 });
 
+// src/utils/doctorUtils.ts
+function sanitizeDoctorName(rawName) {
+  if (!rawName) return "";
+  let cleaned = rawName.trim();
+  cleaned = cleaned.replace(/^(?:dr|doctor)\.?\s+/i, "");
+  cleaned = cleaned.replace(/^(?:dr|doctor)\./i, "");
+  return cleaned.trim();
+}
+var init_doctorUtils = __esm({
+  "src/utils/doctorUtils.ts"() {
+    "use strict";
+  }
+});
+
 // src/services/similarityService.ts
 var similarityService_exports = {};
 __export(similarityService_exports, {
@@ -18357,6 +18402,7 @@ var init_crm = __esm({
     import_url20 = require("url");
     init_doctorReportingService();
     init_getMessage();
+    init_doctorUtils();
     __filename18 = (0, import_url20.fileURLToPath)(import_meta_url);
     __dirname18 = import_path24.default.dirname(__filename18);
     DB_PATH10 = process.env.DB_PATH || import_path24.default.resolve(__dirname18, "..", "..", "data", "app.db");
@@ -18530,14 +18576,30 @@ var init_crm = __esm({
     router2.post("/doctors", async (req, res) => {
       const { name, speciality, phone, hospital, degree, reg_no, send_daily_summary } = req.body;
       if (!name) return res.status(400).json({ error: "Doctor name is required" });
+      const cleanName = sanitizeDoctorName(name) || name.trim();
       try {
         const db2 = await dbManager.getConnection();
-        await db2.run(
+        const existing = await db2.get("SELECT * FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?)", [cleanName]);
+        if (existing) {
+          await db2.run(
+            `UPDATE doctors 
+         SET speciality = COALESCE(NULLIF(?, ''), speciality),
+             phone = COALESCE(NULLIF(?, ''), phone),
+             hospital = COALESCE(NULLIF(?, ''), hospital),
+             degree = COALESCE(NULLIF(?, ''), degree),
+             reg_no = COALESCE(NULLIF(?, ''), reg_no),
+             send_daily_summary = CASE WHEN ? = 1 THEN 1 ELSE send_daily_summary END
+         WHERE id = ?`,
+            [speciality || "", phone || "", hospital || "", degree || "", reg_no || "", send_daily_summary ? 1 : 0, existing.id]
+          );
+          return res.json({ success: true, message: "Doctor profile updated", doctorId: existing.id });
+        }
+        const result = await db2.run(
           `INSERT INTO doctors (name, speciality, phone, hospital, degree, reg_no, send_daily_summary)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [name, speciality || "", phone || "", hospital || "", degree || "", reg_no || "", send_daily_summary ? 1 : 0]
+          [cleanName, speciality || "", phone || "", hospital || "", degree || "", reg_no || "", send_daily_summary ? 1 : 0]
         );
-        res.json({ success: true, message: "Doctor added successfully" });
+        res.json({ success: true, message: "Doctor added successfully", doctorId: result.lastID });
       } catch (error) {
         console.error("Failed to add doctor:", error);
         res.status(500).json({ error: "Internal server error" });
@@ -18547,13 +18609,14 @@ var init_crm = __esm({
       const { id } = req.params;
       const { name, speciality, phone, hospital, degree, reg_no, send_daily_summary } = req.body;
       if (!name) return res.status(400).json({ error: "Doctor name is required" });
+      const cleanName = sanitizeDoctorName(name) || name.trim();
       try {
         const db2 = await dbManager.getConnection();
         await db2.run(
           `UPDATE doctors 
        SET name = ?, speciality = ?, phone = ?, hospital = ?, degree = ?, reg_no = ?, send_daily_summary = ?
        WHERE id = ?`,
-          [name, speciality || "", phone || "", hospital || "", degree || "", reg_no || "", send_daily_summary ? 1 : 0, id]
+          [cleanName, speciality || "", phone || "", hospital || "", degree || "", reg_no || "", send_daily_summary ? 1 : 0, id]
         );
         const updated = await db2.get("SELECT * FROM doctors WHERE id = ?", id);
         res.json({ success: true, doctor: updated });
@@ -19518,12 +19581,137 @@ var init_validateStagingDatabase = __esm({
   }
 });
 
+// src/utils/nameNormalizer.ts
+var nameNormalizer_exports = {};
+__export(nameNormalizer_exports, {
+  isCosmeticProduct: () => isCosmeticProduct,
+  isValidDistributorName: () => isValidDistributorName,
+  normalizeMedicineName: () => normalizeMedicineName,
+  sanitizeDistributorName: () => sanitizeDistributorName
+});
+function isCosmeticProduct(name) {
+  const lower = name.toLowerCase();
+  const cosmeticKeywords = [
+    "lotion",
+    "shampoo",
+    "oil",
+    "cream",
+    "soap",
+    "body wash",
+    "face wash",
+    "facewash",
+    "moisturizer",
+    "moisturiser",
+    "sunscreen",
+    "perfume",
+    "deodorant",
+    "body spray",
+    "lip balm",
+    "toothpaste",
+    "toothbrush",
+    "powder",
+    "gel",
+    "scrub",
+    "conditioner",
+    "cleanser"
+  ];
+  const exceptions = ["ketoconazole", "ketokonazol", "kz soap", "kz plus", "acnestart"];
+  if (exceptions.some((exp) => lower.includes(exp))) {
+    return false;
+  }
+  return cosmeticKeywords.some((keyword) => lower.includes(keyword));
+}
+function normalizeMedicineName(name, manufacturer) {
+  if (!name) return "";
+  if (isCosmeticProduct(name)) {
+    return name.trim();
+  }
+  let cleaned = name.trim();
+  cleaned = cleaned.replace(/\bta[g|gs]\b/gi, "tab");
+  const lower = cleaned.toLowerCase();
+  if (lower.startsWith("dolo 650")) {
+    const mfr = manufacturer || "micro labs ltd";
+    const cleanMfr = mfr.toLowerCase() === "macro lab ltd" ? "macro lab ltd" : mfr;
+    return `dolo 650 strip of 15 tab (${cleanMfr.toLowerCase()})`;
+  }
+  if (lower.startsWith("asthakind dx")) {
+    const mfr = manufacturer || "mankind pharma ltd";
+    let base = cleaned;
+    if (!lower.includes("bottl")) {
+      base = base + " bottl of 100ml";
+    }
+    base = base.replace(/\bbottle\b/gi, "bottl");
+    return `${base} (${mfr.toLowerCase()})`;
+  }
+  if (lower.startsWith("almox 500")) {
+    const mfr = manufacturer || "ALKEM LAB";
+    return `ALMOX 500 strip of 15 cap (${mfr.toUpperCase()})`;
+  }
+  if (lower.startsWith("duphalac")) {
+    const mfr = manufacturer || "abbott india ltd";
+    let pack = "solution bottoe of 150ml";
+    if (lower.includes("150ml")) {
+      pack = "solution bottoe of 150ml";
+    } else if (lower.includes("250ml")) {
+      pack = "solution bottoe of 250ml";
+    }
+    const cleanMfr = mfr.toLowerCase().includes("abbort") || mfr.toLowerCase().includes("abbott") ? "abbort india ltd" : mfr;
+    return `duphalac ${pack} (${cleanMfr.toLowerCase()})`;
+  }
+  cleaned = cleaned.replace(/\bta[g|gs]\b/gi, "tab");
+  cleaned = cleaned.replace(/\bca[p|ps]\b/gi, "cap");
+  if (manufacturer && manufacturer.trim()) {
+    const cleanMfr = manufacturer.trim();
+    if (!cleaned.toLowerCase().includes(cleanMfr.toLowerCase())) {
+      cleaned = `${cleaned} (${cleanMfr})`;
+    }
+  }
+  return cleaned;
+}
+function isValidDistributorName(name) {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (!trimmed || trimmed.length < 2) return false;
+  if (trimmed.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return false;
+  }
+  if (/^(DL|DL\s*NO|DL\s*NUMBER|DL\s*NUM|DRUG\s*LIC|DRUG\s*LICENSE)\b/i.test(trimmed) || /^DL\s*[-/:]?\s*\d+/i.test(trimmed)) {
+    return false;
+  }
+  if (/^DL\b/i.test(trimmed) && trimmed.length <= 5) {
+    return false;
+  }
+  const numericOnly = trimmed.replace(/\D/g, "");
+  if (numericOnly.length >= 10 && numericOnly.length <= 13 && trimmed.replace(/[\d\s+\-()]/g, "").length === 0) {
+    return false;
+  }
+  if (/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/i.test(trimmed)) {
+    return false;
+  }
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(trimmed) || /^INV[-/]?\d+$/i.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+function sanitizeDistributorName(name) {
+  if (!name) return "";
+  const trimmed = String(name).trim();
+  if (!isValidDistributorName(trimmed)) return "";
+  return trimmed;
+}
+var init_nameNormalizer = __esm({
+  "src/utils/nameNormalizer.ts"() {
+    "use strict";
+  }
+});
+
 // src/utils/migrationDistributorHelpers.ts
 function resetDistributorLookupCache() {
   normalizedCache.clear();
 }
 async function findOrCreateDistributor(db2, name) {
-  const trimmed = String(name || "").trim() || "Unknown Supplier";
+  const rawTrimmed = String(name || "").trim();
+  const trimmed = isValidDistributorName(rawTrimmed) ? rawTrimmed : "Unknown Supplier";
   const norm = normalizeDistributorName(trimmed);
   if (norm && normalizedCache.has(norm)) {
     return { id: normalizedCache.get(norm) };
@@ -19551,13 +19739,14 @@ var init_migrationDistributorHelpers = __esm({
   "src/utils/migrationDistributorHelpers.ts"() {
     "use strict";
     init_migrationValidation();
+    init_nameNormalizer();
     normalizedCache = /* @__PURE__ */ new Map();
   }
 });
 
 // src/worker/parsers/pgCopyParser.ts
 function parseCopyHeader(line) {
-  const match = line.match(/^COPY\s+public\.(\w+)\s*\(([^)]+)\)\s*FROM\s+stdin\s*;/i);
+  const match = line.match(/^COPY\s+(?:(?:"?\w+"?\.)?"?(\w+)"?)\s*\(([^)]+)\)\s*FROM\s+stdin\s*;/i);
   if (!match) return null;
   const table = match[1];
   const columns = match[2].split(",").map((c) => c.trim().replace(/"/g, ""));
@@ -19742,8 +19931,9 @@ async function importDoctor(row, db2) {
   const name = row["doctor_name"];
   const deleted = row["deleted"];
   if (!legacyId || !name || deleted === "t") return;
+  const cleanName = sanitizeDoctorName(name) || name.trim();
   doctorBatch.push({
-    name,
+    name: cleanName,
     degree: row["qualification"] || row["doctor_qualifications"] || null,
     reg_no: row["registration_no"] || null,
     hospital: row["doctor_hospital"] || null,
@@ -19762,12 +19952,18 @@ async function flushDoctors(db2) {
   try {
     for (const d of doctorBatch) {
       try {
-        const result = await db2.run(
-          `INSERT INTO doctors (name, degree, reg_no, hospital, phone, address, legacy_id, speciality)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [d.name, d.degree, d.reg_no, d.hospital, d.phone, d.address, d.legacy_id, d.speciality]
-        );
-        doctorMap.set(d.legacy_id, result.lastID);
+        const cleanName = sanitizeDoctorName(d.name) || d.name.trim();
+        const existing = await db2.get("SELECT id FROM doctors WHERE LOWER(TRIM(name)) = LOWER(?)", [cleanName]);
+        if (existing) {
+          doctorMap.set(d.legacy_id, existing.id);
+        } else {
+          const result = await db2.run(
+            `INSERT INTO doctors (name, degree, reg_no, hospital, phone, address, legacy_id, speciality)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [cleanName, d.degree, d.reg_no, d.hospital, d.phone, d.address, d.legacy_id, d.speciality]
+          );
+          doctorMap.set(d.legacy_id, result.lastID);
+        }
       } catch (err) {
         console.warn(`[Migration] Skipped doctor ${d.name}: ${err.message}`);
       }
@@ -19963,6 +20159,7 @@ var init_pgMasterImporter = __esm({
     "use strict";
     init_migrationValidation();
     init_packaging();
+    init_doctorUtils();
     categoryMap = /* @__PURE__ */ new Map();
     manufacturerMap = /* @__PURE__ */ new Map();
     distributorMap = /* @__PURE__ */ new Map();
@@ -20223,10 +20420,10 @@ function clearSalesMap() {
 }
 async function importOrder(row, db2) {
   const legacyId = row["order_id"];
-  const deleted = row["deleted"];
-  if (!legacyId || deleted === "t") return;
-  const status = row["order_status"];
-  if (status && status !== "BILL" && status !== "DELIVERED" && status !== "COMPLETED") return;
+  const deleted = (row["deleted"] || "").trim().toLowerCase();
+  if (!legacyId || deleted === "t" || deleted === "true" || deleted === "1") return;
+  const status = (row["order_status"] || "").trim().toUpperCase();
+  if (status && !COMPLETED_STATUSES.has(status)) return;
   const legacyPatientId = row["patient_id"];
   const customerId = legacyPatientId ? patientMap.get(legacyPatientId) : null;
   const legacyDoctorId = row["doctor_id"];
@@ -20331,7 +20528,7 @@ async function flushSaleItems(db2) {
     throw err;
   }
 }
-var salesInvoiceMap, seenInvoiceNos, existingInvoicesLoaded, salesBatch, saleItemBatch;
+var salesInvoiceMap, seenInvoiceNos, existingInvoicesLoaded, salesBatch, COMPLETED_STATUSES, saleItemBatch;
 var init_pgSalesImporter = __esm({
   "src/worker/importers/pgSalesImporter.ts"() {
     "use strict";
@@ -20342,6 +20539,23 @@ var init_pgSalesImporter = __esm({
     seenInvoiceNos = /* @__PURE__ */ new Set();
     existingInvoicesLoaded = false;
     salesBatch = [];
+    COMPLETED_STATUSES = /* @__PURE__ */ new Set([
+      "BILL",
+      "DELIVERED",
+      "COMPLETED",
+      "BILLED",
+      "CLOSED",
+      "PAID",
+      "SETTLED",
+      "FULFILLED",
+      "DISPATCHED",
+      "SUCCESS",
+      "FINALIZE",
+      "FINALIZED",
+      "FINAL",
+      "DONE",
+      "OK"
+    ]);
     saleItemBatch = [];
   }
 });
@@ -22233,7 +22447,7 @@ async function streamPgDump(sqlPath, handlers, db2) {
   let currentColumns = [];
   let activeHandler = null;
   for await (const line of rl) {
-    if (line.startsWith("COPY public.")) {
+    if (line.toUpperCase().startsWith("COPY ")) {
       const parsed = parseCopyHeader(line);
       if (parsed && handlers[parsed.table]) {
         currentTable = parsed.table;
@@ -26241,7 +26455,8 @@ var init_verification = __esm({
 
 // src/utils/distributorSyncHelper.ts
 async function syncDistributorPhoneAcrossTables(db2, params) {
-  const distName = (params.name || params.store_name || "").trim();
+  const rawDistName = (params.name || params.store_name || "").trim();
+  const distName = isValidDistributorName(rawDistName) ? rawDistName : "";
   const phoneInput = params.phone !== void 0 && params.phone !== null && String(params.phone).trim() !== "" ? params.phone : params.contact !== void 0 && params.contact !== null && String(params.contact).trim() !== "" ? params.contact : params.whatsapp;
   const rawPhone = phoneInput !== void 0 && phoneInput !== null ? String(phoneInput).trim() : "";
   let cleanPhone = rawPhone && !rawPhone.includes("@") && !rawPhone.includes("<") ? rawPhone.replace(/\D/g, "") : "";
@@ -26485,6 +26700,7 @@ var init_distributorSyncHelper = __esm({
   "src/utils/distributorSyncHelper.ts"() {
     "use strict";
     init_emailSanitizer();
+    init_nameNormalizer();
   }
 });
 
@@ -26735,15 +26951,17 @@ var init_settings = __esm({
           const hasWhatsappKey = keys.some((k) => k === "whatsapp_enabled" || k === "whatsapp_preferred_system" || k === "wa_business_enabled");
           if (hasWhatsappKey) {
             try {
-              const { initClient: initClient3, destroyClient: destroyClient2, shouldRouteToBusiness: shouldRouteToBusiness2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
+              const { initClient: initClient3, destroyClient: destroyClient2, shouldRouteToBusiness: shouldRouteToBusiness2, hasSavedSession: hasSavedSession2 } = await Promise.resolve().then(() => (init_whatsappClient(), whatsappClient_exports));
               const enabled = payload["whatsapp_enabled"] === "true";
               const useBusiness = await shouldRouteToBusiness2();
               if (useBusiness || !enabled) {
                 console.log("[Settings] WhatsApp Business API preferred or WhatsApp Web disabled. Shutting down automated client...");
                 await destroyClient2();
-              } else {
-                console.log("[Settings] Automated WhatsApp Web enabled. Re-initializing client...");
+              } else if (hasSavedSession2()) {
+                console.log("[Settings] Automated WhatsApp Web enabled with existing session. Re-initializing client...");
                 await initClient3().catch((err) => console.error("[Settings] WhatsApp Web initialization failed:", err));
+              } else {
+                console.log("[Settings] Automated WhatsApp Web enabled, but no saved session exists. Standing down until manual connect.");
               }
             } catch (err) {
               console.error("[Settings] Failed to hot-reload WhatsApp config:", err);
@@ -30425,22 +30643,39 @@ var init_learning = __esm({
       }
     });
     router12.post("/profiles/merge", async (req, res) => {
-      const { primaryId, secondaryIds } = req.body;
+      const { primaryId, secondaryIds, newName } = req.body;
       if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
         return res.status(400).json({ error: "primaryId and secondaryIds array are required" });
       }
       try {
         const db2 = await dbManager.getConnection();
-        const primary = await db2.get("SELECT * FROM distributors WHERE id = ?", [primaryId]);
+        let primary = await db2.get("SELECT * FROM distributors WHERE id = ?", [primaryId]);
         if (!primary) return res.status(404).json({ error: "Primary distributor not found" });
+        if (newName && typeof newName === "string" && newName.trim() && newName.trim() !== primary.name) {
+          const cleanNewName = newName.trim();
+          await db2.run("UPDATE distributors SET name = ? WHERE id = ?", [cleanNewName, primaryId]);
+          primary = await db2.get("SELECT * FROM distributors WHERE id = ?", [primaryId]);
+        }
         const placeholders = secondaryIds.map(() => "?").join(",");
         const params = [primaryId, ...secondaryIds];
-        await db2.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-        await db2.run(`UPDATE purchase_orders SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-        await db2.run(`UPDATE returns SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-        await db2.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-        await db2.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
-        await db2.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+        const tablesToRelink = [
+          "purchases",
+          "purchase_orders",
+          "returns",
+          "distributor_payments",
+          "distributor_payment_details",
+          "distributor_historical_files",
+          "distributor_medicine_aliases"
+        ];
+        for (const tbl of tablesToRelink) {
+          try {
+            const info = await db2.all(`PRAGMA table_info(${tbl})`);
+            if (info && info.some((c) => c.name === "distributor_id")) {
+              await db2.run(`UPDATE ${tbl} SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+            }
+          } catch (_e) {
+          }
+        }
         await db2.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
         await db2.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [primaryId]);
         await db2.run(`DELETE FROM distributors WHERE id IN (${placeholders})`, secondaryIds);
@@ -30451,7 +30686,7 @@ var init_learning = __esm({
           } catch (_) {
           }
         }
-        res.json({ success: true, message: `Successfully merged ${secondaryIds.length} distributor profile(s) into '${primary.name}'`, primaryId });
+        res.json({ success: true, message: `Successfully merged ${secondaryIds.length} distributor profile(s) into '${primary.name}'`, primaryId, primaryName: primary.name });
       } catch (error) {
         console.error("Failed to merge learning profiles:", error);
         res.status(500).json({ error: "Failed to merge learning profiles: " + error.message });
@@ -30596,11 +30831,19 @@ var init_messaging = __esm({
           const qrUrl = await import_qrcode3.default.toDataURL(currentQr);
           return res.json({ isReady: false, qrUrl });
         }
-        initClient().catch(console.error);
-        res.json({ isReady: false, qrUrl: null, message: "Initializing WhatsApp client. Waiting for QR..." });
+        res.json({ isReady: false, qrUrl: null, message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
       } catch (err) {
-        console.error("QR generation error:", err);
-        res.status(500).json({ error: "Failed to generate QR code" });
+        console.error("QR check error:", err);
+        res.status(500).json({ error: "Failed to check QR status" });
+      }
+    });
+    router13.post("/connect", async (req, res) => {
+      try {
+        initClient({ forceQr: true }).catch(console.error);
+        res.json({ success: true, message: "Initializing WhatsApp QR code scan..." });
+      } catch (err) {
+        console.error("[WhatsApp Connect] Error:", err);
+        res.status(500).json({ error: "Failed to initialize WhatsApp connection" });
       }
     });
     router13.post("/login-window", async (req, res) => {
@@ -31071,97 +31314,6 @@ var init_messaging = __esm({
       }
     });
     messaging_default = router13;
-  }
-});
-
-// src/utils/nameNormalizer.ts
-var nameNormalizer_exports = {};
-__export(nameNormalizer_exports, {
-  isCosmeticProduct: () => isCosmeticProduct,
-  normalizeMedicineName: () => normalizeMedicineName
-});
-function isCosmeticProduct(name) {
-  const lower = name.toLowerCase();
-  const cosmeticKeywords = [
-    "lotion",
-    "shampoo",
-    "oil",
-    "cream",
-    "soap",
-    "body wash",
-    "face wash",
-    "facewash",
-    "moisturizer",
-    "moisturiser",
-    "sunscreen",
-    "perfume",
-    "deodorant",
-    "body spray",
-    "lip balm",
-    "toothpaste",
-    "toothbrush",
-    "powder",
-    "gel",
-    "scrub",
-    "conditioner",
-    "cleanser"
-  ];
-  const exceptions = ["ketoconazole", "ketokonazol", "kz soap", "kz plus", "acnestart"];
-  if (exceptions.some((exp) => lower.includes(exp))) {
-    return false;
-  }
-  return cosmeticKeywords.some((keyword) => lower.includes(keyword));
-}
-function normalizeMedicineName(name, manufacturer) {
-  if (!name) return "";
-  if (isCosmeticProduct(name)) {
-    return name.trim();
-  }
-  let cleaned = name.trim();
-  cleaned = cleaned.replace(/\bta[g|gs]\b/gi, "tab");
-  const lower = cleaned.toLowerCase();
-  if (lower.startsWith("dolo 650")) {
-    const mfr = manufacturer || "micro labs ltd";
-    const cleanMfr = mfr.toLowerCase() === "macro lab ltd" ? "macro lab ltd" : mfr;
-    return `dolo 650 strip of 15 tab (${cleanMfr.toLowerCase()})`;
-  }
-  if (lower.startsWith("asthakind dx")) {
-    const mfr = manufacturer || "mankind pharma ltd";
-    let base = cleaned;
-    if (!lower.includes("bottl")) {
-      base = base + " bottl of 100ml";
-    }
-    base = base.replace(/\bbottle\b/gi, "bottl");
-    return `${base} (${mfr.toLowerCase()})`;
-  }
-  if (lower.startsWith("almox 500")) {
-    const mfr = manufacturer || "ALKEM LAB";
-    return `ALMOX 500 strip of 15 cap (${mfr.toUpperCase()})`;
-  }
-  if (lower.startsWith("duphalac")) {
-    const mfr = manufacturer || "abbott india ltd";
-    let pack = "solution bottoe of 150ml";
-    if (lower.includes("150ml")) {
-      pack = "solution bottoe of 150ml";
-    } else if (lower.includes("250ml")) {
-      pack = "solution bottoe of 250ml";
-    }
-    const cleanMfr = mfr.toLowerCase().includes("abbort") || mfr.toLowerCase().includes("abbott") ? "abbort india ltd" : mfr;
-    return `duphalac ${pack} (${cleanMfr.toLowerCase()})`;
-  }
-  cleaned = cleaned.replace(/\bta[g|gs]\b/gi, "tab");
-  cleaned = cleaned.replace(/\bca[p|ps]\b/gi, "cap");
-  if (manufacturer && manufacturer.trim()) {
-    const cleanMfr = manufacturer.trim();
-    if (!cleaned.toLowerCase().includes(cleanMfr.toLowerCase())) {
-      cleaned = `${cleaned} (${cleanMfr})`;
-    }
-  }
-  return cleaned;
-}
-var init_nameNormalizer = __esm({
-  "src/utils/nameNormalizer.ts"() {
-    "use strict";
   }
 });
 
@@ -45890,6 +46042,25 @@ var init_distributors = __esm({
     };
     router38.get("/distributors", getDistributorsHandler);
     router38.get("/", getDistributorsHandler);
+    router38.get("/pharmarack-list", async (_req, res) => {
+      try {
+        const db2 = await dbManager.getConnection();
+        await db2.run(`
+      CREATE TABLE IF NOT EXISTS pharmarack_distributors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_name TEXT UNIQUE,
+        distributor_code TEXT,
+        phone TEXT,
+        location TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        const rows = await db2.all("SELECT * FROM pharmarack_distributors ORDER BY store_name ASC LIMIT 1000");
+        res.json({ success: true, distributors: rows });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch Pharmarack distributors: " + error.message });
+      }
+    });
     postDistributorsHandler = async (req, res) => {
       const { name, store_name, phone, contact, email, address, gstin, state_code, preferred_file_format } = req.body;
       const distName = (name || store_name || "").trim();
@@ -48832,6 +49003,8 @@ var init_server = __esm({
     })();
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGHUP", () => gracefulShutdown("SIGHUP"));
+    process.on("SIGBREAK", () => gracefulShutdown("SIGBREAK"));
   }
 });
 

@@ -103,12 +103,30 @@ export class WhatsappQueue {
     }
   }
 
-  startWorker(): void {
-    // Process queue every 30 seconds
+  async startWorker(): Promise<void> {
+    // [WHATSAPP QUEUE GATER] Check enabled flags before starting any background timer
+    try {
+      const db = await dbManager.getConnection();
+      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+      if (!autoRow || autoRow.value !== 'true') {
+        console.log('[WHATSAPP QUEUE GATER] Automation is disabled. WhatsApp queue worker will not start.');
+        return;
+      }
+      const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
+      if (!waRow || waRow.value !== 'true') {
+        console.log('[WHATSAPP QUEUE GATER] WhatsApp is disabled. Queue background worker will not start.');
+        return;
+      }
+    } catch (dbErr) {
+      console.warn('[WHATSAPP QUEUE GATER] Could not check enabled flags — worker will not start:', dbErr);
+      return;
+    }
+
+    // Enabled — start the 30-second processing interval
     setInterval(() => {
       this.processQueue().catch(console.error);
     }, 30000);
-    console.log('WhatsApp Resilient Queue background worker started.');
+    console.log('[WhatsApp Queue] Resilient queue background worker started.');
   }
 }
 
