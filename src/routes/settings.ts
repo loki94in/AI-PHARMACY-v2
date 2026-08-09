@@ -117,22 +117,42 @@ router.post('/save', async (req, res) => {
   try {
     await dbManager.transaction(async (db) => {
       await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
-      const entries = Object.entries(payload);
+      const LEARNING_OWNED_KEYS = [
+        'gmail_user', 'gmail_pass', 'gmail_auth_method',
+        'telegram_enabled', 'telegram_token', 'telegram_chat_id',
+        'whatsapp_enabled', 'whatsapp_preferred_system',
+        'wa_business_enabled', 'wa_business_access_token', 'wa_business_phone_number_id',
+        'pharmarack_username', 'pharmarack_password', 'pharmarack_session_token', 'pharmarack_mode',
+        'automation_enabled', 'wa_auto_share_admin'
+      ];
       const protectedKeys = ['pharmarack_session_token', 'pharmarack_username', 'pharmarack_password', 'wa_business_access_token', 'gmail_pass', 'telegram_token'];
+
+      const isSettingsPageSave = req.headers['x-source-screen'] === 'settings';
+      const entries = Object.entries(payload);
 
       const upsertStmt = await db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)');
       const checkProtectedStmt = await db.prepare("SELECT value FROM app_settings WHERE key = ? AND value IS NOT NULL AND value != ''");
 
       try {
         for (const [k, v] of entries) {
+          // Guard A: Block Settings screen saves from overwriting Learning-owned keys
+          if (isSettingsPageSave && LEARNING_OWNED_KEYS.includes(k)) {
+            console.log(`[DEFENSE-GATE] Blocked Settings page from overwriting Learning-owned key: ${k}`);
+            continue;
+          }
+
           if (k === 'pharmarack_mode') {
             await upsertStmt.run(['pharmarack_mode', 'Live']);
             continue;
           }
           const valStr = v !== undefined && v !== null ? String(v).trim() : '';
+          // Guard B: Preserve existing non-empty protected secret if incoming value is empty
           if (protectedKeys.includes(k) && valStr === '') {
             const existing = await checkProtectedStmt.get([k]);
-            if (existing) continue;
+            if (existing) {
+              console.log(`[DEFENSE-GATE] Preserved existing populated secret for key: ${k}`);
+              continue;
+            }
           }
           let finalVal = v ?? '';
           if (k === 'admin_password' && finalVal && !String(finalVal).startsWith('pbkdf2:')) {

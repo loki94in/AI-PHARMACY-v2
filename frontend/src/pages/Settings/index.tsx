@@ -749,7 +749,9 @@ const Settings = () => {
     };
 
     try {
-      await apiClient.post('/settings/save', payload);
+      await apiClient.post('/settings/save', payload, {
+        headers: { 'x-source-screen': 'settings' }
+      });
       toastEvent.trigger('Settings saved successfully', 'success');
       updateSettingsCache(queryClient, payload as Record<string, string>);
 
@@ -786,6 +788,8 @@ const Settings = () => {
     try {
       await apiClient.post('/settings/save', {
         data_fetch_control: modesString
+      }, {
+        headers: { 'x-source-screen': 'settings' }
       });
       updateSettingsCache(queryClient, { data_fetch_control: modesString });
       await broadcastContactDataChanged(queryClient);
