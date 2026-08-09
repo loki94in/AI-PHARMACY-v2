@@ -12,6 +12,8 @@ import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent } from '.
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
+import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
+import { isValid10DigitPhone } from '../../utils/phone';
 
 // ─── Module-level Cache (SPA Performance Contract) ──────────────────────
 let cachedRefillsData: RefillPatient[] = [];
@@ -814,13 +816,12 @@ const RefillsSection: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <input
-                      type="text"
+                    <PhoneInputWithBadge
                       value={addPatientPhone}
-                      onChange={e => setAddPatientPhone(e.target.value)}
+                      onChange={val => setAddPatientPhone(val)}
                       placeholder="Phone / WhatsApp (10 digits) *"
-                      required
-                      className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all"
+                      required={true}
+                      allowEmpty={false}
                     />
                   </div>
                 </div>
@@ -2598,6 +2599,8 @@ const SpecialOrdersSection: React.FC = () => {
   const [editProduct, setEditProduct] = useState('');
   const [editRequester, setEditRequester] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [shakePhone, setShakePhone] = useState(false);
+  const [shakeEditPhone, setShakeEditPhone] = useState(false);
   const [editQty, setEditQty] = useState<number | ''>(1);
   const [editAdvancePayment, setEditAdvancePayment] = useState<number | ''>('');
   const [editPriority, setEditPriority] = useState('Normal');
@@ -2862,6 +2865,8 @@ const SpecialOrdersSection: React.FC = () => {
       return;
     }
     if (!customerPhone || customerPhone.length < 10) {
+      setShakePhone(true);
+      setTimeout(() => setShakePhone(false), 400);
       toastEvent.trigger('Please enter a valid 10-digit mobile number.', 'error', '/crm');
       return;
     }
@@ -2970,7 +2975,9 @@ const SpecialOrdersSection: React.FC = () => {
       return;
     }
     if (!customerPhone || customerPhone.length < 10) {
-      toastEvent.trigger('Please enter a valid 10-digit mobile number.', 'error', '/crm');
+      setShakeEditPhone(true);
+      setTimeout(() => setShakeEditPhone(false), 400);
+      toastEvent.trigger('Customer phone number must be 10 digits.', 'error', '/crm');
       return;
     }
     if (!editQty || Number(editQty) < 1) {
@@ -3516,14 +3523,13 @@ const SpecialOrdersSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-text mb-1">Phone (WhatsApp) *</label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="10-digit mobile"
+                  <PhoneInputWithBadge
+                    label="Phone (WhatsApp)"
                     value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
+                    onChange={val => setPhone(val)}
+                    required={true}
+                    allowEmpty={false}
+                    shakeOnError={shakePhone}
                   />
                 </div>
               </div>

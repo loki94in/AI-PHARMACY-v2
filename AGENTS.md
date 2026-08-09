@@ -309,7 +309,7 @@ To prevent regressions, legacy fallback loops, and developer/AI confusion when f
 2. **Strict Route Ownership Rules**:
    - **Delivery Boy Management**: MUST ONLY be read/written via `/dispatch` (`Dispatch/index.tsx`) using the `delivery_boys` database table (`GET/POST /api/dispatch/delivery-boys`). **NEVER** read/write delivery boy details from `Settings` or `app_settings`.
    - **Special Shortage Orders**: MUST ONLY be managed via `/orders` (`Orders/index.tsx`) using the `special_orders` database table (`GET/POST /api/orders`). **NEVER** introduce parallel logic pointing to `pending_shortage_requests`.
-   - **Unified Configuration Hub (`/settings`)**: `Settings` (`/settings`) is the single consolidated 5-tab hub managing Store Profile metadata, Staff & Security credentials, Integrations & Credentials (WhatsApp, Telegram, Gmail, Pharmarack), AI Learning & OCR (OCR corrections, medicine aliases, clinical retraining stats, doctor directory), and Data & Backups. The legacy `/learning` page file is completely removed and all legacy `/learning` deep links automatically redirect to `/settings`.
+   - **AI Learning Hub (`/learning`) & Settings Hub (`/settings`)**: `/learning` (`Learning/index.tsx`) is the dedicated 4-tab AI Learning command center managing Clinical AI retraining, OCR text correction rules, Doctor Directory, Distributor OCR layouts, and QR document scanning sandbox. `/settings` (`Settings/index.tsx`) is the store configuration hub managing Store Profile, Staff & Security, External Integrations, and Data & Backups. These pages function as completely separate routes with ZERO cross-page redirects.
 
 ---
 

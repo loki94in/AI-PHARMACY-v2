@@ -1435,117 +1435,29 @@ const Sells = () => {
                 <X size={18} />
               </button>
             </div>
-
-            {/* Tab Selectors */}
-            <div className="flex w-full bg-bg3/50 p-1 rounded-xl border border-glass-border">
-              <button
-                onClick={() => setActiveBarcodeTab('invoice')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeBarcodeTab === 'invoice'
-                    ? 'bg-primary text-white shadow-md'
-                    : 'text-muted hover:text-text'
-                }`}
-              >
-                Return Invoice Barcode
-              </button>
-              <button
-                onClick={() => setActiveBarcodeTab('products')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeBarcodeTab === 'products'
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'text-muted hover:text-text'
-                }`}
-              >
-                Product Barcodes ({barcodeModalItems.length})
-              </button>
-            </div>
-
-            {activeBarcodeTab === 'invoice' ? (
-              loadingBarcode ? (
-                <div className="py-10 text-center text-sm text-muted">Generating invoice barcode label...</div>
-              ) : barcodeData ? (
-                <div className="w-full flex flex-col items-center space-y-4 bg-bg2/80 p-5 rounded-xl border border-glass-border">
-                  <img src={barcodeData.qrDataUrl} alt="QR Code" className="w-32 h-32 bg-white p-2 rounded-lg shadow-md" />
-                  <div className="w-full text-center">
-                    <div className="text-[11px] font-bold text-muted uppercase tracking-wider mb-1">Code128 Barcode</div>
-                    <img src={barcodeData.code128DataUrl} alt="Code128" className="h-14 bg-white p-2 rounded-lg w-full object-contain shadow-md" />
-                    <div className="text-xs font-mono text-muted mt-2 font-bold">{barcodeData.barcodeText}</div>
-                  </div>
-
-                  <button
-                    onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
-                    className="w-full py-2.5 bg-primary text-white rounded-lg font-bold text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
-                  >
-                    <Printer size={16} /> Open & Print Invoice PDF Barcode Label
-                  </button>
-                </div>
-              ) : (
-                <div className="py-6 text-center text-sm text-muted">Failed to generate barcode label.</div>
-              )
-            ) : (
-              /* Product Barcodes Tab */
-              <div className="w-full flex flex-col space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="relative flex-1">
-                    <Search size={14} className="absolute left-3 top-2.5 text-muted" />
-                    <input
-                      type="text"
-                      placeholder="Filter product by name or batch..."
-                      value={productBarcodeSearch}
-                      onChange={e => setProductBarcodeSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 bg-bg2 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-purple-500"
-                    />
-                  </div>
-                  {barcodeModalItems.length > 0 && (
-                    <button
-                      onClick={() => handleGenerateProductBarcodes(
-                        barcodeModalItems.filter(it =>
-                          !productBarcodeSearch ||
-                          (it.medicine_name || '').toLowerCase().includes(productBarcodeSearch.toLowerCase()) ||
-                          (it.batch_number || '').toLowerCase().includes(productBarcodeSearch.toLowerCase())
-                        )
-                      )}
-                      disabled={generatingProductBarcode}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50"
-                    >
-                      <Printer size={13} /> Print All ({barcodeModalItems.filter(it => !productBarcodeSearch || (it.medicine_name || '').toLowerCase().includes(productBarcodeSearch.toLowerCase()) || (it.batch_number || '').toLowerCase().includes(productBarcodeSearch.toLowerCase())).length})
-                    </button>
-                  )}
-                </div>
-
-                <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                  {barcodeModalItems
-                    .filter(it =>
-                      !productBarcodeSearch ||
-                      (it.medicine_name || '').toLowerCase().includes(productBarcodeSearch.toLowerCase()) ||
-                      (it.batch_number || '').toLowerCase().includes(productBarcodeSearch.toLowerCase())
-                    )
-                    .map((item, idx) => (
-                      <div key={idx} className="p-3 bg-bg2/80 rounded-lg border border-glass-border flex items-center justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-bold text-text truncate">{item.medicine_name || `Item #${item.inventory_id}`}</div>
-                          <div className="text-[10px] text-muted flex items-center gap-2 mt-0.5">
-                            <span>Batch: <span className="font-mono text-purple-400">{item.batch_number || 'N/A'}</span></span>
-                            <span>Qty: {item.quantity}</span>
-                            {item.mrp ? <span>MRP: ₹{item.mrp}</span> : null}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => handleGenerateProductBarcodes([{ medicine_name: item.medicine_name, batch_number: item.batch_number }])}
-                          disabled={generatingProductBarcode}
-                          className="px-2.5 py-1.5 bg-purple-500/10 hover:bg-purple-600 text-purple-400 hover:text-white rounded-md text-xs font-semibold border border-purple-500/30 transition-all flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
-                          title="Generate product barcode label for missing/torn box barcode"
-                        >
-                          <QrCode size={12} /> Print Label
-                        </button>
-                      </div>
-                    ))
-                  }
-                  {barcodeModalItems.length === 0 && (
-                    <div className="py-6 text-center text-xs text-muted">No product items available for this invoice</div>
-                  )}
-                </div>
+            {loadingBarcode ? (
+              <div className="py-10 text-center text-sm text-muted flex items-center justify-center gap-2">
+                <RefreshCw size={16} className="animate-spin text-primary" />
+                Generating return invoice barcode label...
               </div>
+            ) : barcodeData ? (
+              <div className="w-full flex flex-col items-center space-y-4 bg-bg2/80 p-5 rounded-xl border border-glass-border">
+                <img src={barcodeData.qrDataUrl} alt="QR Code" className="w-32 h-32 bg-white p-2 rounded-lg shadow-md" />
+                <div className="w-full text-center">
+                  <div className="text-[11px] font-bold text-muted uppercase tracking-wider mb-1">Code128 Barcode</div>
+                  <img src={barcodeData.code128DataUrl} alt="Code128" className="h-14 bg-white p-2 rounded-lg w-full object-contain shadow-md" />
+                  <div className="text-xs font-mono text-muted mt-2 font-bold">{barcodeData.barcodeText}</div>
+                </div>
+
+                <button
+                  onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
+                  className="w-full py-2.5 bg-primary text-white rounded-lg font-bold text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <Printer size={16} /> Open & Print Return Invoice PDF Barcode Label
+                </button>
+              </div>
+            ) : (
+              <div className="py-6 text-center text-sm text-muted">Failed to generate barcode label.</div>
             )}
           </div>
         </div>,

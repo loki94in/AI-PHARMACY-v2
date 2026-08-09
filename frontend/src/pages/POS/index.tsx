@@ -14,6 +14,7 @@ import { useFetchMode } from '../../hooks/useFetchMode';
 import { StagedQueueFloatingWidget } from '../../components/StagedQueueFloatingWidget';
 import { stagedQueueService, type StagedItem } from '../../services/stagedQueueService';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
+import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { isExpiredDate, toDateInputValue } from '../../utils/date';
 
 const getLocalDateString = (d: Date = new Date()) => {
@@ -2142,6 +2143,7 @@ const POS = () => {
 
   const [showPhonePromptModal, setShowPhonePromptModal] = useState(false);
   const [promptPhoneValue, setPromptPhoneValue] = useState('');
+  const [shakePromptPhone, setShakePromptPhone] = useState(false);
 
   const handleCompleteSale = async (overridePhone?: string, isDirectSave: boolean = false) => {
     if (!hasValidItems) {
@@ -3994,42 +3996,37 @@ const POS = () => {
               To save this credit transaction and automatically send the instant WhatsApp credit PDF bill, please enter the mobile number for <strong className="text-text">{patientName || 'Customer'}</strong>:
             </p>
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">WhatsApp Phone Number</label>
-              <input
-                type="tel"
-                placeholder="Enter 10-digit phone number (e.g. 9876543210)"
+              <PhoneInputWithBadge
+                label="WhatsApp Phone Number"
                 value={promptPhoneValue}
-                onChange={e => setPromptPhoneValue(sanitizePhoneInput(e.target.value))}
-                maxLength={10}
-                autoFocus
-                className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-sm text-text font-mono focus:outline-none focus:border-primary shadow-inner"
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    const val = sanitizePhoneInput(promptPhoneValue);
-                    if (!isValid10DigitPhone(val)) { alert('Please enter a valid 10-digit phone number (e.g. 9876543210)'); return; }
-                    setPatientPhone(val);
-                    setShowPhonePromptModal(false);
-                    handleCompleteSale(val, pendingDirectSaveRef.current);
-                  }
-                }}
+                onChange={val => setPromptPhoneValue(val)}
+                placeholder="Enter 10-digit phone number (e.g. 9876543210)"
+                required={true}
+                allowEmpty={false}
+                shakeOnError={shakePromptPhone}
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setShowPhonePromptModal(false)}
-                className="px-4 py-2 bg-bg3 text-muted rounded-xl text-xs font-semibold hover:text-text"
+                className="px-4 py-2 bg-bg3 text-muted rounded-xl text-xs font-semibold hover:text-text cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {
                   const val = sanitizePhoneInput(promptPhoneValue);
-                  if (!isValid10DigitPhone(val)) { alert('Please enter a valid 10-digit phone number (e.g. 9876543210)'); return; }
+                  if (!isValid10DigitPhone(val)) {
+                    setShakePromptPhone(true);
+                    setTimeout(() => setShakePromptPhone(false), 400);
+                    toastEvent.trigger('Please enter a valid 10-digit phone number', 'error');
+                    return;
+                  }
                   setPatientPhone(val);
                   setShowPhonePromptModal(false);
                   handleCompleteSale(val, pendingDirectSaveRef.current);
                 }}
-                className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-md"
+                className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
               >
                 <Send size={14} />
                 Save &amp; Send Credit Bill

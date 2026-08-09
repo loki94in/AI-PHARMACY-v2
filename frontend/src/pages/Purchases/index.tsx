@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink } from 'lucide-react';
+import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink, QrCode, Printer } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -14,6 +14,7 @@ import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { getLocalDateString, getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { toastEvent } from '../../services/events';
 import { sanitizePhoneInput } from '../../utils/phone';
+import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -995,6 +996,37 @@ const Purchases: React.FC = () => {
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
+  const [generatingProductBarcode, setGeneratingProductBarcode] = useState(false);
+
+  const handlePrintProductBarcodes = async (itemsToGenerate: Array<{ name?: string; medicine_name?: string; batch_no?: string; batch_number?: string; batch?: string }>) => {
+    const payload = itemsToGenerate
+      .filter(it => (it.name || it.medicine_name || '').trim().length > 0)
+      .map(it => ({
+        name: (it.name || it.medicine_name || 'Medicine').trim(),
+        batch: (it.batch_no || it.batch_number || it.batch || 'N/A').trim(),
+      }));
+
+    if (payload.length === 0) {
+      toastEvent.trigger('No valid items in purchase bill for barcode label generation', 'error');
+      return;
+    }
+
+    setGeneratingProductBarcode(true);
+    try {
+      const res = await api.generateMedicineBarcodes(payload);
+      if (res && res.pdfUrl) {
+        toastEvent.trigger(`Generated ${payload.length} product barcode label(s)`, 'success');
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        toastEvent.trigger('Failed to generate product barcode label', 'error');
+      }
+    } catch (err) {
+      console.error('Product barcode generation error:', err);
+      toastEvent.trigger('Failed to generate product barcode label', 'error');
+    } finally {
+      setGeneratingProductBarcode(false);
+    }
+  };
 
   const handleMfgChange = async (val: string) => {
     setNewMedicine(prev => ({ ...prev, manufacturer: val }));
@@ -3025,15 +3057,29 @@ const Purchases: React.FC = () => {
               ₹{Math.round(totals.grandTotal)}
             </p>
           </div>
-          <button
-            onClick={handleSave}
-            className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
-            title={saving ? 'Click again to retry if stuck' : 'Save Purchase Bill (Ctrl+S)'}
-          >
-            {saving
-              ? <><RefreshCw size={16} className="animate-spin" /> Saving...</>
-              : <><CheckCircle size={16} /> Save Purchase</>}
-          </button>
+          <div className="flex items-center gap-3">
+            {items.some(i => i.name.trim().length > 0) && (
+              <button
+                type="button"
+                onClick={() => handlePrintProductBarcodes(items)}
+                disabled={generatingProductBarcode}
+                className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-4 py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title="Generate and print barcode stickers for all items in this purchase bill"
+              >
+                {generatingProductBarcode ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+                <span>Print Product Barcodes</span>
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
+              title={saving ? 'Click again to retry if stuck' : 'Save Purchase Bill (Ctrl+S)'}
+            >
+              {saving
+                ? <><RefreshCw size={16} className="animate-spin" /> Saving...</>
+                : <><CheckCircle size={16} /> Save Purchase</>}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -3112,13 +3158,11 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Phone (Optional)</label>
-                <input
-                  type="tel"
+                <PhoneInputWithBadge
+                  label="Phone Number"
                   value={newDistributor.phone}
-                  onChange={(e) => setNewDistributor({ ...newDistributor, phone: sanitizePhoneInput(e.target.value) })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="+91 98765 43210"
+                  onChange={val => setNewDistributor({ ...newDistributor, phone: val })}
+                  allowEmpty={true}
                 />
               </div>
 

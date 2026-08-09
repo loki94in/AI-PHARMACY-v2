@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { sanitizePhoneInput } from '../../utils/phone';
+import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
+import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { apiClient, api } from '../../services/api';
 import { useSettingsQuery } from '../../hooks/useSettingsQuery';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -98,14 +99,13 @@ interface MedicineAlias {
   medicine_name: string;
 }
 
-// Map legacy tab search params to the new 5 consolidated tabs
+// Map legacy tab search params to the 4 store infrastructure tabs
 function normalizeSettingsTab(tabParam: string | null): string {
   if (!tabParam) return 'profile';
   const lower = tabParam.toLowerCase();
   if (lower === 'profile' || lower === 'store') return 'profile';
   if (lower === 'staff' || lower === 'security') return 'staff';
-  if (lower === 'integrations' || lower === 'credentials' || lower === 'messaging' || lower === 'operations') return 'integrations';
-  if (lower === 'ocr' || lower === 'clinical' || lower === 'doctors' || lower === 'distributors' || lower === 'learning') return 'ocr';
+  if (lower === 'integrations' || lower === 'credentials') return 'integrations';
   if (lower === 'backups' || lower === 'data' || lower === 'maintenance') return 'backups';
   return 'profile';
 }
@@ -125,7 +125,6 @@ export default function Settings() {
     { id: 'profile', label: 'Store Profile', icon: Building2, desc: 'Pharmacy details, license & store layout' },
     { id: 'staff', label: 'Staff & Security', icon: Shield, desc: 'Cashier accounts, admin access & devices' },
     { id: 'integrations', label: 'Integrations & Credentials', icon: Zap, desc: 'WhatsApp, Telegram, Gmail & Pharmarack' },
-    { id: 'ocr', label: 'AI Learning & OCR', icon: Brain, desc: 'OCR logs, aliases, clinical stats & doctors' },
     { id: 'backups', label: 'Data & Backups', icon: Database, desc: 'Database backups, fetch control & reset' }
   ];
 
@@ -182,7 +181,6 @@ export default function Settings() {
             {activeTab === 'profile' && <StoreProfileTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
             {activeTab === 'staff' && <StaffSecurityTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
             {activeTab === 'integrations' && <IntegrationsCredentialsTab rawSettings={rawSettings} refetchSettings={refetchSettings} isVisible={isPageVisible} />}
-            {activeTab === 'ocr' && <AiLearningOcrTab isVisible={isPageVisible} />}
             {activeTab === 'backups' && <DataBackupsTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
           </>
         )}
@@ -323,13 +321,11 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-text mb-1">Primary Store Phone / Mobile</label>
-              <input
-                type="text"
+              <PhoneInputWithBadge
+                label="Primary Store Phone / Mobile"
                 value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: sanitizePhoneInput(e.target.value) })}
-                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-                placeholder="10-digit mobile number"
+                onChange={val => setFormData({ ...formData, phone: val })}
+                allowEmpty={true}
               />
             </div>
 
@@ -367,13 +363,11 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-text mb-1">Owner WhatsApp Contact</label>
-              <input
-                type="text"
+              <PhoneInputWithBadge
+                label="Owner WhatsApp Contact"
                 value={formData.ownerWhatsappNumber}
-                onChange={(e) => setFormData({ ...formData, ownerWhatsappNumber: sanitizePhoneInput(e.target.value) })}
-                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-                placeholder="Owner WhatsApp for alerts"
+                onChange={val => setFormData({ ...formData, ownerWhatsappNumber: val })}
+                allowEmpty={true}
               />
             </div>
 
@@ -1000,261 +994,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   );
 }
 
-// ==========================================
-// SUB-TAB 4: AI LEARNING & OCR
-// ==========================================
 
-function AiLearningOcrTab({ isVisible }: { isVisible: boolean }) {
-  const [retraining, setRetraining] = useState(false);
-
-  // Retrain Stats
-  const { data: stats, refetch: refetchStats } = useApiQuery<{ activeOcrCorrections: number; learnedRxCombos: number; lastRetrainedAt: string | null }>(
-    'learning-stats',
-    () => apiClient.get('/learning/stats').then(res => res.data),
-    { enabled: isVisible }
-  );
-
-  // OCR Corrections
-  const { data: corrections = [], refetch: refetchCorrections } = useApiQuery<OcrCorrection[]>(
-    'ocr-corrections',
-    () => apiClient.get('/learning/corrections').then(res => res.data || []),
-    { enabled: isVisible }
-  );
-
-  // Doctors
-  const { data: doctors = [], refetch: refetchDoctors } = useApiQuery<Doctor[]>(
-    'crm-doctors',
-    () => apiClient.get('/crm/doctors').then(res => res.data || []),
-    { enabled: isVisible }
-  );
-
-  // Forms
-  const [newCorrectionRaw, setNewCorrectionRaw] = useState('');
-  const [newCorrectionMapped, setNewCorrectionMapped] = useState('');
-
-  const [docName, setDocName] = useState('');
-  const [docReg, setDocReg] = useState('');
-  const [docPhone, setDocPhone] = useState('');
-
-  const handleTriggerRetrain = async () => {
-    setRetraining(true);
-    try {
-      await apiClient.post('/learning/retrain');
-      toastEvent.trigger('Clinical AI model retraining triggered successfully', 'success');
-      refetchStats();
-    } catch (err: any) {
-      toastEvent.trigger('Retraining failed: ' + err.message, 'error');
-    } finally {
-      setRetraining(false);
-    }
-  };
-
-  const handleAddCorrection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCorrectionRaw.trim() || !newCorrectionMapped.trim()) return;
-    try {
-      await apiClient.post('/learning/corrections', { raw_text: newCorrectionRaw, corrected_name: newCorrectionMapped });
-      toastEvent.trigger('OCR correction rule added', 'success');
-      setNewCorrectionRaw('');
-      setNewCorrectionMapped('');
-      refetchCorrections();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to add OCR rule: ' + err.message, 'error');
-    }
-  };
-
-  const handleDeleteCorrection = async (id: number) => {
-    try {
-      await apiClient.delete(`/learning/corrections/${id}`);
-      toastEvent.trigger('Correction rule deleted', 'success');
-      refetchCorrections();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to delete rule', 'error');
-    }
-  };
-
-  const handleAddDoctor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!docName.trim()) return;
-    try {
-      await apiClient.post('/crm/doctors', { name: docName, reg_number: docReg, phone: docPhone });
-      toastEvent.trigger('Doctor added to registry', 'success');
-      setDocName('');
-      setDocReg('');
-      setDocPhone('');
-      refetchDoctors();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to add doctor: ' + err.message, 'error');
-    }
-  };
-
-  const handleDeleteDoctor = async (id: number) => {
-    try {
-      await apiClient.delete(`/crm/doctors/${id}`);
-      toastEvent.trigger('Doctor removed', 'success');
-      refetchDoctors();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to delete doctor', 'error');
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Retrain Stats Card */}
-      <div className="bg-bg3/30 border border-border rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-bold text-text flex items-center gap-2">
-            <Brain size={16} className="text-primary" /> Self-Learning Clinical Model Audit
-          </h2>
-          <p className="text-xs text-muted mt-1">
-            Active OCR Rules: <span className="font-bold text-text">{stats?.activeOcrCorrections ?? corrections.length}</span> | 
-            Learned RX Combos: <span className="font-bold text-text">{stats?.learnedRxCombos ?? 0}</span> | 
-            Last Retrained: <span className="font-bold text-text">{stats?.lastRetrainedAt ? new Date(stats.lastRetrainedAt).toLocaleDateString() : 'Never'}</span>
-          </p>
-        </div>
-        <button
-          onClick={handleTriggerRetrain}
-          disabled={retraining}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shrink-0"
-        >
-          <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
-          <span>Retrain Clinical Model Now</span>
-        </button>
-      </div>
-
-      {/* OCR Corrections Grid */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-primary border-b border-border pb-1">
-          OCR Text Name Corrections Registry
-        </h3>
-
-        <form onSubmit={handleAddCorrection} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input
-            type="text"
-            placeholder="Raw Misread OCR Text (e.g. D0L0 650)"
-            value={newCorrectionRaw}
-            onChange={(e) => setNewCorrectionRaw(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-          />
-          <input
-            type="text"
-            placeholder="Correct Standard Medicine Name (e.g. DOLO 650MG)"
-            value={newCorrectionMapped}
-            onChange={(e) => setNewCorrectionMapped(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
-          >
-            <Plus size={14} /> Add OCR Rule
-          </button>
-        </form>
-
-        <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl max-h-48 scrollbar-thin">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-border text-muted">
-                <th className="py-2 px-3">Scanned Raw OCR Text</th>
-                <th className="py-2 px-3">Mapped Standard Name</th>
-                <th className="py-2 px-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {corrections.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="py-3 text-center text-muted italic">No custom OCR correction rules stored.</td>
-                </tr>
-              ) : (
-                corrections.map((rule) => (
-                  <tr key={rule.id} className="hover:bg-bg3/50">
-                    <td className="py-1.5 px-3 font-mono text-muted">{rule.raw_text}</td>
-                    <td className="py-1.5 px-3 font-semibold text-text">{rule.corrected_name}</td>
-                    <td className="py-1.5 px-3 text-right">
-                      <button onClick={() => handleDeleteCorrection(rule.id)} className="text-red-500 hover:underline text-[11px] cursor-pointer">
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Doctor Directory */}
-      <div className="space-y-3 pt-2">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-primary border-b border-border pb-1">
-          Registered Prescribing Doctors Directory
-        </h3>
-
-        <form onSubmit={handleAddDoctor} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input
-            type="text"
-            placeholder="Doctor Full Name *"
-            value={docName}
-            onChange={(e) => setDocName(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-          />
-          <input
-            type="text"
-            placeholder="Medical Reg Number"
-            value={docReg}
-            onChange={(e) => setDocReg(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-          />
-          <input
-            type="text"
-            placeholder="Contact Phone"
-            value={docPhone}
-            onChange={(e) => setDocPhone(sanitizePhoneInput(e.target.value))}
-            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
-          >
-            <Plus size={14} /> Register Doctor
-          </button>
-        </form>
-
-        <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl max-h-48 scrollbar-thin">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-border text-muted">
-                <th className="py-2 px-3">Doctor Name</th>
-                <th className="py-2 px-3">Reg. Number</th>
-                <th className="py-2 px-3">Phone</th>
-                <th className="py-2 px-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {doctors.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="py-3 text-center text-muted italic">No doctors registered in system.</td>
-                </tr>
-              ) : (
-                doctors.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-bg3/50">
-                    <td className="py-1.5 px-3 font-semibold text-text">{doc.name}</td>
-                    <td className="py-1.5 px-3 text-muted font-mono">{doc.reg_number || 'N/A'}</td>
-                    <td className="py-1.5 px-3 text-muted">{doc.phone || 'N/A'}</td>
-                    <td className="py-1.5 px-3 text-right">
-                      <button onClick={() => handleDeleteDoctor(doc.id)} className="text-red-500 hover:underline text-[11px] cursor-pointer">
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ==========================================
 // SUB-TAB 5: DATA & BACKUPS
