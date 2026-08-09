@@ -158,7 +158,7 @@ function App() {
         <Layout theme={theme} setTheme={setTheme}>
           <Routes>
             <Route path="/" element={<Navigate to="/pos" replace />} />
-            <Route path="/learning" element={<Navigate to="/settings?tab=integrations" replace />} />
+            <Route path="/learning" element={<Navigate to="/settings?tab=ocr" replace />} />
             <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
             <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
             <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
