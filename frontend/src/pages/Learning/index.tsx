@@ -49,7 +49,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { extractCleanEmail } from '../../utils/emailSanitizer';
-import Dispatch from '../Dispatch';
 
 interface LearningProfileSummary {
   distributor_id: number;
@@ -1491,13 +1490,6 @@ const Learning: React.FC = () => {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Tab: Dispatch / Delivery */}
-        {activeTab === 'dispatch' && (
-          <div className="flex-1 flex flex-col overflow-y-auto pr-1 custom-scrollbar min-h-0">
-            <Dispatch />
           </div>
         )}
 

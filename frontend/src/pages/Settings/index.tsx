@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { sanitizePhoneInput } from '../../utils/phone';
@@ -7,7 +7,6 @@ import { useSettingsQuery } from '../../hooks/useSettingsQuery';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { broadcastContactDataChanged, updateSettingsCache } from '../../utils/settingsSync';
-import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { toDateInputValue } from '../../utils/date';
 import {
   Settings as SettingsIcon,
@@ -51,12 +50,9 @@ interface SettingsData {
   gstin: string;
   drugLicense: string;
   email: string;
-  gmailUser: string;
-  gmailPass: string;
   googleClientId: string;
   googleClientSecret: string;
   googleSearchDailyLimit: number;
-  gmailAuthMethod: string;
   emailAutodeleteEnabled: boolean;
   emailAutodeleteLimit: number;
   emailRetentionLimit: number;
@@ -81,12 +77,6 @@ interface SettingsData {
   expiryAlertDays: number;
   dineshWhatsappNumber: string;
 
-  whatsappEnabled: boolean;
-  waBusinessEnabled: boolean;
-  waBusinessPhoneNumberId: string;
-  waBusinessAccessToken: string;
-  waBusinessWabaId: string;
-  waBusinessWebhookVerifyToken: string;
   whatsappPreferredSystem: string;
   backupFrequency: string;
   dataFetchControl: string;
@@ -114,12 +104,9 @@ const Settings = () => {
     gstin: '',
     drugLicense: '',
     email: '',
-    gmailUser: '',
-    gmailPass: '',
     googleClientId: '',
     googleClientSecret: '',
     googleSearchDailyLimit: 100,
-    gmailAuthMethod: 'password',
     emailAutodeleteEnabled: true,
     emailAutodeleteLimit: 10,
     emailRetentionLimit: 15,
@@ -144,12 +131,6 @@ const Settings = () => {
     expiryAlertDays: 90,
     dineshWhatsappNumber: '',
 
-    whatsappEnabled: false,
-    waBusinessEnabled: false,
-    waBusinessPhoneNumberId: '',
-    waBusinessAccessToken: '',
-    waBusinessWabaId: '',
-    waBusinessWebhookVerifyToken: '',
     whatsappPreferredSystem: 'automated',
     backupFrequency: 'off',
     dataFetchControl: '{}',
@@ -168,7 +149,6 @@ const Settings = () => {
   // Transient UI states
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [isOpeningWindow, setIsOpeningWindow] = useState(false);
-  const [isOpeningWaWindow, setIsOpeningWaWindow] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
@@ -177,28 +157,6 @@ const Settings = () => {
   const [desktopNotifEnabled, setDesktopNotifEnabled] = useState(() => {
     return 'Notification' in window && Notification.permission === 'granted';
   });
-  const [waStatus, setWaStatus] = useState({ isReady: false, qrUrl: null as string | null, message: '' });
-  // C5: track whether the WhatsApp settings panel (below) is actually scrolled into view, so
-  // the QR-polling effect can skip network calls entirely while the user isn't looking at it —
-  // this Settings page has no accordion/tab state, so visibility is observed directly via
-  // IntersectionObserver rather than a pre-existing "expanded section" flag.
-  const waSectionRef = useRef<HTMLDivElement | null>(null);
-  const [waSectionVisible, setWaSectionVisible] = useState(false);
-  useEffect(() => {
-    const el = waSectionRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
-      setWaSectionVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => setWaSectionVisible(entry.isIntersecting),
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  const [waBusinessTestResult, setWaBusinessTestResult] = useState<{ success?: boolean; phone?: string; name?: string; error?: string } | null>(null);
-  const [waBusinessTesting, setWaBusinessTesting] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoringFile, setRestoringFile] = useState<string | null>(null);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
@@ -363,12 +321,9 @@ const Settings = () => {
   const setGstin = (val: string | ((p: string) => string)) => updateSetting('gstin', val);
   const setDrugLicense = (val: string | ((p: string) => string)) => updateSetting('drugLicense', val);
   const setEmail = (val: string | ((p: string) => string)) => updateSetting('email', val);
-  const setGmailUser = (val: string | ((p: string) => string)) => updateSetting('gmailUser', val);
-  const setGmailPass = (val: string | ((p: string) => string)) => updateSetting('gmailPass', val);
   const setGoogleClientId = (val: string | ((p: string) => string)) => updateSetting('googleClientId', val);
   const setGoogleClientSecret = (val: string | ((p: string) => string)) => updateSetting('googleClientSecret', val);
   const setGoogleSearchDailyLimit = (val: number | ((p: number) => number)) => updateSetting('googleSearchDailyLimit', val);
-  const setGmailAuthMethod = (val: string | ((p: string) => string)) => updateSetting('gmailAuthMethod', val);
   const setEmailAutodeleteEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAutodeleteEnabled', val);
   const setEmailAutodeleteLimit = (val: number | ((p: number) => number)) => updateSetting('emailAutodeleteLimit', val);
   const setEmailRetentionLimit = (val: number | ((p: number) => number)) => updateSetting('emailRetentionLimit', val);
@@ -393,12 +348,6 @@ const Settings = () => {
   const setExpiryAlertDays = (val: number | ((p: number) => number)) => updateSetting('expiryAlertDays', val);
   const setDineshWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('dineshWhatsappNumber', val);
 
-  const setWhatsappEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('whatsappEnabled', val);
-  const setWaBusinessEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('waBusinessEnabled', val);
-  const setWaBusinessPhoneNumberId = (val: string | ((p: string) => string)) => updateSetting('waBusinessPhoneNumberId', val);
-  const setWaBusinessAccessToken = (val: string | ((p: string) => string)) => updateSetting('waBusinessAccessToken', val);
-  const setWaBusinessWabaId = (val: string | ((p: string) => string)) => updateSetting('waBusinessWabaId', val);
-  const setWaBusinessWebhookVerifyToken = (val: string | ((p: string) => string)) => updateSetting('waBusinessWebhookVerifyToken', val);
   const setWhatsappPreferredSystem = (val: string | ((p: string) => string)) => updateSetting('whatsappPreferredSystem', val);
   const setBackupFrequency = (val: string | ((p: string) => string)) => updateSetting('backupFrequency', val);
   const setMonthlyReportEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('monthlyReportEnabled', val);
@@ -515,12 +464,9 @@ const Settings = () => {
     gstin,
     drugLicense,
     email,
-    gmailUser,
-    gmailPass,
     googleClientId,
     googleClientSecret,
     googleSearchDailyLimit,
-    gmailAuthMethod,
     emailAutodeleteEnabled,
     emailAutodeleteLimit,
     emailRetentionLimit,
@@ -545,12 +491,6 @@ const Settings = () => {
     expiryAlertDays,
     dineshWhatsappNumber,
 
-    whatsappEnabled,
-    waBusinessEnabled,
-    waBusinessPhoneNumberId,
-    waBusinessAccessToken,
-    waBusinessWabaId,
-    waBusinessWebhookVerifyToken,
     whatsappPreferredSystem,
     backupFrequency,
     monthlyReportEnabled,
@@ -602,12 +542,9 @@ const Settings = () => {
         gstin: serverSettings.gstin || '',
         drugLicense: serverSettings.shop_licence || serverSettings.drug_license || '',
         email: serverSettings.email || '',
-        gmailUser: serverSettings.gmail_user || '',
-        gmailPass: serverSettings.gmail_pass || '',
         googleClientId: serverSettings.google_client_id || '',
         googleClientSecret: serverSettings.google_client_secret || '',
         googleSearchDailyLimit: Number(serverSettings.google_search_daily_limit) || 100,
-        gmailAuthMethod: serverSettings.gmail_auth_method || 'password',
         emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
         emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
         emailRetentionLimit: Number(serverSettings.email_retention_limit) || 15,
@@ -628,12 +565,6 @@ const Settings = () => {
         expiryAlertDays: Number(serverSettings.expiry_alert_days) || 90,
         dineshWhatsappNumber: serverSettings.dinesh_whatsapp_number || '',
 
-        whatsappEnabled: serverSettings.whatsapp_enabled === 'true',
-        waBusinessEnabled: serverSettings.wa_business_enabled === 'true',
-        waBusinessPhoneNumberId: serverSettings.wa_business_phone_number_id || '',
-        waBusinessAccessToken: serverSettings.wa_business_access_token || '',
-        waBusinessWabaId: serverSettings.wa_business_waba_id || '',
-        waBusinessWebhookVerifyToken: serverSettings.wa_business_webhook_verify_token || '',
         whatsappPreferredSystem: serverSettings.whatsapp_preferred_system || 'automated',
         backupFrequency: serverSettings.backup_frequency || 'off',
         dataFetchControl: serverSettings.data_fetch_control || '{}',
@@ -654,38 +585,6 @@ const Settings = () => {
       }));
     }
   }, [serverSettings]);
-
-  const pageActive = usePageActive();
-
-  useEffect(() => {
-    let timer: any;
-    if (whatsappEnabled && !waStatus.isReady && pageActive && waSectionVisible) {
-      const fetchQR = async () => {
-        if (document.visibilityState !== 'visible') return;
-        try {
-          const { data } = await apiClient.get('/messaging/qr');
-          setWaStatus(data);
-        } catch (error) {
-          console.error("Failed to fetch WhatsApp QR", error);
-        }
-      };
-
-      fetchQR(); // Initial fetch
-      timer = setInterval(fetchQR, 15000); // Poll every 15s (optimized from 5s)
-
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-          fetchQR();
-        }
-      };
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      return () => {
-        clearInterval(timer);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      };
-    }
-  }, [whatsappEnabled, waStatus.isReady, pageActive, waSectionVisible]);
 
   const handleSaveSettings = async () => {
     if (!settingsHydrated) {
@@ -893,30 +792,6 @@ const Settings = () => {
     }
   };
 
-  const handleReconnect = async () => {
-    try {
-      setWaStatus({ isReady: false, qrUrl: null, message: 'Reconnecting...' });
-      await apiClient.post('/messaging/reconnect');
-      toastEvent.trigger('WhatsApp reconnecting...', 'info');
-    } catch (error) {
-      console.error('Failed to reconnect', error);
-      toastEvent.trigger('Failed to reconnect WhatsApp', 'error');
-    }
-  };
-
-  const handleOpenWaLoginWindow = async () => {
-    setIsOpeningWaWindow(true);
-    try {
-      toastEvent.trigger('Launching Chrome login window for WhatsApp...', 'info');
-      await apiClient.post('/messaging/login-window');
-    } catch (err: any) {
-      console.error('Failed to open WhatsApp login window:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to open Chrome login window. Ensure Chrome is installed.', 'error');
-    } finally {
-      setIsOpeningWaWindow(false);
-    }
-  };
-
   // Backup list React Query — secondary, delayed ~500ms after mount
   const { data: backupListData, isLoading: backupListLoading } = useApiQuery<{ backups: { filename: string; sizeBytes: number; createdAt: string }[] }>(
     'backup-list',
@@ -1079,27 +954,6 @@ const Settings = () => {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: true,
     });
-  };
-
-  const handleTestWaBusiness = async () => {
-    setWaBusinessTesting(true);
-    setWaBusinessTestResult(null);
-    try {
-      // Save credentials first so the test endpoint can read them
-      await handleSaveSettings();
-      const { data } = await apiClient.post('/wa-business/test');
-      setWaBusinessTestResult(data);
-    } catch (err: any) {
-      setWaBusinessTestResult({ success: false, error: err?.response?.data?.error || 'Connection failed' });
-    } finally {
-      setWaBusinessTesting(false);
-    }
-  };
-
-  const copyWebhookUrl = () => {
-    const url = `${window.location.origin}/api/wa-business/webhook`;
-    navigator.clipboard.writeText(url);
-    toastEvent.trigger('Webhook URL copied!', 'success');
   };
 
   return (
@@ -1394,7 +1248,7 @@ const Settings = () => {
 
 
       {/* ─── Notifications ─── */}
-      <div className="glass-panel p-6" ref={waSectionRef}>
+      <div className="glass-panel p-6">
         <h3 className="font-bold flex items-center gap-2 mb-6">
           <Bell size={18} className="text-primary" />
           Notifications
