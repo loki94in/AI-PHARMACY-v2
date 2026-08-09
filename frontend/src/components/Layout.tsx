@@ -142,7 +142,7 @@ const Sidebar = ({
     { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
-    { path: '/learning', label: 'AI Learning', icon: <Activity size={18} /> },
+    { path: '/settings?tab=ocr', label: 'AI Learning', icon: <Activity size={18} /> },
     { path: '/dispatch', label: 'Dispatch', icon: <Truck size={18} /> },
     { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },
     { path: '/returns', label: 'Supplier Returns', icon: <RotateCcw size={18} /> },
@@ -1839,7 +1839,7 @@ export const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
-  const isFitPage = ['/pos', '/inventory', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/learning', '/pharmarack-cart', '/investigation', '/phone-sales', '/migration'].includes(location.pathname);
+  const isFitPage = ['/pos', '/inventory', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/settings', '/pharmarack-cart', '/investigation', '/phone-sales', '/migration'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {

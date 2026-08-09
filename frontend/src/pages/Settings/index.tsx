@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { Link, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { apiClient, api } from '../../services/api';
 import { useSettingsQuery } from '../../hooks/useSettingsQuery';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged, updateSettingsCache } from '../../utils/settingsSync';
-import { toDateInputValue } from '../../utils/date';
+import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -35,1081 +35,525 @@ import {
   Pencil,
   CheckCircle2,
   ArrowRight,
+  Brain,
+  MessageCircle,
+  Mail,
+  Stethoscope,
+  Search,
+  Truck,
+  Check,
+  Edit,
+  Building,
+  Key,
+  Users,
+  Smartphone,
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
-import { MobileConnectionModal } from '../../components/MobileConnectionModal';
 import { BackupCenterContent } from '../../components/BackupCenterModal';
-import { DATA_FETCH_REGISTRY, getRegistryByPage, type FetchMode } from '../../services/dataFetchControl';
 
+// ==========================================
+// TYPES & INTERFACES
+// ==========================================
 
-
-interface SettingsData {
-  pharmacyName: string;
-  address: string;
-  phone: string;
-  gstin: string;
-  drugLicense: string;
-  email: string;
-  googleClientId: string;
-  googleClientSecret: string;
-  googleSearchDailyLimit: number;
-  emailAutodeleteEnabled: boolean;
-  emailAutodeleteLimit: number;
-  emailRetentionLimit: number;
-  adminRemoteMode: boolean;
-  adminUsername: string;
-  adminPassword: string;
-  adminUniqueKey: string;
-  adminAuthorizedDeviceId: string;
-  adminAuthorizedDeviceName: string;
-  defaultTaxRate: number;
-  invoicePrefix: string;
-  autoPrint: boolean;
-  defaultPaymentMode: string;
-  whatsappNotif: boolean;
-  emailAlerts: boolean;
-  lowStockThreshold: number;
-  expiryAlertDays: number;
-  dineshWhatsappNumber: string;
-
-  backupFrequency: string;
-  dataFetchControl: string;
-  monthlyReportEnabled: boolean;
-  monthlyReportPhone: string;
-  monthlyReportDeliveryFormat: string;
-  monthlyReportChartStyle: string;
-  ownerWhatsappNumber: string;
-  monthlyReportTemplateTheme: string;
-  distributorInvoiceFileFormat: string;
-  whatsappDelayCreditBill: number;
-  whatsappDelayDistributor: number;
-  whatsappDelayDeliveryBoy: number;
+interface StorageLocation {
+  id: number;
+  name: string;
+  code: string;
+  type: string;
+  description: string;
+  is_default: number;
+  is_active: number;
 }
 
-const Settings = () => {
-  const [searchParams] = useSearchParams();
-  const isMissingDetails = searchParams.get('missing') === 'pharmacy_details';
+interface RegisteredDevice {
+  token: string;
+  device_name: string;
+  os: string;
+  last_seen: string;
+  is_online: number;
+}
 
-  // Consolidated settings data state
-  const [settings, setSettings] = useState<SettingsData>({
-    pharmacyName: '',
-    address: '',
-    phone: '',
-    gstin: '',
-    drugLicense: '',
-    email: '',
-    googleClientId: '',
-    googleClientSecret: '',
-    googleSearchDailyLimit: 100,
-    emailAutodeleteEnabled: true,
-    emailAutodeleteLimit: 10,
-    emailRetentionLimit: 15,
-    adminRemoteMode: true,
-    adminUsername: 'admin',
-    adminPassword: 'admin123',
-    adminUniqueKey: 'KEY-ADM-837261',
-    adminAuthorizedDeviceId: '',
-    adminAuthorizedDeviceName: '',
-    defaultTaxRate: 18,
-    invoicePrefix: 'INV-',
-    autoPrint: false,
-    defaultPaymentMode: 'Cash',
-    whatsappNotif: false,
-    emailAlerts: false,
-    lowStockThreshold: 10,
-    expiryAlertDays: 90,
-    dineshWhatsappNumber: '',
+interface Doctor {
+  id: number;
+  name: string;
+  reg_number: string;
+  phone: string;
+  address: string;
+}
 
-    backupFrequency: 'off',
-    dataFetchControl: '{}',
-    monthlyReportEnabled: true,
-    monthlyReportPhone: '',
-    monthlyReportDeliveryFormat: 'text',
-    monthlyReportChartStyle: 'standard',
-    ownerWhatsappNumber: '',
-    monthlyReportTemplateTheme: 'executive',
-    distributorInvoiceFileFormat: 'CSV',
-    whatsappDelayCreditBill: 0,
-    whatsappDelayDistributor: 0,
-    whatsappDelayDeliveryBoy: 0,
+interface OcrCorrection {
+  id: number;
+  raw_text: string;
+  corrected_name: string;
+  confidence: number;
+  created_at: string;
+}
+
+interface MedicineAlias {
+  id: number;
+  alias_name: string;
+  medicine_id: number;
+  medicine_name: string;
+}
+
+// Map legacy tab search params to the new 5 consolidated tabs
+function normalizeSettingsTab(tabParam: string | null): string {
+  if (!tabParam) return 'profile';
+  const lower = tabParam.toLowerCase();
+  if (lower === 'profile' || lower === 'store') return 'profile';
+  if (lower === 'staff' || lower === 'security') return 'staff';
+  if (lower === 'integrations' || lower === 'credentials' || lower === 'messaging' || lower === 'operations') return 'integrations';
+  if (lower === 'ocr' || lower === 'clinical' || lower === 'doctors' || lower === 'distributors' || lower === 'learning') return 'ocr';
+  if (lower === 'backups' || lower === 'data' || lower === 'maintenance') return 'backups';
+  return 'profile';
+}
+
+// ==========================================
+// MAIN SETTINGS COMPONENT
+// ==========================================
+
+export default function Settings() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = normalizeSettingsTab(searchParams.get('tab'));
+  const isPageVisible = usePageActive();
+
+  const { data: rawSettings = {}, isLoading: loadingSettings, refetch: refetchSettings } = useSettingsQuery();
+
+  const tabs = [
+    { id: 'profile', label: 'Store Profile', icon: Building2, desc: 'Pharmacy details, license & store layout' },
+    { id: 'staff', label: 'Staff & Security', icon: Shield, desc: 'Cashier accounts, admin access & devices' },
+    { id: 'integrations', label: 'Integrations & Credentials', icon: Zap, desc: 'WhatsApp, Telegram, Gmail & Pharmarack' },
+    { id: 'ocr', label: 'AI Learning & OCR', icon: Brain, desc: 'OCR logs, aliases, clinical stats & doctors' },
+    { id: 'backups', label: 'Data & Backups', icon: Database, desc: 'Database backups, fetch control & reset' }
+  ];
+
+  const handleTabChange = (tabId: string) => {
+    setSearchParams({ tab: tabId });
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-bg text-text p-4 space-y-4 overflow-y-auto">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <SettingsIcon size={24} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-text">Pharmacy Configuration & Control Hub</h1>
+            <p className="text-xs text-muted">Unified control center for store parameters, security, API credentials, and AI self-learning.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab Switcher */}
+      <div className="flex border-b border-border gap-2 overflow-x-auto scrollbar-none pb-0.5">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => handleTabChange(tab.id)}
+              className={`flex items-center gap-2.5 py-3 px-4 font-semibold text-xs rounded-t-xl transition-all whitespace-nowrap border-t border-x cursor-pointer ${
+                isActive
+                  ? 'bg-bg2 border-border border-b-bg2 text-primary font-bold shadow-sm'
+                  : 'bg-bg3/40 border-transparent text-muted hover:text-text hover:bg-bg3/80'
+              }`}
+            >
+              <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Active Tab Workspace Panel */}
+      <div className="flex-1 bg-bg2 border border-border rounded-2xl p-5 shadow-sm">
+        {loadingSettings ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw size={24} className="animate-spin text-primary mr-2" />
+            <span className="text-xs font-semibold text-muted">Hydrating pharmacy configuration settings...</span>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'profile' && <StoreProfileTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
+            {activeTab === 'staff' && <StaffSecurityTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
+            {activeTab === 'integrations' && <IntegrationsCredentialsTab rawSettings={rawSettings} refetchSettings={refetchSettings} isVisible={isPageVisible} />}
+            {activeTab === 'ocr' && <AiLearningOcrTab isVisible={isPageVisible} />}
+            {activeTab === 'backups' && <DataBackupsTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// SUB-TAB 1: STORE PROFILE
+// ==========================================
+
+function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record<string, string>; refetchSettings: () => void }) {
+  const [formData, setFormData] = useState({
+    pharmacyName: rawSettings.pharmacy_name || rawSettings.shop_name || rawSettings.store_name || '',
+    address: rawSettings.address || '',
+    phone: rawSettings.phone || rawSettings.shop_phone || '',
+    gstin: rawSettings.gstin || '',
+    drugLicense: rawSettings.drug_license || rawSettings.license_number || '',
+    email: rawSettings.email || '',
+    dineshWhatsappNumber: rawSettings.dinesh_whatsapp_number || '',
+    ownerWhatsappNumber: rawSettings.owner_whatsapp_number || '',
+    defaultTaxRate: rawSettings.default_tax_rate || '18',
+    invoicePrefix: rawSettings.invoice_prefix || 'INV-',
+    autoPrint: rawSettings.auto_print === 'true',
+    defaultPaymentMode: rawSettings.default_payment_mode || 'Cash',
+    lowStockThreshold: rawSettings.low_stock_threshold || '10',
+    expiryAlertDays: rawSettings.expiry_alert_days || '90',
   });
 
-  // Transient UI states
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [resetConfirm, setResetConfirm] = useState(false);
-  const [resetConfirmText, setResetConfirmText] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetDataCounts, setResetDataCounts] = useState<{medicines:number;inventory:number;bills:number;customers:number;purchases:number} | null>(null);
-  const [clearCacheLoading, setClearCacheLoading] = useState(false);
-  const [desktopNotifEnabled, setDesktopNotifEnabled] = useState(() => {
-    return 'Notification' in window && Notification.permission === 'granted';
-  });
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [restoringFile, setRestoringFile] = useState<string | null>(null);
-  const [deletingFile, setDeletingFile] = useState<string | null>(null);
-  const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
 
   // Storage Locations state
-  interface StorageLocation {
-    id: number;
-    name: string;
-    code: string;
-    type: string;
-    description: string;
-    is_default: number;
-    is_active: number;
-  }
   const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
-  const [storageLocLoading, setStorageLocLoading] = useState(false);
   const [storageLocForm, setStorageLocForm] = useState({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
   const [editingLocId, setEditingLocId] = useState<number | null>(null);
-  const [deletingLocId, setDeletingLocId] = useState<number | null>(null);
-  const [storageLocSaving, setStorageLocSaving] = useState(false);
 
-  // ponytail: stagger initial mount fetches — the settings form (useSettingsQuery below) is the
-  // core data the page needs to render and become interactive, so it loads immediately.
-  // Storage locations, session refresh audit logs, and the backup list/schedule are secondary
-  // diagnostic/history data, so they're delayed ~500ms to get the form interactive sooner and
-  // reduce initial network saturation. Mirrors the same pattern used in Learning/index.tsx.
-  const [showSecondaryData, setShowSecondaryData] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setShowSecondaryData(true), 500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const fetchStorageLocations = async () => {
-    setStorageLocLoading(true);
+  const fetchStorageLocations = useCallback(async () => {
     try {
       const res = await apiClient.get('/settings/storage-locations');
       setStorageLocations(res.data || []);
     } catch (err) {
       console.warn('Failed to fetch storage locations:', err);
-    } finally {
-      setStorageLocLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (showSecondaryData) fetchStorageLocations();
-  }, [showSecondaryData]);
+    fetchStorageLocations();
+  }, [fetchStorageLocations]);
+
+  const handleSaveStoreProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        pharmacy_name: formData.pharmacyName,
+        shop_name: formData.pharmacyName,
+        store_name: formData.pharmacyName,
+        address: formData.address,
+        phone: formData.phone,
+        shop_phone: formData.phone,
+        gstin: formData.gstin,
+        drug_license: formData.drugLicense,
+        email: formData.email,
+        dinesh_whatsapp_number: formData.dineshWhatsappNumber,
+        owner_whatsapp_number: formData.ownerWhatsappNumber,
+        default_tax_rate: formData.defaultTaxRate,
+        invoice_prefix: formData.invoicePrefix,
+        auto_print: formData.autoPrint ? 'true' : 'false',
+        default_payment_mode: formData.defaultPaymentMode,
+        low_stock_threshold: formData.lowStockThreshold,
+        expiry_alert_days: formData.expiryAlertDays,
+      };
+
+      await apiClient.post('/settings/save', payload);
+      toastEvent.trigger('Store profile updated successfully', 'success');
+      updateSettingsCache(queryClient, payload);
+      broadcastContactDataChanged(queryClient);
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to save store profile: ' + (err.message || 'Unknown error'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSaveStorageLoc = async () => {
     if (!storageLocForm.name.trim()) {
       toastEvent.trigger('Location name is required', 'error');
       return;
     }
-    setStorageLocSaving(true);
     try {
-      if (editingLocId !== null) {
+      if (editingLocId) {
         await apiClient.put(`/settings/storage-locations/${editingLocId}`, storageLocForm);
         toastEvent.trigger('Storage location updated', 'success');
       } else {
         await apiClient.post('/settings/storage-locations', storageLocForm);
-        toastEvent.trigger('Storage location added', 'success');
+        toastEvent.trigger('Storage location created', 'success');
       }
       setStorageLocForm({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
       setEditingLocId(null);
       fetchStorageLocations();
     } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to save location', 'error');
-    } finally {
-      setStorageLocSaving(false);
+      toastEvent.trigger(err.response?.data?.error || 'Failed to save storage location', 'error');
     }
   };
 
   const handleDeleteStorageLoc = async (id: number) => {
-    setDeletingLocId(id);
     try {
       await apiClient.delete(`/settings/storage-locations/${id}`);
       toastEvent.trigger('Storage location deleted', 'success');
       fetchStorageLocations();
     } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Cannot delete this location', 'error');
-    } finally {
-      setDeletingLocId(null);
+      toastEvent.trigger(err.response?.data?.error || 'Failed to delete storage location', 'error');
     }
-  };
-
-  const startEditLoc = (loc: StorageLocation) => {
-    setEditingLocId(loc.id);
-    setStorageLocForm({
-      name: loc.name,
-      code: loc.code,
-      type: loc.type,
-      description: loc.description || '',
-      is_default: loc.is_default === 1,
-      is_active: loc.is_active === 1,
-    });
-  };
-
-  const LOC_TYPE_LABELS: Record<string, string> = {
-    main_store: 'Main Store',
-    godown: 'Godown',
-    rack: 'Rack',
-    cold_storage: 'Cold Storage',
-    other: 'Other',
-  };
-
-  // Session Refresh Audit Logs state
-  const [sessionLogs, setSessionLogs] = useState<{ id: number; timestamp: number; trigger_type: string; next_scheduled_minutes: number; status: string; error_message: string | null }[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [reauthLoading, setReauthLoading] = useState(false);
-
-  const fetchSessionLogs = async () => {
-    setLogsLoading(true);
-    try {
-      const res = await api.getSessionRefreshLogs();
-      if (res && res.success && Array.isArray(res.logs)) {
-        setSessionLogs(res.logs);
-      }
-    } catch (err) {
-      console.warn('Failed to fetch session refresh logs:', err);
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (showSecondaryData) fetchSessionLogs();
-  }, [showSecondaryData]);
-
-  const handleManualReauth = async () => {
-    setReauthLoading(true);
-    try {
-      const res = await api.triggerManualReauth();
-      if (res && res.success) {
-        toastEvent.trigger('Manual session re-authentication initiated. Refreshing token...', 'info');
-        setTimeout(fetchSessionLogs, 3000);
-      }
-    } catch (err: any) {
-      toastEvent.trigger(err?.message || 'Failed to trigger re-auth', 'error');
-    } finally {
-      setReauthLoading(false);
-    }
-  };
-
-  // Generic helper to update settings fields.
-  // Wrapped in useCallback (stable identity across renders — setSettings from useState is
-  // itself stable and the update uses the functional form, so the dependency array is empty)
-  // to avoid re-rendering child components that receive it (or the mapped setters derived
-  // from it) as a prop.
-  const updateSetting = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K] | ((prevVal: SettingsData[K]) => SettingsData[K])) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: typeof value === 'function' ? (value as Function)(prev[key]) : value
-    }));
-  }, []);
-
-  // Mapped setters for backward compatibility with minimum code churn
-  const setPharmacyName = (val: string | ((p: string) => string)) => updateSetting('pharmacyName', val);
-  const setAddress = (val: string | ((p: string) => string)) => updateSetting('address', val);
-  const setPhone = (val: string | ((p: string) => string)) => updateSetting('phone', val);
-  const setGstin = (val: string | ((p: string) => string)) => updateSetting('gstin', val);
-  const setDrugLicense = (val: string | ((p: string) => string)) => updateSetting('drugLicense', val);
-  const setEmail = (val: string | ((p: string) => string)) => updateSetting('email', val);
-  const setGoogleClientId = (val: string | ((p: string) => string)) => updateSetting('googleClientId', val);
-  const setGoogleClientSecret = (val: string | ((p: string) => string)) => updateSetting('googleClientSecret', val);
-  const setGoogleSearchDailyLimit = (val: number | ((p: number) => number)) => updateSetting('googleSearchDailyLimit', val);
-  const setEmailAutodeleteEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAutodeleteEnabled', val);
-  const setEmailAutodeleteLimit = (val: number | ((p: number) => number)) => updateSetting('emailAutodeleteLimit', val);
-  const setEmailRetentionLimit = (val: number | ((p: number) => number)) => updateSetting('emailRetentionLimit', val);
-  const setAdminRemoteMode = (val: boolean | ((p: boolean) => boolean)) => updateSetting('adminRemoteMode', val);
-  const setAdminUsername = (val: string | ((p: string) => string)) => updateSetting('adminUsername', val);
-  const setAdminPassword = (val: string | ((p: string) => string)) => updateSetting('adminPassword', val);
-  const setAdminUniqueKey = (val: string | ((p: string) => string)) => updateSetting('adminUniqueKey', val);
-  const setAdminAuthorizedDeviceId = (val: string | ((p: string) => string)) => updateSetting('adminAuthorizedDeviceId', val);
-  const setAdminAuthorizedDeviceName = (val: string | ((p: string) => string)) => updateSetting('adminAuthorizedDeviceName', val);
-  const setDefaultTaxRate = (val: number | ((p: number) => number)) => updateSetting('defaultTaxRate', val);
-  const setInvoicePrefix = (val: string | ((p: string) => string)) => updateSetting('invoicePrefix', val);
-  const setAutoPrint = (val: boolean | ((p: boolean) => boolean)) => updateSetting('autoPrint', val);
-  const setDefaultPaymentMode = (val: string | ((p: string) => string)) => updateSetting('defaultPaymentMode', val);
-  const setWhatsappNotif = (val: boolean | ((p: boolean) => boolean)) => updateSetting('whatsappNotif', val);
-  const setEmailAlerts = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAlerts', val);
-  const setLowStockThreshold = (val: number | ((p: number) => number)) => updateSetting('lowStockThreshold', val);
-  const setExpiryAlertDays = (val: number | ((p: number) => number)) => updateSetting('expiryAlertDays', val);
-  const setDineshWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('dineshWhatsappNumber', val);
-
-  const setBackupFrequency = (val: string | ((p: string) => string)) => updateSetting('backupFrequency', val);
-  const setMonthlyReportEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('monthlyReportEnabled', val);
-  const setMonthlyReportPhone = (val: string | ((p: string) => string)) => updateSetting('monthlyReportPhone', val);
-  const setMonthlyReportDeliveryFormat = (val: string | ((p: string) => string)) => updateSetting('monthlyReportDeliveryFormat', val);
-  const setMonthlyReportChartStyle = (val: string | ((p: string) => string)) => updateSetting('monthlyReportChartStyle', val);
-  const setOwnerWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('ownerWhatsappNumber', val);
-  const setMonthlyReportTemplateTheme = (val: string | ((p: string) => string)) => updateSetting('monthlyReportTemplateTheme', val);
-  const setDistributorInvoiceFileFormat = (val: string | ((p: string) => string)) => updateSetting('distributorInvoiceFileFormat', val);
-  const setWhatsappDelayCreditBill = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayCreditBill', val);
-  const setWhatsappDelayDistributor = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayDistributor', val);
-  const setWhatsappDelayDeliveryBoy = (val: number | ((p: number) => number)) => updateSetting('whatsappDelayDeliveryBoy', val);
-
-  // Transient state for Monthly Report Preview and manual triggers
-  const [reportPreview, setReportPreview] = useState<{ formattedText: string; periodLabel: string; targetPhone: string } | null>(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [sendingReportType, setSendingReportType] = useState<string | null>(null);
-  const [isSendingSamples, setIsSendingSamples] = useState(false);
-
-  // Period Selection state
-  const [selectedPeriodType, setSelectedPeriodType] = useState<'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom'>('monthly');
-  const [customStartDate, setCustomStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split('T')[0];
-  });
-  const [customEndDate, setCustomEndDate] = useState<string>(() => {
-    return new Date().toISOString().split('T')[0];
-  });
-
-  const handlePreviewReport = async (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
-    const pType = overrideType || selectedPeriodType;
-    setIsPreviewLoading(true);
-    try {
-      let q = `/reports/monthly-scheduled-preview?type=${pType}&style=${settings.monthlyReportChartStyle}&theme=${settings.monthlyReportTemplateTheme}`;
-      if (pType === 'custom') {
-        q += `&startDate=${customStartDate}&endDate=${customEndDate}`;
-      }
-      const { data } = await apiClient.get(q);
-      if (data.success) {
-        setReportPreview({
-          formattedText: data.formattedText,
-          periodLabel: data.data.periodLabel,
-          targetPhone: data.targetPhone
-        });
-      } else {
-        toastEvent.trigger('Failed to load report preview', 'error');
-      }
-    } catch (err: any) {
-      toastEvent.trigger(err.message || 'Error loading preview', 'error');
-    } finally {
-      setIsPreviewLoading(false);
-    }
-  };
-
-  const handleSendReportNow = async (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
-    const pType = overrideType || selectedPeriodType;
-    setSendingReportType(pType);
-    try {
-      const { data } = await apiClient.post('/reports/send-monthly-scheduled', {
-        type: pType,
-        startDate: pType === 'custom' ? customStartDate : undefined,
-        endDate: pType === 'custom' ? customEndDate : undefined,
-        phone: settings.ownerWhatsappNumber || settings.monthlyReportPhone || settings.dineshWhatsappNumber || settings.phone,
-        deliveryFormat: settings.monthlyReportDeliveryFormat,
-        chartStyle: settings.monthlyReportChartStyle,
-        theme: settings.monthlyReportTemplateTheme,
-      });
-      if (data.success) {
-        toastEvent.trigger(data.message, 'success');
-      } else {
-        toastEvent.trigger(data.message || 'Failed to send report', 'error');
-      }
-    } catch (err: any) {
-      toastEvent.trigger(err.message || 'Error sending report', 'error');
-    } finally {
-      setSendingReportType(null);
-    }
-  };
-
-  const handleDownloadSamplePdf = (overrideType?: 'monthly' | 'midmonth' | 'quarterly' | 'yearly' | 'custom') => {
-    const pType = overrideType || selectedPeriodType;
-    let url = `/api/reports/monthly-scheduled-preview?type=${pType}&style=${settings.monthlyReportChartStyle}&theme=${settings.monthlyReportTemplateTheme}&download=pdf`;
-    if (pType === 'custom') {
-      url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
-    }
-    window.open(url, '_blank');
-  };
-
-  const handleSendAllTemplateSamples = async () => {
-    setIsSendingSamples(true);
-    try {
-      const targetNumber = settings.ownerWhatsappNumber || settings.monthlyReportPhone || settings.dineshWhatsappNumber || settings.phone;
-      const { data } = await apiClient.post('/reports/send-all-template-samples', {
-        phone: targetNumber
-      });
-      if (data.success) {
-        toastEvent.trigger(data.message, 'success');
-      } else {
-        toastEvent.trigger(data.message || 'Failed to send template samples', 'error');
-      }
-    } catch (err: any) {
-      toastEvent.trigger(err.message || 'Error sending template samples', 'error');
-    } finally {
-      setIsSendingSamples(false);
-    }
-  };
-
-  // Destructure settings for transparent use in JSX and helper functions
-  const {
-    pharmacyName,
-    address,
-    phone,
-    gstin,
-    drugLicense,
-    email,
-    googleClientId,
-    googleClientSecret,
-    googleSearchDailyLimit,
-    emailAutodeleteEnabled,
-    emailAutodeleteLimit,
-    emailRetentionLimit,
-    adminRemoteMode,
-    adminUsername,
-    adminPassword,
-    adminUniqueKey,
-    adminAuthorizedDeviceId,
-    adminAuthorizedDeviceName,
-    defaultTaxRate,
-    invoicePrefix,
-    autoPrint,
-    defaultPaymentMode,
-    whatsappNotif,
-    emailAlerts,
-    lowStockThreshold,
-    expiryAlertDays,
-    dineshWhatsappNumber,
-
-    backupFrequency,
-    monthlyReportEnabled,
-    monthlyReportPhone,
-    monthlyReportDeliveryFormat,
-    monthlyReportChartStyle,
-    ownerWhatsappNumber,
-    monthlyReportTemplateTheme,
-    distributorInvoiceFileFormat,
-    whatsappDelayCreditBill,
-    whatsappDelayDistributor,
-    whatsappDelayDeliveryBoy,
-  } = settings;
-
-  const handleToggleDesktopNotifications = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = e.target.checked;
-    if (checked) {
-      if (!('Notification' in window)) {
-        toastEvent.trigger('Desktop notifications are not supported by this browser.', 'error');
-        return;
-      }
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        setDesktopNotifEnabled(true);
-        toastEvent.trigger('Desktop notifications enabled!', 'success');
-      } else {
-        setDesktopNotifEnabled(false);
-        toastEvent.trigger('Permission denied for desktop notifications.', 'error');
-      }
-    } else {
-      setDesktopNotifEnabled(false);
-      toastEvent.trigger('Desktop notifications can be disabled in your browser settings.', 'info');
-    }
-  };
-
-  const queryClient = useQueryClient();
-
-  const { data: serverSettings, isLoading: loadingSettings } = useSettingsQuery();
-
-  const settingsHydrated = !!serverSettings;
-
-  useEffect(() => {
-    if (serverSettings) {
-      setSettings(prev => ({
-        ...prev,
-        pharmacyName: serverSettings.shop_name || serverSettings.pharmacy_name || serverSettings.store_name || serverSettings.medical_name || '',
-        address: serverSettings.shop_address || serverSettings.address || serverSettings.store_address || '',
-        phone: serverSettings.shop_phone || serverSettings.phone || serverSettings.store_phone || serverSettings.whatsapp_number || serverSettings.owner_whatsapp_number || '',
-        gstin: serverSettings.gstin || '',
-        drugLicense: serverSettings.shop_licence || serverSettings.drug_license || '',
-        email: serverSettings.email || '',
-        googleClientId: serverSettings.google_client_id || '',
-        googleClientSecret: serverSettings.google_client_secret || '',
-        googleSearchDailyLimit: Number(serverSettings.google_search_daily_limit) || 100,
-        emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
-        emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
-        emailRetentionLimit: Number(serverSettings.email_retention_limit) || 15,
-        adminRemoteMode: serverSettings.admin_remote_mode !== 'false',
-        adminUsername: serverSettings.admin_username || 'admin',
-        adminPassword: serverSettings.admin_password || 'admin123',
-        adminUniqueKey: serverSettings.admin_unique_key || 'KEY-ADM-837261',
-        adminAuthorizedDeviceId: serverSettings.admin_authorized_device_id || '',
-        adminAuthorizedDeviceName: serverSettings.admin_authorized_device_name || '',
-        defaultTaxRate: Number(serverSettings.default_tax_rate) || 18,
-        invoicePrefix: serverSettings.invoice_prefix || 'INV-',
-        autoPrint: serverSettings.auto_print === 'true',
-        defaultPaymentMode: serverSettings.default_payment_mode || 'Cash',
-        whatsappNotif: serverSettings.whatsapp_notif === 'true',
-        emailAlerts: serverSettings.email_alerts === 'true',
-        lowStockThreshold: Number(serverSettings.low_stock_threshold) || 10,
-        expiryAlertDays: Number(serverSettings.expiry_alert_days) || 90,
-        dineshWhatsappNumber: serverSettings.dinesh_whatsapp_number || '',
-
-        backupFrequency: serverSettings.backup_frequency || 'off',
-        dataFetchControl: serverSettings.data_fetch_control || '{}',
-        monthlyReportEnabled: serverSettings.monthly_report_enabled !== 'false',
-        monthlyReportPhone: serverSettings.monthly_report_phone || '',
-        monthlyReportDeliveryFormat: serverSettings.monthly_report_delivery_format || 'text',
-        monthlyReportChartStyle: serverSettings.monthly_report_chart_style || 'standard',
-        ownerWhatsappNumber: serverSettings.owner_whatsapp_number || '',
-        monthlyReportTemplateTheme: serverSettings.monthly_report_template_theme || 'executive',
-        distributorInvoiceFileFormat: serverSettings.distributor_invoice_file_format || 'CSV',
-        whatsappDelayCreditBill: Number(serverSettings.whatsapp_delay_credit_bill) || 0,
-        whatsappDelayDistributor: Number(serverSettings.whatsapp_delay_distributor) || 0,
-        whatsappDelayDeliveryBoy: Number(serverSettings.whatsapp_delay_delivery_boy) || 0,
-      }));
-    }
-  }, [serverSettings]);
-
-  const handleSaveSettings = async () => {
-    if (!settingsHydrated) {
-      toastEvent.trigger('Loading settings from server — please wait', 'info');
-      return;
-    }
-    // NOTE: Gmail, WhatsApp/Telegram, WhatsApp Business API, and Pharmarack credential
-    // fields are owned and edited exclusively on the Learning page. Settings has no
-    // editable UI for them, so they must NOT be included here — resubmitting stale
-    // local state for these keys silently overwrites whatever was last saved on
-    // Learning (see SMALL_BUG_FIX_PLAN.md P0-02).
-    const payload = {
-      shop_name: pharmacyName,
-      store_name: pharmacyName,
-      pharmacy_name: pharmacyName,
-      medical_name: pharmacyName,
-      shop_address: address,
-      address: address,
-      shop_phone: phone,
-      phone: phone,
-      store_phone: phone,
-      whatsapp_number: phone,
-      gstin: gstin,
-      shop_licence: drugLicense,
-      drug_license: drugLicense,
-      email: email,
-
-      google_search_daily_limit: googleSearchDailyLimit.toString(),
-      email_retention_limit: emailRetentionLimit.toString(),
-      admin_remote_mode: adminRemoteMode.toString(),
-      admin_username: adminUsername,
-      admin_password: adminPassword,
-      admin_unique_key: adminUniqueKey,
-      admin_authorized_device_id: adminAuthorizedDeviceId,
-      admin_authorized_device_name: adminAuthorizedDeviceName,
-
-
-      default_tax_rate: defaultTaxRate.toString(),
-      invoice_prefix: invoicePrefix,
-      auto_print: autoPrint.toString(),
-      default_payment_mode: defaultPaymentMode,
-
-      whatsapp_notif: whatsappNotif.toString(),
-      email_alerts: emailAlerts.toString(),
-      low_stock_threshold: lowStockThreshold.toString(),
-      expiry_alert_days: expiryAlertDays.toString(),
-      dinesh_whatsapp_number: dineshWhatsappNumber,
-      distributor_invoice_file_format: distributorInvoiceFileFormat,
-      whatsapp_delay_credit_bill: whatsappDelayCreditBill.toString(),
-      whatsapp_delay_distributor: whatsappDelayDistributor.toString(),
-      whatsapp_delay_delivery_boy: whatsappDelayDeliveryBoy.toString(),
-      monthly_report_enabled: monthlyReportEnabled.toString(),
-      monthly_report_phone: monthlyReportPhone,
-      monthly_report_delivery_format: monthlyReportDeliveryFormat,
-      monthly_report_chart_style: monthlyReportChartStyle,
-      owner_whatsapp_number: ownerWhatsappNumber,
-      monthly_report_template_theme: monthlyReportTemplateTheme,
-
-      data_fetch_control: settings.dataFetchControl,
-    };
-
-    try {
-      await apiClient.post('/settings/save', payload, {
-        headers: { 'x-source-screen': 'settings' }
-      });
-      toastEvent.trigger('Settings saved successfully', 'success');
-      updateSettingsCache(queryClient, payload as Record<string, string>);
-
-      // Run secondary sync and broadcasts asynchronously in background.
-      // NOTE: the owner contact upsert now happens atomically inside the backend's
-      // /settings/save transaction (see src/routes/settings.ts), so the separate
-      // api.saveContact(...) HTTP call that used to run here has been removed.
-      (async () => {
-        await broadcastContactDataChanged(queryClient);
-        window.dispatchEvent(new CustomEvent('settings-updated'));
-        window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
-      })();
-    } catch (error) {
-      console.error('Failed to save settings', error);
-      toastEvent.trigger('Failed to save settings', 'error');
-    }
-  };
-
-  const handleDataFetchModeChange = async (key: string, mode: FetchMode) => {
-    let currentModes: Record<string, FetchMode> = {};
-    try {
-      currentModes = JSON.parse(settings.dataFetchControl || '{}');
-    } catch (e) {}
-
-    const newModes = { ...currentModes, [key]: mode };
-    const modesString = JSON.stringify(newModes);
-
-    setSettings(prev => ({
-      ...prev,
-      dataFetchControl: modesString
-    }));
-
-    // Save exclusively to SQLite app_settings database table
-    try {
-      await apiClient.post('/settings/save', {
-        data_fetch_control: modesString
-      }, {
-        headers: { 'x-source-screen': 'settings' }
-      });
-      updateSettingsCache(queryClient, { data_fetch_control: modesString });
-      await broadcastContactDataChanged(queryClient);
-      toastEvent.trigger('Fetch mode updated successfully', 'success');
-    } catch (error) {
-      console.error('Failed to save fetch mode', error);
-      toastEvent.trigger('Failed to save fetch mode', 'error');
-    }
-  };
-
-  // Backup list React Query — secondary, delayed ~500ms after mount
-  const { data: backupListData, isLoading: backupListLoading } = useApiQuery<{ backups: { filename: string; sizeBytes: number; createdAt: string }[] }>(
-    'backup-list',
-    () => apiClient.get('/utilities/backup/list').then(res => res.data),
-    { enabled: showSecondaryData }
-  );
-  const backupList = backupListData?.backups || [];
-
-  // Backup schedule React Query — secondary, delayed ~500ms after mount
-  const { data: serverBackupSchedule } = useApiQuery<{ frequency: string }>(
-    'backup-schedule',
-    () => apiClient.get('/utilities/backup/schedule').then(res => res.data),
-    { enabled: showSecondaryData }
-  );
-
-  useEffect(() => {
-    if (serverBackupSchedule) {
-      setBackupFrequency(serverBackupSchedule.frequency || 'off');
-    }
-  }, [serverBackupSchedule]);
-
-  const handleBackupNow = async () => {
-    setBackupLoading(true);
-    try {
-      await apiClient.post('/utilities/backup');
-      toastEvent.trigger('Backup created successfully!', 'success');
-      queryClient.invalidateQueries({ queryKey: ['backup-list'] });
-    } catch {
-      toastEvent.trigger('Failed to create backup', 'error');
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  const handleScheduleChange = async (freq: string) => {
-    setBackupFrequency(freq);
-    try {
-      await apiClient.post('/utilities/backup/schedule', { frequency: freq });
-      toastEvent.trigger(`Backup schedule set to: ${freq === 'off' ? 'Off' : `Every ${freq}`}`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['backup-schedule'] });
-    } catch {
-      toastEvent.trigger('Failed to update backup schedule', 'error');
-    }
-  };
-
-  const handleDeleteBackup = async (filename: string) => {
-    setDeletingFile(filename);
-    try {
-      await apiClient.delete(`/utilities/backup/${encodeURIComponent(filename)}`);
-      toastEvent.trigger('Backup deleted', 'success');
-      setConfirmDelete(null);
-      queryClient.invalidateQueries({ queryKey: ['backup-list'] });
-    } catch {
-      toastEvent.trigger('Failed to delete backup', 'error');
-    } finally {
-      setDeletingFile(null);
-    }
-  };
-
-  const handleRestoreBackup = async (filename: string) => {
-    setRestoringFile(filename);
-    try {
-      await apiClient.post('/utilities/backup/restore', { filename });
-      toastEvent.trigger(`Restored from: ${filename}`, 'success');
-      setConfirmRestore(null);
-    } catch {
-      toastEvent.trigger('Failed to restore backup', 'error');
-    } finally {
-      setRestoringFile(null);
-    }
-  };
-
-  const handleResetAdminDevice = async () => {
-    try {
-      await apiClient.post('/security/admin/reset-device');
-      setAdminAuthorizedDeviceId('');
-      setAdminAuthorizedDeviceName('');
-      toastEvent.trigger('Admin authorized device registration reset successfully.', 'success');
-    } catch (err: any) {
-      console.error('Failed to reset admin device:', err);
-      toastEvent.trigger('Failed to reset authorized device.', 'error');
-    }
-  };
-
-  const handleResetData = async () => {
-    if (!resetConfirm) {
-      // Fetch live counts to show the user exactly what they're about to wipe
-      setResetConfirm(true);
-      setResetConfirmText('');
-      setResetDataCounts(null);
-      try {
-        const res = await apiClient.get('/utilities/data-counts');
-        setResetDataCounts(res.data);
-      } catch (_) {
-        // Non-critical — show the dialog anyway without counts
-      }
-      return;
-    }
-    if (resetConfirmText.trim().toUpperCase() !== 'RESET') {
-      toastEvent.trigger('Please type RESET to confirm.', 'error');
-      return;
-    }
-    setResetLoading(true);
-    try {
-      await apiClient.post('/utilities/reset-data', { wipeAll: true });
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-        queryClient.clear();
-      } catch (storageErr) {
-        console.warn('Failed to clear browser storage:', storageErr);
-      }
-      toastEvent.trigger('App reset to factory state. Reloading...', 'success');
-      setResetConfirm(false);
-      setResetConfirmText('');
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    } catch (err: any) {
-      console.error('Reset error:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to reset data.', 'error');
-      setResetConfirm(false);
-      setResetConfirmText('');
-    } finally {
-      setResetLoading(false);
-    }
-  };
-
-  const handleClearCache = async () => {
-    setClearCacheLoading(true);
-    try {
-      await apiClient.post('/utilities/clear-cache');
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch (storageErr) {
-        console.warn('Failed to clear browser storage:', storageErr);
-      }
-      toastEvent.trigger('Cache cleared successfully. Reloading...', 'success');
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
-    } catch (err: any) {
-      console.error('Clear cache error:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to clear cache.', 'error');
-    } finally {
-      setClearCacheLoading(false);
-    }
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  };
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: true,
-    });
   };
 
   return (
-    <div className="h-full flex flex-col fade-in space-y-6 overflow-y-auto pb-8">
-
-      {/* Missing Pharmacy Details Warning Banner */}
-      {isMissingDetails && (
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center justify-between gap-3 shrink-0 shadow-lg">
-          <div className="flex items-center gap-3">
-            <AlertTriangle size={22} className="shrink-0 text-amber-400" />
+    <div className="space-y-6">
+      <form onSubmit={handleSaveStoreProfile} className="space-y-6">
+        {/* Core Pharmacy Details */}
+        <div className="space-y-4">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+            <Building2 size={16} /> Core Store Identity & Details
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <h4 className="font-extrabold text-sm text-text">Pharmacy Details Required</h4>
-              <p className="text-xs text-muted">Please fill in your Pharmacy Name and Phone Number below to enable sending distributor orders via WhatsApp.</p>
+              <label className="block text-xs font-semibold text-text mb-1">Pharmacy / Shop Name *</label>
+              <input
+                type="text"
+                required
+                value={formData.pharmacyName}
+                onChange={(e) => setFormData({ ...formData, pharmacyName: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="e.g. LifeCare Pharmacy"
+              />
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* ─── Pharmacy Details ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Building2 size={18} className="text-sky" />
-          Pharmacy Details
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-          <div className="space-y-2">
-            <label htmlFor="pharmacyName" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Pharmacy Name
-            </label>
-            <input
-              id="pharmacyName"
-              type="text"
-              className="premium-input w-full"
-              placeholder="e.g. MedPlus Pharmacy"
-              value={pharmacyName}
-              onChange={(e) => setPharmacyName(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="address" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Address
-            </label>
-            <input
-              id="address"
-              type="text"
-              className="premium-input w-full"
-              placeholder="Street, City, State"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="phone" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Pharmacy Store Phone
-            </label>
-            <input
-              id="phone"
-              type="text"
-              className="premium-input w-full font-mono font-semibold"
-              placeholder="10-digit number"
-              value={phone}
-              onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
-              maxLength={10}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="ownerWhatsappNumber" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Pharmacy Owner WhatsApp Number (Primary System Alerts)
-            </label>
-            <input
-              id="ownerWhatsappNumber"
-              type="text"
-              className="premium-input w-full bg-bg border border-border font-mono font-semibold"
-              placeholder="e.g. 9876543210"
-              value={ownerWhatsappNumber}
-              onChange={(e) => setOwnerWhatsappNumber(sanitizePhoneInput(e.target.value))}
-              maxLength={10}
-            />
-            <p className="text-[10px] text-muted">All automated billing, expiry warnings, OCR status, & monthly reports send here.</p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="gstin" className="text-xs font-bold text-muted uppercase tracking-wider">
-              GSTIN
-            </label>
-            <input
-              id="gstin"
-              type="text"
-              className="premium-input w-full"
-              placeholder="22AAAAA0000A1Z5"
-              value={gstin}
-              onChange={(e) => setGstin(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="drugLicense" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Drug License No.
-            </label>
-            <input
-              id="drugLicense"
-              type="text"
-              className="premium-input w-full"
-              placeholder="DL-0000-000000"
-              value={drugLicense}
-              onChange={(e) => setDrugLicense(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="email" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="off"
-              className="premium-input w-full"
-              placeholder="pharmacy@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button 
-            onClick={handleSaveSettings}
-            disabled={!settingsHydrated || loadingSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Save size={16} />
-            {loadingSettings ? 'Loading…' : 'Save Details'}
-          </button>
-        </div>
-      </div>
-
-      {/* ─── Mobile App & APK Download ─── */}
-      <div className="glass-panel p-6 border border-emerald-500/20 bg-emerald-500/[0.02]">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <Download size={22} />
-            </div>
             <div>
-              <h3 className="font-bold text-base text-text flex items-center gap-2">
-                Android Mobile App (.APK) & Remote Pairing
-              </h3>
-              <p className="text-xs text-muted mt-0.5">
-                Download the official APK file to install on Android phones & connect directly with this PC server over Wi-Fi / LAN.
-              </p>
+              <label className="block text-xs font-semibold text-text mb-1">Primary Store Phone / Mobile</label>
+              <input
+                type="text"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: sanitizePhoneInput(e.target.value) })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="10-digit mobile number"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Store GSTIN Number</label>
+              <input
+                type="text"
+                value={formData.gstin}
+                onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="27AAAAA0000A1Z5"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Drug License Number(s)</label>
+              <input
+                type="text"
+                value={formData.drugLicense}
+                onChange={(e) => setFormData({ ...formData, drugLicense: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="Form 20/21 License No."
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Store Email Address</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="pharmacy@example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Owner WhatsApp Contact</label>
+              <input
+                type="text"
+                value={formData.ownerWhatsappNumber}
+                onChange={(e) => setFormData({ ...formData, ownerWhatsappNumber: sanitizePhoneInput(e.target.value) })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="Owner WhatsApp for alerts"
+              />
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-3">
+              <label className="block text-xs font-semibold text-text mb-1">Complete Store Address</label>
+              <textarea
+                rows={2}
+                value={formData.address}
+                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="Street address, City, Pin code"
+              />
             </div>
           </div>
+        </div>
+
+        {/* Operating Defaults */}
+        <div className="space-y-4 pt-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+            <FileText size={16} /> POS & Invoice Operating Defaults
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Invoice Number Prefix</label>
+              <input
+                type="text"
+                value={formData.invoicePrefix}
+                onChange={(e) => setFormData({ ...formData, invoicePrefix: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Default GST Tax Rate (%)</label>
+              <input
+                type="number"
+                value={formData.defaultTaxRate}
+                onChange={(e) => setFormData({ ...formData, defaultTaxRate: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Default Payment Method</label>
+              <select
+                value={formData.defaultPaymentMode}
+                onChange={(e) => setFormData({ ...formData, defaultPaymentMode: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              >
+                <option value="Cash">Cash</option>
+                <option value="UPI">UPI / QR Code</option>
+                <option value="Card">Credit / Debit Card</option>
+                <option value="Credit">Credit Bill (Khata)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Low Stock Warning Threshold (Qty)</label>
+              <input
+                type="number"
+                value={formData.lowStockThreshold}
+                onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Expiry Alert Period (Days)</label>
+              <input
+                type="number"
+                value={formData.expiryAlertDays}
+                onChange={(e) => setFormData({ ...formData, expiryAlertDays: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 pt-4">
+              <input
+                type="checkbox"
+                id="autoPrint"
+                checked={formData.autoPrint}
+                onChange={(e) => setFormData({ ...formData, autoPrint: e.target.checked })}
+                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+              />
+              <label htmlFor="autoPrint" className="text-xs font-semibold text-text cursor-pointer">
+                Auto-print receipt immediately on sale completion
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
           <button
-            type="button"
-            onClick={() => setShowConnectModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm"
           >
-            <Download size={15} />
-            <span>Download APK & Pair App</span>
+            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            <span>Save Store Profile</span>
           </button>
         </div>
-      </div>
+      </form>
 
-      {/* ─── Distributors & AI Learning Contacts Directory Notice ─── */}
-      <div className="glass-panel p-6 space-y-3 bg-bg2/40 border border-glass-border rounded-2xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="font-bold text-base flex items-center gap-2 text-text">
-              <Building2 size={18} className="text-emerald-400" />
-              Distributor Layouts & Contact Directory
-            </h3>
-            <p className="text-xs text-muted max-w-2xl leading-relaxed">
-              All distributor names, WhatsApp contact numbers, email addresses, and extraction layouts are now managed centrally in the <strong className="text-text font-semibold">AI Learning & Automation Command Center</strong> under the <strong className="text-emerald-400 font-semibold">Distributor Layouts</strong> tab.
-            </p>
-          </div>
-          <Link
-            to="/learning?tab=distributor_layouts"
-            className="premium-btn bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-2 shrink-0 cursor-pointer text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md active:scale-95"
-          >
-            <span>Go to Distributor Layouts</span>
-            <ArrowRight size={14} />
-          </Link>
-        </div>
-      </div>
+      {/* Storage Racks & Locations */}
+      <div className="space-y-4 pt-4 border-t border-border">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <MapPin size={16} /> Physical Storage Racks & Shelves Directory
+        </h2>
 
-      {/* ─── Pharmarack Live Cart & Session Refresh History (60 Days) ─── */}
-      <div className="glass-panel p-6 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-glass-border pb-4">
-          <div>
-            <h3 className="font-bold text-base flex items-center gap-2 text-text">
-              <History size={18} className="text-emerald-400" />
-              Pharmarack Session & Randomized Refresh History (60 Days)
-            </h3>
-            <p className="text-xs text-muted mt-1">
-              Refreshes automatically at a randomized interval between <strong>40 and 60 minutes</strong> (never a fixed time). Retains up to 60 days of audit logs.
-            </p>
+        <div className="bg-bg3/30 border border-border rounded-xl p-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <input
+              type="text"
+              placeholder="Rack Name (e.g. Rack A-1)"
+              value={storageLocForm.name}
+              onChange={(e) => setStorageLocForm({ ...storageLocForm, name: e.target.value })}
+              className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Short Code (e.g. R-A1)"
+              value={storageLocForm.code}
+              onChange={(e) => setStorageLocForm({ ...storageLocForm, code: e.target.value })}
+              className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+            />
+            <select
+              value={storageLocForm.type}
+              onChange={(e) => setStorageLocForm({ ...storageLocForm, type: e.target.value })}
+              className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+            >
+              <option value="rack">Main Rack</option>
+              <option value="fridge">Cold Storage / Fridge</option>
+              <option value="drawer">Narcotics Drawer</option>
+              <option value="counter">Front Counter Display</option>
+            </select>
+            <button
+              onClick={handleSaveStorageLoc}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
+            >
+              <Plus size={14} /> {editingLocId ? 'Update Location' : 'Add Storage Location'}
+            </button>
           </div>
-          <button
-            onClick={handleManualReauth}
-            disabled={reauthLoading}
-            className="premium-btn bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={reauthLoading ? "animate-spin" : ""} />
-            <span>{reauthLoading ? 'Triggering...' : 'Refresh Session Now'}</span>
-          </button>
-        </div>
 
-        {/* Stats Summary row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Refresh Strategy</span>
-            <span className="text-sm font-black text-emerald-400">Randomized (40-60 min)</span>
-          </div>
-          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Logs Retained (60 Days)</span>
-            <span className="text-sm font-black text-text">{sessionLogs.length} Records</span>
-          </div>
-          <div className="p-3.5 rounded-xl bg-bg2 border border-border flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Last Attempt</span>
-            <span className="text-sm font-bold text-text truncate">
-              {sessionLogs.length > 0 ? new Date(sessionLogs[0].timestamp).toLocaleString() : 'No attempts logged'}
-            </span>
-          </div>
-        </div>
-
-        {/* Audit Log Table */}
-        <div className="overflow-hidden rounded-xl border border-glass-border bg-bg/40">
-          <div className="max-h-64 overflow-y-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-bg2 border-b border-glass-border text-muted font-bold uppercase text-[10px] tracking-wider sticky top-0 z-10">
-                <tr>
-                  <th className="py-2.5 px-4">Date & Time</th>
-                  <th className="py-2.5 px-4">Trigger Type</th>
-                  <th className="py-2.5 px-4">Next Window</th>
-                  <th className="py-2.5 px-4">Status</th>
+              <thead>
+                <tr className="border-b border-border text-muted">
+                  <th className="py-2 px-3">Location Name</th>
+                  <th className="py-2 px-3">Code</th>
+                  <th className="py-2 px-3">Type</th>
+                  <th className="py-2 px-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-glass-border/40 font-medium">
-                {logsLoading ? (
+              <tbody className="divide-y divide-border">
+                {storageLocations.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-muted">Loading audit log...</td>
-                  </tr>
-                ) : sessionLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-muted">No session refresh attempts logged in the last 60 days.</td>
+                    <td colSpan={4} className="py-4 text-center text-muted italic">No custom storage locations registered yet.</td>
                   </tr>
                 ) : (
-                  sessionLogs.map(log => (
-                    <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-2.5 px-4 whitespace-nowrap text-text/90">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </td>
-                      <td className="py-2.5 px-4 capitalize">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                          log.trigger_type === 'manual_reauth'
-                            ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                            : log.trigger_type === 'monthly_autosync'
-                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        }`}>
-                          {log.trigger_type === 'background_random' ? 'Random (40-60m)' : log.trigger_type.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-4 text-muted">
-                        {log.next_scheduled_minutes ? `${log.next_scheduled_minutes} mins` : 'Immediate'}
-                      </td>
-                      <td className="py-2.5 px-4">
-                        {log.status === 'success' ? (
-                          <span className="text-emerald-400 font-bold flex items-center gap-1">
-                            ✓ Success
-                          </span>
-                        ) : (
-                          <span className="text-rose-400 font-bold flex items-center gap-1" title={log.error_message || 'Failed'}>
-                            ⚠ Failed ({log.error_message || 'Error'})
-                          </span>
-                        )}
+                  storageLocations.map((loc) => (
+                    <tr key={loc.id} className="hover:bg-bg3/50">
+                      <td className="py-2 px-3 font-semibold text-text">{loc.name}</td>
+                      <td className="py-2 px-3 text-muted font-mono">{loc.code}</td>
+                      <td className="py-2 px-3 uppercase text-[10px] font-bold text-primary">{loc.type}</td>
+                      <td className="py-2 px-3 text-right space-x-2">
+                        <button
+                          onClick={() => {
+                            setEditingLocId(loc.id);
+                            setStorageLocForm({ name: loc.name, code: loc.code, type: loc.type, description: loc.description || '', is_default: !!loc.is_default, is_active: !!loc.is_active });
+                          }}
+                          className="text-primary hover:underline font-semibold cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteStorageLoc(loc.id)}
+                          className="text-red-500 hover:underline font-semibold cursor-pointer"
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -1119,1139 +563,809 @@ const Settings = () => {
           </div>
         </div>
       </div>
-
-
-
-      {/* ─── Notifications ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Bell size={18} className="text-primary" />
-          Notifications
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-          <div className="space-y-2 flex items-end">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={whatsappNotif}
-                  onChange={(e) => setWhatsappNotif(e.target.checked)}
-                  aria-label="Enable WhatsApp Notifications"
-                />
-                <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold group-hover:text-text transition-colors">
-                  Enable WhatsApp Notifications
-                </span>
-                <span className="text-[11px] text-muted font-normal mt-0.5">
-                  Enabling background WhatsApp integration launches a headless Chromium process (~100MB+ RAM, active CPU threads).
-                </span>
-              </div>
-            </label>
-          </div>
-
-          <div className="space-y-2 flex items-end">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={emailAlerts}
-                  onChange={(e) => setEmailAlerts(e.target.checked)}
-                  aria-label="Enable Email Alerts"
-                />
-                <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-              </div>
-              <span className="text-sm font-semibold group-hover:text-white transition-colors">
-                Enable Email Alerts
-              </span>
-            </label>
-          </div>
-
-          <div className="space-y-2 flex items-end">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={desktopNotifEnabled}
-                  onChange={handleToggleDesktopNotifications}
-                  aria-label="Enable Desktop Notifications"
-                />
-                <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-              </div>
-              <span className="text-sm font-semibold group-hover:text-white transition-colors">
-                Enable Desktop Popup Notifications
-              </span>
-            </label>
-          </div>
-
-
-
-          <div className="space-y-2">
-            <label htmlFor="lowStockThreshold" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Low Stock Threshold
-            </label>
-            <input
-              id="lowStockThreshold"
-              type="number"
-              min={0}
-              className="premium-input w-full"
-              placeholder="10"
-              value={lowStockThreshold}
-              onChange={(e) => setLowStockThreshold(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="googleSearchDailyLimit" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Google Search Daily Limit
-            </label>
-            <input
-              id="googleSearchDailyLimit"
-              type="number"
-              min={0}
-              className="premium-input w-full"
-              placeholder="100"
-              value={googleSearchDailyLimit}
-              onChange={(e) => setGoogleSearchDailyLimit(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="expiryAlertDays" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Expiry Alert Days
-            </label>
-            <input
-              id="expiryAlertDays"
-              type="number"
-              min={0}
-              className="premium-input w-full"
-              placeholder="90"
-              value={expiryAlertDays}
-              onChange={(e) => setExpiryAlertDays(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="emailRetentionLimit" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Email Retention Limit (Max Stored)
-            </label>
-            <select
-              id="emailRetentionLimit"
-              className="premium-input w-full bg-bg border border-border"
-              value={emailRetentionLimit}
-              onChange={(e) => setEmailRetentionLimit(Number(e.target.value))}
-            >
-              <option value={15}>15 Emails (Default - Recommended)</option>
-              <option value={30}>30 Emails</option>
-              <option value={50}>50 Emails</option>
-              <option value={100}>100 Emails</option>
-            </select>
-          </div>
-
-          <div className="space-y-2 md:col-span-2">
-            <label htmlFor="dineshWhatsappNumber" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Bounced Alerts WhatsApp Number (Dinesh)
-            </label>
-            <input
-              id="dineshWhatsappNumber"
-              type="text"
-              className="premium-input w-full bg-bg border border-border"
-              placeholder="e.g. 9876543210 or 919876543210"
-              value={dineshWhatsappNumber}
-              onChange={(e) => setDineshWhatsappNumber(e.target.value)}
-            />
-            <p className="text-[10px] text-muted">Daily morning notification (at 9:00 AM) summarizing missing bills or bounced medicines will be sent to this number.</p>
-          </div>
-
-          {/* WhatsApp Scheduled Message Delay Timers Section */}
-          <div className="space-y-4 md:col-span-2 border-t border-border/50 pt-4 mt-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-emerald-400" />
-                  WhatsApp Scheduled Message Delay Timers
-                </h4>
-                <p className="text-[11px] text-muted font-normal mt-0.5">
-                  Set post-save send delays (in minutes) for automated WhatsApp dispatches. 0 = Send immediately.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Credit Bills Delay */}
-              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
-                <label htmlFor="whatsappDelayCreditBill" className="text-xs font-semibold text-text block">
-                  Credit Bills WhatsApp Delay
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="whatsappDelayCreditBill"
-                    type="number"
-                    min={0}
-                    className="premium-input w-full bg-bg text-text border-border"
-                    placeholder="0"
-                    value={whatsappDelayCreditBill}
-                    onChange={(e) => setWhatsappDelayCreditBill(Math.max(0, Number(e.target.value)))}
-                  />
-                  <span className="text-xs text-muted font-medium">mins</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {[0, 5, 15, 60, 360, 1440].map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setWhatsappDelayCreditBill(m)}
-                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
-                        whatsappDelayCreditBill === m
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
-                          : 'bg-bg border-border text-muted hover:text-text'
-                      }`}
-                    >
-                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Distributor Messages Delay */}
-              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
-                <label htmlFor="whatsappDelayDistributor" className="text-xs font-semibold text-text block">
-                  Distributors WhatsApp Delay
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="whatsappDelayDistributor"
-                    type="number"
-                    min={0}
-                    className="premium-input w-full bg-bg text-text border-border"
-                    placeholder="0"
-                    value={whatsappDelayDistributor}
-                    onChange={(e) => setWhatsappDelayDistributor(Math.max(0, Number(e.target.value)))}
-                  />
-                  <span className="text-xs text-muted font-medium">mins</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {[0, 5, 15, 60, 360, 1440].map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setWhatsappDelayDistributor(m)}
-                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
-                        whatsappDelayDistributor === m
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
-                          : 'bg-bg border-border text-muted hover:text-text'
-                      }`}
-                    >
-                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Delivery Staff Delay */}
-              <div className="space-y-2 p-3 rounded-lg bg-bg2/60 border border-border">
-                <label htmlFor="whatsappDelayDeliveryBoy" className="text-xs font-semibold text-text block">
-                  Delivery Staff WhatsApp Delay
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="whatsappDelayDeliveryBoy"
-                    type="number"
-                    min={0}
-                    className="premium-input w-full bg-bg text-text border-border"
-                    placeholder="0"
-                    value={whatsappDelayDeliveryBoy}
-                    onChange={(e) => setWhatsappDelayDeliveryBoy(Math.max(0, Number(e.target.value)))}
-                  />
-                  <span className="text-xs text-muted font-medium">mins</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {[0, 5, 15, 60, 360, 1440].map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setWhatsappDelayDeliveryBoy(m)}
-                      className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
-                        whatsappDelayDeliveryBoy === m
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 font-semibold'
-                          : 'bg-bg border-border text-muted hover:text-text'
-                      }`}
-                    >
-                      {m === 0 ? 'Instant' : m >= 60 ? `${m / 60}h` : `${m}m`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2 md:col-span-2 border-t border-border/50 pt-4 mt-2">
-            <label htmlFor="distributorInvoiceFileFormat" className="text-xs font-bold text-muted uppercase tracking-wider flex items-center justify-between">
-              <span>Preferred Distributor Email Invoice File Formats</span>
-              <span className="text-[10px] text-emerald-400 font-normal">Included in WhatsApp Dispatch Templates</span>
-            </label>
-            <div className="flex flex-wrap gap-2 mb-1">
-              {['CSV Only', 'PDF Only', 'CSV & PDF'].map((fmt) => (
-                <button
-                  key={fmt}
-                  type="button"
-                  onClick={() => setDistributorInvoiceFileFormat(fmt)}
-                  className={`text-[11px] px-2.5 py-1 rounded border transition-all ${
-                    distributorInvoiceFileFormat === fmt
-                      ? 'bg-sky/20 border-sky text-sky font-semibold shadow-sm'
-                      : 'bg-bg2 border-border text-muted hover:text-text'
-                  }`}
-                >
-                  {fmt}
-                </button>
-              ))}
-            </div>
-            <input
-              id="distributorInvoiceFileFormat"
-              type="text"
-              className="premium-input w-full bg-bg border border-border"
-              placeholder="e.g. CSV or PDF"
-              value={distributorInvoiceFileFormat}
-              onChange={(e) => setDistributorInvoiceFileFormat(e.target.value)}
-            />
-            <p className="text-[10px] text-muted">
-              Distributors & delivery boys receive this format requirement in daily WhatsApp orders so they attach supported invoice copies (PDF, CSV) when emailing bills.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button 
-            onClick={handleSaveSettings}
-            disabled={!settingsHydrated || loadingSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Save size={16} />
-            {loadingSettings ? 'Loading…' : 'Save Preferences'}
-          </button>
-        </div>
-      </div>
-
-      {/* ─── Automated Monthly & 15th Scheduled Reports ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-2 text-text">
-          <BarChart3 size={18} className="text-emerald-500" />
-          Automated Monthly & 15th Scheduled Reports (WhatsApp)
-        </h3>
-        <p className="text-xs text-muted mb-6">
-          Automatically computes Purchase vs. Sales totals, Gross Profit, Profit Margin %, Top Selling Items, and visual trend bar chart graphs, sending them via WhatsApp to your saved phone number on the <strong>1st of every month</strong> (full previous month report) and <strong>15th of every month</strong> (mid-month report).
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-          <div className="space-y-2 flex items-center justify-between p-3 rounded-lg border border-border bg-bg2">
-            <div>
-              <span className="text-sm font-semibold text-text block">
-                Auto-Send Monthly & 15th Reports
-              </span>
-              <span className="text-[11px] text-muted block">
-                Dispatches automatically via WhatsApp on 1st & 15th of the month past 8:00 AM.
-              </span>
-            </div>
-            <label className="relative cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="sr-only peer"
-                checked={monthlyReportEnabled}
-                onChange={(e) => setMonthlyReportEnabled(e.target.checked)}
-              />
-              <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-              <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-            </label>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="monthlyReportPhone" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Report Recipient WhatsApp / Phone Number
-            </label>
-            <input
-              id="monthlyReportPhone"
-              type="text"
-              className="premium-input w-full bg-bg border border-border"
-              placeholder="e.g. 9876543210 (Leave empty to use saved pharmacy phone)"
-              value={monthlyReportPhone}
-              onChange={(e) => setMonthlyReportPhone(e.target.value)}
-            />
-            <p className="text-[10px] text-muted">
-              Default fallback: Dinesh WhatsApp Number ({dineshWhatsappNumber || 'not set'}) or Main Pharmacy Phone ({phone || 'not set'}).
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="monthlyReportDeliveryFormat" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Report File / Delivery Format
-            </label>
-            <select
-              id="monthlyReportDeliveryFormat"
-              className="premium-input w-full bg-bg border border-border text-text font-medium"
-              value={monthlyReportDeliveryFormat}
-              onChange={(e) => setMonthlyReportDeliveryFormat(e.target.value)}
-            >
-              <option value="text">📱 WhatsApp Text with Bar Chart</option>
-              <option value="pdf">📄 PDF Document Report (Attached)</option>
-              <option value="combined">📬 WhatsApp Text + PDF Document (Combined)</option>
-              <option value="csv">📊 CSV Spreadsheet Report (Attached)</option>
-            </select>
-            <p className="text-[10px] text-muted">
-              Select whether scheduled reports should be delivered as text message, PDF attachment, both, or CSV sheet.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="monthlyReportChartStyle" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Chart Visual Style
-            </label>
-            <select
-              id="monthlyReportChartStyle"
-              className="premium-input w-full bg-bg border border-border text-text font-medium"
-              value={monthlyReportChartStyle}
-              onChange={(e) => setMonthlyReportChartStyle(e.target.value)}
-            >
-              <option value="standard">📈 Standard Progress Bar Graph</option>
-              <option value="trend">📉 Detailed Period Trend Breakdown</option>
-              <option value="minimal">💳 Minimal Financial Summary</option>
-            </select>
-            <p className="text-[10px] text-muted">
-              Determines graph detail level in WhatsApp messages and PDF document reports.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="monthlyReportTemplateTheme" className="text-xs font-bold text-muted uppercase tracking-wider">
-              PDF Template Design / Layout Theme
-            </label>
-            <select
-              id="monthlyReportTemplateTheme"
-              className="premium-input w-full bg-bg border border-border text-text font-medium"
-              value={monthlyReportTemplateTheme}
-              onChange={(e) => setMonthlyReportTemplateTheme(e.target.value)}
-            >
-              <option value="executive">✨ Executive Modern (Slate & Emerald Header)</option>
-              <option value="classic">🏛️ Corporate Classic (Navy & Royal Blue Header)</option>
-              <option value="minimalist">🖤 Minimalist High-Contrast (Charcoal & Indigo)</option>
-            </select>
-            <p className="text-[10px] text-muted">
-              Choose visual color branding theme for attached PDF report documents.
-            </p>
-          </div>
-
-          <div className="space-y-2 md:col-span-2 p-3 rounded-lg border border-border bg-bg2">
-            <label htmlFor="selectedPeriodType" className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">
-              Manual Report Generation Period
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-              <div>
-                <select
-                  id="selectedPeriodType"
-                  className="premium-input w-full bg-bg border border-border text-text font-medium text-xs"
-                  value={selectedPeriodType}
-                  onChange={(e) => setSelectedPeriodType(e.target.value as any)}
-                >
-                  <option value="monthly">📅 Monthly Report (Previous Month)</option>
-                  <option value="midmonth">🗓️ Mid-Month Report (1st - 15th)</option>
-                  <option value="quarterly">📊 Quarterly Report (Q1 / Q2 / Q3 / Q4)</option>
-                  <option value="yearly">📈 Yearly Annual Report</option>
-                  <option value="custom">⚙️ Custom Date Range</option>
-                </select>
-              </div>
-
-              {selectedPeriodType === 'custom' && (
-                <>
-                  <div>
-                    <label htmlFor="customStartDate" className="text-[10px] text-muted block mb-0.5">Start Date</label>
-                    <input
-                      id="customStartDate"
-                      type="date"
-                      className="premium-input w-full bg-bg text-xs border border-border"
-                      value={toDateInputValue(customStartDate)}
-                      onChange={(e) => setCustomStartDate(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="customEndDate" className="text-[10px] text-muted block mb-0.5">End Date</label>
-                    <input
-                      id="customEndDate"
-                      type="date"
-                      className="premium-input w-full bg-bg text-xs border border-border"
-                      value={toDateInputValue(customEndDate)}
-                      onChange={(e) => setCustomEndDate(e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handlePreviewReport()}
-              disabled={isPreviewLoading}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Eye size={14} className="text-blue-400" />
-              {isPreviewLoading ? 'Loading Preview...' : 'Preview Report Text & Graph'}
-            </button>
-            <button
-              onClick={() => handleDownloadSamplePdf()}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Download size={14} className="text-emerald-400" />
-              Download PDF Report
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleSendAllTemplateSamples}
-              disabled={isSendingSamples}
-              className="px-3 py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Send size={14} className="text-purple-400" />
-              {isSendingSamples ? 'Sending Samples...' : 'Send All 3 PDF Styles to Owner'}
-            </button>
-            <button
-              onClick={() => handleSendReportNow()}
-              disabled={sendingReportType !== null}
-              className="premium-btn bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
-            >
-              <Send size={14} />
-              {sendingReportType !== null ? 'Sending...' : 'Send Selected Report to Owner WhatsApp'}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-6 pt-4 border-t border-border flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handlePreviewReport('monthly')}
-              disabled={isPreviewLoading}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Eye size={14} className="text-blue-400" />
-              {isPreviewLoading ? 'Loading Preview...' : 'Preview 1st Month Report'}
-            </button>
-            <button
-              onClick={() => handlePreviewReport('midmonth')}
-              disabled={isPreviewLoading}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Eye size={14} className="text-amber-400" />
-              {isPreviewLoading ? 'Loading Preview...' : 'Preview 15th Mid-Month Report'}
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleSendReportNow('monthly')}
-              disabled={sendingReportType === 'monthly'}
-              className="premium-btn bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
-            >
-              <Send size={14} />
-              {sendingReportType === 'monthly' ? 'Sending...' : 'Send 1st Month Report Now'}
-            </button>
-            <button
-              onClick={() => handleSendReportNow('midmonth')}
-              disabled={sendingReportType === 'midmonth'}
-              className="premium-btn bg-blue-600 text-white hover:bg-blue-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
-            >
-              <Send size={14} />
-              {sendingReportType === 'midmonth' ? 'Sending...' : 'Send 15th Mid-Month Report Now'}
-            </button>
-          </div>
-        </div>
-
-        {/* Quarterly & Yearly Quick Triggers */}
-        <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handlePreviewReport('quarterly')}
-              disabled={isPreviewLoading}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Eye size={14} className="text-purple-400" />
-              {isPreviewLoading ? 'Loading...' : 'Preview Quarterly Report'}
-            </button>
-            <button
-              onClick={() => handlePreviewReport('yearly')}
-              disabled={isPreviewLoading}
-              className="px-3 py-1.5 rounded-lg border border-border bg-bg2 text-text hover:bg-bg3 text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <Eye size={14} className="text-sky-400" />
-              {isPreviewLoading ? 'Loading...' : 'Preview Yearly Annual Report'}
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleSendReportNow('quarterly')}
-              disabled={sendingReportType === 'quarterly'}
-              className="premium-btn bg-purple-600 text-white hover:bg-purple-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
-            >
-              <Send size={14} />
-              {sendingReportType === 'quarterly' ? 'Sending...' : 'Send Quarterly Report Now'}
-            </button>
-            <button
-              onClick={() => handleSendReportNow('yearly')}
-              disabled={sendingReportType === 'yearly'}
-              className="premium-btn bg-sky-600 text-white hover:bg-sky-700 text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-sm"
-            >
-              <Send size={14} />
-              {sendingReportType === 'yearly' ? 'Sending...' : 'Send Yearly Annual Report Now'}
-            </button>
-          </div>
-        </div>
-
-        {/* Live Report & Graph Preview Modal / Card */}
-        {reportPreview && (
-          <div className="mt-4 p-4 rounded-xl bg-bg border border-emerald-500/30 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                <FileText size={14} />
-                WhatsApp Message & Graph Preview — {reportPreview.periodLabel}
-              </span>
-              <button
-                onClick={() => setReportPreview(null)}
-                className="text-xs text-muted hover:text-text px-2 py-0.5 rounded border border-border"
-              >
-                Close Preview
-              </button>
-            </div>
-            <p className="text-[11px] text-muted">
-              Target Phone: <span className="font-mono text-text">{reportPreview.targetPhone || 'None set (will use saved default)'}</span>
-            </p>
-            <pre className="p-3 rounded-lg bg-bg2 border border-border text-xs font-mono text-text overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
-              {reportPreview.formattedText}
-            </pre>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Admin Remote Operations Mode ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Shield size={18} className="text-amber-500" />
-          Admin Remote Operations Mode
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-          <div className="space-y-2 flex items-end">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={adminRemoteMode}
-                  onChange={(e) => setAdminRemoteMode(e.target.checked)}
-                  aria-label="Enable Admin Remote Operations Mode"
-                />
-                <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-              </div>
-              <span className="text-sm font-semibold group-hover:text-white transition-colors">
-                Enable Admin Remote Operations Mode
-              </span>
-            </label>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="adminUniqueKey" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Secure Admin Key (Mobile Scanner / Setup)
-            </label>
-            <input
-              id="adminUniqueKey"
-              type="text"
-              readOnly
-              className="premium-input w-full bg-zinc-800/40 text-muted font-mono cursor-not-allowed"
-              value={adminUniqueKey}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="adminUsername" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Admin Remote Username
-            </label>
-            <input
-              id="adminUsername"
-              type="text"
-              autoComplete="off"
-              className="premium-input w-full"
-              placeholder="admin"
-              value={adminUsername}
-              onChange={(e) => setAdminUsername(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="adminPassword" className="text-xs font-bold text-muted uppercase tracking-wider">
-              Admin Remote Password
-            </label>
-            <input
-              id="adminPassword"
-              type="password"
-              autoComplete="new-password"
-              className="premium-input w-full"
-              placeholder="••••••••"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2 md:col-span-2 border border-glass-border/40 p-4 rounded-lg bg-zinc-900/20">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider block">
-                Registered Mobile Device
-              </label>
-            </div>
-            {adminAuthorizedDeviceId ? (
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-semibold block text-zinc-100">
-                    {adminAuthorizedDeviceName}
-                  </span>
-                  <span className="text-xs text-muted font-mono block mt-1">
-                    ID: {adminAuthorizedDeviceId}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleResetAdminDevice}
-                  className="premium-btn bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 flex items-center gap-1.5"
-                >
-                  <Trash2 size={13} />
-                  Reset Authorization
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-semibold block text-zinc-100">
-                    No device registered yet.
-                  </span>
-                  <span className="text-xs text-muted">
-                    Scan connection QR code to establish link.
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowConnectModal(true)}
-                  className="premium-btn bg-primary text-white text-xs px-4 py-2 flex items-center gap-2"
-                >
-                  <QrCode size={14} />
-                  One-Click QR Connect
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button 
-            onClick={handleSaveSettings}
-            disabled={!settingsHydrated || loadingSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Save size={16} />
-            {loadingSettings ? 'Loading…' : 'Save Admin Settings'}
-          </button>
-        </div>
-      </div>
-
-      {/* ─── Data Fetch Control ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Zap size={18} className="text-sky" />
-          Data Fetch Control
-        </h3>
-        <p className="text-xs text-muted mb-6 leading-relaxed">
-          Configure API requests and background processes. <strong>Auto</strong> enables normal loading; <strong>Manual</strong> defers loading until you click a "Load" button; <strong>Off</strong> completely disables the fetch.
-        </p>
-
-        <div className="space-y-6">
-          {Object.entries(getRegistryByPage()).map(([page, entries]) => (
-            <div key={page} className="border-b border-glass-border/20 pb-4 last:border-b-0 last:pb-0">
-              <h4 className="text-xs font-bold text-sky uppercase tracking-wider mb-3">
-                {page} Page / Component
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {entries.map(entry => {
-                  let currentModes: Record<string, FetchMode> = {};
-                  try {
-                    currentModes = JSON.parse(settings.dataFetchControl || '{}');
-                  } catch (e) {}
-                  const mode = currentModes[entry.key] || entry.defaultMode;
-
-                  return (
-                    <div key={entry.key} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-zinc-900/10 border border-glass-border/30 gap-3">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-semibold text-text block">
-                          {entry.label}
-                        </span>
-                        {entry.callSite && (
-                          <span className="text-[10px] text-muted font-mono block">
-                            Key: {entry.key}
-                          </span>
-                        )}
-                      </div>
-                      
-                      <div className="flex bg-bg2 p-1 rounded-xl border border-glass-border/40 gap-1 shrink-0 w-full sm:w-auto">
-                        {(['auto', 'manual', 'off'] as FetchMode[]).map(m => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => handleDataFetchModeChange(entry.key, m)}
-                            className={`flex-1 sm:flex-none py-1.5 px-3 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${
-                              mode === m
-                                ? 'bg-primary text-white shadow-[0_2px_8px_rgba(59,130,246,0.3)]'
-                                : 'text-muted hover:text-text'
-                            }`}
-                          >
-                            {m}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ─── Backup & Restore ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Shield size={18} className="text-primary" />
-          Backup & Restore
-        </h3>
-        <BackupCenterContent isInline={true} />
-      </div>
-
-      {/* ─── System ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <HardDrive size={18} className="text-green" />
-          System
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
-          <button 
-            onClick={handleClearCache}
-            disabled={clearCacheLoading}
-            className="premium-btn bg-red text-white shadow-[0_4px_14px_rgba(239,68,68,0.4)] hover:bg-red-600 flex items-center gap-2 w-full justify-center disabled:opacity-50"
-          >
-            {clearCacheLoading ? (
-              <RefreshCw size={16} className="animate-spin" />
-            ) : (
-              <Trash2 size={16} />
-            )}
-            {clearCacheLoading ? 'Clearing Cache...' : 'Clear Cache'}
-          </button>
-
-          <button
-            onClick={() => { setResetConfirm(true); setResetConfirmText(''); }}
-            className="premium-btn bg-amber-600 text-white shadow-[0_4px_14px_rgba(245,158,11,0.4)] hover:bg-amber-700 flex items-center gap-2 w-full justify-center"
-          >
-            <Trash2 size={16} />
-            Reset All Stored Data
-          </button>
-
-          <div className="glass-panel p-4 flex items-center justify-between bg-bg3/30 border border-glass-border">
-            <span className="text-xs font-bold text-muted uppercase tracking-wider">App Version</span>
-            <span className="text-sm font-semibold text-sky">v2.0.0</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ─── Storage Locations ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-1">
-          <MapPin size={18} className="text-sky" />
-          Storage Locations
-        </h3>
-        <p className="text-xs text-muted mb-5">Define where medicines are stored — racks, godowns, cold storage, etc. Used across Inventory, Purchases, and POS.</p>
-
-        {/* Add / Edit Form */}
-        <div className="border border-glass-border/50 rounded-xl p-4 mb-5 bg-bg3/20">
-          <p className="text-xs font-bold text-muted uppercase tracking-wider mb-3">
-            {editingLocId !== null ? '✏️ Edit Location' : '➕ Add New Location'}
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">Name *</label>
-              <input
-                id="locName"
-                type="text"
-                className="premium-input w-full"
-                placeholder="e.g. Rack A1"
-                value={storageLocForm.name}
-                onChange={(e) => setStorageLocForm(f => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">Short Code</label>
-              <input
-                id="locCode"
-                type="text"
-                className="premium-input w-full font-mono uppercase"
-                placeholder="e.g. RA1"
-                value={storageLocForm.code}
-                onChange={(e) => setStorageLocForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">Type</label>
-              <select
-                id="locType"
-                className="premium-input w-full"
-                value={storageLocForm.type}
-                onChange={(e) => setStorageLocForm(f => ({ ...f, type: e.target.value }))}
-              >
-                <option value="rack">Rack</option>
-                <option value="main_store">Main Store</option>
-                <option value="godown">Godown</option>
-                <option value="cold_storage">Cold Storage</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <div className="md:col-span-2 space-y-1">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">Description</label>
-              <input
-                id="locDescription"
-                type="text"
-                className="premium-input w-full"
-                placeholder="Optional description"
-                value={storageLocForm.description}
-                onChange={(e) => setStorageLocForm(f => ({ ...f, description: e.target.value }))}
-              />
-            </div>
-            <div className="flex items-end gap-4">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="accent-sky w-4 h-4"
-                  checked={storageLocForm.is_default}
-                  onChange={(e) => setStorageLocForm(f => ({ ...f, is_default: e.target.checked }))}
-                />
-                <span className="text-xs font-bold text-muted">Default</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="accent-green w-4 h-4"
-                  checked={storageLocForm.is_active}
-                  onChange={(e) => setStorageLocForm(f => ({ ...f, is_active: e.target.checked }))}
-                />
-                <span className="text-xs font-bold text-muted">Active</span>
-              </label>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              id="saveStorageLocBtn"
-              onClick={handleSaveStorageLoc}
-              disabled={storageLocSaving}
-              className="premium-btn bg-sky text-white flex items-center gap-2 disabled:opacity-50"
-            >
-              {storageLocSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-              {editingLocId !== null ? 'Update Location' : 'Add Location'}
-            </button>
-            {editingLocId !== null && (
-              <button
-                onClick={() => { setEditingLocId(null); setStorageLocForm({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true }); }}
-                className="premium-btn bg-bg3/60 text-muted hover:text-text hover:bg-bg3"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Locations List */}
-        {storageLocLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted py-6 justify-center">
-            <RefreshCw size={16} className="animate-spin" /> Loading locations...
-          </div>
-        ) : storageLocations.length === 0 ? (
-          <div className="text-center py-8 text-muted">
-            <MapPin size={28} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No storage locations defined yet.</p>
-          </div>
-        ) : (
-          <div className="border border-glass-border/40 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-bg2/60 border-b border-glass-border/30">
-                <tr className="text-xs text-muted uppercase tracking-wider">
-                  <th className="text-left px-4 py-2.5 font-bold">Name</th>
-                  <th className="text-left px-4 py-2.5 font-bold">Code</th>
-                  <th className="text-left px-4 py-2.5 font-bold">Type</th>
-                  <th className="text-left px-4 py-2.5 font-bold">Description</th>
-                  <th className="text-center px-4 py-2.5 font-bold">Status</th>
-                  <th className="text-right px-4 py-2.5 font-bold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {storageLocations.map((loc) => (
-                  <tr key={loc.id} className="border-t border-glass-border/20 hover:bg-bg3/20 transition-colors">
-                    <td className="px-4 py-3 font-semibold">
-                      {loc.name}
-                      {loc.is_default === 1 && (
-                        <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 bg-sky/15 text-sky rounded">DEFAULT</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted">{loc.code}</td>
-                    <td className="px-4 py-3 text-xs">{LOC_TYPE_LABELS[loc.type] || loc.type}</td>
-                    <td className="px-4 py-3 text-xs text-muted max-w-[200px] truncate" title={loc.description}>{loc.description || '—'}</td>
-                    <td className="px-4 py-3 text-center">
-                      {loc.is_active === 1 ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green/15 text-green">
-                          <CheckCircle2 size={10} /> Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-bg3/60 text-muted">
-                          Inactive
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => startEditLoc(loc)}
-                          className="text-[10px] font-bold bg-sky/10 text-sky px-2.5 py-1 rounded-full hover:bg-sky/20 transition-all flex items-center gap-1"
-                          title="Edit"
-                        >
-                          <Pencil size={10} /> Edit
-                        </button>
-                        {loc.is_default !== 1 && (
-                          <button
-                            onClick={() => handleDeleteStorageLoc(loc.id)}
-                            disabled={deletingLocId === loc.id}
-                            className="text-[10px] font-bold bg-red/10 text-red/70 px-2.5 py-1 rounded-full hover:bg-red/20 hover:text-red transition-all flex items-center gap-1 disabled:opacity-50"
-                            title="Delete"
-                          >
-                            {deletingLocId === loc.id ? <RefreshCw size={10} className="animate-spin" /> : <Trash2 size={10} />} Del
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ─── Factory Reset Confirmation Modal ─── */}
-      {resetConfirm && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
-          <div className="glass-panel w-full max-w-lg p-8 flex flex-col gap-5 border border-red-500/50 shadow-[0_0_80px_rgba(239,68,68,0.35)]">
-
-            {/* Icon + Title */}
-            <div className="flex flex-col items-center gap-3 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-center animate-pulse">
-                <AlertTriangle size={32} className="text-red-400" />
-              </div>
-              <h2 className="text-xl font-black text-text tracking-tight">⚠️ Permanent Factory Reset</h2>
-              <p className="text-sm text-muted leading-relaxed">
-                This will <strong className="text-red-400">permanently and irreversibly delete</strong> every record
-                in this pharmacy system. The app will restart as a fresh installation.
-              </p>
-            </div>
-
-            {/* Live data counts of what will be deleted */}
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-3">The following data will be permanently erased:</p>
-              {resetDataCounts === null ? (
-                <div className="flex items-center gap-2 text-xs text-muted">
-                  <RefreshCw size={12} className="animate-spin" />
-                  Calculating records...
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: 'Medicines', count: resetDataCounts.medicines, icon: '💊' },
-                    { label: 'Inventory Batches', count: resetDataCounts.inventory, icon: '📦' },
-                    { label: 'Bills / Sales', count: resetDataCounts.bills, icon: '🧾' },
-                    { label: 'Purchases', count: resetDataCounts.purchases, icon: '🛒' },
-                    { label: 'Customers', count: resetDataCounts.customers, icon: '👤' },
-                  ].map(({ label, count, icon }) => (
-                    <div key={label} className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                      <span className="text-xs text-muted">{icon} {label}</span>
-                      <span className="text-sm font-black text-red-400 tabular-nums">{count.toLocaleString()}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="text-[10px] text-red-400/70 font-semibold uppercase tracking-wider mt-3 text-center">
-                🔒 This action CANNOT be undone. No recovery is possible.
-              </p>
-            </div>
-
-            {/* Typed confirmation */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-muted uppercase tracking-wider">
-                Type <span className="text-red-400 font-black">RESET</span> to confirm permanent deletion
-              </label>
-              <input
-                id="resetConfirmInput"
-                type="text"
-                className="premium-input w-full text-center font-mono font-bold tracking-widest text-red-400"
-                placeholder="RESET"
-                value={resetConfirmText}
-                onChange={(e) => setResetConfirmText(e.target.value.toUpperCase())}
-                autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter') handleResetData(); }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setResetConfirm(false); setResetConfirmText(''); setResetDataCounts(null); }}
-                disabled={resetLoading}
-                className="premium-btn bg-bg3/60 text-muted hover:text-text hover:bg-bg3 flex-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleResetData}
-                disabled={resetLoading || resetConfirmText.trim().toUpperCase() !== 'RESET'}
-                className="premium-btn flex-1 flex items-center justify-center gap-2 text-white transition-all"
-                style={{
-                  background: resetConfirmText.trim().toUpperCase() === 'RESET' ? 'rgb(185,28,28)' : 'rgba(120,20,20,0.4)',
-                  cursor: resetConfirmText.trim().toUpperCase() === 'RESET' ? 'pointer' : 'not-allowed',
-                  opacity: resetConfirmText.trim().toUpperCase() === 'RESET' ? 1 : 0.5,
-                }}
-              >
-                {resetLoading ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                {resetLoading ? 'Erasing Everything...' : 'Erase Everything Now'}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {showConnectModal && <MobileConnectionModal onClose={() => setShowConnectModal(false)} />}
     </div>
   );
-};
+}
 
-export default Settings;
+// ==========================================
+// SUB-TAB 2: STAFF & SECURITY
+// ==========================================
+
+function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Record<string, string>; refetchSettings: () => void }) {
+  const [adminUsername, setAdminUsername] = useState(rawSettings.admin_username || 'admin');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [adminRemoteMode, setAdminRemoteMode] = useState(rawSettings.admin_remote_mode !== 'false');
+  const [saving, setSaving] = useState(false);
+
+  const { data: devicesList = [] } = useApiQuery<RegisteredDevice[]>(
+    'registered-devices',
+    () => apiClient.get('/settings/registered-devices').then((res) => res.data.devices || []),
+    { staleTime: 15000 }
+  );
+
+  const handleSaveSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload: Record<string, string> = {
+        admin_username: adminUsername,
+        admin_remote_mode: adminRemoteMode ? 'true' : 'false',
+      };
+      if (newAdminPassword.trim()) {
+        payload.admin_password = newAdminPassword.trim();
+      }
+
+      await apiClient.post('/settings/save', payload);
+      toastEvent.trigger('Security parameters updated successfully', 'success');
+      setNewAdminPassword('');
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to save security settings: ' + err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={handleSaveSecurity} className="space-y-6">
+        <div className="space-y-4">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+            <Shield size={16} /> Store Administration & Credentials
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Admin Account Username</label>
+              <input
+                type="text"
+                value={adminUsername}
+                onChange={(e) => setAdminUsername(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Change Admin Password (leave blank to keep existing)</label>
+              <input
+                type="password"
+                placeholder="Enter new strong password"
+                value={newAdminPassword}
+                onChange={(e) => setNewAdminPassword(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <input
+              type="checkbox"
+              id="adminRemote"
+              checked={adminRemoteMode}
+              onChange={(e) => setAdminRemoteMode(e.target.checked)}
+              className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+            />
+            <label htmlFor="adminRemote" className="text-xs font-semibold text-text cursor-pointer">
+              Enable Remote Administrative Master Control Access
+            </label>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm"
+          >
+            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            <span>Update Security Credentials</span>
+          </button>
+        </div>
+      </form>
+
+      {/* Registered Mobile & Desktop Devices */}
+      <div className="space-y-4 pt-4 border-t border-border">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Smartphone size={16} /> Authorized Registered Mobile & Desktop Terminals
+        </h2>
+
+        <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted">
+                <th className="py-2.5 px-3">Device Name</th>
+                <th className="py-2.5 px-3">OS Platform</th>
+                <th className="py-2.5 px-3">Push Token</th>
+                <th className="py-2.5 px-3">Last Active</th>
+                <th className="py-2.5 px-3 text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {devicesList.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-4 text-center text-muted italic">No registered mobile device terminals found.</td>
+                </tr>
+              ) : (
+                devicesList.map((dev) => (
+                  <tr key={dev.token} className="hover:bg-bg3/50">
+                    <td className="py-2.5 px-3 font-semibold text-text">{dev.device_name || 'Unnamed Terminal'}</td>
+                    <td className="py-2.5 px-3 text-muted">{dev.os}</td>
+                    <td className="py-2.5 px-3 font-mono text-[10px] text-muted truncate max-w-[150px]">{dev.token}</td>
+                    <td className="py-2.5 px-3 text-muted">{new Date(dev.last_seen).toLocaleTimeString()}</td>
+                    <td className="py-2.5 px-3 text-right">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        dev.is_online ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-muted/20 text-muted'
+                      }`}>
+                        {dev.is_online ? 'CONNECTED' : 'OFFLINE'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// SUB-TAB 3: INTEGRATIONS & CREDENTIALS
+// ==========================================
+
+function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }: { rawSettings: Record<string, string>; refetchSettings: () => void; isVisible: boolean }) {
+  const [waPreferredSystem, setWaPreferredSystem] = useState(rawSettings.whatsapp_preferred_system || 'web');
+  const [waBusinessToken, setWaBusinessToken] = useState(rawSettings.wa_business_access_token || '');
+  const [waBusinessPhoneId, setWaBusinessPhoneId] = useState(rawSettings.wa_business_phone_number_id || '');
+  
+  const [telegramEnabled, setTelegramEnabled] = useState(rawSettings.telegram_enabled === 'true');
+  const [telegramToken, setTelegramToken] = useState(rawSettings.telegram_token || '');
+  const [telegramChatId, setTelegramChatId] = useState(rawSettings.telegram_chat_id || '');
+
+  const [gmailUser, setGmailUser] = useState(rawSettings.gmail_user || '');
+  const [gmailPass, setGmailPass] = useState(rawSettings.gmail_pass || '');
+
+  const [pharmarackUser, setPharmarackUser] = useState(rawSettings.pharmarack_username || '');
+  const [pharmarackPass, setPharmarackPass] = useState(rawSettings.pharmarack_password || '');
+  const [pharmarackRefreshing, setPharmarackRefreshing] = useState(false);
+
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+
+  // WhatsApp Web QR & Status polling
+  const [waStatus, setWaStatus] = useState<{ status: string; qr?: string }>({ status: 'UNKNOWN' });
+  const fetchWaStatus = useCallback(async () => {
+    if (!isVisible) return;
+    try {
+      const res = await apiClient.get('/whatsapp/status');
+      setWaStatus(res.data || { status: 'UNKNOWN' });
+    } catch (_) {}
+  }, [isVisible]);
+
+  useEffect(() => {
+    fetchWaStatus();
+    const interval = setInterval(fetchWaStatus, 5000);
+    return () => clearInterval(interval);
+  }, [fetchWaStatus]);
+
+  // Telegram status poll
+  const { data: telegramStatus } = useApiQuery<{ isReady: boolean }>(
+    'telegram-status',
+    () => apiClient.get('/settings/telegram-status').then(res => res.data),
+    { enabled: isVisible && telegramEnabled, refetchInterval: 10000 }
+  );
+
+  const handleSaveIntegrations = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload: Record<string, string> = {
+        whatsapp_preferred_system: waPreferredSystem,
+        wa_business_access_token: waBusinessToken,
+        wa_business_phone_number_id: waBusinessPhoneId,
+        telegram_enabled: telegramEnabled ? 'true' : 'false',
+        telegram_token: telegramToken,
+        telegram_chat_id: telegramChatId,
+        gmail_user: gmailUser,
+        gmail_pass: gmailPass,
+        pharmarack_username: pharmarackUser,
+        pharmarack_password: pharmarackPass,
+        pharmarack_mode: 'Live'
+      };
+
+      await apiClient.post('/settings/save', payload);
+      toastEvent.trigger('Integrations & API credentials saved successfully', 'success');
+      updateSettingsCache(queryClient, payload);
+      broadcastContactDataChanged(queryClient);
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to save integration settings: ' + err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTriggerPharmarackRefresh = async () => {
+    setPharmarackRefreshing(true);
+    try {
+      const res = await apiClient.post('/pharmarack/login');
+      if (res.data?.success) {
+        toastEvent.trigger('Pharmarack live B2B session refreshed successfully', 'success');
+      } else {
+        toastEvent.trigger('Pharmarack refresh completed: ' + (res.data?.message || 'Check logs'), 'info');
+      }
+    } catch (err: any) {
+      toastEvent.trigger('Pharmarack session refresh error: ' + err.message, 'error');
+    } finally {
+      setPharmarackRefreshing(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSaveIntegrations} className="space-y-6">
+      {/* WhatsApp Section */}
+      <div className="space-y-4">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <MessageCircle size={16} /> WhatsApp Messaging Infrastructure
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-bg3/30 border border-border rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-bold text-text uppercase">WhatsApp Automated System</h3>
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Preferred Integration System</label>
+              <select
+                value={waPreferredSystem}
+                onChange={(e) => setWaPreferredSystem(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              >
+                <option value="web">Automated WhatsApp Web (Headless Chrome QR)</option>
+                <option value="business">Official WhatsApp Business Cloud API</option>
+              </select>
+            </div>
+
+            {waPreferredSystem === 'web' && (
+              <div className="p-3 bg-bg rounded-xl border border-border space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-text">Web Status:</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    waStatus.status === 'READY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                  }`}>
+                    {waStatus.status}
+                  </span>
+                </div>
+                {waStatus.qr && (
+                  <div className="flex flex-col items-center py-2 bg-white rounded-lg">
+                    <img src={waStatus.qr} alt="WhatsApp Web QR Code" className="w-32 h-32" />
+                    <span className="text-[10px] text-gray-700 font-semibold mt-1">Scan with WhatsApp on phone</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-bg3/30 border border-border rounded-xl p-4 space-y-3">
+            <h3 className="text-xs font-bold text-text uppercase">Meta WhatsApp Business API Keys</h3>
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Phone Number ID</label>
+              <input
+                type="text"
+                value={waBusinessPhoneId}
+                onChange={(e) => setWaBusinessPhoneId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="Meta Phone Number ID"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">System User Access Token</label>
+              <input
+                type="password"
+                value={waBusinessToken}
+                onChange={(e) => setWaBusinessToken(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                placeholder="Permanent Bearer Token"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Telegram Bot */}
+      <div className="space-y-4 pt-2">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Send size={16} /> Telegram Alert Bot & Prescription Receiver
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex items-center gap-3 md:col-span-3">
+            <input
+              type="checkbox"
+              id="tgEnabled"
+              checked={telegramEnabled}
+              onChange={(e) => setTelegramEnabled(e.target.checked)}
+              className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+            />
+            <label htmlFor="tgEnabled" className="text-xs font-bold text-text cursor-pointer">
+              Enable Automated Telegram Bot Notifications & Photo Ingestion
+            </label>
+            {telegramEnabled && (
+              <span className={`ml-auto px-2.5 py-1 rounded text-[10px] font-bold ${
+                telegramStatus?.isReady ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400'
+              }`}>
+                {telegramStatus?.isReady ? 'BOT ONLINE & LISTENING' : 'BOT DISCONNECTED'}
+              </span>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">Telegram Bot Token</label>
+            <input
+              type="password"
+              value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">Target Chat / Channel ID</label>
+            <input
+              type="text"
+              value={telegramChatId}
+              onChange={(e) => setTelegramChatId(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="-100123456789"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Gmail / Email */}
+      <div className="space-y-4 pt-2">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Mail size={16} /> Gmail / IMAP Mail Order Scanner Credentials
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">IMAP Gmail Account Address</label>
+            <input
+              type="email"
+              value={gmailUser}
+              onChange={(e) => setGmailUser(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="store.distributor.invoices@gmail.com"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">Google App Password (16-character secret)</label>
+            <input
+              type="password"
+              value={gmailPass}
+              onChange={(e) => setGmailPass(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="abcd efgh ijkl mnop"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Pharmarack B2B */}
+      <div className="space-y-4 pt-2">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Zap size={16} /> Pharmarack B2B Live Ordering Credentials
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">Pharmarack Login Username / Phone</label>
+            <input
+              type="text"
+              value={pharmarackUser}
+              onChange={(e) => setPharmarackUser(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-text mb-1">Pharmarack Login Password</label>
+            <input
+              type="password"
+              value={pharmarackPass}
+              onChange={(e) => setPharmarackPass(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+            />
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={handleTriggerPharmarackRefresh}
+              disabled={pharmarackRefreshing}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-bg3 border border-border text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+            >
+              <RefreshCw size={14} className={pharmarackRefreshing ? 'animate-spin' : ''} />
+              <span>Refresh B2B Session</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-4">
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm"
+        >
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          <span>Save Integrations & Credentials</span>
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ==========================================
+// SUB-TAB 4: AI LEARNING & OCR
+// ==========================================
+
+function AiLearningOcrTab({ isVisible }: { isVisible: boolean }) {
+  const [retraining, setRetraining] = useState(false);
+
+  // Retrain Stats
+  const { data: stats, refetch: refetchStats } = useApiQuery<{ activeOcrCorrections: number; learnedRxCombos: number; lastRetrainedAt: string | null }>(
+    'learning-stats',
+    () => apiClient.get('/learning/stats').then(res => res.data),
+    { enabled: isVisible }
+  );
+
+  // OCR Corrections
+  const { data: corrections = [], refetch: refetchCorrections } = useApiQuery<OcrCorrection[]>(
+    'ocr-corrections',
+    () => apiClient.get('/learning/corrections').then(res => res.data || []),
+    { enabled: isVisible }
+  );
+
+  // Doctors
+  const { data: doctors = [], refetch: refetchDoctors } = useApiQuery<Doctor[]>(
+    'crm-doctors',
+    () => apiClient.get('/crm/doctors').then(res => res.data || []),
+    { enabled: isVisible }
+  );
+
+  // Forms
+  const [newCorrectionRaw, setNewCorrectionRaw] = useState('');
+  const [newCorrectionMapped, setNewCorrectionMapped] = useState('');
+
+  const [docName, setDocName] = useState('');
+  const [docReg, setDocReg] = useState('');
+  const [docPhone, setDocPhone] = useState('');
+
+  const handleTriggerRetrain = async () => {
+    setRetraining(true);
+    try {
+      await apiClient.post('/learning/retrain');
+      toastEvent.trigger('Clinical AI model retraining triggered successfully', 'success');
+      refetchStats();
+    } catch (err: any) {
+      toastEvent.trigger('Retraining failed: ' + err.message, 'error');
+    } finally {
+      setRetraining(false);
+    }
+  };
+
+  const handleAddCorrection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCorrectionRaw.trim() || !newCorrectionMapped.trim()) return;
+    try {
+      await apiClient.post('/learning/corrections', { raw_text: newCorrectionRaw, corrected_name: newCorrectionMapped });
+      toastEvent.trigger('OCR correction rule added', 'success');
+      setNewCorrectionRaw('');
+      setNewCorrectionMapped('');
+      refetchCorrections();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to add OCR rule: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteCorrection = async (id: number) => {
+    try {
+      await apiClient.delete(`/learning/corrections/${id}`);
+      toastEvent.trigger('Correction rule deleted', 'success');
+      refetchCorrections();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to delete rule', 'error');
+    }
+  };
+
+  const handleAddDoctor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!docName.trim()) return;
+    try {
+      await apiClient.post('/crm/doctors', { name: docName, reg_number: docReg, phone: docPhone });
+      toastEvent.trigger('Doctor added to registry', 'success');
+      setDocName('');
+      setDocReg('');
+      setDocPhone('');
+      refetchDoctors();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to add doctor: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteDoctor = async (id: number) => {
+    try {
+      await apiClient.delete(`/crm/doctors/${id}`);
+      toastEvent.trigger('Doctor removed', 'success');
+      refetchDoctors();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to delete doctor', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Retrain Stats Card */}
+      <div className="bg-bg3/30 border border-border rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-bold text-text flex items-center gap-2">
+            <Brain size={16} className="text-primary" /> Self-Learning Clinical Model Audit
+          </h2>
+          <p className="text-xs text-muted mt-1">
+            Active OCR Rules: <span className="font-bold text-text">{stats?.activeOcrCorrections ?? corrections.length}</span> | 
+            Learned RX Combos: <span className="font-bold text-text">{stats?.learnedRxCombos ?? 0}</span> | 
+            Last Retrained: <span className="font-bold text-text">{stats?.lastRetrainedAt ? new Date(stats.lastRetrainedAt).toLocaleDateString() : 'Never'}</span>
+          </p>
+        </div>
+        <button
+          onClick={handleTriggerRetrain}
+          disabled={retraining}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shrink-0"
+        >
+          <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
+          <span>Retrain Clinical Model Now</span>
+        </button>
+      </div>
+
+      {/* OCR Corrections Grid */}
+      <div className="space-y-3">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-primary border-b border-border pb-1">
+          OCR Text Name Corrections Registry
+        </h3>
+
+        <form onSubmit={handleAddCorrection} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input
+            type="text"
+            placeholder="Raw Misread OCR Text (e.g. D0L0 650)"
+            value={newCorrectionRaw}
+            onChange={(e) => setNewCorrectionRaw(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          />
+          <input
+            type="text"
+            placeholder="Correct Standard Medicine Name (e.g. DOLO 650MG)"
+            value={newCorrectionMapped}
+            onChange={(e) => setNewCorrectionMapped(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
+          >
+            <Plus size={14} /> Add OCR Rule
+          </button>
+        </form>
+
+        <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl max-h-48 scrollbar-thin">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted">
+                <th className="py-2 px-3">Scanned Raw OCR Text</th>
+                <th className="py-2 px-3">Mapped Standard Name</th>
+                <th className="py-2 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {corrections.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="py-3 text-center text-muted italic">No custom OCR correction rules stored.</td>
+                </tr>
+              ) : (
+                corrections.map((rule) => (
+                  <tr key={rule.id} className="hover:bg-bg3/50">
+                    <td className="py-1.5 px-3 font-mono text-muted">{rule.raw_text}</td>
+                    <td className="py-1.5 px-3 font-semibold text-text">{rule.corrected_name}</td>
+                    <td className="py-1.5 px-3 text-right">
+                      <button onClick={() => handleDeleteCorrection(rule.id)} className="text-red-500 hover:underline text-[11px] cursor-pointer">
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Doctor Directory */}
+      <div className="space-y-3 pt-2">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-primary border-b border-border pb-1">
+          Registered Prescribing Doctors Directory
+        </h3>
+
+        <form onSubmit={handleAddDoctor} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            type="text"
+            placeholder="Doctor Full Name *"
+            value={docName}
+            onChange={(e) => setDocName(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          />
+          <input
+            type="text"
+            placeholder="Medical Reg Number"
+            value={docReg}
+            onChange={(e) => setDocReg(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          />
+          <input
+            type="text"
+            placeholder="Contact Phone"
+            value={docPhone}
+            onChange={(e) => setDocPhone(sanitizePhoneInput(e.target.value))}
+            className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
+          >
+            <Plus size={14} /> Register Doctor
+          </button>
+        </form>
+
+        <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl max-h-48 scrollbar-thin">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-border text-muted">
+                <th className="py-2 px-3">Doctor Name</th>
+                <th className="py-2 px-3">Reg. Number</th>
+                <th className="py-2 px-3">Phone</th>
+                <th className="py-2 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {doctors.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-3 text-center text-muted italic">No doctors registered in system.</td>
+                </tr>
+              ) : (
+                doctors.map((doc) => (
+                  <tr key={doc.id} className="hover:bg-bg3/50">
+                    <td className="py-1.5 px-3 font-semibold text-text">{doc.name}</td>
+                    <td className="py-1.5 px-3 text-muted font-mono">{doc.reg_number || 'N/A'}</td>
+                    <td className="py-1.5 px-3 text-muted">{doc.phone || 'N/A'}</td>
+                    <td className="py-1.5 px-3 text-right">
+                      <button onClick={() => handleDeleteDoctor(doc.id)} className="text-red-500 hover:underline text-[11px] cursor-pointer">
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// SUB-TAB 5: DATA & BACKUPS
+// ==========================================
+
+function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<string, string>; refetchSettings: () => void }) {
+  const [backupFrequency, setBackupFrequency] = useState(rawSettings.backup_frequency || 'off');
+  const [savingFreq, setSavingFreq] = useState(false);
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleSaveBackupSchedule = async () => {
+    setSavingFreq(true);
+    try {
+      await apiClient.post('/settings/save', { backup_frequency: backupFrequency });
+      toastEvent.trigger('Backup schedule updated', 'success');
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to update backup schedule: ' + err.message, 'error');
+    } finally {
+      setSavingFreq(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    try {
+      queryClient.clear();
+      invalidateAfterStockWrite(queryClient);
+      toastEvent.trigger('Local inventory & search cache cleared successfully', 'success');
+    } catch (err: any) {
+      toastEvent.trigger('Failed to clear cache: ' + err.message, 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Database Backup Center */}
+      <div className="space-y-4">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Database size={16} /> Automated Database Backup & Snapshot Center
+        </h2>
+
+        <div className="bg-bg3/30 border border-border rounded-xl p-4 space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">Automated Schedule Frequency</label>
+              <select
+                value={backupFrequency}
+                onChange={(e) => setBackupFrequency(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              >
+                <option value="off">Off (Manual Backups Only)</option>
+                <option value="daily">Daily Automatic Backup</option>
+                <option value="weekly">Weekly Automatic Backup</option>
+                <option value="monthly">Monthly Automatic Backup</option>
+              </select>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveBackupSchedule}
+                disabled={savingFreq}
+                className="px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer"
+              >
+                Save Schedule
+              </button>
+              <button
+                onClick={() => setShowBackupModal(true)}
+                className="px-4 py-2 bg-bg3 border border-border text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+              >
+                Open Full Backup & Restore Vault
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Maintenance & Cache */}
+      <div className="space-y-4 pt-2 border-t border-border">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
+          <Trash2 size={16} /> System Maintenance & Diagnostics
+        </h2>
+
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-bg3/20 border border-border rounded-xl p-4">
+          <div>
+            <h3 className="text-xs font-bold text-text">Clear Local Inventory & Search Cache</h3>
+            <p className="text-[11px] text-muted">Forces instant re-hydration of SQLite compact indexes without touching underlying sales history.</p>
+          </div>
+          <button
+            onClick={handleClearCache}
+            className="px-4 py-2 bg-amber-500/10 text-amber-500 border border-amber-500/30 font-bold text-xs rounded-xl hover:bg-amber-500/20 transition-all cursor-pointer shrink-0"
+          >
+            Clear Search Cache
+          </button>
+        </div>
+      </div>
+
+      {/* Full Backup Modal */}
+      {showBackupModal && (
+        <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-bg border border-border rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto relative shadow-2xl">
+            <button
+              onClick={() => setShowBackupModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+            <BackupCenterContent onClose={() => setShowBackupModal(false)} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

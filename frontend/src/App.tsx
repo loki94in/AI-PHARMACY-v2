@@ -33,7 +33,6 @@ const Settings = lazy(pageImports['/settings']);
 const Mail = lazy(pageImports['/mail']);
 const Returns = lazy(pageImports['/returns']);
 const Sells = lazy(pageImports['/sells']);
-const Learning = lazy(pageImports['/learning']);
 const DatabasePage = lazy(pageImports['/database']);
 const CompositionQueue = lazy(pageImports['/composition-queue']);
 const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
@@ -44,8 +43,7 @@ const CompliancePage = lazy(() => import('./pages/Compliance'));
 const SellPriceConfig = lazy(pageImports['/sell-price-config']);
 
 // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
-// NOTE: /non-mapped-distributors redirects to /learning?tab=distributors (see Routes below),
-// so it has no page component or chunk to prefetch here.
+// NOTE: /learning and /non-mapped-distributors redirect to /settings tabs (see Routes below).
 const pageRoutes: KeepAliveRoute[] = [
   { path: '/dashboard', element: <Dashboard /> },
   { path: '/inventory', element: <Inventory /> },
@@ -64,7 +62,6 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/reports', element: <Reports /> },
   { path: '/settings', element: <Settings /> },
   { path: '/mail', element: <Mail /> },
-  { path: '/learning', element: <Learning /> },
   { path: '/dispatch', element: <DispatchPage /> },
   { path: '/database', element: <DatabasePage /> },
   { path: '/composition-queue', element: <CompositionQueue /> },
@@ -161,12 +158,13 @@ function App() {
         <Layout theme={theme} setTheme={setTheme}>
           <Routes>
             <Route path="/" element={<Navigate to="/pos" replace />} />
+            <Route path="/learning" element={<Navigate to="/settings?tab=integrations" replace />} />
             <Route path="/expiry" element={<Navigate to="/returns?tab=expiry" replace />} />
             <Route path="/automation-center" element={<Navigate to="/crm?tab=messages" replace />} />
             <Route path="/refills" element={<Navigate to="/crm?tab=refills" replace />} />
             <Route path="/message-listener" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/non-mapped-distributors" element={<Navigate to="/learning?tab=distributors" replace />} />
-            <Route path="/doctors" element={<Navigate to="/learning?tab=doctors" replace />} />
+            <Route path="/non-mapped-distributors" element={<Navigate to="/settings?tab=ocr" replace />} />
+            <Route path="/doctors" element={<Navigate to="/settings?tab=ocr" replace />} />
             <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
             <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
             <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />

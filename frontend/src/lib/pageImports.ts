@@ -11,7 +11,6 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/mail': () => import('../pages/Mail'),
   '/returns': () => import('../pages/Returns'),
   '/sells': () => import('../pages/Sells'),
-  '/learning': () => import('../pages/Learning'),
   '/database': () => import('../pages/Database'),
   '/composition-queue': () => import('../pages/CompositionQueue'),
   '/pharmarack-cart': () => import('../pages/PharmarackCart'),
