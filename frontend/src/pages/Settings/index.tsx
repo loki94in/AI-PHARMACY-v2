@@ -56,17 +56,12 @@ interface SettingsData {
   emailAutodeleteEnabled: boolean;
   emailAutodeleteLimit: number;
   emailRetentionLimit: number;
-  automationEnabled: boolean;
   adminRemoteMode: boolean;
   adminUsername: string;
   adminPassword: string;
   adminUniqueKey: string;
   adminAuthorizedDeviceId: string;
   adminAuthorizedDeviceName: string;
-  prUsername: string;
-  prPassword: string;
-  prToken: string;
-  prMode: string;
   defaultTaxRate: number;
   invoicePrefix: string;
   autoPrint: boolean;
@@ -77,7 +72,6 @@ interface SettingsData {
   expiryAlertDays: number;
   dineshWhatsappNumber: string;
 
-  whatsappPreferredSystem: string;
   backupFrequency: string;
   dataFetchControl: string;
   monthlyReportEnabled: boolean;
@@ -110,17 +104,12 @@ const Settings = () => {
     emailAutodeleteEnabled: true,
     emailAutodeleteLimit: 10,
     emailRetentionLimit: 15,
-    automationEnabled: false,
     adminRemoteMode: true,
     adminUsername: 'admin',
     adminPassword: 'admin123',
     adminUniqueKey: 'KEY-ADM-837261',
     adminAuthorizedDeviceId: '',
     adminAuthorizedDeviceName: '',
-    prUsername: '',
-    prPassword: '',
-    prToken: '',
-    prMode: 'Live',
     defaultTaxRate: 18,
     invoicePrefix: 'INV-',
     autoPrint: false,
@@ -131,7 +120,6 @@ const Settings = () => {
     expiryAlertDays: 90,
     dineshWhatsappNumber: '',
 
-    whatsappPreferredSystem: 'automated',
     backupFrequency: 'off',
     dataFetchControl: '{}',
     monthlyReportEnabled: true,
@@ -148,7 +136,6 @@ const Settings = () => {
 
   // Transient UI states
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const [isOpeningWindow, setIsOpeningWindow] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
@@ -327,17 +314,12 @@ const Settings = () => {
   const setEmailAutodeleteEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('emailAutodeleteEnabled', val);
   const setEmailAutodeleteLimit = (val: number | ((p: number) => number)) => updateSetting('emailAutodeleteLimit', val);
   const setEmailRetentionLimit = (val: number | ((p: number) => number)) => updateSetting('emailRetentionLimit', val);
-  const setAutomationEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('automationEnabled', val);
   const setAdminRemoteMode = (val: boolean | ((p: boolean) => boolean)) => updateSetting('adminRemoteMode', val);
   const setAdminUsername = (val: string | ((p: string) => string)) => updateSetting('adminUsername', val);
   const setAdminPassword = (val: string | ((p: string) => string)) => updateSetting('adminPassword', val);
   const setAdminUniqueKey = (val: string | ((p: string) => string)) => updateSetting('adminUniqueKey', val);
   const setAdminAuthorizedDeviceId = (val: string | ((p: string) => string)) => updateSetting('adminAuthorizedDeviceId', val);
   const setAdminAuthorizedDeviceName = (val: string | ((p: string) => string)) => updateSetting('adminAuthorizedDeviceName', val);
-  const setPrUsername = (val: string | ((p: string) => string)) => updateSetting('prUsername', val);
-  const setPrPassword = (val: string | ((p: string) => string)) => updateSetting('prPassword', val);
-  const setPrToken = (val: string | ((p: string) => string)) => updateSetting('prToken', val);
-  const setPrMode = (val: string | ((p: string) => string)) => updateSetting('prMode', val);
   const setDefaultTaxRate = (val: number | ((p: number) => number)) => updateSetting('defaultTaxRate', val);
   const setInvoicePrefix = (val: string | ((p: string) => string)) => updateSetting('invoicePrefix', val);
   const setAutoPrint = (val: boolean | ((p: boolean) => boolean)) => updateSetting('autoPrint', val);
@@ -348,7 +330,6 @@ const Settings = () => {
   const setExpiryAlertDays = (val: number | ((p: number) => number)) => updateSetting('expiryAlertDays', val);
   const setDineshWhatsappNumber = (val: string | ((p: string) => string)) => updateSetting('dineshWhatsappNumber', val);
 
-  const setWhatsappPreferredSystem = (val: string | ((p: string) => string)) => updateSetting('whatsappPreferredSystem', val);
   const setBackupFrequency = (val: string | ((p: string) => string)) => updateSetting('backupFrequency', val);
   const setMonthlyReportEnabled = (val: boolean | ((p: boolean) => boolean)) => updateSetting('monthlyReportEnabled', val);
   const setMonthlyReportPhone = (val: string | ((p: string) => string)) => updateSetting('monthlyReportPhone', val);
@@ -470,17 +451,12 @@ const Settings = () => {
     emailAutodeleteEnabled,
     emailAutodeleteLimit,
     emailRetentionLimit,
-    automationEnabled,
     adminRemoteMode,
     adminUsername,
     adminPassword,
     adminUniqueKey,
     adminAuthorizedDeviceId,
     adminAuthorizedDeviceName,
-    prUsername,
-    prPassword,
-    prToken,
-    prMode,
     defaultTaxRate,
     invoicePrefix,
     autoPrint,
@@ -491,7 +467,6 @@ const Settings = () => {
     expiryAlertDays,
     dineshWhatsappNumber,
 
-    whatsappPreferredSystem,
     backupFrequency,
     monthlyReportEnabled,
     monthlyReportPhone,
@@ -548,7 +523,6 @@ const Settings = () => {
         emailAutodeleteEnabled: serverSettings.email_autodelete_enabled !== 'false',
         emailAutodeleteLimit: Number(serverSettings.email_autodelete_limit) || 10,
         emailRetentionLimit: Number(serverSettings.email_retention_limit) || 15,
-        automationEnabled: serverSettings.automation_enabled === 'true',
         adminRemoteMode: serverSettings.admin_remote_mode !== 'false',
         adminUsername: serverSettings.admin_username || 'admin',
         adminPassword: serverSettings.admin_password || 'admin123',
@@ -565,7 +539,6 @@ const Settings = () => {
         expiryAlertDays: Number(serverSettings.expiry_alert_days) || 90,
         dineshWhatsappNumber: serverSettings.dinesh_whatsapp_number || '',
 
-        whatsappPreferredSystem: serverSettings.whatsapp_preferred_system || 'automated',
         backupFrequency: serverSettings.backup_frequency || 'off',
         dataFetchControl: serverSettings.data_fetch_control || '{}',
         monthlyReportEnabled: serverSettings.monthly_report_enabled !== 'false',
@@ -578,10 +551,6 @@ const Settings = () => {
         whatsappDelayCreditBill: Number(serverSettings.whatsapp_delay_credit_bill) || 0,
         whatsappDelayDistributor: Number(serverSettings.whatsapp_delay_distributor) || 0,
         whatsappDelayDeliveryBoy: Number(serverSettings.whatsapp_delay_delivery_boy) || 0,
-        prUsername: serverSettings.pharmarack_username || '',
-        prPassword: serverSettings.pharmarack_password || '',
-        prToken: serverSettings.pharmarack_session_token || '',
-        prMode: serverSettings.pharmarack_mode || 'Live',
       }));
     }
   }, [serverSettings]);
@@ -614,7 +583,6 @@ const Settings = () => {
 
       google_search_daily_limit: googleSearchDailyLimit.toString(),
       email_retention_limit: emailRetentionLimit.toString(),
-      automation_enabled: automationEnabled.toString(),
       admin_remote_mode: adminRemoteMode.toString(),
       admin_username: adminUsername,
       admin_password: adminPassword,
@@ -696,99 +664,6 @@ const Settings = () => {
     } catch (error) {
       console.error('Failed to save fetch mode', error);
       toastEvent.trigger('Failed to save fetch mode', 'error');
-    }
-  };
-
-  const handleOpenLoginWindow = async () => {
-    setIsOpeningWindow(true);
-    setPrToken('');
-    try {
-      await apiClient.post('/pharmarack/login-window');
-      toastEvent.trigger('Google Chrome window opened. Please log in on retailers.pharmarack.com.', 'info');
-      
-      let attempts = 0;
-      const interval = setInterval(async () => {
-        attempts++;
-        if (attempts > 90) { 
-          clearInterval(interval);
-          setIsOpeningWindow(false);
-          return;
-        }
-
-        try {
-          const { data } = await apiClient.get('/settings');
-          if (data && data.pharmarack_session_token && data.pharmarack_session_token !== prToken) {
-            setPrToken(data.pharmarack_session_token);
-            setPrMode(data.pharmarack_mode || 'Live');
-            toastEvent.trigger('Successfully linked Pharmarack session!', 'success');
-            await broadcastContactDataChanged(queryClient);
-            clearInterval(interval);
-            setIsOpeningWindow(false);
-          }
-        } catch (err) {
-          console.warn('Failed to poll settings status:', err);
-        }
-      }, 2000);
-    } catch (err: any) {
-      console.error('Failed to open login window:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to open Chrome login window. Ensure Chrome is installed.', 'error');
-      setIsOpeningWindow(false);
-    }
-  };
-
-  const handlePharmarackLogout = async () => {
-    setPrUsername('');
-    setPrPassword('');
-    setPrToken('');
-    setPrMode('Live');
-    
-    const payload = {
-      shop_name: pharmacyName,
-      shop_address: address,
-      shop_phone: phone,
-      gstin: gstin,
-      shop_licence: drugLicense,
-      email: email,
-
-      automation_enabled: automationEnabled.toString(),
-      admin_remote_mode: adminRemoteMode.toString(),
-      admin_username: adminUsername,
-      admin_password: adminPassword,
-      admin_unique_key: adminUniqueKey,
-      admin_authorized_device_id: adminAuthorizedDeviceId,
-      admin_authorized_device_name: adminAuthorizedDeviceName,
-
-      default_tax_rate: defaultTaxRate.toString(),
-      invoice_prefix: invoicePrefix,
-      auto_print: autoPrint.toString(),
-      default_payment_mode: defaultPaymentMode,
-
-      whatsapp_notif: whatsappNotif.toString(),
-      email_alerts: emailAlerts.toString(),
-      low_stock_threshold: lowStockThreshold.toString(),
-      expiry_alert_days: expiryAlertDays.toString(),
-
-      data_fetch_control: settings.dataFetchControl
-    };
-
-    // Pharmarack credentials are cleared server-side by /pharmarack/logout itself;
-    // do not resend gmail/WhatsApp/pharmarack keys here — those are Learning-owned
-    // and stale local state for them would silently clobber the latest Learning save.
-    try {
-      await apiClient.post('/settings/save', payload);
-      await apiClient.post('/pharmarack/logout');
-      updateSettingsCache(queryClient, {
-        ...payload,
-        pharmarack_username: '',
-        pharmarack_password: '',
-        pharmarack_session_token: '',
-        pharmarack_mode: 'Live',
-      } as Record<string, string>);
-      await broadcastContactDataChanged(queryClient);
-      toastEvent.trigger('Logged out and cleared Pharmarack credentials successfully.', 'success');
-    } catch (error) {
-      console.error('Failed to logout from Pharmarack', error);
-      toastEvent.trigger('Failed to logout from Pharmarack', 'error');
     }
   };
 
@@ -1991,56 +1866,6 @@ const Settings = () => {
           >
             <Save size={16} />
             {loadingSettings ? 'Loading…' : 'Save Admin Settings'}
-          </button>
-        </div>
-      </div>
-
-
-
-
-
-      {/* ─── Background Automations ─── */}
-      <div className="glass-panel p-6">
-        <h3 className="font-bold flex items-center gap-2 mb-6">
-          <Zap size={18} className="text-amber" />
-          Background Automations
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-          <div className="space-y-2 flex items-end">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={automationEnabled}
-                  onChange={(e) => setAutomationEnabled(e.target.checked)}
-                  aria-label="Enable Background Automations"
-                />
-                <div className="w-11 h-6 rounded-full bg-zinc-700 peer-checked:bg-green transition-colors" />
-                <div className="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-5" />
-              </div>
-              <span className="text-sm font-semibold group-hover:text-white transition-colors">
-                Enable Background Automations
-              </span>
-            </label>
-          </div>
-        </div>
-
-        <p className="text-xs text-muted mt-4 max-w-3xl leading-relaxed">
-          Enabling this starts background services at startup including: WhatsApp client pre-initialization, the WhatsApp queue worker, the catalog upload process, daily checks for patient refills, and automatic near-expiry scans.
-          <br />
-          <span className="text-amber/85 font-semibold italic">Note: Changing this setting requires a server restart to take effect.</span>
-        </p>
-
-        <div className="mt-6 flex justify-end">
-          <button 
-            onClick={handleSaveSettings}
-            disabled={!settingsHydrated || loadingSettings}
-            className="premium-btn bg-green text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] hover:bg-emerald-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Save size={16} />
-            {loadingSettings ? 'Loading…' : 'Save Automations'}
           </button>
         </div>
       </div>
