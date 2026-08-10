@@ -807,7 +807,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     item_type, therapeutic, sub_therapeutic, schedule_type,
     short_code, ucode, cgst_per, sgst_per, igst_per,
     reorder_level, max_stock_level, rack, disable_auto_barcode, tb_medicine,
-    sell_price, metadata
+    sell_price, metadata, allow_loose_sale
   } = req.body;
   
   try {
@@ -848,6 +848,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (cgst_per !== undefined) { updates.push('cgst_per = ?'); params.push(parseFloat(cgst_per) || 0); }
     if (sgst_per !== undefined) { updates.push('sgst_per = ?'); params.push(parseFloat(sgst_per) || 0); }
     if (igst_per !== undefined) { updates.push('igst_per = ?'); params.push(parseFloat(igst_per) || 0); }
+    if (allow_loose_sale !== undefined) { updates.push('allow_loose_sale = ?'); params.push(allow_loose_sale ? 1 : 0); }
     if (max_stock_level !== undefined) { updates.push('max_stock_level = ?'); params.push(parseInt(max_stock_level, 10) || null); }
     if (rack !== undefined) { updates.push('rack = ?'); params.push(rack); }
     if (disable_auto_barcode !== undefined) { updates.push('disable_auto_barcode = ?'); params.push(disable_auto_barcode ? 1 : 0); }
@@ -995,6 +996,25 @@ router.get('/precalculated-metrics', async (req, res) => {
   } catch (err: any) {
     console.error('Error fetching precalculated metrics:', err);
     res.status(500).json({ error: 'Failed to fetch precalculated metrics: ' + err.message });
+  }
+});
+
+// Fast Cross-Page Toggle for Allow Loose Sale
+router.patch('/medicines/:id/allow-loose-sale', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { allow_loose_sale } = req.body;
+    if (!id || allow_loose_sale === undefined) {
+      return res.status(400).json({ error: 'id and allow_loose_sale boolean/number are required' });
+    }
+    const val = allow_loose_sale ? 1 : 0;
+    const db = await dbManager.getConnection();
+    await db.run('UPDATE medicines SET allow_loose_sale = ? WHERE id = ?', [val, id]);
+    inventoryCache.invalidate();
+    res.json({ success: true, medicine_id: Number(id), allow_loose_sale: val });
+  } catch (err: any) {
+    console.error('Error toggling allow_loose_sale:', err);
+    res.status(500).json({ error: err.message || 'Failed to toggle allow_loose_sale' });
   }
 });
 

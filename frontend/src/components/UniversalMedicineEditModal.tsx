@@ -343,7 +343,8 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
             reorder_level: data.inventory?.reorder_level ?? 10,
             max_stock_level: med.max_stock_level ?? 500,
             rack_location: data.inventory?.rack_location || med.rack || '',
-            is_loose: isLooseVal,
+            is_loose: med.allow_loose_sale !== undefined ? !!med.allow_loose_sale : isLooseVal,
+            allow_loose_sale: med.allow_loose_sale !== undefined ? (med.allow_loose_sale ? 1 : 0) : 1,
             disable_auto_barcode: !!med.disable_auto_barcode,
             tb_medicine: !!med.tb_medicine,
           };
@@ -429,6 +430,7 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
 
       await api.updateQuickEditMedicine(medicineId, {
         ...form,
+        allow_loose_sale: form.allow_loose_sale !== undefined ? (form.allow_loose_sale ? 1 : 0) : (form.is_loose ? 1 : 0),
         sell_price: parsedSellPrice,
         inventory_id: inventoryId,
         metadata: JSON.stringify(metadataObj)
@@ -1035,9 +1037,9 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input 
                         type="checkbox" 
-                        name="is_loose" 
-                        checked={!!form.is_loose} 
-                        onChange={handleChange}
+                        name="allow_loose_sale" 
+                        checked={form.allow_loose_sale !== undefined ? !!form.allow_loose_sale : !!form.is_loose} 
+                        onChange={(e) => setForm((prev: any) => ({ ...prev, allow_loose_sale: e.target.checked ? 1 : 0, is_loose: e.target.checked }))}
                         className="sr-only peer" 
                       />
                       <div className="w-11 h-6 bg-bg2 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>

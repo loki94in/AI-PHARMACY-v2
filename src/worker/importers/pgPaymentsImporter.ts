@@ -142,18 +142,9 @@ export async function importOrderCredit(row: Record<string, string | null>, db: 
   orderCreditBatch.push({
     sales_invoice_id: salesInvoiceId,
     amount_paid: isPaid ? 1 : 0, // paid flag — actual amount is on the invoice
+    is_paid: isPaid,
     legacy_id: legacyId,
   });
-
-  // Mark the invoice as CREDIT if unpaid
-  if (!isPaid) {
-    try {
-      await db.run(
-        `UPDATE sales_invoices SET payment_status = 'CREDIT' WHERE id = ? AND payment_status = 'PAID'`,
-        [salesInvoiceId]
-      );
-    } catch (_) { /* non-critical */ }
-  }
 
   if (orderCreditBatch.length >= 1000) {
     await flushOrderCredits(db);
@@ -171,6 +162,12 @@ export async function flushOrderCredits(db: Database) {
            VALUES (?, ?, ?)`,
           [oc.sales_invoice_id, oc.amount_paid, oc.legacy_id]
         );
+        if (!oc.is_paid) {
+          await db.run(
+            `UPDATE sales_invoices SET payment_status = 'CREDIT' WHERE id = ? AND payment_status = 'PAID'`,
+            [oc.sales_invoice_id]
+          );
+        }
       } catch (err: any) {
         console.warn(`[Migration] Skipped order credit ${oc.legacy_id}: ${err.message}`);
       }

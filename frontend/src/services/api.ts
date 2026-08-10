@@ -560,6 +560,8 @@ export const api = {
     distributorFilter?: string;
   }) => apiClient.post('/medicines/bulk-delete', data).then(res => res.data),
   createMedicine: (data: any) => apiClient.post('/medicines', data).then(res => res.data),
+  quickEditMedicine: (id: number, data: any) => apiClient.put(`/medicines/${id}/quick-edit`, data).then(res => res.data),
+  patchAllowLooseSale: (id: number, allow_loose_sale: number | boolean) => apiClient.patch(`/medicines/${id}/allow-loose-sale`, { allow_loose_sale: allow_loose_sale ? 1 : 0 }).then(res => res.data),
 
   getMedicinePriceHistory: (name: string) => apiClient.get('/purchases/price-history', { params: { name } }).then(res => res.data),
   searchPharmarack: (q: string, storeId?: string | number, isMapped?: boolean) => 

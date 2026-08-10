@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense, useMemo } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
@@ -994,6 +994,20 @@ const POS = () => {
   const selectedDoctorIdRef = useRef<number | null>(null);
   const justSelectedDoctorRef = useRef<boolean>(false);
 
+  const focusMedicineSearch = useCallback(() => {
+    setIsSearchExpanded(true);
+    setTimeout(() => {
+      const input = (
+        productSearchRef.current?.querySelector('input') ||
+        document.getElementById('medicine-search-input')
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select?.();
+      }
+    }, 60);
+  }, []);
+
   useEffect(() => {
     if (patientHighlightIndex >= 0 && patientSuggestionsRef.current) {
       const highlighted = patientSuggestionsRef.current.querySelector('[data-highlighted="true"]') as HTMLElement;
@@ -1740,6 +1754,36 @@ const POS = () => {
     }, 120);
   };
 
+  const toggleAllowLooseSale = async (item: any) => {
+    const medId = item.medicine_id || item.id;
+    if (!medId) return;
+    const currentFlag = item.allow_loose_sale !== undefined ? (item.allow_loose_sale ? 1 : 0) : 1;
+    const newFlag = currentFlag ? 0 : 1;
+
+    updateCart(prev => prev.map(row => {
+      if (row.medicine_id === medId || row.id === item.id) {
+        return { 
+          ...row, 
+          allow_loose_sale: newFlag, 
+          looseQty: newFlag ? row.looseQty : 0 
+        };
+      }
+      return row;
+    }));
+
+    try {
+      await api.patchAllowLooseSale(medId, newFlag);
+      toastEvent.trigger(
+        newFlag ? `Loose sale enabled for ${item.name || item.medicine_name || 'medicine'}` : `Full Strip Only restriction applied to ${item.name || item.medicine_name || 'medicine'}`,
+        'info'
+      );
+      invalidateAfterStockWrite(queryClient);
+    } catch (err) {
+      console.error('Failed to toggle allow_loose_sale:', err);
+      toastEvent.trigger('Failed to update loose sale setting', 'error');
+    }
+  };
+
   const addMedicineById = async (medicineId: number) => {
     const compactInventory = getCompactInventoryCache();
     const batches = compactInventory.filter(item => item.medicine_id === medicineId);
@@ -1796,6 +1840,16 @@ const POS = () => {
     addToCart(basePayload);
     setSearchTerm('');
     setSearchResults([]);
+
+    setTimeout(() => {
+      const activeRows = cart.filter(r => !r.isEmptyRow);
+      const targetIdx = activeRows.length; // index of new item
+      const qtyInput = document.getElementById(`row-qty-input-${targetIdx}`) || document.getElementById(`row-qty-input-${Math.max(0, activeRows.length - 1)}`);
+      if (qtyInput) {
+        (qtyInput as HTMLInputElement).focus();
+        (qtyInput as HTMLInputElement).select?.();
+      }
+    }, 80);
 
     try {
       const details = await api.getMedicineQuickDetails(item.medicine_id);
@@ -2553,26 +2607,34 @@ const POS = () => {
                     onFocus={() => { if (selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientSuggestions.length > 0) setShowPatientSuggestions(true); }}
                     onBlur={() => setTimeout(() => setShowPatientSuggestions(false), 180)}
                     onKeyDown={e => {
-                      if (!showPatientSuggestions || patientSuggestions.length === 0) return;
-                      if (e.key === 'ArrowDown') {
+                      if (e.key === 'Enter' || e.key === 'Tab') {
+                        if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
+                          e.preventDefault();
+                          const sel = patientSuggestions[patientHighlightIndex];
+                          justSelectedPatientRef.current = true;
+                          selectedCustomerIdRef.current = sel.id;
+                          updatePatientName(sel.name);
+                          setPatientPhone(sel.phone || '');
+                          setSelectedCustomerId(sel.id);
+                          setShowPatientSuggestions(false);
+                          setPatientHighlightIndex(-1);
+                        }
                         e.preventDefault();
-                        setPatientHighlightIndex(i => Math.min(i + 1, patientSuggestions.length - 1));
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setPatientHighlightIndex(i => Math.max(i - 1, 0));
-                      } else if ((e.key === 'Enter' || e.key === 'Tab') && patientHighlightIndex >= 0) {
-                        e.preventDefault();
-                        const sel = patientSuggestions[patientHighlightIndex];
-                        justSelectedPatientRef.current = true;
-                        selectedCustomerIdRef.current = sel.id;
-                        updatePatientName(sel.name);
-                        setPatientPhone(sel.phone || '');
-                        setSelectedCustomerId(sel.id);
-                        setShowPatientSuggestions(false);
-                        setPatientHighlightIndex(-1);
-                      } else if (e.key === 'Escape') {
-                        setShowPatientSuggestions(false);
-                        setPatientHighlightIndex(-1);
+                        setTimeout(() => {
+                          const docEl = document.getElementById('doctor-name-input');
+                          if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                        }, 50);
+                      } else if (showPatientSuggestions && patientSuggestions.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setPatientHighlightIndex(i => Math.min(i + 1, patientSuggestions.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setPatientHighlightIndex(i => Math.max(i - 1, 0));
+                        } else if (e.key === 'Escape') {
+                          setShowPatientSuggestions(false);
+                          setPatientHighlightIndex(-1);
+                        }
                       }
                     }}
                     aria-label="Patient Name"
@@ -2664,6 +2726,7 @@ const POS = () => {
               <div ref={doctorSectionRef} className="md:col-span-3 relative z-20">
                 <div className="flex gap-1 relative items-center">
                   <input
+                    id="doctor-name-input"
                     type="text"
                     autoComplete="off"
                     aria-label="Prescribing Doctor"
@@ -2686,25 +2749,32 @@ const POS = () => {
                     }}
                     onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)}
                     onKeyDown={e => {
-                      if (!isDoctorDropdownOpen || filteredDoctors.length === 0) return;
-                      if (e.key === 'ArrowDown') {
+                      if (e.key === 'Enter' || e.key === 'Tab') {
                         e.preventDefault();
-                        setDoctorHighlightIndex(i => Math.min(i + 1, filteredDoctors.length - 1));
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setDoctorHighlightIndex(i => Math.max(i - 1, 0));
-                      } else if ((e.key === 'Enter' || e.key === 'Tab') && doctorHighlightIndex >= 0) {
-                        e.preventDefault();
-                        const sel = filteredDoctors[doctorHighlightIndex];
-                        justSelectedDoctorRef.current = true;
-                        selectedDoctorIdRef.current = sel.id;
-                        setDoctor(sel.name);
-                        setSelectedDoctorId(sel.id);
+                        if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
+                          const targetIdx = doctorHighlightIndex >= 0 ? doctorHighlightIndex : 0;
+                          const sel = filteredDoctors[targetIdx];
+                          if (sel) {
+                            justSelectedDoctorRef.current = true;
+                            selectedDoctorIdRef.current = sel.id;
+                            setDoctor(sel.name);
+                            setSelectedDoctorId(sel.id);
+                          }
+                        }
                         setIsDoctorDropdownOpen(false);
                         setDoctorHighlightIndex(-1);
-                      } else if (e.key === 'Escape') {
-                        setIsDoctorDropdownOpen(false);
-                        setDoctorHighlightIndex(-1);
+                        focusMedicineSearch();
+                      } else if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setDoctorHighlightIndex(i => Math.min(i + 1, filteredDoctors.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setDoctorHighlightIndex(i => Math.max(i - 1, 0));
+                        } else if (e.key === 'Escape') {
+                          setIsDoctorDropdownOpen(false);
+                          setDoctorHighlightIndex(-1);
+                        }
                       }
                     }}
                     title="Select or Type Doctor Name"
@@ -2724,6 +2794,7 @@ const POS = () => {
                               setSelectedDoctorId(doc.id);
                               setIsDoctorDropdownOpen(false);
                               setDoctorHighlightIndex(-1);
+                              focusMedicineSearch();
                             }}
                             className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all font-semibold ${
                               idx === doctorHighlightIndex
@@ -2800,6 +2871,7 @@ const POS = () => {
                     {inventoryIndexReady ? <Search size={15} /> : <Loader2 size={15} className="animate-spin text-primary" />}
                   </span>
                   <input
+                    id="medicine-search-input"
                     type="text"
                     autoComplete="off"
                     aria-label="Search medicine by name, composition, batch, or price"
@@ -3660,12 +3732,22 @@ const POS = () => {
                                     onKeyDown={e => {
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'qty');
-                                      } else if (e.key === 'Enter') {
+                                      } else if (e.key === 'Enter' || e.key === 'Tab') {
                                         e.preventDefault();
-                                        const looseInput = document.getElementById(`row-loose-input-${cart.indexOf(item)}`);
-                                        if (looseInput) {
+                                        const curIdx = cart.indexOf(item);
+                                        if ((e.target as HTMLInputElement).value === '0' || (e.target as HTMLInputElement).value === '') {
+                                          updateCartItem(item.id, 'qty', 0);
+                                        }
+                                        const looseInput = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
+                                        const batchSel = document.getElementById(`row-batch-select-${curIdx}`) as HTMLSelectElement | null;
+                                        if (looseInput && !looseInput.disabled) {
                                           looseInput.focus();
-                                          (looseInput as HTMLInputElement).select();
+                                          looseInput.select?.();
+                                        } else if (batchSel) {
+                                          batchSel.focus();
+                                        } else {
+                                          const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                          if (discIn) { discIn.focus(); discIn.select?.(); }
                                         }
                                       }
                                     }}
@@ -3682,36 +3764,66 @@ const POS = () => {
                             if (item.isEmptyRow) {
                               return <div className="font-mono text-xs font-bold text-muted">-</div>;
                             }
+                            const isLooseAllowed = item.allow_loose_sale === undefined || !!item.allow_loose_sale;
                             return (
-                              <div className="flex items-center justify-center">
-                                <div className="flex items-center gap-1 bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20 rounded-lg px-2 py-0.5 h-7">
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <div className={`flex items-center gap-1 border rounded-lg px-2 py-0.5 h-7 transition-all ${
+                                  isLooseAllowed 
+                                    ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20' 
+                                    : 'bg-bg/40 border-border/30 opacity-40 cursor-not-allowed'
+                                }`}>
                                   <input 
                                     id={`row-loose-input-${cart.indexOf(item)}`}
                                     data-pos-row-index={cart.indexOf(item)}
                                     data-pos-field="looseQty"
                                     type="number" 
-                                    className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-amber-500 focus:outline-none"
-                                    value={item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : ''}
-                                    onChange={e => updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                                    className={`w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
+                                      isLooseAllowed ? 'text-amber-500' : 'text-muted cursor-not-allowed'
+                                    }`}
+                                    value={isLooseAllowed ? (item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : '') : ''}
+                                    onChange={e => {
+                                      if (!isLooseAllowed) {
+                                        toastEvent.trigger(`${item.name || 'Medicine'} is restricted to Full Pack Only. Click badge to enable loose sales.`, 'info');
+                                        return;
+                                      }
+                                      updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)));
+                                    }}
                                     min="0"
-                                    placeholder="0"
-                                    disabled={item.isEmptyRow}
+                                    placeholder={isLooseAllowed ? "0" : "N/A"}
+                                    disabled={item.isEmptyRow || !isLooseAllowed}
+                                    title={isLooseAllowed ? "Loose Tablets Qty" : "Restricted: Full Pack Only"}
                                     onKeyDown={e => {
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'looseQty');
-                                      } else if (e.key === 'Enter') {
+                                      } else if (e.key === 'Enter' || e.key === 'Tab') {
                                         e.preventDefault();
-                                        const currentIdx = cart.indexOf(item);
-                                        const nextIdx = currentIdx + 1;
-                                        const nextMedInput = document.getElementById(`row-med-input-${nextIdx}`);
-                                        if (nextMedInput) {
-                                          nextMedInput.focus();
-                                          (nextMedInput as HTMLInputElement).select();
+                                        const curIdx = cart.indexOf(item);
+                                        const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                        if (discIn) {
+                                          discIn.focus();
+                                          discIn.select?.();
+                                        } else {
+                                          focusMedicineSearch();
                                         }
                                       }
                                     }}
                                   />
                                 </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleAllowLooseSale(item);
+                                  }}
+                                  className={`px-1.5 py-0.5 text-[9px] font-bold rounded border tracking-tight transition-all ${
+                                    isLooseAllowed 
+                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
+                                      : 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                                  }`}
+                                  title={isLooseAllowed ? "Loose sale allowed (Click to lock to Full Pack Only)" : "Full Pack Only (Click to allow loose tablet sales)"}
+                                >
+                                  {isLooseAllowed ? '🔓 Loose' : '🔒 Full Pack'}
+                                </button>
                               </div>
                             );
                           })()}
@@ -3794,6 +3906,15 @@ const POS = () => {
                             onKeyDown={e => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
+                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault();
+                                const mrpIn = document.getElementById(`row-mrp-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
+                                if (mrpIn) {
+                                  mrpIn.focus();
+                                  mrpIn.select?.();
+                                } else {
+                                  focusMedicineSearch();
+                                }
                               }
                             }}
                           />
@@ -3814,6 +3935,9 @@ const POS = () => {
                             onKeyDown={e => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'mrp');
+                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault();
+                                focusMedicineSearch();
                               }
                             }}
                           />

@@ -739,9 +739,8 @@ router.post('/manual', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-    await db.run('BEGIN TRANSACTION');
 
-    // 1. Handle distributor
+    // 1. Resolve distributor info before opening transaction
     let distId = distributor_id;
     let distName = distributor;
 
@@ -755,6 +754,27 @@ router.post('/manual', async (req, res) => {
     }
 
     if (!distId && distName) {
+      const dbDist = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [distName.trim()]);
+      if (dbDist) distId = dbDist.id;
+    }
+
+    // Check for duplicate invoice BEFORE starting transaction (eliminates Risk 1: rollback-redirect)
+    if (invoice_no && invoice_no.trim()) {
+      const existing = await db.get(
+        `SELECT p.id FROM purchases p
+         LEFT JOIN distributors d ON p.distributor_id = d.id
+         WHERE (p.distributor_id = ? OR (d.name IS NOT NULL AND LOWER(d.name) = LOWER(?))) 
+         AND LOWER(TRIM(p.invoice_no)) = LOWER(TRIM(?))`,
+        [distId || 0, distName || '', invoice_no.trim()]
+      );
+      if (existing) {
+        return handleUpdatePurchaseFull(req, res, existing.id);
+      }
+    }
+
+    await db.run('BEGIN TRANSACTION');
+
+    if (!distId && distName) {
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
       const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
       if (dbDist) distId = dbDist.id;
@@ -765,19 +785,6 @@ router.post('/manual', async (req, res) => {
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
       const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
       if (dbDist) distId = dbDist.id;
-    }
-
-    if (distId && invoice_no) {
-      const existing = await db.get(
-        `SELECT id FROM purchases 
-         WHERE (distributor_id = ? OR distributor_id IN (SELECT id FROM distributors WHERE LOWER(name) = LOWER(?))) 
-         AND LOWER(TRIM(invoice_no)) = LOWER(TRIM(?))`,
-        [distId, distName || '', invoice_no.trim()]
-      );
-      if (existing) {
-        await db.run('ROLLBACK');
-        return handleUpdatePurchaseFull(req, res, existing.id);
-      }
     }
 
     // Calculate totals securely on backend
@@ -860,6 +867,8 @@ router.post('/manual', async (req, res) => {
     // 3. Process items
     const uniqueMedicineIds = new Set<number>();
     const savedItems: any[] = [];
+    const masterMedItems: any[] = []; // ponytail: collected for background upsert after COMMIT
+    const reconcileNames: string[] = []; // ponytail: collected for background reconcile after COMMIT
     for (const item of items) {
       const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
       
@@ -888,18 +897,16 @@ router.post('/manual', async (req, res) => {
       }
       
       if (medName) {
-        try {
-          const { upsertMasterMedicine } = await import('../services/masterMedicinesSeedService.js');
-          await upsertMasterMedicine({
-            name: medName,
-            manufacturer: item.manufacturer || undefined,
-            mrp: mrp || undefined,
-            rate: rawRate || undefined,
-            cgst_per: rawCgst || undefined,
-            sgst_per: rawSgst || undefined,
-            hsn_code: item.hsn_code || undefined
-          });
-        } catch (_) {}
+        // ponytail: deferred to setImmediate — not needed before COMMIT
+        masterMedItems.push({
+          name: medName,
+          manufacturer: item.manufacturer || undefined,
+          mrp: mrp || undefined,
+          rate: rawRate || undefined,
+          cgst_per: rawCgst || undefined,
+          sgst_per: rawSgst || undefined,
+          hsn_code: item.hsn_code || undefined
+        });
 
         const cleanName = medName.trim();
         const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distributor_id);
@@ -926,14 +933,10 @@ router.post('/manual', async (req, res) => {
           }
         }
 
-        // Register distributor alias & trigger CRM order reconciliation
+        // Register distributor alias; reconcile deferred to background (ponytail: non-critical before response)
         if (medId) {
           await medicineService.registerDistributorAlias(db, distributor_id, cleanName, medId);
-          try {
-            await OrderFulfillmentService.getInstance().reconcileIncomingInventory(db, cleanName);
-          } catch (recErr) {
-            console.warn('[Purchases] Reconcile incoming inventory non-fatal warning:', recErr);
-          }
+          reconcileNames.push(cleanName);
         }
       }
 
@@ -957,15 +960,14 @@ router.post('/manual', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
-      // Fetch current sell_price for saved_items
-      const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
+      // sell_price filled in batch SELECT after loop (ponytail: replaces N per-item round-trips)
       savedItems.push({
         medicine_id: medId,
         name: medName,
         medicine_name: medName,
         rate: rawRate,
         mrp: mrp || 0,
-        sell_price: medRow?.sell_price ?? null
+        sell_price: null
       });
 
       // Update inventory_master (unified storage)
@@ -1005,6 +1007,21 @@ router.post('/manual', async (req, res) => {
       }
     }
 
+    // Batch-fetch sell_price for all saved items in one query (ponytail: replaces N per-item SELECTs)
+    if (savedItems.length > 0) {
+      const savedMedIds = savedItems.map((i: any) => i.medicine_id).filter(Boolean);
+      if (savedMedIds.length > 0) {
+        const spRows = await db.all(
+          `SELECT id, sell_price FROM medicines WHERE id IN (${savedMedIds.map(() => '?').join(',')})`,
+          savedMedIds
+        );
+        const spMap = new Map((spRows as any[]).map((r: any) => [r.id, r.sell_price]));
+        for (const si of savedItems) {
+          si.sell_price = spMap.get(si.medicine_id) ?? null;
+        }
+      }
+    }
+
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
@@ -1019,38 +1036,62 @@ router.post('/manual', async (req, res) => {
     });
 
     setImmediate(async () => {
-      // Trigger refills and special orders after transaction commits successfully
+      // Isolate all background DB writes inside an explicit transaction (eliminates Risk 2 & transactionless bgDb writes)
       try {
-        const { inventoryService } = await import('../services/inventoryService.js');
-        for (const medId of uniqueMedicineIds) {
+        await dbManager.transaction(async (bgDb) => {
+          // 1. Upsert master medicine catalog entries
           try {
-            await inventoryService.checkAndTriggerRefillsForMedicine(medId);
-          } catch (err) {
-            console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in manual purchase:`, err);
+            const { upsertMasterMedicine } = await import('../services/masterMedicinesSeedService.js');
+            for (const med of masterMedItems) {
+              try { await upsertMasterMedicine(med); } catch (_) {}
+            }
+          } catch (_) {}
+
+          // 2. Reconcile incoming inventory for special orders
+          for (const name of reconcileNames) {
+            try {
+              await OrderFulfillmentService.getInstance().reconcileIncomingInventory(bgDb, name);
+            } catch (recErr) {
+              console.warn('[Purchases] Background reconcile warning:', recErr);
+            }
           }
-        }
-      } catch (err) {
-        console.error('Background refill trigger error:', err);
+
+          // 3. Trigger refills and special orders after transaction commits successfully
+          try {
+            const { inventoryService } = await import('../services/inventoryService.js');
+            for (const medId of uniqueMedicineIds) {
+              try {
+                await inventoryService.checkAndTriggerRefillsForMedicine(medId);
+              } catch (err) {
+                console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in manual purchase:`, err);
+              }
+            }
+          } catch (err) {
+            console.error('Background refill trigger error:', err);
+          }
+
+          // 4. Trigger overlap detection service for purchase items
+          try {
+            const { overlapDetectionService } = await import('../services/overlapDetectionService.js');
+            for (const item of items) {
+              const medName = (item.medicine || item.medicine_name || '').trim();
+              if (medName) {
+                await overlapDetectionService.detectOverlap({
+                  medicineName: medName,
+                  distributorId: distId ? Number(distId) : undefined,
+                  purchaseId,
+                  quantity: Number(item.qty) || 1
+                });
+              }
+            }
+          } catch (ovErr) {
+            console.warn('Overlap detection trigger warning in manual purchase:', ovErr);
+          }
+        });
+      } catch (bgTxErr) {
+        console.warn('[Purchases] Background post-save task transaction warning:', bgTxErr);
       }
 
-      // Trigger overlap detection service for purchase items
-      try {
-        const { overlapDetectionService } = await import('../services/overlapDetectionService.js');
-        for (const item of items) {
-          const medName = (item.medicine || item.medicine_name || '').trim();
-          if (medName) {
-            await overlapDetectionService.detectOverlap({
-              medicineName: medName,
-              distributorId: distId ? Number(distId) : undefined,
-              purchaseId,
-              quantity: Number(item.qty) || 1
-            });
-          }
-        }
-      } catch (ovErr) {
-        console.warn('Overlap detection trigger warning in manual purchase:', ovErr);
-      }
-      
       if (distId && source_filename && mapping_config) {
         try {
           await emailService.saveLearningProfile(
@@ -1342,27 +1383,8 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
-    await rebuildPurchaseSummaryCache();
-    triggerBackgroundSummaryRebuild();
 
-    // Background enrichment for medicines in this purchase
-    const medicineNamesToEnrich = items
-      .map((item: any) => item.medicine || item.medicine_name)
-      .filter((name: any) => typeof name === 'string' && name.trim().length > 0);
-
-    if (medicineNamesToEnrich.length > 0) {
-      (async () => {
-        for (const name of medicineNamesToEnrich) {
-          try {
-            await activityTracker.waitUntilIdle();
-            await onlineDataEnricher.enrichMedicineByName(name);
-          } catch (e) {
-            console.error('[Background Enrichment] Error enriching:', name, e);
-          }
-        }
-      })();
-    }
-
+    // Respond immediately — cache rebuild is non-critical before user sees success (ponytail: was blocking response)
     res.json({
       success: true,
       message: 'Purchase updated successfully',
@@ -1370,6 +1392,11 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       purchase_id: Number(id),
       saved_items: savedItems,
       saved_medicines: savedItems
+    });
+
+    // Rebuild summary KPI cache in background after response is sent
+    setImmediate(() => {
+      triggerBackgroundSummaryRebuild();
     });
   } catch (error: any) {
     console.error('Full purchase update error:', error);

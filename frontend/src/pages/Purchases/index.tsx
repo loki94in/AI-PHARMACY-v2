@@ -1841,7 +1841,6 @@ const Purchases: React.FC = () => {
         invoice_no: finalInvoiceNo,
         date: invoiceDate || getTodayString(),
         cd_per: parseFloat(String(globalCdPer || 0)) || 0,
-        extra_credit: parseFloat(String(cnAmount || 0)) || 0,
         cn_amount: parseFloat(String(cnAmount || 0)) || 0,
         cn_number: cnNumber,
         reconcile_expiry_return_id: reconcileExpiryReturnId,
@@ -2448,14 +2447,18 @@ const Purchases: React.FC = () => {
           </div>
 
           {/* Invoice No */}
-          <div className="w-36">
-            <label className="block text-sm font-medium text-gray-300 mb-1">Invoice No *</label>
+          <div className="w-44">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-300">Invoice No *</label>
+              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">🔒 Auto</span>
+            </div>
             <input
               type="text"
-              value={invoiceNo}
-              onChange={(e) => setInvoiceNo(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="INV-001"
+              readOnly={true}
+              value={invoiceNo || `PUR-${Date.now().toString().slice(-6)}`}
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none cursor-not-allowed opacity-90 font-bold"
+              placeholder="PUR-001"
+              title="Sequential Purchase Invoice Number (Auto-Generated)"
             />
           </div>
 
@@ -2655,10 +2658,10 @@ const Purchases: React.FC = () => {
                                 searchMedicines(e.target.value, index);
                               }}
                               onKeyDown={e => {
-                                if (activeSearchIndex === index && searchResults.length > 0) {
+                                if (activeSearchIndex === index) {
                                   if (e.key === 'ArrowDown') {
                                     e.preventDefault();
-                                    setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                                    setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length));
                                     return;
                                   } else if (e.key === 'ArrowUp') {
                                     e.preventDefault();
@@ -2668,6 +2671,17 @@ const Purchases: React.FC = () => {
                                     if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
                                       e.preventDefault();
                                       selectMedicine(searchResults[searchHighlightIndex], index);
+                                      return;
+                                    } else if (searchHighlightIndex === searchResults.length || searchResults.length === 0) {
+                                      e.preventDefault();
+                                      setActiveMedicineIndex(index);
+                                      setNewMedicine(prev => ({
+                                        ...prev,
+                                        name: item.medicine_name || item.original_name || ''
+                                      }));
+                                      setShowMedicineModal(true);
+                                      setSearchResults([]);
+                                      setActiveSearchIndex(null);
                                       return;
                                     }
                                   } else if (e.key === 'Escape') {
@@ -2727,13 +2741,40 @@ const Purchases: React.FC = () => {
                             return null;
                           })()}
                           {activeSearchIndex === index && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
-                            <div className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-border rounded-xl shadow-2xl p-3 text-center left-0 backdrop-blur-xl">
-                              <span className="text-[12px] text-amber-400 font-bold block mb-1">
-                                🔍 No exact match for "{item.medicine_name}" in catalog
-                              </span>
-                              <span className="text-[11px] text-muted block">
-                                Check spelling or continue to create a new medicine entry.
-                              </span>
+                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl">
+                              <div className="px-3 py-1.5 text-xs text-muted font-medium border-b border-glass-border/30 flex items-center justify-between">
+                                <span>No exact match in store inventory</span>
+                                <span className="text-[10px] text-amber-400 font-mono font-semibold">New Item</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMedicineIndex(index);
+                                  setNewMedicine(prev => ({
+                                    ...prev,
+                                    name: item.medicine_name || item.original_name || ''
+                                  }));
+                                  setShowMedicineModal(true);
+                                  setSearchResults([]);
+                                  setActiveSearchIndex(null);
+                                }}
+                                className="w-full text-left p-3 mt-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 transition-all flex items-center gap-3 group"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
+                                  <Plus className="w-4 h-4 text-emerald-400" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-xs text-emerald-300 truncate">
+                                    Add "{item.medicine_name}" to Master Database
+                                  </div>
+                                  <div className="text-[11px] text-muted truncate mt-0.5">
+                                    Directly register new medicine into store master database
+                                  </div>
+                                </div>
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-bg3 text-muted font-mono border border-glass-border flex-shrink-0">
+                                  [Enter]
+                                </span>
+                              </button>
                             </div>
                           )}
                           {activeSearchIndex === index && searchResults.length > 0 && (
@@ -2784,24 +2825,37 @@ const Purchases: React.FC = () => {
                                   </div>
                                 </button>
                               ))}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveMedicineIndex(index);
-                              setNewMedicine(prev => ({
-                                ...prev,
-                                name: item.medicine_name || item.original_name || ''
-                              }));
-                              setShowMedicineModal(true);
-                              setSearchResults([]);
-                              setActiveSearchIndex(null);
-                            }}
-                            className="w-full text-left px-4 py-2 hover:bg-white/10 text-green-400 font-bold border-t border-glass-border/30 flex items-center gap-1.5"
-                          >
-                            ➕ Add New Medicine
-                          </button>
-                        </div>
-                      )}
+                              <button
+                                type="button"
+                                data-highlighted={searchHighlightIndex === searchResults.length ? "true" : "false"}
+                                onClick={() => {
+                                  setActiveMedicineIndex(index);
+                                  setNewMedicine(prev => ({
+                                    ...prev,
+                                    name: item.medicine_name || item.original_name || ''
+                                  }));
+                                  setShowMedicineModal(true);
+                                  setSearchResults([]);
+                                  setActiveSearchIndex(null);
+                                }}
+                                className={`w-full text-left px-4 py-2.5 hover:bg-emerald-500/15 text-emerald-400 font-semibold border-t border-glass-border/30 flex items-center justify-between transition-all ${
+                                  searchHighlightIndex === searchResults.length ? 'bg-emerald-500/20 border-l-2 border-emerald-400' : ''
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                                    <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                                  </div>
+                                  <span className="truncate text-xs">
+                                    Add <strong className="underline decoration-emerald-400/50">{item.medicine_name || item.original_name || 'New Medicine'}</strong> to Master Database
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-muted font-mono">
+                                  New Master Entry
+                                </span>
+                              </button>
+                            </div>
+                          )}
                     </div>
                     {schemeMatchStatus[item.id] && (
                       <p className="text-yellow-400 text-xs mt-1">{schemeMatchStatus[item.id]}</p>
@@ -2998,6 +3052,17 @@ const Purchases: React.FC = () => {
                       >
                         <Edit size={14} />
                       </button>
+                      {item.medicine_name && item.medicine_name.trim().length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handlePrintProductBarcodes([item])}
+                          disabled={generatingProductBarcode}
+                          className="text-purple-400 hover:text-purple-300 p-1 transition-colors cursor-pointer disabled:opacity-40"
+                          title="Generate & Print Barcode Stickers for this specific medicine (Replace damaged strip barcode)"
+                        >
+                          <QrCode size={14} />
+                        </button>
+                      )}
                       <button
                         onClick={() => removeItem(index)}
                         className="text-red-400 hover:text-red-300 p-1"

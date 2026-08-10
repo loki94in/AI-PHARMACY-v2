@@ -242,7 +242,8 @@ export async function ensureSchema(dbPath: string) {
       tb_medicine INTEGER DEFAULT 0,
       source TEXT DEFAULT 'manual',
       possible_duplicate_of INTEGER DEFAULT NULL,
-      sell_price REAL DEFAULT NULL
+      sell_price REAL DEFAULT NULL,
+      allow_loose_sale INTEGER DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS catalog_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -596,6 +597,22 @@ export async function ensureSchema(dbPath: string) {
     const existingMedCols = new Set(medCols.map((c: any) => c.name));
     if (!existingMedCols.has('sell_price')) {
       await db.run("ALTER TABLE medicines ADD COLUMN sell_price REAL DEFAULT NULL").catch(() => {});
+    }
+    if (!existingMedCols.has('allow_loose_sale')) {
+      await db.run("ALTER TABLE medicines ADD COLUMN allow_loose_sale INTEGER DEFAULT 1").catch(() => {});
+      await db.run(`
+        UPDATE medicines 
+        SET allow_loose_sale = 0 
+        WHERE LOWER(packaging) LIKE '%bottle%' 
+           OR LOWER(packaging) LIKE '%syrup%' 
+           OR LOWER(packaging) LIKE '%suspension%' 
+           OR LOWER(packaging) LIKE '%drops%' 
+           OR LOWER(packaging) LIKE '%inj%' 
+           OR LOWER(packaging) LIKE '%ml%' 
+           OR LOWER(name) LIKE '%syrup%' 
+           OR LOWER(name) LIKE '%suspension%' 
+           OR LOWER(name) LIKE '%bottle%'
+      `).catch(() => {});
     }
 
   await db.exec(`

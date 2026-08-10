@@ -4,6 +4,7 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
+import { toastEvent } from '../../services/events';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
@@ -263,7 +264,8 @@ const Inventory = () => {
       batch_number: item.batch_number,
       expiry_date: item.expiry_date,
       loose_quantity: item.loose_quantity,
-      rack_location: item.rack_location
+      rack_location: item.rack_location,
+      allow_loose_sale: item.allow_loose_sale !== undefined ? (item.allow_loose_sale ? 1 : 0) : 1
     });
     setPanelOpen(true);
     setDetailsLoading(true);
@@ -286,17 +288,20 @@ const Inventory = () => {
   const handleSave = () => {
     if (!selectedItem) return;
     setIsSaving(true);
-    api.updateMedicine(selectedItem.id, editForm)
+    const medId = selectedItem.medicine_id || selectedItem.id;
+    api.quickEditMedicine(medId, editForm)
       .then(() => {
         setIsSaving(false);
         setIsEditing(false);
         setSelectedItem({ ...selectedItem, ...editForm } as InventoryItem);
         loadInventory();
         queryClient.invalidateQueries({ queryKey: ['inventory-list'] });
+        toastEvent.trigger('Inventory details updated successfully', 'success');
       })
       .catch(err => {
         console.error('Failed to update item:', err);
         setIsSaving(false);
+        toastEvent.trigger('Failed to update inventory details', 'error');
       });
   };
 
@@ -766,7 +771,20 @@ const Inventory = () => {
 
                     {/* Loose Units */}
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">Loose Units</span>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-muted block">Loose Units</span>
+                        {isEditing && (
+                          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-primary">
+                            <input 
+                              type="checkbox" 
+                              checked={editForm.allow_loose_sale !== undefined ? !!editForm.allow_loose_sale : true} 
+                              onChange={e => setEditForm({ ...editForm, allow_loose_sale: e.target.checked ? 1 : 0 })}
+                              className="rounded border-glass-border bg-bg3 text-primary focus:ring-0 w-3.5 h-3.5"
+                            />
+                            <span>Allow Loose</span>
+                          </label>
+                        )}
+                      </div>
                       {isEditing ? (
                         <div className="flex items-center gap-1.5">
                           <button onClick={() => setEditForm({ ...editForm, loose_quantity: Math.max(0, (editForm.loose_quantity || 0) - 1) })} className="p-1.5 rounded-lg bg-bg3 hover:bg-bg2 text-text transition-colors border border-glass-border">
@@ -778,7 +796,16 @@ const Inventory = () => {
                           </button>
                         </div>
                       ) : (
-                        <span className="text-2xl font-black text-primary">{selectedItem.loose_quantity || 0}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl font-black text-primary">{selectedItem.loose_quantity || 0}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            (selectedItem.allow_loose_sale === undefined || selectedItem.allow_loose_sale) 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                              : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                          }`}>
+                            {(selectedItem.allow_loose_sale === undefined || selectedItem.allow_loose_sale) ? '🔓 Loose Allowed' : '🔒 Full Pack Only'}
+                          </span>
+                        </div>
                       )}
                     </div>
 

@@ -25,23 +25,24 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
 
   try {
     // 1. Fetch distributors with purchases today
+    // (purchases has no created_at column — `date` is the only timestamp)
     const purchaseDistributors = await db.all(
       `SELECT DISTINCT p.distributor_id, d.name as distributor_name, d.phone as distributor_phone
        FROM purchases p
        JOIN distributors d ON p.distributor_id = d.id
-       WHERE (p.date IS NOT NULL AND DATE(p.date) = ?)
-          OR (p.created_at IS NOT NULL AND DATE(p.created_at) = ?)`,
-      [todayStr, todayStr]
+       WHERE p.date IS NOT NULL AND DATE(p.date) = ?`,
+      [todayStr]
     );
 
     // 2. Fetch distributors with special orders today
+    // (special_orders has no distributor_id/order_date columns — only distributor_name and date)
     const specialOrderDistributors = await db.all(
-      `SELECT DISTINCT s.distributor_id, d.name as distributor_name, d.phone as distributor_phone
+      `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
        FROM special_orders s
-       JOIN distributors d ON s.distributor_id = d.id
-       WHERE s.distributor_id IS NOT NULL
+       JOIN distributors d ON s.distributor_name = d.name
+       WHERE s.distributor_name IS NOT NULL AND s.distributor_name != ''
          AND ((s.created_at IS NOT NULL AND DATE(s.created_at) = ?)
-              OR (s.order_date IS NOT NULL AND DATE(s.order_date) = ?))`,
+              OR (s.date IS NOT NULL AND DATE(s.date) = ?))`,
       [todayStr, todayStr]
     );
 

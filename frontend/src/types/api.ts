@@ -61,6 +61,7 @@ export interface Medicine {
   rack?: string;
   disable_auto_barcode?: number | boolean;
   tb_medicine?: number | boolean;
+  allow_loose_sale?: number | boolean;
   metadata?: any;
 }
 
