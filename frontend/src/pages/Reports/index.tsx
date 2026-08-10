@@ -647,255 +647,220 @@ const Reports = () => {
   return (
     <div className="h-full flex flex-col gap-4 min-h-0 overflow-hidden text-text bg-bg p-4 animate-in fade-in duration-300">
       
-      {/* Dynamic Date Controls & Custom Toolbars */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-bg2 border border-border p-4 rounded-2xl flex-shrink-0 shadow-lg relative overflow-hidden backdrop-blur-md">
-        <div className="absolute top-0 left-0 w-2 h-full bg-primary" />
-        
-        {/* Title */}
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary shadow-inner">
-            <PieChart size={20} />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-base font-bold text-text leading-none">Analytics & Reports Hub</span>
-            <span className="text-[11px] text-muted mt-0.5">
-              {activeTab === 'nonMoving' 
-                ? 'Identify dormant stock & valuation loss metrics' 
-                : activeTab === 'trace' 
-                ? 'Trace transactions for Batch, Invoice, or supplier parameters'
-                : 'Live financial ledger analyzer & inventory valuation'}
-            </span>
-          </div>
-        </div>
-
-        {/* Tab Switcher Pills */}
-        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-                  isActive
-                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
-                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
-                }`}
-              >
-                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex gap-3 items-center flex-wrap w-full md:w-auto justify-end">
-          {/* Controls for Standard Date Filter Tabs */}
-          {activeTab !== 'nonMoving' && activeTab !== 'trace' && (
-            <>
-              <div className="flex items-center gap-1 bg-bg3/60 border border-glass-border p-1 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setPresetRange(activeTab === 'expiry' ? 'expiry365' : '30d')}
-                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
-                >
-                  {activeTab === 'expiry' ? 'Upcoming 1Yr' : '30 Days'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPresetRange('1y')}
-                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
-                >
-                  1 Year
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPresetRange('all')}
-                  className="px-2 py-1 text-[10px] font-bold rounded-lg hover:bg-primary/20 text-muted hover:text-text transition-all cursor-pointer"
-                >
-                  All Time
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
-                <span>From</span>
-                <input
-                  type="date"
-                  min="2020-01-01"
-                  className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold cursor-pointer"
-                  value={toDateInputValue(fromDate)}
-                  onChange={(e) => handleFromDateChange(e.target.value)}
-                  aria-label="From Date"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
-                <span>To</span>
-                <input
-                  type="date"
-                  min="2020-01-01"
-                  disabled={!manualToDate}
-                  className="bg-transparent border-none text-text text-xs focus:outline-none focus:ring-0 font-mono font-bold disabled:opacity-50 cursor-pointer"
-                  value={toDateInputValue(toDate)}
-                  onChange={(e) => handleToDateChange(e.target.value)}
-                  aria-label="To Date"
-                />
-                <label className="text-[9px] text-muted flex items-center gap-1 cursor-pointer select-none border-l border-glass-border pl-2 ml-1">
-                  <input
-                    type="checkbox"
-                    checked={manualToDate}
-                    onChange={e => setManualToDate(e.target.checked)}
-                    className="rounded border-glass-border text-primary focus:ring-primary/20 bg-bg3"
-                  />
-                  <span>Edit</span>
-                </label>
-              </div>
-            </>
-          )}
-
-          {/* Controls for Non-Moving dead stock filter */}
-          {activeTab === 'nonMoving' && (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Filter medicine or batch..."
-                  className="pl-9 pr-3 py-1 bg-bg3/60 border border-glass-border rounded-xl text-text text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 w-52 font-medium"
-                  value={nonMovingSearchQuery}
-                  onChange={(e) => setNonMovingSearchQuery(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-2 text-[10px] text-muted font-black uppercase tracking-wider bg-bg3/60 border border-glass-border px-3 py-1.5 rounded-xl">
-                <span>Inactive ({'>='} Days)</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="3650"
-                  className="w-16 bg-bg border border-glass-border rounded-lg text-text text-xs focus:outline-none px-2 py-0.5 font-mono font-bold text-center"
-                  value={localNonMovingDays}
-                  onChange={(e) => setLocalNonMovingDays(Math.max(1, parseInt(e.target.value) || 1))}
-                />
-              </div>
+      {/* Sleek Compact Top Bar & Filters Header */}
+      <div className="flex flex-col gap-3 bg-bg2 border border-border p-3.5 px-4 rounded-2xl flex-shrink-0 shadow-sm">
+        {/* Row 1: Title & Tab Switcher Pills */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Title */}
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-sm">
+              <PieChart size={20} />
             </div>
-          )}
+            <div>
+              <h1 className="text-base font-bold text-text leading-none">Analytics & Reports Hub</h1>
+              <p className="text-[11px] text-muted mt-0.5">
+                {activeTab === 'nonMoving' 
+                  ? 'Identify dormant stock & valuation loss metrics' 
+                  : activeTab === 'trace' 
+                  ? 'Trace transactions for Batch, Invoice, or supplier parameters'
+                  : 'Live financial ledger analyzer & inventory valuation'}
+              </p>
+            </div>
+          </div>
 
-          {/* Controls for Product trace & audit */}
-          {activeTab === 'trace' && (
-            <form onSubmit={handleTraceSearch} className="flex items-center gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Enter Batch, Invoice, or Distributor..."
-                  className="pl-9 pr-3 py-1.5 bg-bg3/60 border border-glass-border rounded-xl text-text text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 w-64 font-medium"
-                  value={traceQuery}
-                  onChange={(e) => setTraceQuery(e.target.value)}
-                />
+          {/* Single Primary Tab Switcher */}
+          <div className="flex items-center gap-1 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                      : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                  }`}
+                >
+                  <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Row 2: Compact Filter Controls & Action Buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-border/50">
+          {/* Filter Inputs (Standard Date Range / NonMoving / Trace) */}
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            {activeTab !== 'nonMoving' && activeTab !== 'trace' && (
+              <>
+                <div className="flex items-center gap-1 bg-bg3/50 border border-border p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setPresetRange(activeTab === 'expiry' ? 'expiry365' : '30d')}
+                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                  >
+                    {activeTab === 'expiry' ? 'Upcoming 1Yr' : '30 Days'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetRange('1y')}
+                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                  >
+                    1 Year
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetRange('all')}
+                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                  >
+                    All Time
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-xs">
+                  <span className="text-muted text-[11px] font-medium">From:</span>
+                  <input
+                    type="date"
+                    min="2020-01-01"
+                    className="bg-transparent text-text text-xs focus:outline-none font-medium cursor-pointer"
+                    value={toDateInputValue(fromDate)}
+                    onChange={(e) => handleFromDateChange(e.target.value)}
+                    aria-label="From Date"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-xs">
+                  <span className="text-muted text-[11px] font-medium">To:</span>
+                  <input
+                    type="date"
+                    min="2020-01-01"
+                    disabled={!manualToDate}
+                    className="bg-transparent text-text text-xs focus:outline-none font-medium disabled:opacity-50 cursor-pointer"
+                    value={toDateInputValue(toDate)}
+                    onChange={(e) => handleToDateChange(e.target.value)}
+                    aria-label="To Date"
+                  />
+                  <label className="text-[10px] text-muted flex items-center gap-1 cursor-pointer select-none border-l border-border pl-2 ml-1">
+                    <input
+                      type="checkbox"
+                      checked={manualToDate}
+                      onChange={e => setManualToDate(e.target.checked)}
+                      className="rounded border-border text-primary focus:ring-primary/20 bg-bg3"
+                    />
+                    <span>Edit</span>
+                  </label>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'nonMoving' && (
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Filter medicine or batch..."
+                    className="pl-9 pr-3 py-1.5 bg-bg3/50 border border-border rounded-xl text-text text-xs focus:outline-none focus:border-primary w-56"
+                    value={nonMovingSearchQuery}
+                    onChange={(e) => setNonMovingSearchQuery(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-2 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-xs">
+                  <span className="text-muted text-[11px] font-medium">Inactive ({'>='} Days):</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="3650"
+                    className="w-16 bg-bg border border-border rounded-lg text-text text-xs focus:outline-none px-2 py-0.5 font-bold text-center"
+                    value={localNonMovingDays}
+                    onChange={(e) => setLocalNonMovingDays(Math.max(1, parseInt(e.target.value) || 1))}
+                  />
+                </div>
               </div>
-            </form>
-          )}
+            )}
 
-          <button
-            type="button"
-            onClick={handleGenerate}
-            className="bg-primary hover:bg-primary/95 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition-all active:scale-95 shadow-md shadow-primary/25 cursor-pointer shrink-0 h-9"
-            title="Generate Report Data"
-          >
-            <BarChart3 size={13} />
-            <span>Generate</span>
-          </button>
+            {activeTab === 'trace' && (
+              <form onSubmit={handleTraceSearch} className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Enter Batch, Invoice, or Distributor..."
+                    className="pl-9 pr-3 py-1.5 bg-bg3/50 border border-border rounded-xl text-text text-xs focus:outline-none focus:border-primary w-64"
+                    value={traceQuery}
+                    onChange={(e) => setTraceQuery(e.target.value)}
+                  />
+                </div>
+              </form>
+            )}
+          </div>
 
-          <button
-            type="button"
-            onClick={() => handleSendToWhatsapp('combined')}
-            disabled={sendingWhatsapp}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
-            title="Send PDF & Graph Report to Owner WhatsApp"
-          >
-            <Send size={13} />
-            <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
-          </button>
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleGenerate}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer shrink-0"
+              title="Generate Report Data"
+            >
+              <BarChart3 size={13} />
+              <span>Generate</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setShowExportModal(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md shadow-purple-600/25 cursor-pointer shrink-0 h-9"
-            title="Export Complete Report (PDF / Excel Format)"
-          >
-            <Download size={13} />
-            <span>Export / Download Report</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => handleSendToWhatsapp('combined')}
+              disabled={sendingWhatsapp}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer shrink-0"
+              title="Send PDF & Graph Report to Owner WhatsApp"
+            >
+              <Send size={13} />
+              <span>{sendingWhatsapp ? 'Sending...' : 'Send WhatsApp'}</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={handleSendAllTemplateSamples}
-            disabled={sendingSamples}
-            className="bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 h-9"
-            title="Send all 3 PDF Template Styles to Owner WhatsApp"
-          >
-            <Send size={13} />
-            <span>{sendingSamples ? 'Sending...' : 'Send 3 PDF Styles'}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setShowExportModal(true)}
+              className="bg-bg3 border border-border hover:bg-bg3/80 text-text font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer shrink-0"
+              title="Export Complete Report (PDF / Excel Format)"
+            >
+              <Download size={13} />
+              <span>Export Report</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Dynamic Summary KPI Cards Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 flex-shrink-0 animate-in fade-in duration-300">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-shrink-0">
         {getStatsCards().map((card, idx) => {
           const Icon = card.icon;
           return (
-            <div key={idx} className={`bg-glass-bg border ${borderMap[card.color]} rounded-2xl p-4 relative overflow-hidden group shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300`}>
-              <div
-                className="absolute top-0 right-0 w-24 h-24 translate-x-6 -translate-y-6 pointer-events-none rounded-full blur-xl"
-                style={{ background: `radial-gradient(circle, ${card.gradient} 0%, transparent 70%)` }}
-              />
-              <div className="flex justify-between items-start mb-2">
-                <div className="text-[10px] text-muted font-black uppercase tracking-wider">{card.label}</div>
-                <span className={`p-2 rounded-xl bg-bg2 border border-glass-border ${colorMap[card.color]}`}>
-                  <Icon size={14} className="group-hover:scale-110 transition-transform duration-300" />
-                </span>
+            <div key={idx} className="bg-bg2 border border-border rounded-xl p-3 flex items-center justify-between shadow-sm">
+              <div>
+                <div className="text-[10px] text-muted font-bold uppercase tracking-wider">{card.label}</div>
+                <div className="text-lg font-black text-text font-mono tracking-tight mt-0.5">
+                  {card.value}
+                </div>
+                <div className="text-[10px] text-muted mt-0.5 truncate max-w-[180px]">
+                  {card.desc}
+                </div>
               </div>
-              <div className={`text-2xl font-black ${colorMap[card.color]} font-mono tracking-tight`}>
-                {card.value}
-              </div>
-              <div className="text-[9px] text-muted/70 font-bold mt-1.5 tracking-wide">
-                {card.desc}
+              <div className="p-2 rounded-xl bg-bg3 border border-border text-primary shrink-0">
+                <Icon size={16} />
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Main Split Panel Area */}
-      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
-        
-        {/* Left Selector Sidebar */}
-        <div className="w-64 flex-shrink-0 flex flex-col gap-2 bg-glass-bg border border-border rounded-2xl p-3.5 overflow-y-auto scrollbar-thin shadow-lg">
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-muted px-2.5 mb-2">Report Modules</h3>
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-3 px-3.5 py-3 rounded-xl border text-xs font-bold transition-all text-left cursor-pointer group ${
-                  isActive
-                    ? `${tab.activeBg} font-black shadow-sm`
-                    : 'bg-bg3/20 border-glass-border text-muted hover:text-text hover:bg-bg3/60'
-                }`}
-              >
-                <Icon size={16} className={`shrink-0 transition-transform group-hover:scale-105 duration-200 ${isActive ? tab.color : 'text-muted'}`} />
-                <span className="flex-1 truncate">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Content Table Panel */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg border border-border rounded-2xl shadow-xl">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-bg2 border border-border rounded-2xl shadow-sm">
           {isError && (
             <div className="m-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between text-xs text-red-400 font-semibold shrink-0">
               <div className="flex items-center gap-2">
@@ -1416,8 +1381,6 @@ const Reports = () => {
           )}
 
         </div>
-
-      </div>
 
       {/* EXPORT COMPLETE REPORT MODAL DIALOG */}
       {showExportModal && (
