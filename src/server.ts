@@ -577,6 +577,9 @@ server.on('error', (err: any) => {
         // WhatsApp Queue Worker — self-gating: only starts 30s interval if whatsapp_enabled + automation_enabled
         import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
 
+        // Distributor Dispatch Reminder Worker — runs 12:30 PM - 1:00 PM auto reminders
+        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => console.error('[Boot] Distributor dispatch reminder worker start failed:', err));
+
         // Push notification event listener (lazy-loaded)
         import('./services/pushNotificationService.js').catch(err => console.error('[Boot] Push service load failed:', err));
 

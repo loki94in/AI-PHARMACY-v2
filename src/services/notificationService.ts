@@ -796,6 +796,92 @@ export class NotificationService {
       return false;
     }
   }
+
+  /**
+   * Send ultra-short dispatch status reminder message to a distributor
+   */
+  async sendDistributorDispatchReminder(reminderId: number): Promise<boolean> {
+    try {
+      const db = await dbManager.getConnection();
+      const reminder = await db.get(
+        `SELECT r.*, d.name as dist_name, d.phone as dist_phone
+         FROM distributor_dispatch_reminders r
+         LEFT JOIN distributors d ON r.distributor_id = d.id
+         WHERE r.id = ?`,
+        [reminderId]
+      );
+
+      if (!reminder) {
+        console.warn(`[DistributorReminder] Reminder ID ${reminderId} not found.`);
+        return false;
+      }
+
+      const recipientPhone = reminder.distributor_phone || reminder.dist_phone;
+      if (!recipientPhone || !String(recipientPhone).trim()) {
+        console.warn(`[DistributorReminder] Distributor ${reminder.distributor_name} has no phone number.`);
+        return false;
+      }
+
+      // Resolve Delivery Boy details (or fallback to Store Admin)
+      let boyName = '👤 Admin / Store Owner';
+      let boyPhone = 'N/A';
+
+      if (reminder.delivery_boy_id) {
+        const boy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE id = ?', [reminder.delivery_boy_id]);
+        if (boy && boy.name) {
+          boyName = boy.name;
+          boyPhone = formatDisplayPhone(boy.whatsapp_number);
+        }
+      }
+
+      if (boyName === '👤 Admin / Store Owner') {
+        // Find first active delivery boy as primary assigned staff
+        const activeBoy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 LIMIT 1');
+        if (activeBoy && activeBoy.name) {
+          boyName = activeBoy.name;
+          boyPhone = formatDisplayPhone(activeBoy.whatsapp_number);
+        } else {
+          // Store Admin fallback
+          const storePhoneRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_phone', 'owner_whatsapp_number') AND value IS NOT NULL AND value != '' LIMIT 1");
+          if (storePhoneRow && storePhoneRow.value) {
+            boyPhone = formatDisplayPhone(storePhoneRow.value);
+          }
+        }
+      }
+
+      // Store Name
+      const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key = 'shop_name'");
+      const storeName = shopNameRow?.value || 'Pharmacy';
+
+      // Ultra-short message format selected by user:
+      // "📦 Has today's order been dispatched or collected by [Delivery Boy Name] ([Delivery Boy Phone])? - [Store Name]"
+      const message = `📦 Has today's order been dispatched or collected by ${boyName} (${boyPhone})? - ${storeName}`;
+
+      console.log(`[DistributorReminder] Sending reminder to ${reminder.distributor_name} (${recipientPhone}): ${message}`);
+      const sendResult = await sendMessage(recipientPhone, undefined, message);
+
+      const statusStr = sendLogStatus(sendResult);
+      const isOk = isSendSuccess(sendResult);
+
+      if (isOk) {
+        await db.run(
+          `UPDATE distributor_dispatch_reminders SET last_reminded_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [reminderId]
+        );
+      }
+
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['distributor_dispatch_reminder', reminder.distributor_name, recipientPhone, message, statusStr, `reminder_${reminderId}_${Date.now()}`]
+      );
+
+      return isOk;
+    } catch (err: any) {
+      console.error(`[DistributorReminder] Error sending reminder for ID ${reminderId}:`, err.message);
+      return false;
+    }
+  }
 }
 
 // Singleton instance

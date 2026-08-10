@@ -3,6 +3,7 @@
 // Provides offline search without hitting live Pharmarack API.
 import { dbManager } from '../database/connection.js';
 import { enhancedSimilarity } from './productNameFilterService.js';
+import { tokenRefreshScheduler } from './tokenRefreshScheduler.js';
 
 export interface CatalogProduct {
   name: string;
@@ -40,28 +41,43 @@ export function scoreProductName(query: string, productName: string): number {
   );
 }
 
-// ponytail: reuse existing fetchPharmarack from pharmarack route — import dynamically to avoid circular deps
+// ponytail: reuse existing fetchPharmarack pattern with automatic retry on token expiration/406
 
 async function fetchPharmarackApi(url: string, options: any = {}): Promise<Response> {
   const db = await dbManager.getConnection();
   const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
-  const token = tokenRow?.value || '';
+  let token = tokenRow?.value || '';
   if (!token) throw new Error('No Pharmarack session token');
 
-  const authHeader = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-  return fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json',
-      'devicetype': 'web',
-      'Accept': 'application/json, text/plain, */*',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://retailers.pharmarack.com/',
-      'Origin': 'https://retailers.pharmarack.com',
-      ...(options.headers || {})
+  const executeFetch = async (t: string) => {
+    const authHeader = t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+    return fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+        'devicetype': 'web',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://retailers.pharmarack.com/',
+        'Origin': 'https://retailers.pharmarack.com',
+        ...(options.headers || {})
+      }
+    });
+  };
+
+  let response = await executeFetch(token);
+
+  if ((response.status === 401 || response.status === 403 || response.status === 406) && token) {
+    console.log(`[Catalog Cache Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
+    const freshToken = await tokenRefreshScheduler.executeRefresh();
+    if (freshToken) {
+      console.log(`[Catalog Cache Fetch] Retrying API ${url} with fresh token...`);
+      response = await executeFetch(freshToken);
     }
-  });
+  }
+
+  return response;
 }
 
 /**
@@ -123,9 +139,10 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
     }
 
     const stores = storeData.data.Stores;
+    const checkIsMapped = (s: any) => s.Ismapped === 1 || s.IsMapped === 1 || s.isMapped === true || s.isMapped === 1 || String(s.IsMapped) === '1' || String(s.Ismapped) === '1';
 
     // Prioritize mapped stores to avoid 355 unmapped error spam on boot
-    const targetStores = stores.filter((s: any) => s.Ismapped === 1);
+    const targetStores = stores.filter((s: any) => checkIsMapped(s));
     const storesToSync = targetStores.length > 0 ? targetStores : stores.slice(0, 20);
     let consecutiveErrors = 0;
 
@@ -137,7 +154,7 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
 
       const storeId = store.StoreId;
       const storeName = store.StoreName || 'Unknown';
-      const isMapped = store.Ismapped === 1;
+      const isMapped = checkIsMapped(store);
 
       try {
         // Use 'a' as search keyword to fetch catalog items safely from Elasticsearch

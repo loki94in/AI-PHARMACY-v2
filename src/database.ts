@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 31;
+const CURRENT_SCHEMA_VERSION = 32;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -456,9 +456,20 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_patient_refills_status_date ON patient_refills (status, next_refill_date);
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name);
-    CREATE INDEX IF NOT EXISTS idx_delivery_boys_lookup ON delivery_boys (name, id, is_active);
-    CREATE INDEX IF NOT EXISTS idx_patient_refills_phone ON patient_refills (patient_phone);
-    CREATE INDEX IF NOT EXISTS idx_patient_refills_next_refill ON patient_refills (next_refill_date);
+    CREATE TABLE IF NOT EXISTS distributor_dispatch_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      distributor_name TEXT NOT NULL,
+      distributor_phone TEXT,
+      delivery_boy_id INTEGER,
+      status TEXT CHECK(status IN ('Pending', 'Dispatched', 'Collected')) DEFAULT 'Pending',
+      auto_remind INTEGER DEFAULT 1,
+      last_reminded_at DATETIME,
+      date TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_date ON distributor_dispatch_reminders (date);
+    CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_distributor ON distributor_dispatch_reminders (distributor_id);
 
     -- Core Operational Tables
     CREATE TABLE IF NOT EXISTS purchase_items (

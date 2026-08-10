@@ -4,6 +4,7 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { notificationService } from '../services/notificationService.js';
+import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -283,6 +284,85 @@ router.get('/messages', async (req, res) => {
   }
 });
 
+// ─── DISTRIBUTOR DISPATCH REMINDERS ──────────────────────────────────────────
+
+// GET today's distributor reminders (with auto-sync)
+router.get('/distributor-reminders/today', async (_req, res) => {
+  try {
+    const reminders = await syncTodayActiveDistributors();
+    res.json({ success: true, reminders });
+  } catch (error: any) {
+    console.error('Fetch distributor reminders error:', error);
+    res.status(500).json({ error: 'Failed to fetch distributor reminders' });
+  }
+});
+
+// POST toggle auto-remind status for a distributor reminder
+router.post('/distributor-reminders/toggle-auto', async (req, res) => {
+  const { id, auto_remind } = req.body;
+  if (!id) return res.status(400).json({ error: 'id is required' });
+
+  try {
+    const db = await dbManager.getConnection();
+    const val = auto_remind ? 1 : 0;
+    await db.run('UPDATE distributor_dispatch_reminders SET auto_remind = ? WHERE id = ?', [val, id]);
+    const updated = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [id]);
+    res.json({ success: true, reminder: updated });
+  } catch (error: any) {
+    console.error('Toggle auto-remind error:', error);
+    res.status(500).json({ error: 'Failed to toggle auto-remind' });
+  }
+});
+
+// PUT update reminder status (Pending, Dispatched, Collected) & delivery_boy_id
+router.put('/distributor-reminders/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status, delivery_boy_id } = req.body;
+
+  try {
+    const db = await dbManager.getConnection();
+    const existing = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Reminder not found' });
+
+    const newStatus = status || existing.status;
+    const newBoy = delivery_boy_id !== undefined ? delivery_boy_id : existing.delivery_boy_id;
+
+    await db.run(
+      'UPDATE distributor_dispatch_reminders SET status = ?, delivery_boy_id = ? WHERE id = ?',
+      [newStatus, newBoy, id]
+    );
+
+    const updated = await db.get(
+      `SELECT r.*, db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone
+       FROM distributor_dispatch_reminders r
+       LEFT JOIN delivery_boys db ON r.delivery_boy_id = db.id
+       WHERE r.id = ?`,
+      [id]
+    );
+
+    res.json({ success: true, reminder: updated });
+  } catch (error: any) {
+    console.error('Update reminder status error:', error);
+    res.status(500).json({ error: 'Failed to update reminder status' });
+  }
+});
+
+// POST send WhatsApp reminder now
+router.post('/distributor-reminders/:id/send-now', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ok = await notificationService.sendDistributorDispatchReminder(Number(id));
+    if (ok) {
+      res.json({ success: true, message: 'WhatsApp reminder sent successfully' });
+    } else {
+      res.status(500).json({ error: 'Failed to send WhatsApp reminder. Check logs or distributor phone number.' });
+    }
+  } catch (error: any) {
+    console.error('Send now distributor reminder error:', error);
+    res.status(500).json({ error: error.message || 'Failed to send reminder' });
+  }
+});
+
 // Legacy support route
 router.post('/', async (req, res) => {
   const { type, description } = req.body;
@@ -290,7 +370,7 @@ router.post('/', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run('INSERT INTO action_logs (action_type, description) VALUES (?, ?)', ['DISPATCH', `${type}: ${description}`]);
-        res.json({ success: true, message: 'Dispatch logged' });
+    res.json({ success: true, message: 'Dispatch logged' });
   } catch (error) {
     console.error('Dispatch error:', error);
     res.status(500).json({ error: 'Failed to log dispatch' });

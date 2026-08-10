@@ -719,6 +719,10 @@ export const api = {
   deleteDeliveryBoy: (id: number) => apiClient.delete(`/dispatch/delivery-boys/${id}`).then(res => res.data),
   getDeliveryBoyMessageDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/dispatch/messages/dates').then(res => res.data),
   getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: any[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
+  getTodayDistributorReminders: () => apiClient.get<{ success: boolean; reminders: any[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
+  toggleDistributorAutoRemind: (id: number, auto_remind: boolean) => apiClient.post('/dispatch/distributor-reminders/toggle-auto', { id, auto_remind }).then(res => res.data),
+  updateDistributorReminderStatus: (id: number, data: { status?: string; delivery_boy_id?: number | null }) => apiClient.put(`/dispatch/distributor-reminders/${id}/status`, data).then(res => res.data),
+  sendDistributorReminderNow: (id: number) => apiClient.post(`/dispatch/distributor-reminders/${id}/send-now`).then(res => res.data),
 
   // CRM — extended
   updatePatient: (id: number, data: Partial<import('../types/api').Patient>) => apiClient.put(`/crm/patients/${id}`, data).then(res => res.data),

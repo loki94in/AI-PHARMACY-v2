@@ -1984,9 +1984,11 @@ export default function PharmarackCart() {
     return unsub;
   }, []);
 
-  // Listen to cross-page refresh events fired by QuickOrderModal, LiveCartAddModal, Orders page, etc.
-  // 'refresh-pharmarack-cart'  → re-fetch cart so newly-added items appear immediately
-  // 'refresh-special-orders'   → re-fetch pending orders so the left sidebar count is up-to-date
+  // Listen to cross-page refresh events fired by QuickOrderModal, LiveCartAddModal, login/OTP completion, etc.
+  // 'refresh-pharmarack-cart'    → re-fetch cart so newly-added items appear immediately
+  // 'pharmarack-auth-changed'     → re-fetch cart as soon as user enters OTP / session token updates
+  // 'pharmarack-session-updated'  → re-fetch cart on session renewal
+  // 'refresh-special-orders'     → re-fetch pending orders so the left sidebar count is up-to-date
   useEffect(() => {
     const handleCartRefresh = () => {
       cachedDistributors = [];
@@ -1997,11 +1999,24 @@ export default function PharmarackCart() {
       cachedPendingOrders = [];
       fetchPendingOrders();
     };
+    const handleFocusOrVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchCartSilent();
+      }
+    };
     window.addEventListener('refresh-pharmarack-cart', handleCartRefresh);
+    window.addEventListener('pharmarack-auth-changed', handleCartRefresh);
+    window.addEventListener('pharmarack-session-updated', handleCartRefresh);
     window.addEventListener('refresh-special-orders', handleOrdersRefresh);
+    window.addEventListener('focus', handleFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleFocusOrVisibility);
     return () => {
       window.removeEventListener('refresh-pharmarack-cart', handleCartRefresh);
+      window.removeEventListener('pharmarack-auth-changed', handleCartRefresh);
+      window.removeEventListener('pharmarack-session-updated', handleCartRefresh);
       window.removeEventListener('refresh-special-orders', handleOrdersRefresh);
+      window.removeEventListener('focus', handleFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleFocusOrVisibility);
     };
   }, []);
 
