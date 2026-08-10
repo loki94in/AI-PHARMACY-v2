@@ -494,59 +494,56 @@ const Learning: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header Banner */}
-      <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 backdrop-blur-xl shadow-lg">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 flex items-center justify-center text-primary shrink-0 shadow-[0_0_15px_rgba(14,165,233,0.15)]">
-            <Brain size={26} />
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm">
+        {/* Title & Retrain Action */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+              <Brain size={20} />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-text leading-none">AI Learning & Automation Hub</h1>
+              <p className="text-[11px] text-muted mt-0.5">Clinical model, OCR rules, doctors & distributor layout parser</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-text tracking-tight flex items-center gap-2">
-              AI Learning & Automation Hub
-            </h1>
-            <p className="text-xs sm:text-sm text-muted mt-0.5">
-              Self-learning clinical model, OCR brand correction rules, doctor registry, and distributor layout parser.
-            </p>
-          </div>
+
+          <button
+            onClick={handleRetrain}
+            disabled={retraining}
+            className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center gap-1.5 hover:bg-primary/90 transition-all shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            <RefreshCw size={13} className={retraining ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">{retraining ? 'Retraining...' : 'Retrain AI'}</span>
+          </button>
         </div>
 
-        <button
-          onClick={handleRetrain}
-          disabled={retraining}
-          className="px-4 py-2.5 rounded-xl bg-primary text-white font-bold text-xs flex items-center gap-2 hover:bg-primary/90 transition-all duration-200 shadow-md shadow-primary/20 disabled:opacity-50 cursor-pointer shrink-0"
-        >
-          <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
-          {retraining ? 'Retraining AI Engine...' : 'Retrain Clinical Model'}
-        </button>
-      </div>
-
-      {/* Tabs Header */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-border scrollbar-none">
-        {[
-          { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain },
-          { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope },
-          { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database },
-          { id: 'operations', label: 'Document Scanner Sandbox', icon: QrCode },
-        ].map(t => {
-          const Icon = t.icon;
-          const isActive = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => handleTabChange(t.id)}
-              className={`
-                px-4 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer
-                ${isActive
-                  ? 'bg-primary text-white shadow-md shadow-primary/20'
-                  : 'text-muted hover:text-text hover:bg-bg2'
-                }
-              `}
-            >
-              <Icon size={16} />
-              {t.label}
-            </button>
-          );
-        })}
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {[
+            { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain },
+            { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope },
+            { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database },
+            { id: 'operations', label: 'Scanner Sandbox', icon: QrCode },
+          ].map(t => {
+            const Icon = t.icon;
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => handleTabChange(t.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* TAB 1: Clinical AI & OCR Rules */}

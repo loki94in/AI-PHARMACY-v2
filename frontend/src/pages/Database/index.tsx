@@ -460,52 +460,65 @@ const DatabasePage = () => {
 
   return (
     <div className="h-full flex flex-col fade-in relative gap-3">
-      {/* Page Tabs */}
-      <div className="flex items-center justify-between border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setSearchParams({ tab: 'db' })}
-            className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-              currentTab === 'db'
-                ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-                : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-            }`}
-          >
-            <DatabaseIcon size={14} />
-            Master Database
-          </button>
-          <button
-            onClick={() => setSearchParams({ tab: 'catalog' })}
-            className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-              currentTab === 'catalog'
-                ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-                : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-            }`}
-          >
-            <Upload size={14} />
-            Catalog Upload
-          </button>
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+        {/* Title & Quick Actions */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+              <DatabaseIcon size={20} />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-text leading-none">Database & Master Catalog</h1>
+              <p className="text-[11px] text-muted mt-0.5">Explore SQLite drug records & upload distributor master catalogs</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSyncFromInventory}
+              disabled={syncingInventory}
+              className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Sync all saved/purchased products from inventory into Master Database"
+            >
+              <RefreshCw size={12} className={syncingInventory ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">{syncingInventory ? 'Syncing...' : 'Sync Meds'}</span>
+            </button>
+            <button
+              onClick={handleSeedMasterCatalog}
+              disabled={seedingMaster}
+              className="px-2.5 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-500/30 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Seed/Restore full 200,000+ reference medicines catalog"
+            >
+              <BookOpen size={12} className={seedingMaster ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">{seedingMaster ? 'Seeding...' : 'Seed Catalog'}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 pr-1">
-          <button
-            onClick={handleSyncFromInventory}
-            disabled={syncingInventory}
-            className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-bold uppercase flex items-center gap-1.5 transition-all"
-            title="Sync all saved/purchased products from inventory into Master Database"
-          >
-            <RefreshCw size={13} className={syncingInventory ? 'animate-spin' : ''} />
-            {syncingInventory ? 'Syncing...' : 'Sync Meds to Master'}
-          </button>
-          <button
-            onClick={handleSeedMasterCatalog}
-            disabled={seedingMaster}
-            className="px-3 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-lg text-xs font-bold uppercase flex items-center gap-1.5 transition-all"
-            title="Seed/Restore full 200,000+ reference medicines catalog"
-          >
-            <BookOpen size={13} className={seedingMaster ? 'animate-spin' : ''} />
-            {seedingMaster ? 'Seeding...' : 'Seed Master Catalog (200k+)'}
-          </button>
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {[
+            { id: 'db', label: 'Master Database', icon: DatabaseIcon },
+            { id: 'catalog', label: 'Catalog Upload', icon: Upload },
+          ].map(t => {
+            const Icon = t.icon;
+            const isActive = currentTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSearchParams({ tab: t.id })}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

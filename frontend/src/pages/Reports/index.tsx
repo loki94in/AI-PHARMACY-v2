@@ -651,20 +651,44 @@ const Reports = () => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-bg2 border border-border p-4 rounded-2xl flex-shrink-0 shadow-lg relative overflow-hidden backdrop-blur-md">
         <div className="absolute top-0 left-0 w-2 h-full bg-primary" />
         
+        {/* Title */}
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary shadow-inner">
-            <PieChart size={18} className="animate-spin-slow" />
+            <PieChart size={20} />
           </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-black text-text uppercase tracking-widest">Reports Workspace</span>
-            <span className="text-[10px] text-muted font-bold">
+          <div className="flex flex-col">
+            <span className="text-base font-bold text-text leading-none">Analytics & Reports Hub</span>
+            <span className="text-[11px] text-muted mt-0.5">
               {activeTab === 'nonMoving' 
                 ? 'Identify dormant stock & valuation loss metrics' 
                 : activeTab === 'trace' 
                 ? 'Trace transactions for Batch, Invoice, or supplier parameters'
-                : 'Live financial ledger analyzer'}
+                : 'Live financial ledger analyzer & inventory valuation'}
             </span>
           </div>
+        </div>
+
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex gap-3 items-center flex-wrap w-full md:w-auto justify-end">

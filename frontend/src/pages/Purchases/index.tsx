@@ -3058,7 +3058,7 @@ const Purchases: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {items.some(i => i.name.trim().length > 0) && (
+            {items.some(i => (i.name || i.medicine_name || '').trim().length > 0) && (
               <button
                 type="button"
                 onClick={() => handlePrintProductBarcodes(items)}

@@ -4485,28 +4485,39 @@ const CRM: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full gap-4">
-      {/* Header */}
-      <div className="flex-shrink-0">
-        <h1 className="text-lg font-bold text-text">CRM &amp; Messaging</h1>
-        <p className="text-xs text-muted mt-0.5">Refills, customer credit ledger &amp; WhatsApp Web</p>
-      </div>
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+        {/* Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <Users size={20} />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-text leading-none">CRM & Customer Hub</h1>
+            <p className="text-[11px] text-muted mt-0.5">Patient refills, special shortage orders, customer credit & WhatsApp</p>
+          </div>
+        </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 p-1 bg-bg2 border border-border rounded-xl flex-shrink-0 w-fit">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setTab(tab.key)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium ${
-              activeTab === tab.key
-                ? 'bg-primary text-white shadow-sm'
-                : 'text-muted hover:text-text hover:bg-bg3'
-            }`}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {TABS.map(tab => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setTab(tab.key)}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <span className={isActive ? 'text-primary' : 'text-muted'}>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tab content */}

@@ -2020,49 +2020,66 @@ export default function PharmarackCart() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-3 p-6 pb-4">
-      {/* Page Tabs */}
-      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
-        <button
-          onClick={() => setSearchParams({ tab: 'cart' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'cart' || !currentTab
-            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-            }`}
-        >
-          <ShoppingCart size={14} />
-          Pharmarack Cart
-        </button>
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+        {/* Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <ShoppingCart size={20} />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-text leading-none">Pharmarack Cart & Orders</h1>
+            <p className="text-[11px] text-muted mt-0.5">Live distributor cart, order status & sent history logs</p>
+          </div>
+        </div>
 
-        <button
-          onClick={() => {
-            setSearchParams({ tab: 'sent-history' });
-            setHasUnreadSentHistory(false);
-          }}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all relative ${currentTab === 'sent-history'
-            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          <button
+            onClick={() => setSearchParams({ tab: 'cart' })}
+            className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              currentTab === 'cart' || !currentTab
+                ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
             }`}
-        >
-          <Send size={14} />
-          <span>Sent Orders History</span>
-          {hasUnreadSentHistory && currentTab !== 'sent-history' && (
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-          )}
-        </button>
+          >
+            <ShoppingCart size={14} className={currentTab === 'cart' || !currentTab ? 'text-primary' : 'text-muted'} />
+            <span>Pharmarack Cart</span>
+          </button>
 
-        <button
-          onClick={() => setSearchParams({ tab: 'non-mapped' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${currentTab === 'non-mapped'
-            ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-            : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
+          <button
+            onClick={() => {
+              setSearchParams({ tab: 'sent-history' });
+              setHasUnreadSentHistory(false);
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer relative ${
+              currentTab === 'sent-history'
+                ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
             }`}
-        >
-          <Building2 size={14} />
-          Non-Mapped Distributors
-        </button>
+          >
+            <Send size={14} className={currentTab === 'sent-history' ? 'text-primary' : 'text-muted'} />
+            <span>Sent Orders History</span>
+            {hasUnreadSentHistory && currentTab !== 'sent-history' && (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setSearchParams({ tab: 'non-mapped' })}
+            className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              currentTab === 'non-mapped'
+                ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+            }`}
+          >
+            <Building2 size={14} className={currentTab === 'non-mapped' ? 'text-primary' : 'text-muted'} />
+            <span>Non-Mapped Distributors</span>
+          </button>
+        </div>
       </div>
 
       {currentTab === 'non-mapped' ? (

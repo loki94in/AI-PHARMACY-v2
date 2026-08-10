@@ -749,52 +749,45 @@ const Returns: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3 p-4">
-      {/* Page Tabs */}
-      <div className="flex border-b border-glass-border bg-glass-bg backdrop-blur-xl shrink-0 rounded-xl overflow-hidden p-1 gap-1">
-        <button
-          onClick={() => setSearchParams({ tab: 'returns' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'returns'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <RotateCcw size={14} />
-          Supplier Returns
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'expiry' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'expiry'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <CalendarDays size={14} />
-          Expiry Monitor
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'customer' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'customer'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <Users size={14} />
-          Customer Returns
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'customer-history' })}
-          className={`flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
-            currentTab === 'customer-history'
-              ? 'bg-primary/10 border border-primary/20 text-text shadow-[0_0_10px_rgba(var(--primary-rgb),0.15)]'
-              : 'border border-transparent text-muted hover:text-text hover:bg-white/[0.02]'
-          }`}
-        >
-          <History size={14} />
-          Return History
-        </button>
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+        {/* Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <RotateCcw size={20} />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-text leading-none">Returns & Expiry Hub</h1>
+            <p className="text-[11px] text-muted mt-0.5">Manage supplier returns, near-expiry monitor & customer return claims</p>
+          </div>
+        </div>
+
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {[
+            { id: 'returns', label: 'Supplier Returns', icon: RotateCcw },
+            { id: 'expiry', label: 'Expiry Monitor', icon: CalendarDays },
+            { id: 'customer', label: 'Customer Returns', icon: Users },
+            { id: 'customer-history', label: 'Return History', icon: History },
+          ].map(t => {
+            const Icon = t.icon;
+            const isActive = currentTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setSearchParams({ tab: t.id })}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {currentTab === 'expiry' ? (
