@@ -101,13 +101,13 @@ interface MedicineAlias {
 
 // Map legacy tab search params to the 4 store infrastructure tabs
 function normalizeSettingsTab(tabParam: string | null): string {
-  if (!tabParam) return 'profile';
+  if (!tabParam) return 'backups';
   const lower = tabParam.toLowerCase();
   if (lower === 'profile' || lower === 'store') return 'profile';
   if (lower === 'staff' || lower === 'security') return 'staff';
   if (lower === 'integrations' || lower === 'credentials') return 'integrations';
   if (lower === 'backups' || lower === 'data' || lower === 'maintenance') return 'backups';
-  return 'profile';
+  return 'backups';
 }
 
 // ==========================================
@@ -134,39 +134,40 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col h-full bg-bg text-text p-4 space-y-4 overflow-y-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <SettingsIcon size={24} />
+      {/* Compact Unified Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm">
+        {/* Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <SettingsIcon size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-text">Pharmacy Configuration & Control Hub</h1>
-            <p className="text-xs text-muted">Unified control center for store parameters, security, API credentials, and AI self-learning.</p>
+            <h1 className="text-base font-bold text-text leading-none">Settings & Configuration</h1>
+            <p className="text-[11px] text-muted mt-0.5">Control center for store rules, security & integrations</p>
           </div>
         </div>
-      </div>
 
-      {/* Tab Switcher */}
-      <div className="flex border-b border-border gap-2 overflow-x-auto scrollbar-none pb-0.5">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
-              className={`flex items-center gap-2.5 py-3 px-4 font-semibold text-xs rounded-t-xl transition-all whitespace-nowrap border-t border-x cursor-pointer ${
-                isActive
-                  ? 'bg-bg2 border-border border-b-bg2 text-primary font-bold shadow-sm'
-                  : 'bg-bg3/40 border-transparent text-muted hover:text-text hover:bg-bg3/80'
-              }`}
-            >
-              <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+        {/* Tab Switcher Pills */}
+        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
+                }`}
+              >
+                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Active Tab Workspace Panel */}
