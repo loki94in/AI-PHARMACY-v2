@@ -19,7 +19,8 @@ const META_PATH = join(KNOWLEDGE_DIR, 'meta.json');
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', '.next', '.cache',
   'backup', '.codegraph', '.wwebjs_auth', 'uploads', '.understand-anything',
-  'cache'
+  'cache', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache',
+  'site-packages', 'node_modules', '.expo', '.gradle', 'android', 'ios'
 ]);
 
 const INCLUDE_EXTS = new Set([
@@ -256,6 +257,19 @@ function main() {
     graph.edges = graph.edges.filter(e => {
       return graph.nodes.some(n => n.id === e.source) && graph.nodes.some(n => n.id === e.target);
     });
+  }
+
+  // Drop nodes living inside any skipped directory (e.g. vendored .venv site-packages)
+  const isSkippedPath = (p) => {
+    const parts = (p || '').split('/');
+    return parts.some(part => SKIP_DIRS.has(part));
+  };
+  const beforeGhostCount = graph.nodes.length;
+  graph.nodes = graph.nodes.filter(n => !n.filePath || !isSkippedPath(n.filePath));
+  if (graph.nodes.length !== beforeGhostCount) {
+    const validIds = new Set(graph.nodes.map(n => n.id));
+    graph.edges = graph.edges.filter(e => validIds.has(e.source) && validIds.has(e.target));
+    console.log(`[QUICK-UPDATE] Pruned ${beforeGhostCount - graph.nodes.length} vendored/excluded nodes from graph.`);
   }
   
   // Add/update nodes

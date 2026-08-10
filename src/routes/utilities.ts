@@ -563,6 +563,20 @@ router.post('/reset-data', async (req, res) => {
           settingsRows = await dbRaw.all('SELECT * FROM settings');
         } catch (_) {}
         await dbRaw.close();
+
+        // Exclude all sent order history keys & transient WhatsApp queue timestamps
+        const excludeKeys = [
+          'pharmarack_last_batch_sent_time',
+          'pharmarack_last_sent_wa_time_map',
+          'pharmarack_sent_history',
+          'pharmarack_latest_sent_map',
+          'pharmacart_sent_wa_history',
+          'whatsapp_last_sent_timestamp',
+          'last_whatsapp_queue_sync'
+        ];
+        const isHistoryKey = (k: string) => excludeKeys.includes(k) || k.startsWith('sent_order_') || k.startsWith('wa_sent_') || k.startsWith('pharmarack_sent_');
+        appSettingsRows = appSettingsRows.filter(r => r && r.key && !isHistoryKey(r.key));
+        settingsRows = settingsRows.filter(r => r && r.key && !isHistoryKey(r.key));
       } catch (e) {
         console.warn('[Reset] Failed to read configurations from DB:', e);
       }

@@ -173,6 +173,12 @@ The graph is ~223 KB for 258 files. This is normal. If it exceeds 1 MB, check fo
 node -e "const g=require('./.understand-anything/knowledge-graph.json'); const ids=g.nodes.map(n=>n.id); const dupes=ids.filter((id,i)=>ids.indexOf(id)!==i); console.log('Duplicates:', dupes)"
 ```
 
+### Generating human-readable documentation from the graph
+After updating the graph, regenerate the full project documentation:
+```bash
+node scripts/generate-project-docs.mjs   # writes docs/KNOWLEDGE_GRAPH_DOCUMENTATION.md
+```
+
 ### New file not showing in graph
 Run the update script:
 ```bash

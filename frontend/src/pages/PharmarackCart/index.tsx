@@ -511,11 +511,39 @@ export default function PharmarackCart() {
       fetchDistributorMappings();
       loadContactData();
     };
+
+    const handleClearSentHistory = () => {
+      setSentWaStatusMap({});
+      setLastSentWaTimeMap({});
+      setLastBatchSentTime('');
+      setLatestSentMap({});
+      setSentOrders([]);
+      setDistributors([]);
+      setPendingOrders([]);
+      setPendingRefills([]);
+      cachedDistributors = [];
+      cachedPendingOrders = [];
+      cachedPendingRefills = [];
+      cachedPriceHistory = {};
+      cachedLastFetched = null;
+      try {
+        localStorage.removeItem('pharmacart_sent_wa_history');
+        localStorage.removeItem('pharmarack_last_sent_wa_time_map');
+        localStorage.removeItem('pharmarack_last_batch_sent_time');
+        localStorage.removeItem('pharmarack_sent_history');
+        localStorage.removeItem('pharmarack_latest_sent_map');
+      } catch (_) {}
+    };
+
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
     window.addEventListener('settings-updated', handlePhoneUpdate);
+    window.addEventListener('clear-sent-history', handleClearSentHistory);
+    window.addEventListener('clear-app-cache', handleClearSentHistory);
     return () => {
       window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
       window.removeEventListener('settings-updated', handlePhoneUpdate);
+      window.removeEventListener('clear-sent-history', handleClearSentHistory);
+      window.removeEventListener('clear-app-cache', handleClearSentHistory);
     };
   }, []);
 
@@ -1188,22 +1216,29 @@ export default function PharmarackCart() {
     }
   };
 
-  const handleSendWhatsAppOrder = async (dist: Distributor, bypassMissingBoyCheck = false) => {
+  const handleSendWhatsAppOrder = async (
+    dist: Distributor,
+    bypassMissingBoyCheck = false,
+    forceResend = false,
+    targetMode: 'distributor_only' | 'both' = 'both'
+  ) => {
     if (!hasPharmacySettings()) {
       toastEvent.trigger('Pharmacy Name and Contact Phone are required in Settings before sending orders.', 'error');
       navigate('/settings?missing=pharmacy_details');
       return;
     }
 
-    if (!bypassMissingBoyCheck && !hasDeliveryBoyContacts()) {
+    if (!bypassMissingBoyCheck && targetMode === 'both' && !hasDeliveryBoyContacts()) {
       setPendingTargetDistributor(dist);
       setShowMissingBoyModal(true);
       return;
     }
 
     const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-    if (freshItems.length === 0) {
-      toastEvent.trigger(`All ${dist.items.length} item(s) for ${dist.storeName} were already sent! No new items to order.`, 'info');
+    const itemsToOrder = freshItems.length > 0 ? freshItems : dist.items;
+
+    if (itemsToOrder.length === 0) {
+      toastEvent.trigger(`No items found in cart for ${dist.storeName}.`, 'info');
       return;
     }
 
@@ -1242,26 +1277,33 @@ export default function PharmarackCart() {
           try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
           return next;
         });
-        toastEvent.trigger(`WhatsApp order sent and verified for ${dist.storeName}!`, 'success');
+        toastEvent.trigger(
+          forceResend
+            ? `Resent WhatsApp order to ${dist.storeName}${targetMode === 'both' ? ' & Delivery Boy' : ' (Distributor Only)'}!`
+            : `WhatsApp order sent and verified for ${dist.storeName}!`,
+          'success'
+        );
       } else {
         throw new Error(res?.data?.error || 'Silent send failed');
       }
 
-      // Also trigger backend notification to Delivery Boys
-      try {
-        await apiClient.post('/pharmarack/cart/notify-manual', {
-          storeId: dist.storeId,
-          storeName: dist.storeName,
-          deliveryPersons: dist.deliveryPersons,
-          items: freshItems
-        });
-      } catch (distErr) {
-        console.warn('Could not notify delivery boys via backend route:', distErr);
+      // Also trigger backend notification to Delivery Boys ONLY if targetMode is 'both'
+      if (targetMode === 'both') {
+        try {
+          await apiClient.post('/pharmarack/cart/notify-manual', {
+            storeId: dist.storeId,
+            storeName: dist.storeName,
+            deliveryPersons: dist.deliveryPersons,
+            items: itemsToOrder
+          });
+        } catch (distErr) {
+          console.warn('Could not notify delivery boys via backend route:', distErr);
+        }
       }
 
       // Log placed order to DB history
       try {
-        const itemsToLog = freshItems;
+        const itemsToLog = itemsToOrder;
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
           store_name: dist.storeName,
@@ -2149,7 +2191,7 @@ export default function PharmarackCart() {
                                   <button
                                     onClick={() => handleReaddSingleSentItem(item, order.store_id, order.store_name)}
                                     disabled={readdingSentItems}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
                                     title="Add this medicine to active cart (falls back to Live Cart search if out of stock)"
                                   >
                                     <Plus size={11} /> Re-add
@@ -2223,7 +2265,7 @@ export default function PharmarackCart() {
               <button
                 onClick={() => handleSendAllWhatsAppOrders()}
                 disabled={isSendingBatchWhatsApp || distributors.length === 0}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 font-bold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-extrabold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm cursor-pointer"
                 title="Send order messages silently to all saved distributor WhatsApp numbers with 30-45s safe delay"
               >
                 {isSendingBatchWhatsApp ? (
@@ -2448,7 +2490,7 @@ export default function PharmarackCart() {
                                         <button
                                           type="button"
                                           onClick={handleConfirmOrdered}
-                                          className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm"
+                                          className="text-[9px] font-bold bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
                                           title="Double-check & confirm that this order is placed"
                                         >
                                           <Check size={10} />
@@ -2465,7 +2507,7 @@ export default function PharmarackCart() {
                                       <button
                                         type="button"
                                         onClick={() => handleConfirmCandidateMatch(order, candidateItem)}
-                                        className="text-[9px] font-bold bg-amber-500 hover:bg-amber-400 text-black px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                                        className="text-[9px] font-bold bg-white text-amber-600 border border-amber-500 hover:bg-amber-50 px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
                                         title={`Confirm "${candidateItem.productName || candidateItem.name}" in cart is this request`}
                                       >
                                         <Check size={10} />
@@ -2590,7 +2632,7 @@ export default function PharmarackCart() {
                                 ) : (
                                   <button
                                     onClick={() => liveCartAddEvent.triggerOpen(medName, shortageQty, undefined, refill.id)}
-                                    className="shrink-0 text-[9px] font-bold bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/30 px-2 py-1 rounded-md transition-all active:scale-95 text-amber-400 font-sans flex items-center gap-1 cursor-pointer"
+                                    className="shrink-0 text-[9px] font-bold bg-white text-amber-600 border border-amber-500 hover:bg-amber-50 px-2 py-1 rounded-md transition-all active:scale-95 font-sans flex items-center gap-1 cursor-pointer shadow-sm"
                                     title={`Add ${shortageQty} shortage units to Pharmarack Live Cart`}
                                   >
                                     <Search size={10} />
@@ -2666,7 +2708,7 @@ export default function PharmarackCart() {
                               </span>
                               <button
                                 onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
-                                className="shrink-0 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+                                className="shrink-0 text-[10px] font-bold bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
                                 title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
                               >
                                 <Plus size={11} />
@@ -2734,7 +2776,7 @@ export default function PharmarackCart() {
                                     });
                                   }
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/30 text-emerald-400 text-[10px] font-extrabold transition-all active:scale-95 shrink-0"
+                                className="px-2.5 py-1.5 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 text-[10px] font-extrabold transition-all active:scale-95 shrink-0 shadow-sm cursor-pointer"
                               >
                                 Save
                               </button>
@@ -2959,8 +3001,8 @@ export default function PharmarackCart() {
                                 <button
                                   onClick={() => handleOpenEditModal(dist)}
                                   className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 ${activePhone
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                                    ? 'bg-white text-emerald-600 border-emerald-500 hover:bg-emerald-50'
+                                    : 'bg-white text-amber-600 border-amber-500 hover:bg-amber-50'
                                     }`}
                                   title="Search saved distributors & edit WhatsApp phone number"
                                 >
@@ -2997,7 +3039,7 @@ export default function PharmarackCart() {
                             <button
                               onClick={() => handleSendDeliveryBoyNotification(dist)}
                               disabled={sendingDeliveryBoyNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white text-teal-600 border border-teal-500 hover:bg-teal-50 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
                               title="Manually trigger and send WhatsApp order notification to assigned Delivery Boy anytime"
                             >
                               {sendingDeliveryBoyNotifId === dist.storeId ? (
@@ -3012,7 +3054,7 @@ export default function PharmarackCart() {
                             <button
                               onClick={() => handleSendManualNotification(dist)}
                               disabled={sendingNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded bg-sky/10 hover:bg-sky/20 text-sky border border-sky/30 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm"
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white text-sky-600 border border-sky-500 hover:bg-sky-50 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
                               title="Send notification / place order in Pharmarack"
                             >
                               {sendingNotifId === dist.storeId ? (
@@ -3023,43 +3065,78 @@ export default function PharmarackCart() {
                               <span>Send to Pharmarack</span>
                             </button>
 
-                            {/* Button 2: Send via WhatsApp */}
+                            {/* Button 2: WhatsApp Send & Resend Controls */}
                             {(() => {
                               const isSending = sendingWaDistributorId === dist.storeId;
                               const status = sentWaStatusMap[dist.storeId];
-                              let btnClass = "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border-emerald-500/40";
-                              if (status === 'success') btnClass = "bg-emerald-500 text-white border-emerald-600 animate-pulse";
-                              if (status === 'queued') btnClass = "bg-amber-500/20 text-amber-300 border-amber-500/40";
-                              if (status === 'error') btnClass = "bg-rose-500/20 text-rose-400 border-rose-500/40";
+                              const isAlreadySent = status === 'success' || Boolean(lastSentWaTimeMap[dist.storeId]) || (dist.items.length > 0 && dist.items.every(i => isItemAlreadySent(i, dist)));
+
+                              // User styling requirement: WHITE background, GREEN text & GREEN border only. NO solid green fill background.
+                              const whiteGreenBtnClass = "bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-extrabold shadow-sm";
+
+                              if (isAlreadySent) {
+                                return (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {/* Resend to Distributor Only Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendWhatsAppOrder(dist, false, true, 'distributor_only')}
+                                      disabled={isSending}
+                                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
+                                      title="Resend WhatsApp order message to Distributor Only"
+                                    >
+                                      {isSending ? (
+                                        <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                                      ) : (
+                                        <RotateCcw size={11} className="text-emerald-600" />
+                                      )}
+                                      <span>Resend (Distributor Only)</span>
+                                    </button>
+
+                                    {/* Resend to Both (Distributor & Delivery Boy) Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendWhatsAppOrder(dist, false, true, 'both')}
+                                      disabled={isSending}
+                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
+                                      title="Resend WhatsApp order message to BOTH Distributor and Delivery Boy"
+                                    >
+                                      <Send size={10} className="text-emerald-600" />
+                                      <span>Resend Both</span>
+                                    </button>
+                                  </div>
+                                );
+                              }
+
+                              let btnClass = "bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-bold";
+                              if (status === 'queued') btnClass = "bg-white text-amber-600 border border-amber-500 hover:bg-amber-50";
+                              if (status === 'error') btnClass = "bg-white text-rose-600 border border-rose-500 hover:bg-rose-50";
 
                               return (
                                 <button
-                                  onClick={() => handleSendWhatsAppOrder(dist)}
+                                  type="button"
+                                  onClick={() => handleSendWhatsAppOrder(dist, false, false, 'both')}
                                   disabled={isSending}
-                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[10px] font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50 ${btnClass}`}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50 ${btnClass}`}
                                   title="Send formatted order message directly to Distributor via WhatsApp"
                                 >
                                   {isSending ? (
-                                    <span className="w-2.5 h-2.5 border border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
-                                  ) : status === 'success' ? (
-                                    <Check size={11} className="text-white animate-bounce" />
+                                    <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
                                   ) : status === 'queued' ? (
-                                    <Clock size={11} className="text-amber-300" />
+                                    <Clock size={11} className="text-amber-500" />
                                   ) : status === 'error' ? (
-                                    <AlertCircle size={11} className="text-rose-400" />
+                                    <AlertCircle size={11} className="text-rose-500" />
                                   ) : (
-                                    <MessageSquare size={10} />
+                                    <MessageSquare size={10} className="text-emerald-500" />
                                   )}
                                   <span>
                                     {isSending
                                       ? 'Sending...'
-                                      : status === 'success'
-                                        ? 'Sent!'
-                                        : status === 'queued'
-                                          ? 'Queued'
-                                          : status === 'error'
-                                            ? 'Retry WhatsApp'
-                                            : 'Send via WhatsApp'}
+                                      : status === 'queued'
+                                        ? 'Queued'
+                                        : status === 'error'
+                                          ? 'Retry WhatsApp'
+                                          : 'Send via WhatsApp'}
                                   </span>
                                 </button>
                               );

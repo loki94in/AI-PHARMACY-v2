@@ -533,6 +533,27 @@ const Sells = () => {
               </button>
             )}
           </div>
+
+          {/* Reset All Filters Button */}
+          {(colFilterNo || colFilterName || colFilterDrName || colFilterMinAmount || colFilterMaxAmount || colFilterPayVia || dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
+            <button
+              type="button"
+              onClick={() => {
+                setColFilterNo('');
+                setColFilterName('');
+                setColFilterDrName('');
+                setColFilterMinAmount('');
+                setColFilterMaxAmount('');
+                setColFilterPayVia('');
+                dateRangeHelper.clearFilters();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+              title="Reset all search filters and date ranges"
+            >
+              <RotateCcw size={13} />
+              <span>Reset All Filters</span>
+            </button>
+          )}
         </div>
 
         {/* Live Filter Summary Count */}

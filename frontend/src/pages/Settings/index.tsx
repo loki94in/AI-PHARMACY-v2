@@ -232,6 +232,26 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
     fetchStorageLocations();
   }, [fetchStorageLocations]);
 
+  const handleResetStoreProfile = () => {
+    setFormData({
+      pharmacyName: rawSettings.pharmacy_name || rawSettings.shop_name || rawSettings.store_name || '',
+      address: rawSettings.address || '',
+      phone: rawSettings.phone || rawSettings.shop_phone || '',
+      gstin: rawSettings.gstin || '',
+      drugLicense: rawSettings.drug_license || rawSettings.license_number || '',
+      email: rawSettings.email || '',
+      dineshWhatsappNumber: rawSettings.dinesh_whatsapp_number || '',
+      ownerWhatsappNumber: rawSettings.owner_whatsapp_number || '',
+      defaultTaxRate: rawSettings.default_tax_rate || '18',
+      invoicePrefix: rawSettings.invoice_prefix || 'INV-',
+      autoPrint: rawSettings.auto_print === 'true',
+      defaultPaymentMode: rawSettings.default_payment_mode || 'Cash',
+      lowStockThreshold: rawSettings.low_stock_threshold || '10',
+      expiryAlertDays: rawSettings.expiry_alert_days || '90',
+    });
+    toastEvent.trigger('Store profile form reset to saved parameters', 'info');
+  };
+
   const handleSaveStoreProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -459,7 +479,16 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
           </div>
         </div>
 
-        <div className="flex justify-end pt-2">
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleResetStoreProfile}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border border-border text-muted hover:text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+          >
+            <RotateCcw size={14} />
+            <span>Reset Form</span>
+          </button>
           <button
             type="submit"
             disabled={saving}
@@ -577,6 +606,24 @@ function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Recor
     { staleTime: 15000 }
   );
 
+  const handleResetSecurity = () => {
+    setAdminUsername(rawSettings.admin_username || 'admin');
+    setNewAdminPassword('');
+    setAdminRemoteMode(rawSettings.admin_remote_mode !== 'false');
+    toastEvent.trigger('Security form reset to saved parameters', 'info');
+  };
+
+  const handleResetDeviceAuthorization = async () => {
+    if (!window.confirm('Are you sure you want to reset remote admin device authorization? This will require re-authorization for remote admin sessions.')) return;
+    try {
+      await apiClient.post('/security/admin/reset-device');
+      toastEvent.trigger('Admin device authorization reset successfully', 'success');
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to reset device authorization: ' + (err.message || 'Unknown error'), 'error');
+    }
+  };
+
   const handleSaveSecurity = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -644,7 +691,16 @@ function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Recor
           </div>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={handleResetSecurity}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border border-border text-muted hover:text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+          >
+            <RotateCcw size={14} />
+            <span>Reset Form</span>
+          </button>
           <button
             type="submit"
             disabled={saving}
@@ -658,9 +714,19 @@ function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Recor
 
       {/* Registered Mobile & Desktop Devices */}
       <div className="space-y-4 pt-4 border-t border-border">
-        <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
-          <Smartphone size={16} /> Authorized Registered Mobile & Desktop Terminals
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            <Smartphone size={16} /> Authorized Registered Mobile & Desktop Terminals
+          </h2>
+          <button
+            type="button"
+            onClick={handleResetDeviceAuthorization}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 text-red-500 border border-red-500/30 font-bold text-xs rounded-xl hover:bg-red-500/20 transition-all cursor-pointer shrink-0"
+          >
+            <RotateCcw size={13} />
+            <span>Reset Device Authorization</span>
+          </button>
+        </div>
 
         <div className="overflow-x-auto bg-bg3/20 border border-border rounded-xl">
           <table className="w-full text-left text-xs">
@@ -748,6 +814,20 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     () => apiClient.get('/settings/telegram-status').then(res => res.data),
     { enabled: isVisible && telegramEnabled, refetchInterval: 10000 }
   );
+
+  const handleResetIntegrations = () => {
+    setWaPreferredSystem(rawSettings.whatsapp_preferred_system || 'web');
+    setWaBusinessToken(rawSettings.wa_business_access_token || '');
+    setWaBusinessPhoneId(rawSettings.wa_business_phone_number_id || '');
+    setTelegramEnabled(rawSettings.telegram_enabled === 'true');
+    setTelegramToken(rawSettings.telegram_token || '');
+    setTelegramChatId(rawSettings.telegram_chat_id || '');
+    setGmailUser(rawSettings.gmail_user || '');
+    setGmailPass(rawSettings.gmail_pass || '');
+    setPharmarackUser(rawSettings.pharmarack_username || '');
+    setPharmarackPass(rawSettings.pharmarack_password || '');
+    toastEvent.trigger('Integration credentials reset to saved parameters', 'info');
+  };
 
   const handleSaveIntegrations = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -980,7 +1060,16 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         </div>
       </div>
 
-      <div className="flex justify-end pt-4">
+      <div className="flex justify-end gap-3 pt-4">
+        <button
+          type="button"
+          onClick={handleResetIntegrations}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2.5 bg-bg3 border border-border text-muted hover:text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+        >
+          <RotateCcw size={14} />
+          <span>Reset Form</span>
+        </button>
         <button
           type="submit"
           disabled={saving}
@@ -1004,6 +1093,8 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
   const [backupFrequency, setBackupFrequency] = useState(rawSettings.backup_frequency || 'off');
   const [savingFreq, setSavingFreq] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
+  const [showSystemResetModal, setShowSystemResetModal] = useState(false);
+  const [resetModalInitialMode, setResetModalInitialMode] = useState<'data' | 'factory'>('data');
   const queryClient = useQueryClient();
 
   const handleSaveBackupSchedule = async () => {
@@ -1072,23 +1163,68 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
         </div>
       </div>
 
-      {/* Maintenance & Cache */}
+      {/* Maintenance, Cache & Reset */}
       <div className="space-y-4 pt-2 border-t border-border">
         <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
-          <Trash2 size={16} /> System Maintenance & Diagnostics
+          <Trash2 size={16} /> System Maintenance, Data Reset & Factory Wipe
         </h2>
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-bg3/20 border border-border rounded-xl p-4">
-          <div>
-            <h3 className="text-xs font-bold text-text">Clear Local Inventory & Search Cache</h3>
-            <p className="text-[11px] text-muted">Forces instant re-hydration of SQLite compact indexes without touching underlying sales history.</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Card 1: Search Cache */}
+          <div className="flex flex-col justify-between gap-4 bg-bg3/20 border border-border rounded-xl p-4">
+            <div>
+              <h3 className="text-xs font-bold text-text flex items-center gap-2">
+                <RefreshCw size={14} className="text-amber-400" /> Clear Search Cache
+              </h3>
+              <p className="text-[11px] text-muted mt-1">Forces instant re-hydration of SQLite compact indexes without touching sales data.</p>
+            </div>
+            <div>
+              <button
+                onClick={handleClearCache}
+                className="w-full py-2 bg-amber-500/10 text-amber-500 border border-amber-500/30 font-bold text-xs rounded-xl hover:bg-amber-500/20 transition-all cursor-pointer"
+              >
+                Clear Search Cache
+              </button>
+            </div>
           </div>
-          <button
-            onClick={handleClearCache}
-            className="px-4 py-2 bg-amber-500/10 text-amber-500 border border-amber-500/30 font-bold text-xs rounded-xl hover:bg-amber-500/20 transition-all cursor-pointer shrink-0"
-          >
-            Clear Search Cache
-          </button>
+
+          {/* Card 2: System Data Reset */}
+          <div className="flex flex-col justify-between gap-4 bg-bg3/20 border border-border rounded-xl p-4">
+            <div>
+              <h3 className="text-xs font-bold text-text flex items-center gap-2">
+                <RotateCcw size={14} className="text-amber-400" /> System Data Reset
+              </h3>
+              <p className="text-[11px] text-muted mt-1">Wipes sales, inventory & transactions. Keeps store profile & API keys intact.</p>
+            </div>
+            <div>
+              <button
+                onClick={() => { setShowSystemResetModal(true); setResetModalInitialMode('data'); }}
+                className="w-full py-2 bg-amber-500/10 text-amber-500 border border-amber-500/30 font-bold text-xs rounded-xl hover:bg-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw size={13} />
+                <span>Reset Sales & Inventory</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Card 3: Full Factory Reset */}
+          <div className="flex flex-col justify-between gap-4 bg-red-500/5 border border-red-500/30 rounded-xl p-4">
+            <div>
+              <h3 className="text-xs font-bold text-red-400 flex items-center gap-2">
+                <Trash2 size={14} className="text-red-400" /> Full Factory Reset (Complete Wipe)
+              </h3>
+              <p className="text-[11px] text-muted mt-1">Completely wipes ALL saved data, WhatsApp/Gmail tokens, Pharmarack logins, doctors, distributors & settings to fresh factory state.</p>
+            </div>
+            <div>
+              <button
+                onClick={() => { setShowSystemResetModal(true); setResetModalInitialMode('factory'); }}
+                className="w-full py-2 bg-red-600 text-white font-bold text-xs rounded-xl hover:bg-red-700 transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+              >
+                <Trash2 size={13} />
+                <span>Full Factory Reset</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1106,6 +1242,217 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
           </div>
         </div>
       )}
+
+      {/* System Data Reset Modal */}
+      {showSystemResetModal && (
+        <ResetDataModal
+          initialMode={resetModalInitialMode}
+          onClose={() => setShowSystemResetModal(false)}
+          refetchSettings={refetchSettings}
+        />
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// SYSTEM DATA & FACTORY RESET MODAL
+// ==========================================
+
+interface ResetDataModalProps {
+  initialMode?: 'data' | 'factory';
+  onClose: () => void;
+  refetchSettings: () => void;
+}
+
+function ResetDataModal({ initialMode = 'data', onClose, refetchSettings }: ResetDataModalProps) {
+  const [resetType, setResetType] = useState<'data' | 'factory'>(initialMode);
+  const [dataCounts, setDataCounts] = useState<{ medicines: number; inventory: number; bills: number; purchases: number; customers: number } | null>(null);
+  const [loadingCounts, setLoadingCounts] = useState(true);
+  const [confirmInput, setConfirmInput] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    apiClient.get('/utilities/data-counts')
+      .then(res => setDataCounts(res.data))
+      .catch(err => console.warn('Failed to fetch data counts:', err))
+      .finally(() => setLoadingCounts(false));
+  }, []);
+
+  const requiredWord = resetType === 'factory' ? 'FACTORY RESET' : 'RESET';
+  const isConfirmed = confirmInput.trim().toUpperCase() === requiredWord;
+
+  const handleExecuteReset = async () => {
+    if (!isConfirmed) return;
+    setResetting(true);
+    try {
+      const res = await apiClient.post('/utilities/reset-data', { wipeAll: resetType === 'factory' });
+      
+      // 1. Purge all localStorage sent order history keys & cached state
+      try {
+        localStorage.removeItem('pharmacart_sent_wa_history');
+        localStorage.removeItem('pharmarack_last_sent_wa_time_map');
+        localStorage.removeItem('pharmarack_last_batch_sent_time');
+        localStorage.removeItem('pharmarack_sent_history');
+        localStorage.removeItem('pharmarack_latest_sent_map');
+        localStorage.removeItem('custom_distributor_phones');
+        localStorage.removeItem('pos_active_tabs');
+        localStorage.removeItem('sells-date-range');
+        if (resetType === 'factory') {
+          localStorage.clear();
+          sessionStorage.clear();
+        }
+      } catch (_) {}
+
+      // 2. Clear QueryClient and invalidate queries
+      queryClient.clear();
+      invalidateAfterStockWrite(queryClient);
+      refetchSettings();
+
+      // 3. Dispatch events to notify all active pages
+      window.dispatchEvent(new CustomEvent('clear-app-cache'));
+      window.dispatchEvent(new CustomEvent('clear-sent-history'));
+      window.dispatchEvent(new CustomEvent('settings-updated'));
+
+      toastEvent.trigger(res.data?.message || 'Database reset successfully', 'success');
+      onClose();
+
+      // 4. Force browser page reload after short delay to flush all module-level memory variables across SPA
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    } catch (err: any) {
+      toastEvent.trigger('System reset failed: ' + (err.response?.data?.error || err.message || 'Unknown error'), 'error');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-global-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-bg border border-border rounded-2xl p-6 w-full max-w-xl relative shadow-2xl space-y-5">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer"
+        >
+          <X size={18} />
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-red-500/10 text-red-500 border border-red-500/30">
+            <AlertTriangle size={24} />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-text">System Data Reset & Factory Initialization</h2>
+            <p className="text-xs text-muted">Re-initialize database tables, self-heal schemas, or execute full factory reset.</p>
+          </div>
+        </div>
+
+        {/* Mode Selector */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => { setResetType('data'); setConfirmInput(''); }}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              resetType === 'data'
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-500 font-bold'
+                : 'bg-bg3/30 border-border text-muted hover:text-text'
+            }`}
+          >
+            <div className="font-bold text-xs flex items-center gap-1.5">
+              <RotateCcw size={14} /> System Data Reset
+            </div>
+            <p className="text-[11px] mt-1 opacity-80">Wipes sales, inventory & transactions. Keeps store profile & API keys intact.</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setResetType('factory'); setConfirmInput(''); }}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+              resetType === 'factory'
+                ? 'bg-red-500/10 border-red-500/40 text-red-500 font-bold'
+                : 'bg-bg3/30 border-border text-muted hover:text-text'
+            }`}
+          >
+            <div className="font-bold text-xs flex items-center gap-1.5">
+              <Trash2 size={14} /> Full Factory Reset
+            </div>
+            <p className="text-[11px] mt-1 opacity-80">Complete wipe of all data, store profile, cashier accounts & integration tokens.</p>
+          </button>
+        </div>
+
+        {/* Impact Summary */}
+        <div className="bg-bg3/30 border border-border rounded-xl p-4 space-y-2">
+          <h3 className="text-xs font-bold text-text uppercase tracking-wider">Live Database Snapshot</h3>
+          {loadingCounts ? (
+            <div className="flex items-center text-xs text-muted py-2">
+              <RefreshCw size={14} className="animate-spin mr-2" /> Counting active records...
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-center text-xs">
+              <div className="p-2 bg-bg rounded-lg border border-border">
+                <div className="font-bold text-text">{dataCounts?.medicines ?? 0}</div>
+                <div className="text-[10px] text-muted">Medicines</div>
+              </div>
+              <div className="p-2 bg-bg rounded-lg border border-border">
+                <div className="font-bold text-text">{dataCounts?.inventory ?? 0}</div>
+                <div className="text-[10px] text-muted">Batches</div>
+              </div>
+              <div className="p-2 bg-bg rounded-lg border border-border">
+                <div className="font-bold text-text">{dataCounts?.bills ?? 0}</div>
+                <div className="text-[10px] text-muted">Sales Bills</div>
+              </div>
+              <div className="p-2 bg-bg rounded-lg border border-border">
+                <div className="font-bold text-text">{dataCounts?.purchases ?? 0}</div>
+                <div className="text-[10px] text-muted">Purchases</div>
+              </div>
+              <div className="p-2 bg-bg rounded-lg border border-border">
+                <div className="font-bold text-text">{dataCounts?.customers ?? 0}</div>
+                <div className="text-[10px] text-muted">Customers</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Confirmation Input */}
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-text">
+            Type <span className="font-mono font-bold text-red-400">{requiredWord}</span> to confirm execution:
+          </label>
+          <input
+            type="text"
+            value={confirmInput}
+            onChange={(e) => setConfirmInput(e.target.value)}
+            placeholder={`Type ${requiredWord} here`}
+            className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-red-500 focus:outline-none"
+          />
+        </div>
+
+        {/* Modal Actions */}
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 bg-bg3 border border-border text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleExecuteReset}
+            disabled={!isConfirmed || resetting}
+            className={`flex items-center gap-2 px-5 py-2 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-sm ${
+              isConfirmed && !resetting
+                ? resetType === 'factory' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-amber-600 text-white hover:bg-amber-700'
+                : 'bg-muted/20 text-muted cursor-not-allowed border border-border'
+            }`}
+          >
+            {resetting ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            <span>Execute {resetType === 'factory' ? 'Factory Reset' : 'System Reset'}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
