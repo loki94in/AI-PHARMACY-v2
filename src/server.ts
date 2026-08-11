@@ -83,6 +83,21 @@ process.env.DISABLE_SELF_HEALING_WORKERS = process.env.DISABLE_SELF_HEALING_WORK
 const app = express();
 app.use(compression());
 
+// Tracks requests currently being handled so graceful shutdown can drain them before
+// closing the DB connection — without this, a request mid-query when SIGINT/SIGTERM
+// arrives hits an already-closed connection (SQLITE_MISUSE: Database is closed).
+let inFlightRequests = 0;
+app.use((req, res, next) => {
+  inFlightRequests++;
+  // 'finish' (normal completion) and 'close' (aborted connection) can both fire for the
+  // same response — guard so a request is only ever decremented once.
+  let counted = true;
+  const release = () => { if (counted) { counted = false; inFlightRequests--; } };
+  res.on('finish', release);
+  res.on('close', release);
+  next();
+});
+
 app.use((req, res, next) => {
   // Don't treat status polling or background worker queries as blocking activity
   const isEnrichmentStatus = req.path.startsWith('/api/enrichment/status') || req.path.startsWith('/api/enrichment/queue');
@@ -753,6 +768,19 @@ async function setupCrons(db: any) {
 
 // Graceful shutdown with auto-backup
 async function gracefulShutdown(signal: string) {
+  console.log(`${signal} received. Draining in-flight requests...`);
+  // Stop accepting NEW connections immediately, but let requests already being handled
+  // finish naturally instead of racing them against dbManager.close(true) below.
+  server.close();
+  const drainStart = Date.now();
+  const DRAIN_TIMEOUT_MS = 10000;
+  while (inFlightRequests > 0 && Date.now() - drainStart < DRAIN_TIMEOUT_MS) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  if (inFlightRequests > 0) {
+    console.warn(`[Shutdown] ${inFlightRequests} request(s) still in flight after ${DRAIN_TIMEOUT_MS}ms — proceeding anyway.`);
+  }
+
   console.log(`${signal} received. Creating shutdown backup...`);
   // Mark clean shutdown BEFORE anything else that might fail
   try {
