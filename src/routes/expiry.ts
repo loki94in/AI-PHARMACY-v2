@@ -106,15 +106,16 @@ router.get('/', async (req, res) => {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-          AND date(im.expiry_date) >= date(?)
-          AND date(im.expiry_date) <= date(?)
         ORDER BY im.expiry_date ASC
-      `, [date_from, date_to]);
+      `);
+      // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
+      // filter in JS with the same helper the cache-backed path below uses.
+      const filtered = rows.filter((r: any) => isDateInRange(r.expiry_date, date_from, date_to));
       // Trigger background rebuild so next request is fast
       import('../services/expiryAlertService.js')
         .then(m => m.rebuildAllExpiryCaches())
         .catch(() => {});
-      return res.json(rows);
+      return res.json(filtered);
     }
 
     // Cache dir exists: read files that are present.
@@ -180,10 +181,11 @@ router.get('/export', async (req, res) => {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-          AND date(im.expiry_date) >= date(?)
-          AND date(im.expiry_date) <= date(?)
         ORDER BY im.expiry_date ASC
-      `, [date_from, date_to]);
+      `);
+      // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
+      // filter in JS with the same helper the cache-backed path below uses.
+      items = items.filter((item: any) => isDateInRange(item.expiry_date, date_from, date_to));
     } else {
       for (const ym of months) {
         const filePath = path.join(cacheDir, `expiry_${ym}.json`);
@@ -356,15 +358,19 @@ router.post('/send-alerts', async (req, res) => {
 
   try {
     const db = await dbManager.getConnection();
-    const rows = await db.all(`
+    // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
+    // filter in JS with the same helper used elsewhere in this file.
+    const candidateRows = await db.all(`
       SELECT m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
-      WHERE date(im.expiry_date) <= date('now', '+' || ? || ' days')
-      AND COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
+      WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
       ORDER BY im.expiry_date ASC
-      LIMIT 10
-    `, [targetDays]);
+    `);
+    const windowEnd = getNDaysAheadString(targetDays);
+    const rows = candidateRows
+      .filter((r: any) => isDateInRange(r.expiry_date, '1970-01-01', windowEnd))
+      .slice(0, 10);
 
     let medicalName = 'AI Pharmacy';
     const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");

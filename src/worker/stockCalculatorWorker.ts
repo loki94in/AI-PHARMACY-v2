@@ -151,10 +151,12 @@ export async function recalculateTargetedStockMetrics(affectedMedicineIds?: numb
       ]);
     }
 
-    // Broadcast SSE live sync signal to frontend
-    eventService.emit('server_event', {
-      type: 'sales_sync',
-      cache_type: 'sales_sync',
+    // Broadcast SSE live sync signal to frontend.
+    // Uses a distinct event type — 'sales_sync' is already a real event (offline
+    // invoice sync, see sales.ts) with a { success, count } payload contract; reusing
+    // it here with unwrapped fields crashed pushNotificationService's payload.success
+    // read (TypeError -> unhandled rejection -> process.exit(1) in production).
+    eventService.broadcast('stock_metrics_updated', {
       count: medicineIdsToUpdate.length,
       updated_at: new Date().toISOString()
     });
@@ -167,6 +169,17 @@ export async function recalculateTargetedStockMetrics(affectedMedicineIds?: numb
 export async function recalculateStockLimits(): Promise<void> {
   const db = await dbManager.getConnection();
   try {
+    // Runs at every boot and on this worker's daily interval — the only unconditional,
+    // recurring point that reaches every install regardless of schema-version fast-boot
+    // skip, so expired batches don't sit with is_active=1 indefinitely on long-running installs.
+    try {
+      const { deactivateExpiredInventory } = await import('../utils/inventoryActive.js');
+      const zeroed = await deactivateExpiredInventory(db);
+      if (zeroed > 0) console.log(`[StockCalculatorWorker] Deactivated ${zeroed} expired inventory batch(es).`);
+    } catch (err) {
+      console.error('[StockCalculatorWorker] deactivateExpiredInventory error:', err);
+    }
+
     await db.run(`
       CREATE TABLE IF NOT EXISTS stock_config (
         medicine_id INTEGER PRIMARY KEY,

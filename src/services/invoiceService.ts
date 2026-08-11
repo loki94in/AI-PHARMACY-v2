@@ -44,16 +44,15 @@ export class InvoiceService {
   async generateInvoiceNo(db: Database): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `S-${year}-`;
+    // ORDER BY invoice_no DESC sorts as TEXT, not numerically — 'S-2026-9999' sorts after
+    // 'S-2026-10000' lexicographically ('9' > '1'), so once a year passes 9,999 invoices
+    // every subsequent call recomputes an already-taken number and hits a UNIQUE collision
+    // forever. Extract the numeric suffix and take a true MAX instead (mirrors sales.ts).
     const row = await db.get(
-      'SELECT invoice_no FROM sales_invoices WHERE invoice_no LIKE ? ORDER BY invoice_no DESC LIMIT 1',
-      `${prefix}%`
+      `SELECT MAX(CAST(SUBSTR(invoice_no, ?) AS INTEGER)) as maxNum FROM sales_invoices WHERE invoice_no LIKE ?`,
+      [prefix.length + 1, `${prefix}%`]
     );
-    let nextNum = 1;
-    if (row && row.invoice_no) {
-      const parts = row.invoice_no.split('-');
-      const numPart = parts[2];
-      nextNum = parseInt(numPart, 10) + 1;
-    }
+    const nextNum = (row && row.maxNum ? row.maxNum : 0) + 1;
     const padded = String(nextNum).padStart(4, '0');
     return `${prefix}${padded}`;
   }

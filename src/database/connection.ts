@@ -24,6 +24,23 @@ class DatabaseManager {
   private suspendedUntil: Promise<void> | null = null;
   private resumeFn: (() => void) | null = null;
 
+  // Serializes BEGIN..COMMIT/ROLLBACK on the shared singleton connection. node-sqlite3
+  // does not queue statements against SQLite's own transaction state — two concurrent
+  // requests both issuing 'BEGIN IMMEDIATE TRANSACTION' on this same connection object
+  // collide with "cannot start a transaction within a transaction" (confirmed under a
+  // 20-concurrent POS load test: 0/260 sale requests succeeded). Every BEGIN now waits
+  // its turn in this FIFO chain; COMMIT/ROLLBACK releases it for the next caller.
+  private txMutexTail: Promise<void> = Promise.resolve();
+  private activeTxRelease: (() => void) | null = null;
+
+  private acquireTxLock(): Promise<() => void> {
+    let release!: () => void;
+    const nextTail = new Promise<void>(resolve => { release = resolve; });
+    const acquired = this.txMutexTail.then(() => release);
+    this.txMutexTail = this.txMutexTail.then(() => nextTail);
+    return acquired;
+  }
+
   private constructor() {}
 
   public static getInstance(): DatabaseManager {
@@ -188,6 +205,23 @@ class DatabaseManager {
   private setupWriteInterceptor(db: Database) {
     const originalRun = db.run.bind(db);
     const originalExec = db.exec.bind(db);
+    const self = this;
+
+    // Classify BEGIN/COMMIT/ROLLBACK so the transaction mutex above can serialize them.
+    const txPhase = (sql: string): 'begin' | 'end' | null => {
+      const trimmed = sql.trim().toUpperCase();
+      if (trimmed.startsWith('BEGIN')) return 'begin';
+      if (trimmed === 'COMMIT' || trimmed.startsWith('ROLLBACK')) return 'end';
+      return null;
+    };
+
+    const releaseIfHeld = () => {
+      if (self.activeTxRelease) {
+        const release = self.activeTxRelease;
+        self.activeTxRelease = null;
+        release();
+      }
+    };
 
     const checkWriteQuery = (sql: string): { isInventoryWrite: boolean } => {
       if (!sql) return { isInventoryWrite: false };
@@ -215,6 +249,25 @@ class DatabaseManager {
 
     db.run = async function (sql: any, ...params: any[]) {
       if (typeof sql === 'string') {
+        const phase = txPhase(sql);
+        if (phase === 'begin') {
+          const release = await self.acquireTxLock();
+          self.activeTxRelease = release;
+          try {
+            return await originalRun(sql, ...params);
+          } catch (err) {
+            releaseIfHeld();
+            throw err;
+          }
+        }
+        if (phase === 'end') {
+          try {
+            return await originalRun(sql, ...params);
+          } finally {
+            releaseIfHeld();
+          }
+        }
+
         const sqlLower = sql.toLowerCase();
         const { isInventoryWrite } = checkWriteQuery(sql);
         if (isInventoryWrite) {
@@ -240,6 +293,24 @@ class DatabaseManager {
     } as any;
 
     db.exec = async function (sql: string) {
+      const phase = txPhase(sql);
+      if (phase === 'begin') {
+        const release = await self.acquireTxLock();
+        self.activeTxRelease = release;
+        try {
+          return await originalExec(sql);
+        } catch (err) {
+          releaseIfHeld();
+          throw err;
+        }
+      }
+      if (phase === 'end') {
+        try {
+          return await originalExec(sql);
+        } finally {
+          releaseIfHeld();
+        }
+      }
       checkWriteQuery(sql);
       return originalExec(sql);
     };

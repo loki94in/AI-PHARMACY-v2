@@ -654,15 +654,15 @@ router.get('/gstr-1', async (req, res) => {
     `, [from, to]);
 
     const invoices = await db.all(`
-      SELECT 
-        si.id, si.invoice_no, ${SALES_INV_DATE_EXPR} as date,
-        si.total_amount, si.subtotal, si.discount,
-        si.cgst_value, si.sgst_value, si.igst_value, si.tax_amount, si.roff,
+      SELECT
+        sinv.id, sinv.invoice_no, ${SALES_INV_DATE_EXPR} as date,
+        sinv.total_amount, sinv.subtotal, sinv.discount,
+        sinv.cgst_value, sinv.sgst_value, sinv.igst_value, sinv.tax_amount, sinv.roff,
         c.name as customer_name
-      FROM sales_invoices si
-      LEFT JOIN customers c ON si.customer_id = c.id
+      FROM sales_invoices sinv
+      LEFT JOIN customers c ON sinv.customer_id = c.id
       WHERE ${SALES_INV_DATE_EXPR} >= date(?) AND ${SALES_INV_DATE_EXPR} <= date(?)
-      ORDER BY si.id DESC
+      ORDER BY sinv.id DESC
       LIMIT 1000
     `, [from, to]);
 

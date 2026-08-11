@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 32;
+const CURRENT_SCHEMA_VERSION = 33;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -883,6 +883,12 @@ export async function ensureSchema(dbPath: string) {
     ['medicines', 'ucode', 'ALTER TABLE medicines ADD COLUMN ucode TEXT DEFAULT NULL'],
     ['medicines', 'disable_auto_barcode', 'ALTER TABLE medicines ADD COLUMN disable_auto_barcode INTEGER DEFAULT 0'],
     ['medicines', 'tb_medicine', 'ALTER TABLE medicines ADD COLUMN tb_medicine INTEGER DEFAULT 0'],
+    // stock_ledger's full definition (line ~1280) never applies on top of the earlier
+    // CREATE TABLE IF NOT EXISTS (line ~329) — these three columns were silently missing
+    // on every install, making every recordStockLedger() call throw (swallowed by its own catch).
+    ['stock_ledger', 'loose_quantity', 'ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0'],
+    ['stock_ledger', 'transaction_id', 'ALTER TABLE stock_ledger ADD COLUMN transaction_id TEXT'],
+    ['stock_ledger', 'business_date', 'ALTER TABLE stock_ledger ADD COLUMN business_date DATETIME'],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs

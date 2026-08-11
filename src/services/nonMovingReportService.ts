@@ -46,30 +46,32 @@ export class NonMovingReportService {
       cutoffDate.setDate(cutoffDate.getDate() - periodDays);
       const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // CTEs isolate activity per inventory item (im.id) and per batch (medicine_id + batch_no)
+      // The original version scanned sale_items and stock_ledger TWICE each — once in
+      // active_sales/active_ledger (recent-activity flag) and again in latest_sales/latest_ledger
+      // (max transaction date) — using the identical per-row predicate both times. Computing the
+      // flag and the max date together in one GROUP BY pass (conditional MAX(CASE...)) is
+      // algebraically identical (a row is "active" iff at least one qualifying row has the flag
+      // set, which the MAX of a 0/1 flag captures exactly) and halves the two most expensive
+      // full-table scans (stock_ledger alone is 1M+ rows on a long-lived install). An earlier
+      // attempt to instead drive this from inventory_master with correlated per-row subqueries
+      // was measured SLOWER at scale (10.5s vs 1.2s on a 100K-row stock_ledger fixture, A/B
+      // tested against this same result set) — SQLite's set-based CTE/hash-join plan beats many
+      // small correlated index probes here, so that approach was reverted in favor of this one.
       const rows = await db.all(`
-        WITH active_sales AS (
-          SELECT sit.inventory_id
-          FROM sale_items sit
-          JOIN sales_invoices si ON sit.invoice_id = si.id
-          WHERE COALESCE(date(si.business_date), date(si.date), date(substr(si.date, 1, 10))) >= date(?)
-          GROUP BY sit.inventory_id
-        ),
-        active_ledger AS (
-          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key
-          FROM stock_ledger sl
-          WHERE COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10)), date(sl.created_at)) >= date(?)
-            AND sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
-          GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
-        ),
-        latest_sales AS (
-          SELECT sit.inventory_id, MAX(COALESCE(si.date, si.business_date)) as max_sale_date
+        WITH sale_activity AS (
+          SELECT
+            sit.inventory_id,
+            MAX(COALESCE(si.date, si.business_date)) as max_sale_date,
+            MAX(CASE WHEN COALESCE(date(si.business_date), date(si.date), date(substr(si.date, 1, 10))) >= date(?) THEN 1 ELSE 0 END) as has_recent_sale
           FROM sale_items sit
           JOIN sales_invoices si ON sit.invoice_id = si.id
           GROUP BY sit.inventory_id
         ),
-        latest_ledger AS (
-          SELECT sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key, MAX(COALESCE(sl.business_date, sl.created_at)) as max_ledger_date
+        ledger_activity AS (
+          SELECT
+            sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, ''))) as batch_key,
+            MAX(COALESCE(sl.business_date, sl.created_at)) as max_ledger_date,
+            MAX(CASE WHEN COALESCE(date(sl.business_date), date(substr(sl.business_date, 1, 10)), date(sl.created_at)) >= date(?) THEN 1 ELSE 0 END) as has_recent_activity
           FROM stock_ledger sl
           WHERE sl.transaction_type NOT IN ('PURCHASE', 'INWARD')
           GROUP BY sl.medicine_id, LOWER(TRIM(COALESCE(sl.batch_no, '')))
@@ -91,20 +93,18 @@ export class NonMovingReportService {
           im.quantity,
           im.expiry_date,
           bp.min_purchase_date as purchase_date,
-          COALESCE(ls.max_sale_date, ll.max_ledger_date) as last_transaction_date,
+          COALESCE(sa.max_sale_date, la.max_ledger_date) as last_transaction_date,
           im.mrp,
           im.cost_price
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
-        LEFT JOIN active_sales sa ON im.id = sa.inventory_id
-        LEFT JOIN active_ledger sl ON im.medicine_id = sl.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = sl.batch_key
-        LEFT JOIN latest_sales ls ON im.id = ls.inventory_id
-        LEFT JOIN latest_ledger ll ON im.medicine_id = ll.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = ll.batch_key
+        LEFT JOIN sale_activity sa ON im.id = sa.inventory_id
+        LEFT JOIN ledger_activity la ON im.medicine_id = la.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = la.batch_key
         LEFT JOIN batch_purchases bp ON im.medicine_id = bp.medicine_id AND LOWER(TRIM(COALESCE(im.batch_no, ''))) = bp.batch_key
         WHERE ${INVENTORY_ACTIVE_WHERE}
           AND im.quantity > 0
-          AND sa.inventory_id IS NULL
-          AND sl.medicine_id IS NULL
+          AND COALESCE(sa.has_recent_sale, 0) = 0
+          AND COALESCE(la.has_recent_activity, 0) = 0
       `, [cutoffDateString, cutoffDateString]);
 
       // Process results to add calculated fields
