@@ -24,7 +24,6 @@ import {
   Building2,
   ExternalLink,
   QrCode,
-  Sliders,
   AlertCircle,
   Clock,
   TrendingUp,
@@ -58,9 +57,16 @@ interface LearningProfileSummary {
 }
 
 interface ProfileDetail {
-  distributor_id: number;
-  file_mapping_rules: string;
-  last_updated: string;
+  distributor: { id: number; name: string; phone: string | null; email: string | null };
+  profile: {
+    distributor_id: number;
+    file_mapping_rules: string | null;
+    layout_type: string | null;
+    success_count: number | null;
+    last_success_at: string | null;
+    last_updated: string | null;
+  } | null;
+  files: Array<{ id: number; filename: string; file_type: string | null; status: string | null; created_at: string }>;
 }
 
 interface OcrCorrection {
@@ -1234,8 +1240,8 @@ const Learning: React.FC = () => {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between border-b border-border pb-3">
                     <div className="font-bold text-text text-base flex items-center gap-2">
-                      <Sliders size={18} className="text-primary" />
-                      <span>OCR Mapping JSON (Distributor #{selectedProfileId})</span>
+                      <Building2 size={18} className="text-primary" />
+                      <span>{selectedProfileDetail.distributor?.name || `Distributor #${selectedProfileId}`}</span>
                     </div>
                     <button
                       onClick={() => setSelectedProfileId(null)}
@@ -1244,9 +1250,47 @@ const Learning: React.FC = () => {
                       <X size={16} />
                     </button>
                   </div>
-                  <pre className="p-4 bg-bg border border-border rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto max-h-[450px] scrollbar-thin">
-                    {JSON.stringify(JSON.parse(selectedProfileDetail.file_mapping_rules || '{}'), null, 2)}
-                  </pre>
+
+                  <div className="flex items-center gap-4 text-xs text-muted">
+                    <span>{selectedProfileDetail.distributor?.phone || 'No phone set'}</span>
+                    {selectedProfileDetail.distributor?.email && <span>{selectedProfileDetail.distributor.email}</span>}
+                  </div>
+
+                  {(() => {
+                    const successCount = selectedProfileDetail.profile?.success_count || 0;
+                    const lastSuccess = selectedProfileDetail.profile?.last_success_at;
+                    const learned = successCount > 0;
+                    return (
+                      <div className={`p-4 rounded-xl border ${learned ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+                        <div className={`font-bold text-sm ${learned ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {learned
+                            ? `✅ Bill layout learned — ${successCount} bill${successCount === 1 ? '' : 's'} read automatically`
+                            : '⏳ Not learned yet'}
+                        </div>
+                        <div className="text-xs text-muted mt-1">
+                          {learned
+                            ? `Last one: ${lastSuccess ? formatDisplayDate(lastSuccess) : 'recently'}. The app keeps reading this distributor's bills automatically — no setup needed.`
+                            : "The app will learn this distributor's bill layout automatically the next time a bill is processed — no manual setup needed."}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div>
+                    <div className="text-xs font-bold text-muted uppercase tracking-wider mb-2">File History</div>
+                    {selectedProfileDetail.files && selectedProfileDetail.files.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {selectedProfileDetail.files.map(f => (
+                          <div key={f.id} className="flex items-center justify-between text-xs bg-bg border border-border rounded-lg px-3 py-2">
+                            <span className="text-text font-medium truncate max-w-[220px]">📄 {f.filename}</span>
+                            <span className="text-muted">{f.created_at ? formatDisplayDate(f.created_at) : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted italic">No files recorded yet.</div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="py-20 text-center space-y-3">
@@ -1255,7 +1299,7 @@ const Learning: React.FC = () => {
                   </div>
                   <div className="font-bold text-text text-sm">Select a Distributor Profile</div>
                   <div className="text-xs text-muted max-w-sm mx-auto">
-                    Click any distributor profile on the left to inspect its column mapping rules JSON and file extraction history.
+                    Click any distributor profile on the left to see whether the app has learned its bill layout yet.
                   </div>
                 </div>
               )}
