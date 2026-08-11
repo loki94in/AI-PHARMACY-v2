@@ -5,7 +5,7 @@ import {
   WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
-import { toastEvent } from '../services/events';
+import { toastEvent, whatsappQueueEvent } from '../services/events';
 
 interface QueueItem {
   id: number;
@@ -78,8 +78,12 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   useEffect(() => {
     fetchStatus();
     fetchDelaySettings();
-    const interval = setInterval(fetchStatus, 684000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchStatus, 3000);
+    const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
+    return () => {
+      clearInterval(interval);
+      unsub();
+    };
   }, []);
 
   const handleSaveDelayTimer = async (key: string, val: number) => {

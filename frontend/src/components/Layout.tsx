@@ -61,7 +61,7 @@ import {
 } from 'lucide-react';
 
 
-import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
@@ -466,7 +466,19 @@ const NotificationPanel = ({
               <p className="text-[11px] text-muted font-medium">Activity & System Alerts</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                whatsappQueueEvent.triggerOpen();
+                onClose();
+              }}
+              className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 cursor-pointer shadow-xs"
+              title="Open WhatsApp Queue & Live Message Controller"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              <MessageSquareIcon size={12} />
+              <span>WhatsApp Queue</span>
+            </button>
             <button
               onClick={() => {
                 navigate('/settings');
@@ -612,21 +624,38 @@ const NotificationPanel = ({
                         <span className="text-[10px] text-muted font-mono">{formatTime(notif.time)}</span>
                       </div>
 
-                      {notif.link && (
+                      {(notif.link || notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation') && (
                         <button
                           type="button"
                           onClick={e => {
                             e.stopPropagation();
                             e.preventDefault();
                             if (!notif.read) onMarkRead(notif.id);
-                            navigate(notif.link!);
+                            if (notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' || !notif.link) {
+                              whatsappQueueEvent.triggerOpen();
+                            } else {
+                              navigate(notif.link!);
+                            }
                             onClose();
                           }}
-                          className="flex items-center gap-1 text-[11px] font-bold text-sky-400 hover:text-sky-300 transition-colors cursor-pointer px-2 py-0.5 rounded-md hover:bg-sky-500/10"
-                          title="Navigate to item link"
+                          className={`flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer px-2 py-0.5 rounded-md ${
+                            notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation'
+                              ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/20'
+                              : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/10'
+                          }`}
+                          title={notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? "Open WhatsApp Queue Controller" : "Navigate to item link"}
                         >
-                          <ExternalLink size={11} />
-                          <span>Open</span>
+                          {notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? (
+                            <>
+                              <MessageSquareIcon size={11} />
+                              <span>View Queue</span>
+                            </>
+                          ) : (
+                            <>
+                              <ExternalLink size={11} />
+                              <span>Open</span>
+                            </>
+                          )}
                           <ChevronRight size={11} />
                         </button>
                       )}
@@ -859,13 +888,11 @@ const Topbar = ({
     isProcessing: boolean;
     isPaused?: boolean;
     activeTargetName?: string | null;
-    counts: { pending: number; sending: number; sent: number };
+    counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
   } | null>(null);
 
   const notifiedFailedQueueIdsRef = useRef<Set<number>>(new Set());
 
-  const waQueueActiveRef = useRef(false);
-  const prevQueueActiveRef = useRef(false);
   const [lastQueueCompletedAt, setLastQueueCompletedAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -891,7 +918,6 @@ const Topbar = ({
   const fetchWhatsAppQueueStatus = useCallback(async () => {
     try {
       if (servicesStatus && (!servicesStatus.whatsapp?.connected || servicesStatus.whatsapp?.isSyncing === false && !servicesStatus.whatsapp?.connected)) {
-        // Skip WhatsApp queue status polling if WhatsApp gateway is not connected/configured
         return;
       }
       const { api } = await import('../services/api.js');
@@ -901,19 +927,12 @@ const Topbar = ({
           isProcessing: qData.isProcessing,
           isPaused: qData.isPaused,
           activeTargetName: qData.activeTargetName,
-          counts: qData.counts || { pending: 0, sending: 0, sent: 0 }
+          counts: qData.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 }
         });
         const pending = qData.counts?.pending || 0;
         const sending = qData.counts?.sending || 0;
         const sent = qData.counts?.sent || 0;
         const isQueueActive = pending > 0 || sending > 0 || qData.isProcessing;
-        waQueueActiveRef.current = isQueueActive;
-
-        if (prevQueueActiveRef.current && !isQueueActive && sent > 0) {
-          setLastQueueCompletedAt(Date.now());
-          toastEvent.trigger(`✅ All ${sent} WhatsApp message${sent === 1 ? '' : 's'} sent`, 'success');
-        }
-        prevQueueActiveRef.current = isQueueActive;
 
         if (Array.isArray(qData.recentItems)) {
           qData.recentItems.forEach((item: any) => {
@@ -928,7 +947,7 @@ const Topbar = ({
     } catch (err) {
       console.warn('[Layout] Failed to fetch whatsapp queue status:', err);
     }
-  }, []);
+  }, [servicesStatus]);
 
   useEffect(() => {
     if (!compactCacheLoaded) return;
@@ -936,13 +955,24 @@ const Topbar = ({
     fetchServicesStatus();
     const sInterval = setInterval(fetchServicesStatus, 30000);
 
-    // WhatsApp queue status: Poll every 30 seconds
+    // WhatsApp queue status: Live 3-second polling when active, 15-second polling otherwise
     fetchWhatsAppQueueStatus();
-    const qInterval = setInterval(fetchWhatsAppQueueStatus, 30000);
+    const isQueueActive = waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0;
+    const qInterval = setInterval(fetchWhatsAppQueueStatus, isQueueActive ? 3000 : 15000);
 
     const handleRefreshStatus = () => {
       fetchServicesStatus();
+      fetchWhatsAppQueueStatus();
     };
+
+    const unsubOpen = whatsappQueueEvent.subscribeOpen(() => {
+      onOpenWaQueue?.();
+      fetchWhatsAppQueueStatus();
+    });
+
+    const unsubUpdated = whatsappQueueEvent.subscribeUpdated(() => {
+      fetchWhatsAppQueueStatus();
+    });
 
     window.addEventListener('focus', handleRefreshStatus);
     window.addEventListener('refresh-pharmarack-cart', handleRefreshStatus);
@@ -951,11 +981,13 @@ const Topbar = ({
     return () => {
       clearInterval(sInterval);
       clearInterval(qInterval);
+      unsubOpen();
+      unsubUpdated();
       window.removeEventListener('focus', handleRefreshStatus);
       window.removeEventListener('refresh-pharmarack-cart', handleRefreshStatus);
       window.removeEventListener('pharmarack-auth-changed', handleRefreshStatus);
     };
-  }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
+  }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded, waQueueDetail?.isProcessing, waQueueDetail?.counts?.pending, waQueueDetail?.counts?.sending, onOpenWaQueue]);
 
   useEffect(() => {
     fetchDevices();
@@ -1039,6 +1071,8 @@ const Topbar = ({
     waQueueDetail?.isProcessing
     || (waQueueDetail?.counts?.pending || 0) > 0
     || (waQueueDetail?.counts?.sending || 0) > 0
+    || (waQueueDetail?.counts?.failed_offline || 0) > 0
+    || (waQueueDetail?.counts?.failed_perm || 0) > 0
     || (lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000)
   );
   const queueCompletedRecently = lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000;
@@ -1199,7 +1233,7 @@ const Topbar = ({
             <Link
               to="/settings"
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-slate-500/20"
-              title="Background automation is OFF — all background tasks are silent. Click to configure in Settings."
+              title="Background Automation is OFF — system is in Silent Mode (no automatic background sends or cron tasks). Click to configure in Settings."
             >
               <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
               <span>Silent</span>
@@ -1304,6 +1338,20 @@ const Topbar = ({
             title="Backup & Restore Panel"
           >
             <Database size={18} />
+          </button>
+
+          {/* WhatsApp Queue Direct Access Shortcut Button */}
+          <button
+            onClick={() => whatsappQueueEvent.triggerOpen()}
+            className="p-2 text-emerald-400 hover:text-emerald-300 transition-all flex items-center justify-center relative hover:bg-emerald-500/15 rounded-xl border border-emerald-500/25 bg-emerald-500/5 cursor-pointer shadow-xs"
+            title="Open WhatsApp Message Queue & Live Controller"
+            aria-label="WhatsApp Queue"
+          >
+            <MessageSquareIcon size={18} />
+            <span className="absolute top-1 right-1 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+            </span>
           </button>
 
           {/* Notification bell */}
@@ -1889,6 +1937,12 @@ export const Layout = ({
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    return whatsappQueueEvent.subscribeOpen(() => {
+      setShowWaQueuePopover(true);
+    });
+  }, []);
 
   const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
   const [compactCacheLoaded, setCompactCacheLoaded] = useState(() => isCompactInventoryCacheReady());

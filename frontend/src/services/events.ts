@@ -86,3 +86,24 @@ export const specialOrdersEvent = {
   },
 };
 
+// Global event bus helper for WhatsApp Queue live drawer & status triggers
+export const whatsappQueueEvent = {
+  triggerOpen: () => {
+    window.dispatchEvent(new CustomEvent('app-open-wa-queue'));
+  },
+  triggerUpdated: () => {
+    window.dispatchEvent(new CustomEvent('app-wa-queue-updated'));
+  },
+  subscribeOpen: (callback: () => void) => {
+    const handler = () => callback();
+    window.addEventListener('app-open-wa-queue', handler);
+    return () => window.removeEventListener('app-open-wa-queue', handler);
+  },
+  subscribeUpdated: (callback: () => void) => {
+    const handler = () => callback();
+    window.addEventListener('app-wa-queue-updated', handler);
+    return () => window.removeEventListener('app-wa-queue-updated', handler);
+  },
+};
+
+

@@ -26,8 +26,8 @@ import {
   Calendar,
   AlertCircle
 } from 'lucide-react';
-import { api } from '../../services/api';
-import { toastEvent } from '../../services/events';
+import { api, apiClient } from '../../services/api';
+import { whatsappQueueEvent, toastEvent } from '../../services/events';
 import {
   getDispatchDeliveryBoysCache,
   getDispatchOrdersCache,
@@ -376,6 +376,8 @@ const Dispatch = () => {
         deliveryBoyName: targetBoy?.name
       });
       showNotif(res.message || `Enqueued ${orderIds.length} collection messages for 8s-12s paced sending!`, 'success');
+      whatsappQueueEvent.triggerOpen();
+      whatsappQueueEvent.triggerUpdated();
       setTimeout(() => fetchMessageDates(), 2000);
     } catch (err: any) {
       showNotif(err?.response?.data?.error || 'Failed to enqueue WhatsApp messages', 'error');

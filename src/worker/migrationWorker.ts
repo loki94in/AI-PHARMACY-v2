@@ -380,30 +380,54 @@ async function processMigrationFile(
     const archiveDir = path.join(getAppDataDir(), 'data', 'archived_migrations');
     if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
 
-    // Step 0: Always recreate staging.db from scratch to avoid corrupt leftovers from failed retries
-    if (fs.existsSync(STAGING_DB_PATH)) {
-      try { fs.unlinkSync(STAGING_DB_PATH); } catch (_) {}
-      try { fs.unlinkSync(STAGING_DB_PATH + '-wal'); } catch (_) {}
-      try { fs.unlinkSync(STAGING_DB_PATH + '-shm'); } catch (_) {}
-    }
-    migrationStatus.message = 'Creating staging database...';
-    if (fs.existsSync(DB_PATH)) {
-      // ponytail: removed dbManager.close(true) — it killed the global singleton
-      // while Express routes were actively serving, causing SQLITE_MISUSE errors.
-      // The WAL checkpoint below uses a separate better-sqlite3 handle which is safe.
+    // Close open staging connections first so Windows doesn't block unlinking/copying with EBUSY
+    try {
+      const { closeAllStagingConnections } = await import('../routes/migration.js');
+      await closeAllStagingConnections();
+    } catch (_) {}
 
-      // 1. Checkpoint WAL of active app.db to merge frames safely before copying
-      try {
-        const Database = (await import('better-sqlite3')).default;
-        const appDb = new Database(DB_PATH);
-        appDb.pragma('wal_checkpoint(FULL)');
-        appDb.close();
-      } catch (checkpointErr) {
-        console.warn('[Migration Worker] Failed to checkpoint app.db WAL before copy:', checkpointErr);
+    // Step 0: Recreate staging.db from scratch when starting a fresh migration batch
+    const stagingExists = fs.existsSync(STAGING_DB_PATH);
+    if (!isIntermediate || !stagingExists) {
+      if (stagingExists) {
+        for (let retry = 0; retry < 5; retry++) {
+          try {
+            if (fs.existsSync(STAGING_DB_PATH)) fs.unlinkSync(STAGING_DB_PATH);
+            if (fs.existsSync(STAGING_DB_PATH + '-wal')) fs.unlinkSync(STAGING_DB_PATH + '-wal');
+            if (fs.existsSync(STAGING_DB_PATH + '-shm')) fs.unlinkSync(STAGING_DB_PATH + '-shm');
+            break;
+          } catch (_) {
+            await new Promise(r => setTimeout(r, 100 * (retry + 1)));
+          }
+        }
       }
+      migrationStatus.message = 'Creating staging database...';
+      if (fs.existsSync(DB_PATH)) {
+        // 1. Checkpoint WAL of active app.db to merge frames safely before copying
+        try {
+          const Database = (await import('better-sqlite3')).default;
+          const appDb = new Database(DB_PATH);
+          appDb.pragma('wal_checkpoint(FULL)');
+          appDb.close();
+        } catch (checkpointErr) {
+          console.warn('[Migration Worker] Failed to checkpoint app.db WAL before copy:', checkpointErr);
+        }
 
-      // 2. Perform file copy
-      await fs.promises.copyFile(DB_PATH, STAGING_DB_PATH);
+        // 2. Perform file copy with retry against busy locks
+        let copySuccess = false;
+        for (let copyRetry = 0; copyRetry < 5; copyRetry++) {
+          try {
+            await fs.promises.copyFile(DB_PATH, STAGING_DB_PATH);
+            copySuccess = true;
+            break;
+          } catch (copyErr: any) {
+            console.warn(`[Migration Worker] Copy app.db to staging.db retry ${copyRetry + 1}/5:`, copyErr?.message);
+            await new Promise(r => setTimeout(r, 200 * (copyRetry + 1)));
+          }
+        }
+        if (!copySuccess) {
+          throw new Error('Failed to create staging database file due to file lock. Please retry.');
+        }
 
       // 3. Repair the copy's search index before validating it. PRAGMA integrity_check
       // opens every virtual table, so a damaged medicines_fts makes the check itself
@@ -448,6 +472,7 @@ async function processMigrationFile(
           throw new Error(`Failed to copy staging database securely: ${integrityErr.message}`);
         }
       }
+    }
     }
 
     let actualFilePath = tempProcessingPath;

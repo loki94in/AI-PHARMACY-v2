@@ -508,8 +508,18 @@ router.get('/staging/returns', async (req, res) => {
 
 router.delete('/staging/rollback', async (_req, res) => {
   try {
+    await closeAllStagingConnections();
     if (fs.existsSync(STAGING_DB_PATH)) {
-      fs.unlinkSync(STAGING_DB_PATH);
+      for (let retry = 0; retry < 5; retry++) {
+        try {
+          if (fs.existsSync(STAGING_DB_PATH)) fs.unlinkSync(STAGING_DB_PATH);
+          if (fs.existsSync(STAGING_DB_PATH + '-wal')) fs.unlinkSync(STAGING_DB_PATH + '-wal');
+          if (fs.existsSync(STAGING_DB_PATH + '-shm')) fs.unlinkSync(STAGING_DB_PATH + '-shm');
+          break;
+        } catch (_) {
+          await new Promise(r => setTimeout(r, 100 * (retry + 1)));
+        }
+      }
     }
     Object.assign(migrationStatus, { active: false, progress: 0, message: 'Idle', file: null, isStagingReady: false, errorCount: 0 });
     res.json({ success: true, message: 'Staging cleared. Ready for a fresh migration.' });

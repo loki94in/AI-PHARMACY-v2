@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2 } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
-import { toastEvent, liveCartAddEvent, specialOrdersEvent } from '../../services/events';
+import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent } from '../../services/events';
 import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -1472,6 +1472,8 @@ export default function PharmarackCart() {
 
         setHasUnreadSentHistory(true);
         specialOrdersEvent.triggerUpdated();
+        whatsappQueueEvent.triggerOpen();
+        whatsappQueueEvent.triggerUpdated();
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
         await fetchPendingOrders();
         await fetchLatestSentMap();

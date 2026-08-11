@@ -436,11 +436,12 @@ class DatabaseManager {
   }
 
   public async close(force: boolean = false): Promise<void> {
-    if (force) {
-      if (this.connection) {
-        try {
-          await this.connection.close();
-        } catch (e) {}
+    if (this.connection) {
+      try {
+        await this.connection.close();
+      } catch (err) {
+        if (!force) throw err;
+      } finally {
         this.connection = null;
         this.currentDbPath = null;
       }
