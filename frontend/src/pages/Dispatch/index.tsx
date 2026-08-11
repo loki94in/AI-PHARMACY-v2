@@ -12,19 +12,13 @@ import {
   Trash2,
   RefreshCw,
   Send,
-  Check,
   Edit3,
   Bell,
-  ToggleLeft,
-  ToggleRight,
   MessageSquare,
   Search,
   Layers,
-  Phone,
   Filter,
-  ShieldCheck,
   Calendar,
-  AlertCircle
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { whatsappQueueEvent, toastEvent } from '../../services/events';
@@ -823,6 +817,28 @@ const Dispatch = () => {
                     {distributorReminders.length}
                   </span>
                 </button>
+              </div>
+
+              {/* Sent / Not Sent Count Badges (scoped to today's orders) */}
+              <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                <span className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  ✅ Sent Today
+                  <span className="font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
+                    {distributorReminders.filter(r =>
+                      r.has_order_today === 1 &&
+                      (r.latest_notif_status === 'sent' || r.latest_notif_status === 'delivered')
+                    ).length}
+                  </span>
+                </span>
+                <span className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  🕓 Not Sent
+                  <span className="font-mono px-1.5 py-0.2 rounded-full bg-amber-500/30 text-amber-300 font-extrabold">
+                    {distributorReminders.filter(r =>
+                      r.has_order_today === 1 &&
+                      r.latest_notif_status !== 'sent' && r.latest_notif_status !== 'delivered'
+                    ).length}
+                  </span>
+                </span>
               </div>
 
               <div className="relative">
