@@ -48,7 +48,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
     const pharmarackDistributors = await db.all(
       `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
        FROM pharmarack_placed_orders po
-       JOIN distributors d ON (po.store_name = d.name OR po.store_id = d.id)
+       JOIN distributors d ON po.store_name = d.name
        WHERE po.order_date = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ?`,
       [todayStr, todayStr]
     );
@@ -98,31 +98,36 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
 
     // Fetch and return full list of today's reminders with delivery boy name joined.
     // Distributors with orders placed/sent via Pharmarack Cart today get sorted to the ABSOLUTE TOP!
+    // NOTE: purchases has no supplier_id/created_at column (only distributor_id/date), and
+    // pharmarack_placed_orders has no created_at column (only order_date/placed_at) — referencing
+    // them here previously threw SQLITE_ERROR on every call, which the outer catch (below) swallowed
+    // into a silent `return []`. That made this entire Distributor Dispatch Reminders feature return
+    // nothing for every request, in both "Today's Orders Only" and "All Distributors" views.
     const todayReminders = await db.all(
       `SELECT r.*, db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone,
               CASE WHEN EXISTS (
-                SELECT 1 FROM pharmarack_placed_orders po 
-                WHERE (po.store_name = r.distributor_name OR po.store_id = r.distributor_id) 
-                  AND (po.order_date = ? OR DATE(po.placed_at) = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ? OR DATE(po.created_at) = ?)
+                SELECT 1 FROM pharmarack_placed_orders po
+                WHERE po.store_name = r.distributor_name
+                  AND (po.order_date = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ?)
               ) THEN 1 ELSE 0 END as has_pharmarack_order_today,
               CASE WHEN (
                 EXISTS (
-                  SELECT 1 FROM pharmarack_placed_orders po 
-                  WHERE (po.store_name = r.distributor_name OR po.store_id = r.distributor_id) 
-                    AND (po.order_date = ? OR DATE(po.placed_at) = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ? OR DATE(po.created_at) = ?)
+                  SELECT 1 FROM pharmarack_placed_orders po
+                  WHERE po.store_name = r.distributor_name
+                    AND (po.order_date = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ?)
                 )
                 OR EXISTS (
-                  SELECT 1 FROM purchases p 
-                  WHERE (p.distributor_id = r.distributor_id OR p.supplier_id = r.distributor_id) 
-                    AND (p.date = ? OR DATE(p.date) = ? OR DATE(p.created_at) = ?)
+                  SELECT 1 FROM purchases p
+                  WHERE p.distributor_id = r.distributor_id
+                    AND (p.date = ? OR DATE(p.date) = ?)
                 )
                 OR EXISTS (
-                  SELECT 1 FROM special_orders s 
-                  WHERE s.distributor_name = r.distributor_name 
+                  SELECT 1 FROM special_orders s
+                  WHERE s.distributor_name = r.distributor_name
                     AND (s.date = ? OR DATE(s.date) = ? OR DATE(s.created_at) = ?)
                 )
                 OR EXISTS (
-                  SELECT 1 FROM automation_notifications n 
+                  SELECT 1 FROM automation_notifications n
                   WHERE (n.recipient_name = r.distributor_name OR n.recipient_phone = r.distributor_phone)
                     AND DATE(n.created_at) = ?
                 )
@@ -145,17 +150,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
        LEFT JOIN delivery_boys db ON r.delivery_boy_id = db.id
        WHERE r.date = ?
        ORDER BY has_pharmarack_order_today DESC, has_order_today DESC, r.status DESC, r.created_at DESC`,
-      [
-        todayStr, todayStr, todayStr, todayStr,
-        todayStr, todayStr, todayStr, todayStr,
-        todayStr, todayStr, todayStr,
-        todayStr, todayStr, todayStr,
-        todayStr,
-        todayStr,
-        todayStr,
-        todayStr,
-        todayStr
-      ]
+      Array(14).fill(todayStr)
     );
 
     // Guaranteed fallback: If no rows found for today in distributor_dispatch_reminders, fetch master distributors
