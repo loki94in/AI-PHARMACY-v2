@@ -25,7 +25,6 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
 
   try {
     // 1. Fetch distributors with purchases today
-    // (purchases has no created_at column — `date` is the only timestamp)
     const purchaseDistributors = await db.all(
       `SELECT DISTINCT p.distributor_id, d.name as distributor_name, d.phone as distributor_phone
        FROM purchases p
@@ -35,7 +34,6 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
     );
 
     // 2. Fetch distributors with special orders today
-    // (special_orders has no distributor_id/order_date columns — only distributor_name and date)
     const specialOrderDistributors = await db.all(
       `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
        FROM special_orders s
@@ -46,9 +44,26 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       [todayStr, todayStr]
     );
 
+    // 3. Fetch distributors from pharmarack_placed_orders today
+    const pharmarackDistributors = await db.all(
+      `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
+       FROM pharmarack_placed_orders po
+       JOIN distributors d ON (po.store_name = d.name OR po.store_id = d.id)
+       WHERE po.order_date = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ?`,
+      [todayStr, todayStr]
+    );
+
+    // 4. Fetch all active registered distributors from distributors directory table as fallback
+    // so the Dispatch & Collection Command Center is always fully populated
+    const allRegisteredDistributors = await db.all(
+      `SELECT id as distributor_id, name as distributor_name, phone as distributor_phone
+       FROM distributors
+       WHERE name IS NOT NULL AND name != ''`
+    );
+
     // Merge distinct active distributors
     const distMap = new Map<number, { id: number; name: string; phone: string }>();
-    for (const d of [...purchaseDistributors, ...specialOrderDistributors]) {
+    for (const d of [...purchaseDistributors, ...specialOrderDistributors, ...pharmarackDistributors, ...allRegisteredDistributors]) {
       if (d.distributor_id && !distMap.has(d.distributor_id)) {
         distMap.set(d.distributor_id, {
           id: d.distributor_id,
@@ -70,18 +85,91 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
            VALUES (?, ?, ?, ?, 'Pending', 1)`,
           [dist.id, dist.name, dist.phone, todayStr]
         );
+      } else {
+        // Keep distributor_phone up to date if missing
+        if (dist.phone) {
+          await db.run(
+            `UPDATE distributor_dispatch_reminders SET distributor_phone = ? WHERE id = ? AND (distributor_phone IS NULL OR distributor_phone = '' OR distributor_phone = 'No phone set')`,
+            [dist.phone, existing.id]
+          );
+        }
       }
     }
 
-    // Fetch and return full list of today's reminders with delivery boy name joined
+    // Fetch and return full list of today's reminders with delivery boy name joined.
+    // Distributors with orders placed/sent via Pharmarack Cart today get sorted to the ABSOLUTE TOP!
     const todayReminders = await db.all(
-      `SELECT r.*, db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone
+      `SELECT r.*, db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM pharmarack_placed_orders po 
+                WHERE (po.store_name = r.distributor_name OR po.store_id = r.distributor_id) 
+                  AND (po.order_date = ? OR DATE(po.placed_at) = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ? OR DATE(po.created_at) = ?)
+              ) THEN 1 ELSE 0 END as has_pharmarack_order_today,
+              CASE WHEN (
+                EXISTS (
+                  SELECT 1 FROM pharmarack_placed_orders po 
+                  WHERE (po.store_name = r.distributor_name OR po.store_id = r.distributor_id) 
+                    AND (po.order_date = ? OR DATE(po.placed_at) = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ? OR DATE(po.created_at) = ?)
+                )
+                OR EXISTS (
+                  SELECT 1 FROM purchases p 
+                  WHERE (p.distributor_id = r.distributor_id OR p.supplier_id = r.distributor_id) 
+                    AND (p.date = ? OR DATE(p.date) = ? OR DATE(p.created_at) = ?)
+                )
+                OR EXISTS (
+                  SELECT 1 FROM special_orders s 
+                  WHERE s.distributor_name = r.distributor_name 
+                    AND (s.date = ? OR DATE(s.date) = ? OR DATE(s.created_at) = ?)
+                )
+                OR EXISTS (
+                  SELECT 1 FROM automation_notifications n 
+                  WHERE (n.recipient_name = r.distributor_name OR n.recipient_phone = r.distributor_phone)
+                    AND DATE(n.created_at) = ?
+                )
+                OR r.status != 'Pending'
+                OR (r.last_reminded_at IS NOT NULL AND DATE(r.last_reminded_at) = ?)
+              ) THEN 1 ELSE 0 END as has_order_today,
+              (
+                SELECT n.status FROM automation_notifications n
+                WHERE (n.recipient_name = r.distributor_name OR n.recipient_phone = r.distributor_phone)
+                  AND DATE(n.created_at) = ?
+                ORDER BY n.id DESC LIMIT 1
+              ) as latest_notif_status,
+              (
+                SELECT n.error_message FROM automation_notifications n
+                WHERE (n.recipient_name = r.distributor_name OR n.recipient_phone = r.distributor_phone)
+                  AND DATE(n.created_at) = ? AND (n.status = 'failed' OR n.status = 'error')
+                ORDER BY n.id DESC LIMIT 1
+              ) as latest_notif_error
        FROM distributor_dispatch_reminders r
        LEFT JOIN delivery_boys db ON r.delivery_boy_id = db.id
        WHERE r.date = ?
-       ORDER BY r.status DESC, r.created_at DESC`,
-      [todayStr]
+       ORDER BY has_pharmarack_order_today DESC, has_order_today DESC, r.status DESC, r.created_at DESC`,
+      [
+        todayStr, todayStr, todayStr, todayStr,
+        todayStr, todayStr, todayStr, todayStr,
+        todayStr, todayStr, todayStr,
+        todayStr, todayStr, todayStr,
+        todayStr,
+        todayStr,
+        todayStr,
+        todayStr,
+        todayStr
+      ]
     );
+
+    // Guaranteed fallback: If no rows found for today in distributor_dispatch_reminders, fetch master distributors
+    if (!todayReminders || todayReminders.length === 0) {
+      const fallbackList = await db.all(`
+        SELECT d.id, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone,
+               'Pending' as status, 1 as auto_remind, NULL as delivery_boy_id, NULL as delivery_boy_name,
+               0 as has_pharmarack_order_today, 0 as has_order_today, NULL as latest_notif_status, NULL as latest_notif_error
+        FROM distributors d
+        WHERE d.name IS NOT NULL AND d.name != ''
+        ORDER BY d.name ASC
+      `);
+      return fallbackList;
+    }
 
     return todayReminders;
   } catch (err: any) {

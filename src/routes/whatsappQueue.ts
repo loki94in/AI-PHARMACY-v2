@@ -123,8 +123,8 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
         let summaryMsg = `🏥 *${headerShopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
         orders.forEach((o: any, idx: number) => {
           const cleanP = String(o.phone || '').replace(/\D/g, '');
-          const phoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : (cleanP.length >= 10 ? `+${cleanP}` : (o.phone || 'N/A'));
-          summaryMsg += `${idx + 1}. *${o.storeName}*: (${o.items?.length || 0} items)\n    ${phoneNoGap}\n`;
+          const phoneFormatted = cleanP.length === 10 ? `+91 ${cleanP.slice(0, 5)} ${cleanP.slice(5)}` : (cleanP.length >= 10 ? `+${cleanP}` : (o.phone || 'N/A'));
+          summaryMsg += `${idx + 1}. *${o.storeName}* (${o.items?.length || 0} items)\n    📞 Contact: ${phoneFormatted}\n`;
         });
         summaryMsg += `\n==================================\n`;
         summaryMsg += `🚚 *Total Today Distributors:* ${orders.length}\n`;

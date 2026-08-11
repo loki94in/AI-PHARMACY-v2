@@ -266,6 +266,18 @@ const POS = () => {
   const [matchedRefill, setMatchedRefill] = useState<any | null>(null);
   const [dismissedRefillId, setDismissedRefillId] = useState<number | null>(null);
 
+  // Auto-focus Patient Name input on POS page mount so user can immediately start typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const el = document.getElementById('patient-name-input') as HTMLInputElement | null;
+      if (el && document.activeElement !== el) {
+        el.focus();
+        el.select?.();
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Hydrate POS cart from URL parameters for automatic refill checkouts
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2607,9 +2619,8 @@ const POS = () => {
                     onFocus={() => { if (selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientSuggestions.length > 0) setShowPatientSuggestions(true); }}
                     onBlur={() => setTimeout(() => setShowPatientSuggestions(false), 180)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === 'Tab') {
+                      if (e.key === 'Enter') {
                         if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
-                          e.preventDefault();
                           const sel = patientSuggestions[patientHighlightIndex];
                           justSelectedPatientRef.current = true;
                           selectedCustomerIdRef.current = sel.id;
@@ -2624,6 +2635,17 @@ const POS = () => {
                           const docEl = document.getElementById('doctor-name-input');
                           if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
                         }, 50);
+                      } else if (e.key === 'Tab') {
+                        if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
+                          const sel = patientSuggestions[patientHighlightIndex];
+                          justSelectedPatientRef.current = true;
+                          selectedCustomerIdRef.current = sel.id;
+                          updatePatientName(sel.name);
+                          setPatientPhone(sel.phone || '');
+                          setSelectedCustomerId(sel.id);
+                          setShowPatientSuggestions(false);
+                          setPatientHighlightIndex(-1);
+                        }
                       } else if (showPatientSuggestions && patientSuggestions.length > 0) {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -2699,12 +2721,20 @@ const POS = () => {
               <div className="md:col-span-3">
                 <div className="flex gap-1 items-center">
                   <input
+                    id="patient-phone-input"
                     type="text"
                     className="premium-input text-xs font-mono font-semibold h-8.5 px-3 w-full text-text bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
                     placeholder="Mobile / WhatsApp..."
                     value={patientPhone}
                     onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
                     maxLength={10}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const docEl = document.getElementById('doctor-name-input');
+                        if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                      }
+                    }}
                     aria-label="Phone Number"
                   />
                   <button
@@ -2749,7 +2779,7 @@ const POS = () => {
                     }}
                     onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === 'Tab') {
+                      if (e.key === 'Enter') {
                         e.preventDefault();
                         if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
                           const targetIdx = doctorHighlightIndex >= 0 ? doctorHighlightIndex : 0;
@@ -2764,6 +2794,18 @@ const POS = () => {
                         setIsDoctorDropdownOpen(false);
                         setDoctorHighlightIndex(-1);
                         focusMedicineSearch();
+                      } else if (e.key === 'Tab') {
+                        if (isDoctorDropdownOpen && filteredDoctors.length > 0 && doctorHighlightIndex >= 0) {
+                          const sel = filteredDoctors[doctorHighlightIndex];
+                          if (sel) {
+                            justSelectedDoctorRef.current = true;
+                            selectedDoctorIdRef.current = sel.id;
+                            setDoctor(sel.name);
+                            setSelectedDoctorId(sel.id);
+                          }
+                        }
+                        setIsDoctorDropdownOpen(false);
+                        setDoctorHighlightIndex(-1);
                       } else if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -2850,17 +2892,13 @@ const POS = () => {
                 type="button"
                 onClick={() => {
                   setIsSearchExpanded(true);
-                  setTimeout(() => {
-                    const input = productSearchRef.current?.querySelector('input');
-                    input?.focus();
-                  }, 50);
+                  setTimeout(() => focusMedicineSearch(), 50);
                 }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary transition-all shadow-sm cursor-pointer group"
-                title="Search Medicine (Click or press F2 / Ctrl + K)"
+                className="premium-btn bg-bg2 border border-border/60 hover:border-primary/50 text-text transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-medium group cursor-pointer"
               >
-                <Search size={15} className="text-primary group-hover:scale-110 transition-transform" />
-                <span className="text-xs font-bold">Search Medicine</span>
-                <span className="text-[10px] font-mono font-bold bg-primary/15 border border-primary/30 px-1.5 py-0.5 rounded text-primary">
+                <Search size={13} className="text-primary group-hover:scale-110 transition-transform" />
+                <span className="text-[11px] font-bold">Search Medicine</span>
+                <span className="text-[9px] font-mono font-bold bg-primary/15 border border-primary/30 px-1 py-0.5 rounded text-primary">
                   F2 / Ctrl+K
                 </span>
               </button>
@@ -3261,94 +3299,12 @@ const POS = () => {
                 type="button"
                 aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
-                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-text shadow-[0_4px_14px_rgba(59,130,246,0.25)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 px-5 h-10 rounded-xl shrink-0 font-bold text-xs"
+                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-text shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-bold text-[11px]"
               >
-                <Camera size={16} />
+                <Camera size={13} />
                 <span>AI Camera Scan</span>
               </button>
-
-            {/* Combined Single Line Doctor & Prescription Suggestions Bar */}
-            <div className="border-t border-border/30 pt-1.5 flex items-center gap-2 w-full min-w-0 overflow-hidden">
-              <span className="text-[11px] font-extrabold text-muted uppercase tracking-wider flex items-center gap-1 select-none shrink-0">
-                ⚡ Doctor's Suggestions:
-              </span>
-              <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-thin flex-1 min-w-0 items-center">
-                {doctorSuggestions.length > 0 ? (
-                  <>
-                    {doctorSuggestions.map(med => {
-                      const reqQty = med.most_common_qty !== undefined && med.most_common_qty !== null ? med.most_common_qty : med.last_qty;
-                      const reqLooseQty = med.most_common_loose_qty !== undefined && med.most_common_loose_qty !== null ? med.most_common_loose_qty : med.last_loose_qty;
-                      const qtyTag = reqQty && reqQty > 0 
-                        ? `${reqQty} Str` 
-                        : (reqLooseQty && reqLooseQty > 0 ? `${reqLooseQty} Tab` : `x${med.frequency}`);
-                      return (
-                        <button
-                          key={`doc_sug_${med.id}`}
-                          type="button"
-                          onClick={() => addMedicineById(med.id)}
-                          className="flex items-center gap-1.5 bg-bg2 border border-border/60 hover:border-primary/60 hover:bg-primary/10 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
-                            {med.name}
-                            <span className="text-[10px] text-sky ml-1 font-mono font-bold">
-                              ({qtyTag})
-                            </span>
-                          </span>
-                          <span className="text-[10px] text-primary font-bold">+</span>
-                        </button>
-                      );
-                    })}
-                    {doctorComboSuggestions.map(med => {
-                      const reqQty = med.most_common_qty !== undefined && med.most_common_qty !== null ? med.most_common_qty : med.last_qty;
-                      const reqLooseQty = med.most_common_loose_qty !== undefined && med.most_common_loose_qty !== null ? med.most_common_loose_qty : med.last_loose_qty;
-                      return (
-                        <button
-                          key={`doc_combo_${med.id}`}
-                          type="button"
-                          onClick={() => addMedicineById(med.id)}
-                          className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/30 hover:border-purple-500/60 hover:bg-purple-500/20 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <span className="text-xs font-semibold text-purple-300 transition-all">
-                            {med.name}
-                            <span className="text-[10px] text-purple-400 ml-1 font-mono font-bold">
-                              (x{med.co_count})
-                            </span>
-                          </span>
-                          <span className="text-[10px] text-purple-400 font-bold">+</span>
-                        </button>
-                      );
-                    })}
-                  </>
-                ) : (
-                  commonCombinations.length > 0 ? (
-                    commonCombinations.map(med => {
-                      const qtyTag = med.recommendedQty > 0 
-                        ? `${med.recommendedQty} Str` 
-                        : (med.recommendedLooseQty > 0 ? `${med.recommendedLooseQty} Tab` : '1');
-                      return (
-                        <button
-                          key={`common_${med.id}`}
-                          type="button"
-                          onClick={() => addToCart(med)}
-                          className="flex items-center gap-1.5 bg-bg2 border border-border/60 hover:border-primary/60 hover:bg-primary/10 px-2.5 py-1 rounded-full transition-all group whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          <span className="text-xs font-semibold text-text group-hover:text-primary transition-all">
-                            {med.name}
-                            <span className="text-[10px] text-sky ml-1 font-mono font-bold">
-                              ({qtyTag})
-                            </span>
-                          </span>
-                          <span className="text-[10px] text-primary font-bold">+</span>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <span className="text-xs text-muted italic">Select a doctor or search medicine above for instant suggestions</span>
-                  )
-                )}
-              </div>
             </div>
-          </div>
 
           {/* B. Cart Panel - Takes up all remaining height */}
           <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border relative z-10 min-h-0 min-w-0 shadow-md w-full">
@@ -3462,19 +3418,7 @@ const POS = () => {
                     let statusBadge = null;
 
                     if (!item.isEmptyRow) {
-                      if (isUnmappedNew) {
-                        rowStatusClass = "border-b border-purple-500/30 bg-purple-500/[0.06] hover:bg-purple-500/[0.12]";
-                        statusBadge = null;
-                      } else if (isMasterDbOnly) {
-                        rowStatusClass = "border-b border-amber-500/30 bg-amber-500/[0.06] hover:bg-amber-500/[0.12]";
-                        statusBadge = null;
-                      } else {
-                        statusBadge = (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0 ml-1">
-                            In Stock
-                          </span>
-                        );
-                      }
+                      statusBadge = null;
                     }
 
                     return (
@@ -3766,24 +3710,24 @@ const POS = () => {
                             }
                             const isLooseAllowed = item.allow_loose_sale === undefined || !!item.allow_loose_sale;
                             return (
-                              <div className="flex flex-col items-center justify-center gap-1">
-                                <div className={`flex items-center gap-1 border rounded-lg px-2 py-0.5 h-7 transition-all ${
+                              <div className="flex items-center justify-center">
+                                <div className={`flex items-center gap-0.5 border rounded-lg px-1.5 py-0.5 h-7 transition-all ${
                                   isLooseAllowed 
                                     ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20' 
-                                    : 'bg-bg/40 border-border/30 opacity-40 cursor-not-allowed'
+                                    : 'bg-rose-500/5 border-rose-500/20 opacity-75'
                                 }`}>
                                   <input 
                                     id={`row-loose-input-${cart.indexOf(item)}`}
                                     data-pos-row-index={cart.indexOf(item)}
                                     data-pos-field="looseQty"
                                     type="number" 
-                                    className={`w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
+                                    className={`w-9 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
                                       isLooseAllowed ? 'text-amber-500' : 'text-muted cursor-not-allowed'
                                     }`}
                                     value={isLooseAllowed ? (item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : '') : ''}
                                     onChange={e => {
                                       if (!isLooseAllowed) {
-                                        toastEvent.trigger(`${item.name || 'Medicine'} is restricted to Full Pack Only. Click badge to enable loose sales.`, 'info');
+                                        toastEvent.trigger(`${item.name || 'Medicine'} is restricted to Full Pack Only. Click lock icon to enable loose sales.`, 'info');
                                         return;
                                       }
                                       updateCartItem(item.id, 'looseQty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)));
@@ -3808,22 +3752,18 @@ const POS = () => {
                                       }
                                     }}
                                   />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleAllowLooseSale(item);
+                                    }}
+                                    className="text-[11px] p-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                                    title={isLooseAllowed ? "Loose sale allowed (Click to lock to Full Pack Only)" : "Full Pack Only (Click to allow loose tablet sales)"}
+                                  >
+                                    {isLooseAllowed ? '🔓' : '🔒'}
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleAllowLooseSale(item);
-                                  }}
-                                  className={`px-1.5 py-0.5 text-[9px] font-bold rounded border tracking-tight transition-all ${
-                                    isLooseAllowed 
-                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' 
-                                      : 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
-                                  }`}
-                                  title={isLooseAllowed ? "Loose sale allowed (Click to lock to Full Pack Only)" : "Full Pack Only (Click to allow loose tablet sales)"}
-                                >
-                                  {isLooseAllowed ? '🔓 Loose' : '🔒 Full Pack'}
-                                </button>
                               </div>
                             );
                           })()}

@@ -517,6 +517,14 @@ export const api = {
   getEmailOrderReviews: (status?: string) => apiClient.get('/email-order-reviews', { params: status ? { status } : undefined }).then(res => res.data),
   dismissEmailOrderReview: (id: number) => apiClient.post(`/email-order-reviews/${id}/dismiss`).then(res => res.data),
   
+  // Reorder Suggestions & Snooze
+  getReorderSuggestions: () => apiClient.get('/sales/reorder-suggestions').then(res => res.data),
+  snoozeReorderSuggestion: (medicineId: number, snoozeDays?: number, snoozeType?: string, reason?: string) =>
+    apiClient.post('/sales/reorder-suggestions/snooze', { medicineId, snoozeDays, snoozeType, reason }).then(res => res.data),
+  unsnoozeReorderSuggestion: (medicineId: number) =>
+    apiClient.post('/sales/reorder-suggestions/unsnooze', { medicineId }).then(res => res.data),
+  getSnoozedReorders: () => apiClient.get('/sales/reorder-suggestions/snoozed').then(res => res.data),
+  
   
   // Medicines Database
   getMedicines: (

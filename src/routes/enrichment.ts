@@ -239,8 +239,6 @@ router.get('/enrichment/queue', async (req, res) => {
       limit, offset
     );
 
-    await dbManager.close();
-
     res.json({
       data: items,
       totalItems,

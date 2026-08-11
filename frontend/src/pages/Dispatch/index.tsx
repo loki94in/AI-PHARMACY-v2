@@ -76,7 +76,7 @@ const Dispatch = () => {
   const cachedOrders = getDispatchOrdersCache() as DispatchOrder[] | null;
   const cachedDeliveryBoys = getDispatchDeliveryBoysCache() as DeliveryBoy[] | null;
 
-  const [activeTab, setActiveTab] = useState<TabType>('queue');
+  const [activeTab, setActiveTab] = useState<TabType>('reminders');
   const [orders, setOrders] = useState<DispatchOrder[]>(cachedOrders || []);
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>(cachedDeliveryBoys || []);
   const [allBoys, setAllBoys] = useState<DeliveryBoy[]>([]);
@@ -110,6 +110,7 @@ const Dispatch = () => {
   // Distributor Dispatch Reminders state
   const [distributorReminders, setDistributorReminders] = useState<any[]>([]);
   const [distributorSearch, setDistributorSearch] = useState('');
+  const [distributorTodayOnly, setDistributorTodayOnly] = useState<boolean>(true);
   const [sendingReminderId, setSendingReminderId] = useState<number | null>(null);
   const [loadingDistributorReminders, setLoadingDistributorReminders] = useState(false);
 
@@ -173,8 +174,8 @@ const Dispatch = () => {
     }
   }, []);
 
-  const fetchDistributorReminders = useCallback(async () => {
-    setLoadingDistributorReminders(true);
+  const fetchDistributorReminders = useCallback(async (silent = false) => {
+    if (!silent) setLoadingDistributorReminders(true);
     try {
       const res = await api.getTodayDistributorReminders();
       if (res && res.success && Array.isArray(res.reminders)) {
@@ -183,7 +184,7 @@ const Dispatch = () => {
     } catch (err) {
       console.error('Failed to fetch distributor reminders:', err);
     } finally {
-      setLoadingDistributorReminders(false);
+      if (!silent) setLoadingDistributorReminders(false);
     }
   }, []);
 
@@ -215,7 +216,7 @@ const Dispatch = () => {
     try {
       await api.sendDistributorReminderNow(id);
       showNotif('WhatsApp reminder sent to distributor!');
-      fetchDistributorReminders();
+      await fetchDistributorReminders(true);
     } catch (err: any) {
       showNotif(err.message || 'Failed to send WhatsApp reminder', 'error');
     } finally {
@@ -238,9 +239,14 @@ const Dispatch = () => {
       fetchDistributorReminders();
       fetchMessageDates();
     };
+    const unsubWs = whatsappQueueEvent.subscribeUpdated(() => {
+      fetchDistributorReminders();
+      fetchAll();
+    });
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
     window.addEventListener('settings-updated', handlePhoneUpdate);
     return () => {
+      unsubWs();
       window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
       window.removeEventListener('settings-updated', handlePhoneUpdate);
     };
@@ -392,7 +398,7 @@ const Dispatch = () => {
     return new Date(o.delivered_at).toDateString() === new Date().toDateString();
   }).length;
 
-  const uncollectedDistributorsCount = distributorReminders.filter(r => r.status !== 'Collected').length;
+  const uncollectedDistributorsCount = distributorReminders.filter(r => r.has_order_today === 1 && r.status !== 'Collected').length;
 
   // Filtered Queue Orders
   const filteredOrders = orders.filter(order => {
@@ -787,23 +793,62 @@ const Dispatch = () => {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30 font-bold flex items-center gap-1">
-                <Clock size={11} /> Auto-Send Window: 12:30 PM – 1:00 PM IST
-              </span>
+              {/* Daily Order Toggle Pill */}
+              <div className="flex items-center gap-1 bg-bg p-0.5 rounded-xl border border-glass-border text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDistributorTodayOnly(true)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1.5 ${
+                    distributorTodayOnly
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm font-black'
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  <span>📦 Today's Orders Only</span>
+                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
+                    {distributorReminders.filter(r => r.has_order_today === 1).length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDistributorTodayOnly(false)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1.5 ${
+                    !distributorTodayOnly
+                      ? 'bg-bg2 text-text border border-glass-border shadow-sm font-black'
+                      : 'text-muted hover:text-text'
+                  }`}
+                >
+                  <span>📋 All Distributors</span>
+                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-bg3 text-muted font-bold">
+                    {distributorReminders.length}
+                  </span>
+                </button>
+              </div>
 
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
-                  placeholder="Filter distributors..."
+                  placeholder="Search distributor, phone, staff, status..."
                   value={distributorSearch}
                   onChange={e => setDistributorSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-primary/50"
+                  className="pl-8 pr-7 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-primary/50 w-64 font-medium"
                 />
+                {distributorSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setDistributorSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5"
+                    title="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
 
               <button
-                onClick={fetchDistributorReminders}
+                type="button"
+                onClick={() => fetchDistributorReminders()}
                 className="p-2 rounded-xl bg-bg3/50 hover:bg-bg3 text-muted hover:text-text transition-colors border border-glass-border"
                 title="Refresh Distributor Reminders"
               >
@@ -817,7 +862,7 @@ const Dispatch = () => {
             <table className="w-full text-left border-collapse text-xs">
               <thead className="bg-bg2/90">
                 <tr>
-                  {['Distributor Name', 'Contact Phone', 'Assigned Delivery Staff', 'Dispatch / Collection Status', 'Auto-Reminder', 'Last Reminded', 'Action'].map(h => (
+                  {['Distributor Name', 'Contact Phone', 'Assigned Delivery Staff', 'Dispatch / Collection Status', 'Action'].map(h => (
                     <th key={h} className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
                   ))}
                 </tr>
@@ -825,32 +870,76 @@ const Dispatch = () => {
               <tbody className="divide-y divide-glass-border/30">
                 {loadingDistributorReminders ? (
                   <tr>
-                    <td colSpan={7} className="p-10 text-center text-muted">
+                    <td colSpan={5} className="p-10 text-center text-muted">
                       <RefreshCw size={20} className="animate-spin mx-auto mb-2 text-amber-400" />
                       Checking today's active distributor orders...
                     </td>
                   </tr>
-                ) : distributorReminders.filter(r => r.distributor_name.toLowerCase().includes(distributorSearch.toLowerCase())).length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-10 text-center text-muted">
-                      <Bell size={28} className="mx-auto mb-2 opacity-30 text-amber-400" />
-                      <p className="font-bold text-text">No active distributor orders for today</p>
-                      <p className="text-xs text-muted">When shortage or purchase orders are placed today, their distributors will auto-appear here.</p>
-                    </td>
-                  </tr>
-                ) : (
-                  distributorReminders
-                    .filter(r => r.distributor_name.toLowerCase().includes(distributorSearch.toLowerCase()))
-                    .map(item => (
-                      <tr key={item.id} className="hover:bg-bg3/30 transition-colors">
-                        <td className="p-3 font-bold text-text">{item.distributor_name}</td>
-                        <td className="p-3 font-mono text-muted">{item.distributor_phone || 'No phone set'}</td>
-                        <td className="p-3">
-                          <select
-                            value={item.delivery_boy_id || ''}
-                            onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
-                            className="text-xs px-2.5 py-1 rounded-lg bg-bg text-text border border-glass-border focus:outline-none font-medium"
-                          >
+                ) : (() => {
+                  const displayList = distributorReminders.filter(r => {
+                    if (distributorTodayOnly && r.has_order_today !== 1) return false;
+                    const term = distributorSearch.toLowerCase().trim();
+                    if (!term) return true;
+                    return (
+                      (r.distributor_name && r.distributor_name.toLowerCase().includes(term)) ||
+                      (r.distributor_phone && r.distributor_phone.includes(term)) ||
+                      (r.delivery_boy_name && r.delivery_boy_name.toLowerCase().includes(term)) ||
+                      (r.status && r.status.toLowerCase().includes(term))
+                    );
+                  });
+
+                  if (displayList.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={5} className="p-10 text-center text-muted">
+                          <Bell size={28} className="mx-auto mb-2 opacity-30 text-amber-400" />
+                          <p className="font-bold text-text">No matching distributors found</p>
+                          <p className="text-xs text-muted">
+                            {distributorTodayOnly
+                              ? "No distributor orders sent today. Switch to '📋 All Distributors' to view full directory."
+                              : "Try clearing your search query or placing a new purchase/cart order."}
+                          </p>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return displayList.map(item => (
+                    <tr key={item.id} className="hover:bg-bg3/30 transition-colors">
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-text">{item.distributor_name}</span>
+                          {item.has_pharmarack_order_today === 1 ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                              🛒 Pharmarack Cart Sent
+                            </span>
+                          ) : item.has_order_today === 1 ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-sky/20 text-sky border border-sky/30 flex items-center gap-1 shrink-0">
+                              📦 Today's Order
+                            </span>
+                          ) : null}
+
+                          {item.latest_notif_status === 'failed' || item.latest_notif_error ? (
+                            <span 
+                              className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
+                              title={item.latest_notif_error || 'WhatsApp message failed to deliver'}
+                            >
+                              ❌ Failed: {item.latest_notif_error ? item.latest_notif_error.substring(0, 24) + '...' : 'Delivery Error'}
+                            </span>
+                          ) : item.latest_notif_status === 'sent' || item.latest_notif_status === 'delivered' ? (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center gap-1 shrink-0">
+                              ✅ Message Sent
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="p-3 font-mono text-muted">{item.distributor_phone || 'No phone set'}</td>
+                      <td className="p-3">
+                        <select
+                          value={item.delivery_boy_id || ''}
+                          onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
+                          className="text-xs px-2.5 py-1 rounded-lg bg-bg text-text border border-glass-border focus:outline-none font-medium"
+                        >
                             <option value="">👤 Unassigned / Admin Fallback</option>
                             {deliveryBoys.map(b => (
                               <option key={b.id} value={b.id}>{b.name}</option>
@@ -876,39 +965,22 @@ const Dispatch = () => {
                         </td>
                         <td className="p-3">
                           <button
-                            onClick={() => handleToggleAutoRemind(item.id, item.auto_remind)}
-                            className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
-                              item.auto_remind
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                : 'bg-bg3 text-muted border-glass-border'
-                            }`}
-                          >
-                            {item.auto_remind ? <ToggleRight size={16} className="text-emerald-400" /> : <ToggleLeft size={16} className="text-muted" />}
-                            {item.auto_remind ? 'ON' : 'OFF'}
-                          </button>
-                        </td>
-                        <td className="p-3 font-mono text-[11px] text-muted">
-                          {item.last_reminded_at
-                            ? new Date(item.last_reminded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                            : 'Not sent today'}
-                        </td>
-                        <td className="p-3">
-                          <button
+                            type="button"
                             onClick={() => handleSendReminderNow(item.id)}
                             disabled={sendingReminderId === item.id}
-                            className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30 disabled:opacity-50 transition-all active:scale-95"
+                            className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30 disabled:opacity-50 transition-all active:scale-95 cursor-pointer"
                           >
                             {sendingReminderId === item.id ? (
                               <RefreshCw size={12} className="animate-spin" />
                             ) : (
                               <MessageSquare size={12} />
                             )}
-                            Send Reminder Now
+                            {sendingReminderId === item.id ? 'Sending...' : 'Send Reminder Now'}
                           </button>
                         </td>
                       </tr>
-                    ))
-                )}
+                    ));
+                })()}
               </tbody>
             </table>
           </div>

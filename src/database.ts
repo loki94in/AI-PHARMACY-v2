@@ -406,6 +406,15 @@ export async function ensureSchema(dbPath: string) {
       is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
+      medicine_id INTEGER PRIMARY KEY,
+      snooze_until TEXT NOT NULL,
+      snooze_type TEXT NOT NULL DEFAULT '7_days',
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+      updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+      FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+    );
     CREATE TABLE IF NOT EXISTS patient_refills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       customer_id INTEGER,

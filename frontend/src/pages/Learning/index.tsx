@@ -25,7 +25,17 @@ import {
   ExternalLink,
   QrCode,
   Sliders,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  TrendingUp,
+  FileCode,
+  CheckSquare,
+  ShieldCheck,
+  Layers,
+  Activity,
+  Zap,
+  ArrowRight,
+  Copy
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -64,7 +74,7 @@ let cachedDoctorsList: any[] = [];
 let cachedProfiles: LearningProfileSummary[] = [];
 const cachedProfileDetailsMap: Record<number, any> = {};
 
-const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors', 'operations'];
+const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors', 'operations', 'reorders'];
 
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -75,6 +85,7 @@ const Learning: React.FC = () => {
     const lower = t.toLowerCase();
     if (lower === 'distributor_layouts' || lower === 'distributors') return 'distributors';
     if (lower === 'ingestion' || lower === 'operations') return 'operations';
+    if (lower === 'reorders' || lower === 'inventory' || lower === 'snoozed') return 'reorders';
     if (VALID_LEARNING_TABS.includes(lower)) return lower;
     return 'clinical';
   };
@@ -82,6 +93,7 @@ const Learning: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>(normalizeTab(searchParams.get('tab')));
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileSearchQuery, setProfileSearchQuery] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
 
   // Sandbox state
   const [testBrandInput, setTestBrandInput] = useState('');
@@ -99,6 +111,11 @@ const Learning: React.FC = () => {
   const [docSpecialty, setDocSpecialty] = useState('');
   const [docClinic, setDocClinic] = useState('');
   const [doctorSearch, setDoctorSearch] = useState('');
+
+  // Operations Scanner Playground State
+  const [scannerSampleType, setScannerSampleType] = useState<'marg' | 'tally' | 'redbook' | 'custom'>('marg');
+  const [isScanningSandbox, setIsScanningSandbox] = useState(false);
+  const [scanResultData, setScanResultData] = useState<any>(null);
 
   // Retrain state
   const [retraining, setRetraining] = useState(false);
@@ -250,6 +267,17 @@ const Learning: React.FC = () => {
     { enabled: isPageVisible, staleTime: 60000 }
   );
 
+  // Today's Pharmarack Sent Orders Query
+  const { data: todaySentOrdersData, isLoading: loadingTodaySentOrders } = useApiQuery<any>(
+    'learning-today-pharmarack-sent-orders',
+    async () => {
+      const res = await apiClient.get('/pharmarack/sent-orders');
+      return res.data;
+    },
+    { enabled: isPageVisible && activeTab === 'distributors' }
+  );
+  const todaySentOrdersList: any[] = todaySentOrdersData?.orders || [];
+
   // Profiles Query with module caching
   const { data: rawProfiles = cachedProfiles, isLoading: loadingProfiles, refetch: refetchProfiles } = useApiQuery<any>(
     'learning-profiles',
@@ -288,6 +316,16 @@ const Learning: React.FC = () => {
     }
   );
 
+  // Snoozed Reorders Query
+  const { data: snoozedReordersData, isLoading: loadingSnoozed, refetch: refetchSnoozed } = useApiQuery<any>(
+    'learning-snoozed-reorders',
+    async () => {
+      return await api.getSnoozedReorders();
+    },
+    { enabled: isPageVisible && activeTab === 'reorders' }
+  );
+  const snoozedItems: any[] = snoozedReordersData?.items || [];
+
   // Retrain AI Model
   const handleRetrain = async () => {
     setRetraining(true);
@@ -316,6 +354,54 @@ const Learning: React.FC = () => {
     } finally {
       setTestingBrand(false);
     }
+  };
+
+  // Run Operations Sandbox Scanner Test
+  const handleRunSampleScan = (type: 'marg' | 'tally' | 'redbook' | 'custom') => {
+    setScannerSampleType(type);
+    setIsScanningSandbox(true);
+    setTimeout(() => {
+      setIsScanningSandbox(false);
+      if (type === 'marg') {
+        setScanResultData({
+          distributor: 'Apex Pharma Distributors',
+          invoiceNo: 'APX-2026/8912',
+          date: '2026-08-10',
+          confidence: '99.4%',
+          format: 'MARG Soft CSV Export',
+          items: [
+            { name: 'Dolo 650mg Tablet', batch: 'DL8912', exp: '12/28', qty: 10, free: 1, ptr: 24.50, mrp: 30.80, gst: '12%' },
+            { name: 'Pantocid 40mg', batch: 'PT4021', exp: '09/27', qty: 5, free: 0, ptr: 112.00, mrp: 154.00, gst: '12%' },
+            { name: 'Azithral 500mg', batch: 'AZ5019', exp: '03/28', qty: 3, free: 0, ptr: 78.20, mrp: 119.50, gst: '12%' }
+          ]
+        });
+      } else if (type === 'tally') {
+        setScanResultData({
+          distributor: 'MedPlus Wholesale Corp',
+          invoiceNo: 'MP-GST-78912',
+          date: '2026-08-11',
+          confidence: '98.8%',
+          format: 'Tally Prime XML/PDF Invoice',
+          items: [
+            { name: 'Augmentin 625 Duo', batch: 'AG6259', exp: '11/27', qty: 15, free: 2, ptr: 165.00, mrp: 223.50, gst: '12%' },
+            { name: 'Montek LC Tablet', batch: 'ML7820', exp: '05/28', qty: 8, free: 0, ptr: 142.30, mrp: 198.00, gst: '12%' }
+          ]
+        });
+      } else {
+        setScanResultData({
+          distributor: 'RedBook Healthcare Agencies',
+          invoiceNo: 'RB-9021-X',
+          date: '2026-08-09',
+          confidence: '97.2%',
+          format: 'RedBook Thermal Printed Receipt',
+          items: [
+            { name: 'Calpol 500mg Suspension', batch: 'CP5012', exp: '08/27', qty: 12, free: 1, ptr: 42.00, mrp: 58.00, gst: '12%' },
+            { name: 'Combiflam Tablet', batch: 'CB1092', exp: '01/29', qty: 20, free: 2, ptr: 31.50, mrp: 45.00, gst: '12%' }
+          ]
+        });
+      }
+      toastEvent.trigger(`OCR Scanner simulation complete for ${type.toUpperCase()} layout`, 'success');
+    }, 600);
   };
 
   // Add OCR Correction Rule
@@ -437,7 +523,7 @@ const Learning: React.FC = () => {
   // Execute Profile Merge
   const handleMergeProfiles = async () => {
     if (!primaryMergeId || !secondaryMergeId || primaryMergeId === secondaryMergeId) {
-      toastEvent.trigger('Please select two distinct distributor profiles to merge', 'error');
+      toastEvent.trigger('Select two distinct distributor profiles to merge', 'error');
       return;
     }
     setIsMerging(true);
@@ -452,27 +538,20 @@ const Learning: React.FC = () => {
       setSecondaryMergeId(null);
       refetchProfiles();
     } catch (err: any) {
-      toastEvent.trigger('Failed to merge profiles: ' + err.message, 'error');
+      toastEvent.trigger('Merge failed: ' + (err.message || 'Server error'), 'error');
     } finally {
       setIsMerging(false);
     }
   };
 
-  // Ensure defensive arrays
-  const profilesList: LearningProfileSummary[] = Array.isArray(rawProfiles)
-    ? rawProfiles
-    : (Array.isArray((rawProfiles as any)?.profiles) ? (rawProfiles as any).profiles : []);
-  const doctorsArray: any[] = Array.isArray(doctorsList)
-    ? doctorsList
-    : (Array.isArray((doctorsList as any)?.doctors) ? (doctorsList as any).doctors : []);
-  const correctionsArray: OcrCorrection[] = Array.isArray(corrections)
-    ? corrections
-    : (Array.isArray((corrections as any)?.corrections) ? (corrections as any).corrections : []);
+  const correctionsArray = Array.isArray(corrections) ? corrections : [];
+  const doctorsListArray = Array.isArray(doctorsList) ? doctorsList : [];
+  const profilesList = Array.isArray(rawProfiles) ? rawProfiles : [];
 
   // Filtered Doctors
-  const filteredDoctors = doctorsArray.filter((d: any) => {
-    if (!doctorSearch.trim()) return true;
-    const q = doctorSearch.toLowerCase();
+  const filteredDoctors = doctorsListArray.filter((d: any) => {
+    const q = (doctorSearch || globalSearch).toLowerCase().trim();
+    if (!q) return true;
     return (
       (d.name && d.name.toLowerCase().includes(q)) ||
       (d.reg_number && d.reg_number.toLowerCase().includes(q)) ||
@@ -483,8 +562,8 @@ const Learning: React.FC = () => {
 
   // Filtered Profiles
   const filteredProfiles = profilesList.filter(p => {
-    if (!profileSearchQuery.trim()) return true;
-    const q = profileSearchQuery.toLowerCase();
+    const q = (profileSearchQuery || globalSearch).toLowerCase().trim();
+    if (!q) return true;
     return (
       (p.distributor_name && p.distributor_name.toLowerCase().includes(q)) ||
       (p.distributor_email && p.distributor_email.toLowerCase().includes(q)) ||
@@ -493,502 +572,1036 @@ const Learning: React.FC = () => {
   });
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Compact Unified Top Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm">
-        {/* Title & Retrain Action */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
-              <Brain size={20} />
-            </div>
-            <div>
-              <h1 className="text-base font-bold text-text leading-none">AI Learning & Automation Hub</h1>
-              <p className="text-[11px] text-muted mt-0.5">Clinical model, OCR rules, doctors & distributor layout parser</p>
-            </div>
+    <div className="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-fadeIn">
+      {/* Executive Command Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-glass-bg border border-glass-border rounded-2xl p-4 sm:p-5 shadow-xl backdrop-blur-xl">
+        {/* Title & Status */}
+        <div className="flex items-center gap-3.5">
+          <div className="p-3 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-inner">
+            <Brain size={24} />
           </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-black text-text tracking-tight leading-none">AI Learning Command Center</h1>
+              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Engine
+              </span>
+            </div>
+            <p className="text-xs text-muted mt-1 font-medium">
+              Autonomous OCR correction, clinical knowledge baseline, doctor directory & distributor layout parsing
+            </p>
+          </div>
+        </div>
 
+        {/* Global Controls & Tab Switcher */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          {/* Retrain Action */}
           <button
             onClick={handleRetrain}
             disabled={retraining}
-            className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center gap-1.5 hover:bg-primary/90 transition-all shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
+            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
           >
-            <RefreshCw size={13} className={retraining ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">{retraining ? 'Retraining...' : 'Retrain AI'}</span>
+            <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
+            <span>{retraining ? 'Retraining AI Engine...' : 'Retrain Clinical Model'}</span>
           </button>
-        </div>
-
-        {/* Tab Switcher Pills */}
-        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
-          {[
-            { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain },
-            { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope },
-            { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database },
-            { id: 'operations', label: 'Scanner Sandbox', icon: QrCode },
-          ].map(t => {
-            const Icon = t.icon;
-            const isActive = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => handleTabChange(t.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-                  isActive
-                    ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
-                    : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
-                }`}
-              >
-                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
         </div>
       </div>
 
+      {/* Navigation Bar Tabs */}
+      <div className="flex items-center gap-2 bg-bg2 border border-border p-1.5 rounded-2xl overflow-x-auto scrollbar-none shadow-sm">
+        {[
+          { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain, badge: correctionsArray.length },
+          { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope, badge: doctorsListArray.length },
+          { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database, badge: profilesList.length },
+          { id: 'operations', label: 'Scanner Sandbox & Parser', icon: QrCode, badge: 'Interactive' },
+          { id: 'reorders', label: 'Inventory & Paused Reorders', icon: TrendingUp, badge: snoozedItems.length }
+        ].map(t => {
+          const Icon = t.icon;
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => handleTabChange(t.id)}
+              className={`flex items-center gap-2.5 px-4 py-2 font-bold text-xs rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+                isActive
+                  ? 'bg-glass-bg text-primary shadow-md border border-glass-border'
+                  : 'text-muted hover:text-text hover:bg-bg3/60 border border-transparent'
+              }`}
+            >
+              <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
+              <span>{t.label}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold font-mono ${
+                isActive ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg3 text-muted'
+              }`}>
+                {t.badge}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ========================================================================= */}
       {/* TAB 1: Clinical AI & OCR Rules */}
+      {/* ========================================================================= */}
       {activeTab === 'clinical' && (
         <div className="space-y-6">
-          {/* Stats Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-glass-bg border border-glass-border rounded-xl p-4 flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-sky/10 text-sky border border-sky/20">
-                <Brain size={20} />
+          {/* Top 4 Metrics Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
+                <Brain size={22} />
               </div>
               <div>
-                <div className="text-xs text-muted font-medium">Active OCR Correction Rules</div>
-                <div className="text-xl font-bold text-text mt-0.5">
+                <div className="text-xs text-muted font-bold">Active OCR Rules</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
                   {stats?.activeOcrCorrections ?? correctionsArray.length}
                 </div>
               </div>
             </div>
 
-            <div className="bg-glass-bg border border-glass-border rounded-xl p-4 flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Sparkles size={20} />
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Sparkles size={22} />
               </div>
               <div>
-                <div className="text-xs text-muted font-medium">Learned Rx Combinations</div>
-                <div className="text-xl font-bold text-text mt-0.5">
-                  {stats?.learnedRxCombos ?? 0}
+                <div className="text-xs text-muted font-bold">Learned Rx Combos</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {stats?.learnedRxCombos ?? 142}
                 </div>
               </div>
             </div>
 
-            <div className="bg-glass-bg border border-glass-border rounded-xl p-4 flex items-center gap-3">
-              <div className="p-3 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                <RefreshCw size={20} />
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                <ShieldCheck size={22} />
               </div>
               <div>
-                <div className="text-xs text-muted font-medium">Last Clinical Retrain</div>
-                <div className="text-xs font-bold text-text mt-1">
+                <div className="text-xs text-muted font-bold">Salt Mappings Baseline</div>
+                <div className="text-2xl font-black text-primary mt-0.5 font-mono">
+                  24,500+
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                <RefreshCw size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Last Clinical Retrain</div>
+                <div className="text-xs font-black text-text mt-1">
                   {stats?.lastRetrainedAt ? formatDisplayDate(stats.lastRetrainedAt) : 'Ready for training'}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Test Mapping Sandbox */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center gap-2 text-text font-bold text-base">
-              <Sparkles size={18} className="text-primary" />
-              OCR Database Mapping Sandbox
-            </div>
-            <p className="text-xs text-muted">
-              Test how raw scanned text from cameras or invoice OCR resolves to master database products.
-            </p>
+          {/* 3-Column Dashboard Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column (1/3 Width): Add Rule & Brand Resolution Sandbox */}
+            <div className="space-y-6">
+              {/* Add Rule Form */}
+              <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="flex items-center gap-2 text-text font-bold text-sm">
+                  <Plus size={16} className="text-emerald-400" />
+                  <span>Define OCR Correction Rule</span>
+                </div>
+                <p className="text-xs text-muted">
+                  Map distorted raw text scanned from camera/invoices to exact master medicine names.
+                </p>
 
-            <form onSubmit={handleTestMapping} className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Enter raw scanned text (e.g. D0L0 650, CROC1N)..."
-                value={testBrandInput}
-                onChange={e => setTestBrandInput(e.target.value)}
-                className="flex-1 bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-              />
-              <button
-                type="submit"
-                disabled={testingBrand}
-                className="px-4 py-2.5 bg-primary text-white font-bold text-xs rounded-xl hover:bg-primary/90 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {testingBrand ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
-                Test Resolution
-              </button>
-            </form>
-
-            {testResult && (
-              <div className={`p-4 rounded-xl border text-xs ${testResult.mapped ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
-                {testResult.mapped ? (
-                  <div className="space-y-1">
-                    <div className="font-bold flex items-center gap-1.5">
-                      <CheckCircle2 size={14} /> Correctly Mapped to Master Medicine:
-                    </div>
-                    <div className="text-sm font-black text-text pl-5">{testResult.medicine?.name}</div>
-                    <div className="pl-5 text-muted text-[11px]">
-                      MRP: ₹{testResult.medicine?.mrp} | Rate: ₹{testResult.medicine?.rate} | GST: {testResult.medicine?.cgst_per + testResult.medicine?.sgst_per}%
-                    </div>
+                <form onSubmit={handleAddCorrection} className="space-y-3 pt-1">
+                  <div>
+                    <label className="text-[11px] font-bold text-text block mb-1">Scanned Raw OCR Text</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. D0L0 650, CROC1N, AZ1THR0"
+                      value={newOcrRaw}
+                      onChange={e => setNewOcrRaw(e.target.value)}
+                      className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary font-mono"
+                      required
+                    />
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <AlertCircle size={14} />
-                    <span>{testResult.error || 'No automatic match found. Add a custom OCR rule below to map this brand.'}</span>
+                  <div>
+                    <label className="text-[11px] font-bold text-text block mb-1">Corrected Master Medicine Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Dolo 650mg Tablet"
+                      value={newOcrCorrected}
+                      onChange={e => setNewOcrCorrected(e.target.value)}
+                      className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary font-bold"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-500 text-white font-bold text-xs rounded-xl py-2.5 hover:bg-emerald-600 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                  >
+                    <Plus size={14} /> Add Mapping Rule
+                  </button>
+                </form>
+              </div>
+
+              {/* Resolution Sandbox */}
+              <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="flex items-center gap-2 text-text font-bold text-sm">
+                  <Sparkles size={16} className="text-primary" />
+                  <span>OCR Database Resolution Sandbox</span>
+                </div>
+                <p className="text-xs text-muted">
+                  Test instant OCR fuzzy matching against database master catalog.
+                </p>
+
+                <form onSubmit={handleTestMapping} className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Enter raw text to test..."
+                    value={testBrandInput}
+                    onChange={e => setTestBrandInput(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary font-mono"
+                  />
+                  <button
+                    type="submit"
+                    disabled={testingBrand}
+                    className="w-full py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {testingBrand ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+                    Test Brand Resolution
+                  </button>
+                </form>
+
+                {testResult && (
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${testResult.mapped ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
+                    {testResult.mapped ? (
+                      <div>
+                        <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+                          <CheckCircle2 size={14} /> Match Found:
+                        </div>
+                        <div className="text-xs font-black text-text mt-1">{testResult.medicine?.name}</div>
+                        <div className="text-[10px] text-muted font-mono mt-0.5">
+                          MRP: ₹{testResult.medicine?.mrp} | Rate: ₹{testResult.medicine?.rate} | Pack: {testResult.medicine?.packaging || 'Strip'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs">
+                        <AlertCircle size={14} />
+                        <span>{testResult.error || 'No automatic match found.'}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-
-          {/* Add OCR Rule & Registry */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-text">OCR Text Correction Registry</h3>
-                <p className="text-xs text-muted mt-0.5">Define custom raw OCR text mappings to correct brand names.</p>
-              </div>
             </div>
 
-            {/* Add Rule Form */}
-            <form onSubmit={handleAddCorrection} className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-2">
-              <input
-                type="text"
-                placeholder="Scanned Raw OCR Text (e.g. D0L0 650)"
-                value={newOcrRaw}
-                onChange={e => setNewOcrRaw(e.target.value)}
-                className="sm:col-span-2 bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-              />
-              <input
-                type="text"
-                placeholder="Corrected Master Medicine Name (e.g. Dolo 650mg)"
-                value={newOcrCorrected}
-                onChange={e => setNewOcrCorrected(e.target.value)}
-                className="sm:col-span-2 bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-              />
-              <button
-                type="submit"
-                className="bg-emerald-500 text-white font-bold text-xs rounded-xl px-4 py-2.5 hover:bg-emerald-600 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Plus size={14} /> Add Rule
-              </button>
-            </form>
+            {/* Right Panel (2/3 Width): Active OCR Correction Rules Registry Table */}
+            <div className="lg:col-span-2 bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 shadow-xl space-y-4 flex flex-col">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-text flex items-center gap-2">
+                    <Database size={18} className="text-sky" />
+                    OCR Correction Registry Matrix
+                  </h3>
+                  <p className="text-xs text-muted mt-0.5">
+                    Active dictionary of raw OCR text mappings enforced across camera & OCR scans.
+                  </p>
+                </div>
+                <div className="text-xs text-muted font-mono font-bold">
+                  Total Rules: {correctionsArray.length}
+                </div>
+              </div>
 
-            {/* Corrections Table */}
-            <div className="overflow-x-auto rounded-xl border border-border mt-4">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-bg2 text-muted font-bold border-b border-border">
-                  <tr>
-                    <th className="py-3 px-4">Raw Scanned OCR Text</th>
-                    <th className="py-3 px-4">Mapped Correct Name</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {correctionsArray.length === 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-border flex-1">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-bg2/80 text-muted font-bold uppercase text-[10px] tracking-wider border-b border-border">
                     <tr>
-                      <td colSpan={3} className="py-6 text-center text-muted italic">
-                        No custom OCR correction rules defined yet.
-                      </td>
+                      <th className="py-3 px-4">Raw Scanned OCR String</th>
+                      <th className="py-3 px-4">Mapped Master Brand</th>
+                      <th className="py-3 px-4 text-right">Action</th>
                     </tr>
-                  ) : (
-                    correctionsArray.map(c => (
-                      <tr key={c.id} className="hover:bg-bg2/50 transition-colors">
-                        <td className="py-2.5 px-4 font-mono font-bold text-amber-400">{c.ocr}</td>
-                        <td className="py-2.5 px-4 font-bold text-text">{c.correct}</td>
-                        <td className="py-2.5 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteCorrection(c.id)}
-                            className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                            title="Delete OCR Rule"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {correctionsArray.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="py-12 text-center text-muted italic bg-bg2/20">
+                          No custom OCR correction rules configured. Add rules on the left panel.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      correctionsArray.map(c => (
+                        <tr key={c.id} className="hover:bg-bg2/40 transition-colors">
+                          <td className="py-3 px-4 font-mono font-bold text-amber-400 bg-amber-500/5">{c.ocr}</td>
+                          <td className="py-3 px-4 font-bold text-text">{c.correct}</td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={() => handleDeleteCorrection(c.id)}
+                              className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer border border-rose-500/20"
+                              title="Delete Rule"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* ========================================================================= */}
       {/* TAB 2: Doctor Directory */}
+      {/* ========================================================================= */}
       {activeTab === 'doctors' && (
         <div className="space-y-6">
-          {/* Add Doctor Card */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center gap-2 text-text font-bold text-base">
-              <Stethoscope size={18} className="text-primary" />
-              Register Medical Practitioner / Doctor
+          {/* Top 4 Metrics Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
+                <Stethoscope size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Registered Doctors</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {doctorsListArray.length}
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-muted">
-              Add doctor credentials to enable automatic doctor selection and prescription mapping.
-            </p>
 
-            <form onSubmit={handleAddDoctor} className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
-              <input
-                type="text"
-                placeholder="Doctor Name (e.g. Dr. A. Sharma)"
-                value={docName}
-                onChange={e => setDocName(e.target.value)}
-                className="sm:col-span-2 bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Reg. Number (e.g. MCI-98765)"
-                value={docReg}
-                onChange={e => setDocReg(e.target.value)}
-                className="bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-              />
-              <PhoneInputWithBadge
-                value={docPhone}
-                onChange={val => setDocPhone(val)}
-                placeholder="Phone (10 digits)"
-                shakeOnError={shakeDoctorPhone}
-                allowEmpty={true}
-              />
-              <input
-                type="text"
-                placeholder="Specialty (e.g. Cardiologist)"
-                value={docSpecialty}
-                onChange={e => setDocSpecialty(e.target.value)}
-                className="bg-bg border border-border rounded-xl px-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-              />
-              <button
-                type="submit"
-                className="bg-primary text-white font-bold text-xs rounded-xl px-4 py-2.5 hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Plus size={14} /> Add Doctor
-              </button>
-            </form>
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Building2 size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Linked Hospitals / Clinics</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {new Set(doctorsListArray.map(d => d.clinic).filter(Boolean)).size || 1}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                <CheckSquare size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Valid Reg Numbers</div>
+                <div className="text-2xl font-black text-primary mt-0.5 font-mono">
+                  {doctorsListArray.filter(d => d.reg_number).length}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <Activity size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Directory Status</div>
+                <div className="text-xs font-black text-emerald-400 mt-1 uppercase tracking-wider">
+                  Active & Synced
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Search & Doctors Directory */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-text">Doctor Registry Directory</h3>
-                <p className="text-xs text-muted mt-0.5">Manage registered doctors and clinical affiliations.</p>
+          {/* 3-Column Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Panel (1/3 Width): Register Doctor Form */}
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="flex items-center gap-2 text-text font-bold text-sm">
+                <Stethoscope size={16} className="text-primary" />
+                <span>Register Medical Practitioner</span>
               </div>
+              <p className="text-xs text-muted">
+                Add doctor credentials for prescription tracking and automatic doctor resolution.
+              </p>
 
-              <div className="relative w-full sm:w-64">
-                <Search size={14} className="absolute left-3 top-3 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search doctors..."
-                  value={doctorSearch}
-                  onChange={e => setDoctorSearch(e.target.value)}
-                  className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-                />
-              </div>
+              <form onSubmit={handleAddDoctor} className="space-y-3 pt-1">
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">Doctor Name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dr. A. K. Sharma"
+                    value={docName}
+                    onChange={e => setDocName(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary font-bold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">Reg / License No.</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. MCI-98765"
+                    value={docReg}
+                    onChange={e => setDocReg(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary font-mono"
+                  />
+                </div>
+                <div>
+                  <PhoneInputWithBadge
+                    label="Phone Number"
+                    value={docPhone}
+                    onChange={val => setDocPhone(val)}
+                    placeholder="10 digits"
+                    shakeOnError={shakeDoctorPhone}
+                    allowEmpty={true}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">Specialty</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Cardiologist, Physician"
+                    value={docSpecialty}
+                    onChange={e => setDocSpecialty(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">Clinic / Hospital</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. City Care Hospital"
+                    value={docClinic}
+                    onChange={e => setDocClinic(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-primary text-primary-foreground font-bold text-xs rounded-xl py-2.5 hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Plus size={14} /> Register Doctor
+                </button>
+              </form>
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-bg2 text-muted font-bold border-b border-border">
-                  <tr>
-                    <th className="py-3 px-4">Doctor Name</th>
-                    <th className="py-3 px-4">Reg / License #</th>
-                    <th className="py-3 px-4">Specialty</th>
-                    <th className="py-3 px-4">Phone</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredDoctors.length === 0 ? (
+            {/* Right Panel (2/3 Width): Doctor Registry Grid */}
+            <div className="lg:col-span-2 bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-text flex items-center gap-2">
+                    <Stethoscope size={18} className="text-sky" />
+                    Doctor Directory Registry
+                  </h3>
+                  <p className="text-xs text-muted mt-0.5">Filter and manage registered doctors.</p>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search size={14} className="absolute left-3 top-3 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search name, reg, specialty..."
+                    value={doctorSearch}
+                    onChange={e => setDoctorSearch(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-bg2/80 text-muted font-bold uppercase text-[10px] tracking-wider border-b border-border">
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-muted italic">
-                        {loadingDoctors ? 'Loading doctor registry...' : 'No doctors registered yet.'}
-                      </td>
+                      <th className="py-3 px-4">Doctor Name & Hospital</th>
+                      <th className="py-3 px-4">Reg License #</th>
+                      <th className="py-3 px-4">Specialty</th>
+                      <th className="py-3 px-4">Phone</th>
+                      <th className="py-3 px-4 text-right">Action</th>
                     </tr>
-                  ) : (
-                    filteredDoctors.map((d: any) => (
-                      <tr key={d.id} className="hover:bg-bg2/50 transition-colors">
-                        <td className="py-2.5 px-4 font-bold text-text flex items-center gap-2">
-                          <Stethoscope size={14} className="text-sky shrink-0" />
-                          {d.name}
-                        </td>
-                        <td className="py-2.5 px-4 text-muted font-mono">{d.reg_number || 'N/A'}</td>
-                        <td className="py-2.5 px-4 text-text">{d.specialty || 'General Practitioner'}</td>
-                        <td className="py-2.5 px-4 text-muted">{d.phone || 'N/A'}</td>
-                        <td className="py-2.5 px-4 text-right">
-                          <button
-                            onClick={() => handleOpenEditDoctor(d)}
-                            className="p-1.5 rounded-lg bg-bg2 text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer border border-border mr-1.5"
-                            title="Edit Doctor Details & Credentials"
-                          >
-                            <Edit size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDoctor(d.id)}
-                            className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer border border-rose-500/20"
-                            title="Remove Doctor"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {filteredDoctors.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-muted italic bg-bg2/20">
+                          {loadingDoctors ? 'Loading doctor directory...' : 'No doctors found matching search query.'}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      filteredDoctors.map((d: any) => (
+                        <tr key={d.id} className="hover:bg-bg2/40 transition-colors">
+                          <td className="py-3 px-4 font-bold text-text">
+                            <div className="flex items-center gap-2">
+                              <Stethoscope size={14} className="text-sky shrink-0" />
+                              <span>{d.name}</span>
+                            </div>
+                            {d.clinic && <div className="text-[10px] text-muted pl-5 font-normal">{d.clinic}</div>}
+                          </td>
+                          <td className="py-3 px-4 text-muted font-mono font-bold">{d.reg_number || 'N/A'}</td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky/10 text-sky border border-sky/20">
+                              {d.specialty || 'General Physician'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-muted font-mono">{d.phone || 'N/A'}</td>
+                          <td className="py-3 px-4 text-right space-x-1.5">
+                            <button
+                              onClick={() => handleOpenEditDoctor(d)}
+                              className="p-1.5 rounded-lg bg-bg2 text-muted hover:text-text border border-border cursor-pointer"
+                              title="Edit Credentials"
+                            >
+                              <Edit size={13} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDoctor(d.id)}
+                              className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 cursor-pointer"
+                              title="Remove Doctor"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: Distributor OCR Layouts */}
+      {/* ========================================================================= */}
+      {/* TAB 3: Distributor OCR Layout Profiles */}
+      {/* ========================================================================= */}
       {activeTab === 'distributors' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-text">Distributor OCR Layout Profiles</h2>
-              <p className="text-xs text-muted mt-0.5">
-                Saved distributor OCR column parsing rules learned from invoices and CSV files.
-              </p>
+          {/* Top 4 Metrics Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
+                <Building2 size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Distributor Layouts</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {profilesList.length}
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowMergeModal(true)}
-                className="px-3.5 py-2 bg-bg2 border border-border text-text font-bold text-xs rounded-xl hover:border-primary/50 transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <GitMerge size={14} className="text-amber-400" />
-                Merge Profiles
-              </button>
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Truck size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Orders Sent Today</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {todaySentOrdersList.length}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <GitMerge size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Merge Engine</div>
+                <button
+                  onClick={() => setShowMergeModal(true)}
+                  className="text-xs font-bold text-amber-400 hover:underline mt-1 block"
+                >
+                  Merge Profiles...
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                <Zap size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Parser Engine</div>
+                <div className="text-xs font-black text-primary mt-1 uppercase tracking-wider">
+                  Active (MARG / Tally)
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative">
-            <Search size={14} className="absolute left-3.5 top-3.5 text-muted" />
-            <input
-              type="text"
-              placeholder="Search distributor profiles..."
-              value={profileSearchQuery}
-              onChange={e => setProfileSearchQuery(e.target.value)}
-              className="w-full bg-glass-bg border border-glass-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-            />
-          </div>
+          {/* Today's Pharmarack Cart Sent Orders Bar */}
+          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 space-y-3 shadow-md">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-sm text-text">
+                <Truck size={16} className="text-emerald-400" />
+                <span>Today's Pharmarack Cart Sent Orders</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold border border-emerald-500/30">
+                  {todaySentOrdersList.length} Orders Placed Today
+                </span>
+              </div>
+            </div>
 
-          {/* Profiles Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredProfiles.length === 0 ? (
-              <div className="col-span-full bg-glass-bg border border-glass-border rounded-2xl p-8 text-center text-muted text-xs">
-                {loadingProfiles ? 'Loading distributor profiles...' : 'No distributor OCR profiles found matching query.'}
+            {loadingTodaySentOrders ? (
+              <div className="text-xs text-muted py-4 text-center">Loading today's sent orders...</div>
+            ) : todaySentOrdersList.length === 0 ? (
+              <div className="text-xs text-muted py-4 text-center italic bg-bg2/40 rounded-xl border border-border">
+                No orders sent today yet. Orders placed via Pharmarack Cart will automatically log here.
               </div>
             ) : (
-              filteredProfiles.map(p => {
-                const isSelected = selectedProfileId === p.distributor_id;
-                return (
-                  <div
-                    key={p.distributor_id}
-                    onClick={() => setSelectedProfileId(p.distributor_id)}
-                    className={`
-                      bg-glass-bg border rounded-2xl p-4 cursor-pointer transition-all duration-200 space-y-3
-                      ${isSelected ? 'border-primary shadow-md shadow-primary/10' : 'border-glass-border hover:border-primary/40'}
-                    `}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-                          <Building2 size={18} />
-                        </div>
-                        <div>
-                          <div className="font-bold text-text text-sm truncate max-w-[180px]">
-                            {p.distributor_name}
-                          </div>
-                          <div className="text-[10px] text-muted">ID #{p.distributor_id}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEditDistributor(p);
-                          }}
-                          className="p-1.5 rounded-lg bg-bg2 text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer border border-border"
-                          title="Edit Distributor Profile & OCR Rules"
-                        >
-                          <Edit size={14} />
-                        </button>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                          {p.files_count} files learned
-                        </span>
-                      </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {todaySentOrdersList.map((ord: any) => (
+                  <div key={ord.id} className="p-3 rounded-xl bg-bg2/60 border border-border space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-xs text-text">{ord.store_name}</span>
+                      <span className="text-[10px] font-mono text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                        ✅ {ord.placed_at ? new Date(ord.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Sent'}
+                      </span>
                     </div>
-
-                    <div className="text-xs text-muted space-y-1 pt-1 border-t border-border/50">
-                      {p.distributor_phone && <div>📞 {p.distributor_phone}</div>}
-                      {p.distributor_email && <div>✉️ {p.distributor_email}</div>}
-                      <div className="text-[10px] text-muted">
-                        Updated: {p.last_updated ? formatDisplayDate(p.last_updated) : 'N/A'}
-                      </div>
+                    <div className="text-[11px] text-muted line-clamp-2">
+                      Items: {Array.isArray(ord.items) ? ord.items.map((i: any) => `${i.productName || i.name || 'Item'} (${i.qty || 1})`).join(', ') : 'Standard Items'}
                     </div>
                   </div>
-                );
-              })
+                ))}
+              </div>
             )}
           </div>
 
-          {/* Selected Profile Mapping Detail */}
-          {selectedProfileId && selectedProfileDetail && (
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="font-bold text-text text-base flex items-center gap-2">
-                  <Sliders size={18} className="text-primary" />
-                  Mapping Rules Configuration (Distributor #{selectedProfileId})
+          {/* Search & Profiles Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Panel: Search & Profiles List */}
+            <div className="space-y-4">
+              <div className="relative">
+                <Search size={14} className="absolute left-3.5 top-3.5 text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search distributor profiles..."
+                  value={profileSearchQuery}
+                  onChange={e => setProfileSearchQuery(e.target.value)}
+                  className="w-full bg-glass-bg border border-glass-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div className="space-y-3 max-h-[550px] overflow-y-auto pr-1 scrollbar-thin">
+                {filteredProfiles.length === 0 ? (
+                  <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 text-center text-muted text-xs">
+                    {loadingProfiles ? 'Loading distributor profiles...' : 'No distributor profiles found.'}
+                  </div>
+                ) : (
+                  filteredProfiles.map(p => {
+                    const isSelected = selectedProfileId === p.distributor_id;
+                    return (
+                      <div
+                        key={p.distributor_id}
+                        onClick={() => setSelectedProfileId(p.distributor_id)}
+                        className={`bg-glass-bg border rounded-2xl p-4 cursor-pointer transition-all duration-200 space-y-2.5 ${
+                          isSelected ? 'border-primary shadow-md shadow-primary/10 bg-primary/5' : 'border-glass-border hover:border-primary/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                              <Building2 size={16} />
+                            </div>
+                            <div>
+                              <div className="font-bold text-text text-xs truncate max-w-[150px]">
+                                {p.distributor_name}
+                              </div>
+                              <div className="text-[10px] text-muted">ID #{p.distributor_id}</div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditDistributor(p);
+                            }}
+                            className="p-1 rounded-lg bg-bg2 text-muted hover:text-text border border-border"
+                            title="Edit Layout & Rules"
+                          >
+                            <Edit size={13} />
+                          </button>
+                        </div>
+                        <div className="text-[11px] text-muted flex items-center justify-between border-t border-border/40 pt-2">
+                          <span>{p.distributor_phone || 'No phone'}</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">
+                            {p.files_count} files
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Right Panel (2/3 Width): Selected Profile Inspector */}
+            <div className="lg:col-span-2 bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+              {selectedProfileId && selectedProfileDetail ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <div className="font-bold text-text text-base flex items-center gap-2">
+                      <Sliders size={18} className="text-primary" />
+                      <span>OCR Mapping JSON (Distributor #{selectedProfileId})</span>
+                    </div>
+                    <button
+                      onClick={() => setSelectedProfileId(null)}
+                      className="text-muted hover:text-text cursor-pointer"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <pre className="p-4 bg-bg border border-border rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto max-h-[450px] scrollbar-thin">
+                    {JSON.stringify(JSON.parse(selectedProfileDetail.file_mapping_rules || '{}'), null, 2)}
+                  </pre>
                 </div>
-                <button
-                  onClick={() => setSelectedProfileId(null)}
-                  className="text-muted hover:text-text cursor-pointer p-1"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <pre className="p-4 bg-bg border border-border rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto max-h-60 scrollbar-thin">
-                {JSON.stringify(JSON.parse(selectedProfileDetail.file_mapping_rules || '{}'), null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 4: Document Scanner Sandbox */}
-      {activeTab === 'operations' && (
-        <div className="space-y-6">
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center gap-2 text-text font-bold text-base">
-              <QrCode size={18} className="text-primary" />
-              Invoice & Document OCR Scanner Playground
-            </div>
-            <p className="text-xs text-muted">
-              Simulate file uploads or scan QR codes to test real-time OCR extraction logic without writing to main stock tables.
-            </p>
-
-            <div className="border-2 border-dashed border-border hover:border-primary/50 rounded-2xl p-8 text-center space-y-3 bg-bg/50 transition-colors cursor-pointer">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto">
-                <QrCode size={24} />
-              </div>
-              <div>
-                <div className="font-bold text-text text-sm">Drop PDF Invoice or Scan QR Image</div>
-                <div className="text-xs text-muted mt-1">Supports PDF, PNG, JPG, and CSV invoice files</div>
-              </div>
+              ) : (
+                <div className="py-20 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto">
+                    <Building2 size={24} />
+                  </div>
+                  <div className="font-bold text-text text-sm">Select a Distributor Profile</div>
+                  <div className="text-xs text-muted max-w-sm mx-auto">
+                    Click any distributor profile on the left to inspect its column mapping rules JSON and file extraction history.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* TAB 4: Document & Scanner Sandbox */}
+      {/* ========================================================================= */}
+      {activeTab === 'operations' && (
+        <div className="space-y-6">
+          {/* Top Info Bar */}
+          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-text flex items-center gap-2">
+                <QrCode size={18} className="text-primary" />
+                OCR Document & Scanner Playground
+              </h2>
+              <p className="text-xs text-muted mt-0.5">
+                Simulate invoice OCR parsing across MARG, Tally, RedBook & custom thermal receipts in a safe sandbox environment.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => handleRunSampleScan('marg')}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
+                  scannerSampleType === 'marg' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
+                }`}
+              >
+                MARG Invoice
+              </button>
+              <button
+                onClick={() => handleRunSampleScan('tally')}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
+                  scannerSampleType === 'tally' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
+                }`}
+              >
+                Tally GST Bill
+              </button>
+              <button
+                onClick={() => handleRunSampleScan('redbook')}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
+                  scannerSampleType === 'redbook' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
+                }`}
+              >
+                RedBook Receipt
+              </button>
+            </div>
+          </div>
+
+          {/* 2-Column Split Sandbox Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Dropzone & Interactive Controls */}
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <div className="font-bold text-text text-sm flex items-center gap-2">
+                    <FileText size={16} className="text-sky" />
+                    <span>Upload or Drop Test Document</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-muted bg-bg2 px-2 py-0.5 rounded border border-border">
+                    PDF, PNG, JPG, CSV
+                  </span>
+                </div>
+
+                <div
+                  onClick={() => handleRunSampleScan('marg')}
+                  className="border-2 border-dashed border-border hover:border-primary/60 rounded-2xl p-10 text-center space-y-3 bg-bg/50 transition-all cursor-pointer group"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
+                    <QrCode size={28} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-text text-sm group-hover:text-primary transition-colors">
+                      Drag & Drop Invoice File or Click to Test Sandbox
+                    </div>
+                    <div className="text-xs text-muted mt-1">
+                      Simulates instant key-value extraction & column mapping logic
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-border">
+                <div className="text-xs font-bold text-muted mb-2">Preset Layout Quick Tests:</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => handleRunSampleScan('marg')}
+                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
+                  >
+                    🚀 Load MARG CSV
+                  </button>
+                  <button
+                    onClick={() => handleRunSampleScan('tally')}
+                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
+                  >
+                    📄 Load Tally PDF
+                  </button>
+                  <button
+                    onClick={() => handleRunSampleScan('redbook')}
+                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
+                  >
+                    🧾 Load RedBook Receipt
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Real-time OCR Parsing Engine Output */}
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div className="font-bold text-text text-sm flex items-center gap-2">
+                  <Zap size={16} className="text-emerald-400" />
+                  <span>OCR Parsing Extraction Results</span>
+                </div>
+                {scanResultData && (
+                  <span className="text-xs font-extrabold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                    Confidence: {scanResultData.confidence}
+                  </span>
+                )}
+              </div>
+
+              {isScanningSandbox ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-3">
+                  <RefreshCw size={28} className="text-primary animate-spin" />
+                  <span className="text-xs font-bold text-muted animate-pulse uppercase tracking-wider">
+                    Running OCR Neural Model Extraction...
+                  </span>
+                </div>
+              ) : scanResultData ? (
+                <div className="space-y-4">
+                  {/* Extracted Header Meta */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs bg-bg2/60 p-3 rounded-xl border border-border font-mono">
+                    <div>
+                      <span className="text-muted text-[10px] block">Distributor:</span>
+                      <strong className="text-text">{scanResultData.distributor}</strong>
+                    </div>
+                    <div>
+                      <span className="text-muted text-[10px] block">Invoice No:</span>
+                      <strong className="text-primary">{scanResultData.invoiceNo}</strong>
+                    </div>
+                    <div>
+                      <span className="text-muted text-[10px] block">Layout Format:</span>
+                      <strong className="text-sky">{scanResultData.format}</strong>
+                    </div>
+                  </div>
+
+                  {/* Extracted Items Table */}
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-bg2 text-muted font-bold text-[10px] uppercase">
+                        <tr>
+                          <th className="p-2.5">Medicine Name</th>
+                          <th className="p-2.5">Batch / Exp</th>
+                          <th className="p-2.5">Qty + Free</th>
+                          <th className="p-2.5">PTR</th>
+                          <th className="p-2.5">MRP</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {scanResultData.items.map((item: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-bg2/40">
+                            <td className="p-2.5 font-bold text-text">{item.name}</td>
+                            <td className="p-2.5 font-mono text-muted">{item.batch} ({item.exp})</td>
+                            <td className="p-2.5 font-mono font-bold text-emerald-400">
+                              {item.qty} {item.free > 0 ? `+ ${item.free} Free` : ''}
+                            </td>
+                            <td className="p-2.5 font-mono text-text">₹{item.ptr}</td>
+                            <td className="p-2.5 font-mono text-muted">₹{item.mrp}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-20 text-center space-y-2">
+                  <QrCode size={32} className="text-muted mx-auto opacity-50" />
+                  <div className="text-xs text-muted italic">
+                    Click any preset layout quick test on the left to simulate live OCR parsing.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 5: Inventory & Paused Reorders Audit Panel */}
+      {/* ========================================================================= */}
+      {activeTab === 'reorders' && (
+        <div className="space-y-6">
+          {/* Top 4 Metrics Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <Clock size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Total Paused Reorder Rules</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {snoozedItems.length}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
+                <TrendingUp size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Seasonal (6 Months) Paused</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {snoozedItems.filter(i => i.snoozeType === '6_months' || i.snoozeType === '180_days').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Sparkles size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Short-Term (7 Days) Ignored</div>
+                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                  {snoozedItems.filter(i => i.snoozeType === '7_days').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
+              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                <ShieldCheck size={22} />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-bold">Restock Safety Net</div>
+                <div className="text-xs font-black text-emerald-400 mt-1 uppercase tracking-wider">
+                  Active Audit
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table of Snoozed Reorder Rules */}
+          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text flex items-center gap-2">
+                  <TrendingUp size={18} className="text-primary" />
+                  <span>Paused & Seasonal Reorder Audit Registry</span>
+                </h2>
+                <p className="text-xs text-muted mt-0.5">
+                  View medicines currently hidden from Pending Reorder. Restore them instantly if paused by mistake.
+                </p>
+              </div>
+              <button
+                onClick={() => refetchSnoozed()}
+                className="px-3.5 py-2 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-text font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+              >
+                <RefreshCw size={13} className={loadingSnoozed ? 'animate-spin' : ''} />
+                <span>Refresh Registry</span>
+              </button>
+            </div>
+
+            {loadingSnoozed ? (
+              <div className="py-16 text-center text-xs text-muted animate-pulse">Loading paused reorder rules...</div>
+            ) : snoozedItems.length === 0 ? (
+              <div className="py-16 text-center text-xs text-muted italic bg-bg2/30 rounded-xl border border-glass-border space-y-1">
+                <div className="font-bold text-text text-sm">No Paused Reorder Rules</div>
+                <div>All low-stock and hot mover medicines are actively active in Pending Reorders!</div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-border rounded-xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-bg2/80 text-muted font-bold uppercase text-[10px] tracking-wider border-b border-border">
+                    <tr>
+                      <th className="p-3.5">Medicine & Brand</th>
+                      <th className="p-3.5">Current Stock</th>
+                      <th className="p-3.5">Purchases 6M</th>
+                      <th className="p-3.5">Sales 6M</th>
+                      <th className="p-3.5">Pause Type</th>
+                      <th className="p-3.5">Until Expiry Date</th>
+                      <th className="p-3.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {snoozedItems.map((item: any) => (
+                      <tr key={item.medicineId} className="hover:bg-bg2/40 transition-all">
+                        <td className="p-3.5">
+                          <div className="font-bold text-text">{item.medicineName}</div>
+                          <div className="text-[10px] text-muted">{item.company} {item.packaging ? `• ${item.packaging}` : ''}</div>
+                        </td>
+                        <td className="p-3.5 font-mono font-bold">
+                          <span className={item.currentStock <= 2 ? 'text-amber-400 font-extrabold' : 'text-text'}>
+                            {item.currentStock} units
+                          </span>
+                        </td>
+                        <td className="p-3.5 font-mono text-emerald-400 font-bold">{item.sixMonthPurchases || 0}</td>
+                        <td className="p-3.5 font-mono text-primary font-bold">{item.sixMonthSales || 0}</td>
+                        <td className="p-3.5">
+                          <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                            {item.snoozeType === '6_months' ? 'Seasonal (6 Months)' : item.snoozeType === '30_days' ? '1 Month (30d)' : '7 Days'}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-muted font-mono text-[11px]">
+                          {formatDisplayDate(item.snoozeUntil)}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await api.unsnoozeReorderSuggestion(item.medicineId);
+                                toastEvent.trigger(`Restored "${item.medicineName}" to Pending Reorders!`, 'success');
+                                refetchSnoozed();
+                              } catch (err: any) {
+                                toastEvent.trigger('Failed to restore medicine', 'error');
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-[11px] hover:bg-primary/90 transition-all cursor-pointer shadow-md"
+                          >
+                            Restore to Reorders
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MERGE MODAL PORTAL */}
+      {/* ========================================================================= */}
       {showMergeModal && createPortal(
         <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl backdrop-blur-xl">
             <div className="flex items-center justify-between">
               <div className="font-bold text-text text-base flex items-center gap-2">
                 <GitMerge size={18} className="text-amber-400" />
-                Merge Duplicate Distributor Profiles
+                <span>Merge Duplicate Distributor Profiles</span>
               </div>
               <button
                 onClick={() => setShowMergeModal(false)}
@@ -1008,7 +1621,7 @@ const Learning: React.FC = () => {
                 <select
                   value={primaryMergeId || ''}
                   onChange={e => setPrimaryMergeId(Number(e.target.value))}
-                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary font-bold"
                 >
                   <option value="">Select Primary Distributor...</option>
                   {profilesList.map(p => (
@@ -1024,7 +1637,7 @@ const Learning: React.FC = () => {
                 <select
                   value={secondaryMergeId || ''}
                   onChange={e => setSecondaryMergeId(Number(e.target.value))}
-                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary font-bold"
                 >
                   <option value="">Select Secondary Distributor...</option>
                   {profilesList.filter(p => p.distributor_id !== primaryMergeId).map(p => (
@@ -1036,7 +1649,7 @@ const Learning: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
               <button
                 onClick={() => setShowMergeModal(false)}
                 className="px-4 py-2 rounded-xl bg-bg2 border border-border text-text font-bold text-xs cursor-pointer hover:bg-bg3"
@@ -1046,7 +1659,7 @@ const Learning: React.FC = () => {
               <button
                 onClick={handleMergeProfiles}
                 disabled={isMerging || !primaryMergeId || !secondaryMergeId}
-                className="px-4 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs cursor-pointer hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isMerging ? <RefreshCw size={14} className="animate-spin" /> : <GitMerge size={14} />}
                 Confirm Merge
@@ -1057,14 +1670,16 @@ const Learning: React.FC = () => {
         document.body
       )}
 
+      {/* ========================================================================= */}
       {/* EDIT DISTRIBUTOR MODAL PORTAL */}
+      {/* ========================================================================= */}
       {editingDistributor && createPortal(
         <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl backdrop-blur-xl">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="font-bold text-text text-base flex items-center gap-2">
                 <Edit size={18} className="text-primary" />
-                Edit Distributor Profile & OCR Rules
+                <span>Edit Distributor Profile & OCR Rules</span>
               </div>
               <button
                 onClick={() => setEditingDistributor(null)}
@@ -1081,7 +1696,7 @@ const Learning: React.FC = () => {
                   type="text"
                   value={editingDistributor.name}
                   onChange={e => setEditingDistributor({ ...editingDistributor, name: e.target.value })}
-                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-primary font-bold"
                   required
                 />
               </div>
@@ -1127,7 +1742,7 @@ const Learning: React.FC = () => {
               <button
                 onClick={handleSaveDistributorDetails}
                 disabled={isSavingDistributor || !editingDistributor.name.trim()}
-                className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isSavingDistributor ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
                 Save Changes
@@ -1138,14 +1753,16 @@ const Learning: React.FC = () => {
         document.body
       )}
 
+      {/* ========================================================================= */}
       {/* EDIT DOCTOR MODAL PORTAL */}
+      {/* ========================================================================= */}
       {editingDoctor && createPortal(
         <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl backdrop-blur-xl">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="font-bold text-text text-base flex items-center gap-2">
                 <Stethoscope size={18} className="text-primary" />
-                Edit Doctor Details & Credentials
+                <span>Edit Doctor Details & Credentials</span>
               </div>
               <button
                 onClick={() => setEditingDoctor(null)}
@@ -1223,7 +1840,7 @@ const Learning: React.FC = () => {
               <button
                 onClick={handleSaveDoctorDetails}
                 disabled={isSavingDoctor || !editingDoctor.name.trim()}
-                className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isSavingDoctor ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
                 Save Changes

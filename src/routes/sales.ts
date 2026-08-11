@@ -2546,30 +2546,54 @@ router.post('/staged/:id/reject', async (req, res) => {
   }
 });
 
-// Get 6-Month & 2-Day Sales reorder suggestions for Pharmarack Cart
+// Get Purchase-Weighted (70% Purchase / 30% Sales) & Low-Stock Safety Reorder Suggestions
 router.get('/reorder-suggestions', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
     
-    // Query 2-Day sales per medicine
-    const twoDaySales = await db.all(`
-      SELECT 
-        m.id as medicine_id,
-        m.name as medicine_name,
-        m.company,
-        m.packaging,
-        m.ptr,
-        m.mrp,
-        SUM(si.quantity) as two_day_qty
-      FROM sale_items si
-      JOIN sales_invoices inv ON si.invoice_id = inv.id
-      JOIN inventory_master im ON si.inventory_id = im.id
-      JOIN medicines m ON im.medicine_id = m.id
-      WHERE inv.date >= DATETIME('now', '-2 days')
-      GROUP BY m.id
-      ORDER BY two_day_qty DESC
-      LIMIT 100
+    // Ensure snooze table exists
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
+        medicine_id INTEGER PRIMARY KEY,
+        snooze_until TEXT NOT NULL,
+        snooze_type TEXT NOT NULL DEFAULT '7_days',
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+      )
     `);
+
+    // Fetch active snoozed medicine IDs
+    const snoozedRows = await db.all(`
+      SELECT medicine_id FROM inventory_reorder_snooze
+      WHERE snooze_until > DATETIME('now')
+    `);
+    const snoozedSet = new Set<number>(snoozedRows.map((r: any) => Number(r.medicine_id)));
+
+    // Query 2-Day sales per medicine
+    const twoDaySalesMap: Record<number, any> = {};
+    try {
+      const twoDaySales = await db.all(`
+        SELECT 
+          m.id as medicine_id,
+          m.name as medicine_name,
+          m.company,
+          m.packaging,
+          m.ptr,
+          m.mrp,
+          SUM(si.quantity) as two_day_qty
+        FROM sale_items si
+        JOIN sales_invoices inv ON si.invoice_id = inv.id
+        JOIN inventory_master im ON si.inventory_id = im.id
+        JOIN medicines m ON im.medicine_id = m.id
+        WHERE inv.date >= DATETIME('now', '-2 days')
+        GROUP BY m.id
+      `);
+      for (const row of twoDaySales) {
+        twoDaySalesMap[row.medicine_id] = row;
+      }
+    } catch (_) {}
 
     // Query 6-Month (180 days) sales per medicine
     const sixMonthSalesMap: Record<number, number> = {};
@@ -2585,7 +2609,7 @@ router.get('/reorder-suggestions', async (_req, res) => {
         GROUP BY im.medicine_id
       `);
       for (const row of sixMonthRows) {
-        sixMonthSalesMap[row.medicine_id] = row.total_qty;
+        sixMonthSalesMap[row.medicine_id] = Number(row.total_qty || 0);
       }
     } catch (_) {}
 
@@ -2603,59 +2627,218 @@ router.get('/reorder-suggestions', async (_req, res) => {
         GROUP BY im.medicine_id
       `);
       for (const row of purchaseRows) {
-        sixMonthPurchasesMap[row.medicine_id] = row.total_qty;
+        sixMonthPurchasesMap[row.medicine_id] = Number(row.total_qty || 0);
       }
     } catch (_) {}
 
-    // Query Current Stock per medicine
-    const currentStockMap: Record<number, number> = {};
-    try {
-      const stockRows = await db.all(`
-        SELECT medicine_id, SUM(quantity) as current_stock
-        FROM inventory_master
-        GROUP BY medicine_id
-      `);
-      for (const row of stockRows) {
-        currentStockMap[row.medicine_id] = Math.max(0, row.current_stock || 0);
-      }
-    } catch (_) {}
+    // Query Current Stock & Medicine details for candidates
+    const candidateMeds = await db.all(`
+      SELECT 
+        m.id as medicine_id,
+        m.name as medicine_name,
+        m.company,
+        m.packaging,
+        m.ptr,
+        m.mrp,
+        COALESCE(SUM(im.quantity), 0) as current_stock
+      FROM medicines m
+      LEFT JOIN inventory_master im ON im.medicine_id = m.id
+      GROUP BY m.id
+    `);
 
-    // Assemble suggestion items
-    const items = twoDaySales.map((row: any) => {
-      const medId = row.medicine_id;
-      const sold2Days = Number(row.two_day_qty || 0);
-      const sold6Months = Number(sixMonthSalesMap[medId] || sold2Days);
+    const items: any[] = [];
+
+    for (const row of candidateMeds) {
+      const medId = Number(row.medicine_id);
+      if (snoozedSet.has(medId)) continue; // Skip snoozed items
+
+      const sold2Days = Number(twoDaySalesMap[medId]?.two_day_qty || 0);
+      const sold6Months = Number(sixMonthSalesMap[medId] || 0);
       const purchased6Months = Number(sixMonthPurchasesMap[medId] || 0);
-      const stock = Number(currentStockMap[medId] || 0);
+      const stock = Math.max(0, Number(row.current_stock || 0));
 
+      // Purchase-weighted True Monthly Consumption (70% Purchase + 30% Sales)
+      const monthlyWeightedConsumption = Math.round((0.70 * purchased6Months + 0.30 * sold6Months) / 6);
       const dailyAvgSales = Math.round((sold6Months / 180) * 100) / 100;
       const dailyAvgPurchases = Math.round((purchased6Months / 180) * 100) / 100;
-      
-      // Suggested Reorder Qty = (2-Day Sales + 6-Month Daily Avg * 2) - Current Stock
-      const netRequirement = (sold2Days + (dailyAvgSales * 2)) - stock;
-      const suggestedQty = Math.max(1, Math.ceil(netRequirement > 0 ? netRequirement : sold2Days));
 
-      return {
-        medicineId: medId,
-        medicineName: row.medicine_name,
-        company: row.company || '',
-        packaging: row.packaging || '',
-        ptr: Number(row.ptr || 0),
-        mrp: Number(row.mrp || 0),
-        twoDaySales: sold2Days,
-        sixMonthTotalSales: sold6Months,
-        sixMonthAvgDailySales: dailyAvgSales,
-        sixMonthTotalPurchases: purchased6Months,
-        sixMonthAvgDailyPurchases: dailyAvgPurchases,
-        currentStock: stock,
-        suggestedQty: suggestedQty
-      };
+      const isHotMover = monthlyWeightedConsumption >= 10 || sold2Days >= 5;
+      const isLowStockSafety = stock <= 2 && (purchased6Months >= 6 || sold6Months >= 6);
+
+      // Include if: 2-day sales > 0 OR Low stock safety OR Hot mover below stock threshold
+      if (sold2Days > 0 || isLowStockSafety || (monthlyWeightedConsumption > 0 && stock <= monthlyWeightedConsumption)) {
+        let suggestedQty = 1;
+        if (monthlyWeightedConsumption > 0) {
+          suggestedQty = Math.max(1, Math.ceil(monthlyWeightedConsumption - stock));
+        } else if (sold2Days > 0) {
+          suggestedQty = Math.max(1, sold2Days * 2);
+        } else if (isLowStockSafety) {
+          suggestedQty = Math.max(1, 10 - stock); // Standard strip/box top-up
+        }
+
+        items.push({
+          medicineId: medId,
+          medicineName: row.medicine_name,
+          company: row.company || '',
+          packaging: row.packaging || '',
+          ptr: Number(row.ptr || 0),
+          mrp: Number(row.mrp || 0),
+          twoDaySales: sold2Days,
+          sixMonthTotalSales: sold6Months,
+          sixMonthAvgDailySales: dailyAvgSales,
+          sixMonthTotalPurchases: purchased6Months,
+          sixMonthAvgDailyPurchases: dailyAvgPurchases,
+          monthlyWeightedConsumption,
+          currentStock: stock,
+          suggestedQty,
+          isHotMover,
+          isLowStockSafety
+        });
+      }
+    }
+
+    // Sort: Low Stock Safety & Hot Movers first, then higher suggestedQty
+    items.sort((a, b) => {
+      if (a.isLowStockSafety !== b.isLowStockSafety) return a.isLowStockSafety ? -1 : 1;
+      if (a.isHotMover !== b.isHotMover) return a.isHotMover ? -1 : 1;
+      return b.suggestedQty - a.suggestedQty;
     });
 
     res.json({ success: true, count: items.length, items });
   } catch (err: any) {
     console.error('Reorder suggestions error:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch reorder suggestions' });
+  }
+});
+
+// Snooze a medicine suggestion (7 days, 30 days, 180 days / 6 months, permanent)
+router.post('/reorder-suggestions/snooze', async (req, res) => {
+  try {
+    const { medicineId, snoozeDays = 7, snoozeType = '7_days', reason = '' } = req.body;
+    if (!medicineId) {
+      return res.status(400).json({ error: 'medicineId is required' });
+    }
+
+    let daysToSnooze = Number(snoozeDays);
+    if (snoozeType === '30_days') daysToSnooze = 30;
+    else if (snoozeType === '6_months' || snoozeType === '180_days') daysToSnooze = 180;
+    else if (snoozeType === 'permanent') daysToSnooze = 3650;
+
+    const db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
+        medicine_id INTEGER PRIMARY KEY,
+        snooze_until TEXT NOT NULL,
+        snooze_type TEXT NOT NULL DEFAULT '7_days',
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+      )
+    `);
+
+    await db.run(
+      `INSERT OR REPLACE INTO inventory_reorder_snooze 
+       (medicine_id, snooze_until, snooze_type, reason, created_at, updated_at) 
+       VALUES (?, DATETIME('now', ?), ?, ?, COALESCE((SELECT created_at FROM inventory_reorder_snooze WHERE medicine_id = ?), DATETIME('now')), DATETIME('now'))`,
+      [medicineId, `+${daysToSnooze} days`, snoozeType, reason, medicineId]
+    );
+
+    res.json({ success: true, message: `Medicine ${medicineId} snoozed for ${daysToSnooze} days (${snoozeType})` });
+  } catch (err: any) {
+    console.error('Failed to snooze reorder suggestion:', err);
+    res.status(500).json({ error: err.message || 'Failed to snooze reorder suggestion' });
+  }
+});
+
+// Remove snooze for a medicine (restore to pending reorder list)
+router.post('/reorder-suggestions/unsnooze', async (req, res) => {
+  try {
+    const { medicineId } = req.body;
+    if (!medicineId) {
+      return res.status(400).json({ error: 'medicineId is required' });
+    }
+
+    const db = await dbManager.getConnection();
+    await db.run(`DELETE FROM inventory_reorder_snooze WHERE medicine_id = ?`, [medicineId]);
+
+    res.json({ success: true, message: `Medicine ${medicineId} restored to reorder list` });
+  } catch (err: any) {
+    console.error('Failed to unsnooze reorder suggestion:', err);
+    res.status(500).json({ error: err.message || 'Failed to unsnooze reorder suggestion' });
+  }
+});
+
+// Get all active snoozed medicines (for Learning Hub / Settings audit view)
+router.get('/reorder-suggestions/snoozed', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
+        medicine_id INTEGER PRIMARY KEY,
+        snooze_until TEXT NOT NULL,
+        snooze_type TEXT NOT NULL DEFAULT '7_days',
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+      )
+    `);
+
+    const rows = await db.all(`
+      SELECT 
+        s.medicine_id,
+        s.snooze_until,
+        s.snooze_type,
+        s.reason,
+        s.created_at,
+        m.name as medicine_name,
+        m.company,
+        m.packaging,
+        m.ptr,
+        m.mrp,
+        COALESCE((SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = m.id), 0) as current_stock,
+        COALESCE((
+          SELECT SUM(si.quantity) 
+          FROM sale_items si 
+          JOIN sales_invoices inv ON si.invoice_id = inv.id 
+          JOIN inventory_master im ON si.inventory_id = im.id 
+          WHERE im.medicine_id = m.id AND inv.date >= DATETIME('now', '-180 days')
+        ), 0) as six_month_sales,
+        COALESCE((
+          SELECT SUM(pi.quantity) 
+          FROM purchase_items pi 
+          JOIN purchases p ON pi.purchase_id = p.id 
+          JOIN inventory_master im ON pi.inventory_id = im.id 
+          WHERE im.medicine_id = m.id AND p.date >= DATETIME('now', '-180 days')
+        ), 0) as six_month_purchases
+      FROM inventory_reorder_snooze s
+      JOIN medicines m ON s.medicine_id = m.id
+      WHERE s.snooze_until > DATETIME('now')
+      ORDER BY s.snooze_until ASC
+    `);
+
+    const items = rows.map((r: any) => ({
+      medicineId: r.medicine_id,
+      medicineName: r.medicine_name,
+      company: r.company || '',
+      packaging: r.packaging || '',
+      ptr: Number(r.ptr || 0),
+      mrp: Number(r.mrp || 0),
+      currentStock: Number(r.current_stock || 0),
+      sixMonthSales: Number(r.six_month_sales || 0),
+      sixMonthPurchases: Number(r.six_month_purchases || 0),
+      snoozeUntil: r.snooze_until,
+      snoozeType: r.snooze_type,
+      reason: r.reason || '',
+      createdAt: r.created_at
+    }));
+
+    res.json({ success: true, count: items.length, items });
+  } catch (err: any) {
+    console.error('Failed to fetch snoozed reorders:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch snoozed reorders' });
   }
 });
 

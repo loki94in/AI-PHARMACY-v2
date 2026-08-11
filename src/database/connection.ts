@@ -435,16 +435,19 @@ class DatabaseManager {
     }
   }
 
+  /**
+   * Close active SQLite database connection.
+   * Routine calls without force=true are safe no-ops to protect the shared singleton pool.
+   * Explicit maintenance/shutdown calls pass force=true to release file handles.
+   */
   public async close(force: boolean = false): Promise<void> {
+    if (!force) return;
     if (this.connection) {
       try {
         await this.connection.close();
-      } catch (err) {
-        if (!force) throw err;
-      } finally {
-        this.connection = null;
-        this.currentDbPath = null;
-      }
+      } catch (e) {}
+      this.connection = null;
+      this.currentDbPath = null;
     }
   }
 

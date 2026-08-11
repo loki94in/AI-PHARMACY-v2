@@ -1136,25 +1136,26 @@ export default function PharmarackCart() {
     const storePhone = storeInfo.phone || storeInfo.adminPhone || '';
     const formattedStorePhone = storePhone ? formatPhone(storePhone) : 'N/A';
 
-    let msg = `🏥 *${storeName}*\n`;
-    msg += `*Delivery Location:* ${address}\n`;
-    msg += `📞 *Pharmacy Contact:* ${formattedStorePhone}\n\n`;
-    msg += `📅 *Date:* ${dateStr}\n\n`;
-    msg += `📋 *Items Requested:*\n`;
-
     // Filter to send ONLY fresh/new items so distributor is not confused by already-sent old items
     const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
     const itemsToSend = freshItems.length > 0 ? freshItems : dist.items;
 
-    itemsToSend.forEach((item) => {
-      const pack = item.packaging ? ` (${item.packaging})` : '';
-      msg += `  • ${item.productName}${pack}\n    Qty: ${item.qty}\n`;
+    let msg = `🏥 *${storeName}*\n`;
+    msg += `📍 *Delivery Location:* ${address}\n`;
+    msg += `📞 *Pharmacy Contact:* ${formattedStorePhone}\n\n`;
+    msg += `📅 *Order Date:* ${dateStr}\n\n`;
+    msg += `📋 *ORDER ITEMS (${itemsToSend.length}):*\n`;
+
+    itemsToSend.forEach((item, idx) => {
+      const packStr = item.packaging ? ` [${item.packaging}]` : '';
+      const priceStr = item.ptr > 0 ? ` @ ₹${item.ptr}` : '';
+      msg += `${idx + 1}. *${item.productName}*${packStr}\n   📦 Quantity: *${item.qty}*${priceStr}\n`;
     });
 
-    msg += `\n🚚 *Assigned Delivery Boy:*\n`;
-    msg += `  👤 ${boyName}\n  📞 ${boyPhone || 'N/A'}\n\n`;
+    msg += `\n🚚 *Assigned Delivery Person:*\n`;
+    msg += `  👤 *${boyName}*\n  📞 *${boyPhone || 'N/A'}*\n\n`;
 
-    msg += `*Note:* ${email} (${fileFormat}) when sending bills.`;
+    msg += `📝 *Note:* Please send invoice bill (${fileFormat}) to ${email}.`;
 
     return msg;
   };
@@ -2704,15 +2705,15 @@ export default function PharmarackCart() {
                     return (
                       <div className="space-y-2">
                         {sidebarTab === 'all' && (
-                          <div className="text-[10px] font-black uppercase text-emerald-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
+                          <div className="text-[10px] font-black uppercase text-primary tracking-wider px-1 pt-2 pb-1 border-b border-glass-border flex items-center justify-between">
                             <span className="flex items-center gap-1">
                               <TrendingUp size={11} />
-                              2-Day & 6M Sales Suggestions ({reorderSuggestions.length})
+                              Smart Restock & Safety Reorders ({reorderSuggestions.length})
                             </span>
                           </div>
                         )}
                         {reorderSuggestions.map((sug) => (
-                          <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-bg/40 flex flex-col gap-2 shadow-sm hover:border-emerald-500/30 transition-all">
+                          <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-glass-bg flex flex-col gap-2 shadow-sm hover:border-primary/40 transition-all">
                             <div className="flex justify-between items-start">
                               <div className="flex flex-col min-w-0 pr-1">
                                 <span className="text-xs font-black text-text truncate" title={sug.medicineName}>
@@ -2722,32 +2723,105 @@ export default function PharmarackCart() {
                                   {sug.company} {sug.packaging ? `• ${sug.packaging}` : ''}
                                 </span>
                               </div>
-                              <span className="shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                🔥 {sug.twoDaySales} Sold (2d)
-                              </span>
+                              <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                                {sug.isLowStockSafety && (
+                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30" title="Low stock (1-2 strips left) with 6M demand history">
+                                    ⚠️ Low Stock ({sug.currentStock} left)
+                                  </span>
+                                )}
+                                {sug.isHotMover && (
+                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">
+                                    🔥 Hot Mover
+                                  </span>
+                                )}
+                                {!sug.isHotMover && !sug.isLowStockSafety && sug.twoDaySales > 0 && (
+                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    ⚡ {sug.twoDaySales} Sold (2d)
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
-                            <div className="flex items-center justify-between text-[10px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border/30">
-                              <span title="6-Month Daily Average Sales">
-                                📊 6M Avg: <strong className="text-emerald-400">{sug.sixMonthAvgDailySales}</strong>/day
+                            <div className="grid grid-cols-2 gap-1 text-[9px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border">
+                              <span title="Purchase-Weighted Monthly Consumption (70% Purchases / 30% Sales)">
+                                📦 Purchases 6M: <strong className="text-text">{sug.sixMonthTotalPurchases || 0}</strong>
+                              </span>
+                              <span title="6-Month POS Sales Volume">
+                                🛒 Sales 6M: <strong className="text-text">{sug.sixMonthTotalSales || 0}</strong>
                               </span>
                               <span title="Current Inventory Stock">
-                                📦 Stock: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
+                                📊 Stock Level: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
+                              </span>
+                              <span title="Weighted Monthly Demand Rate">
+                                📈 Est. Monthly: <strong className="text-primary">{sug.monthlyWeightedConsumption || sug.suggestedQty}</strong>/mo
                               </span>
                             </div>
 
-                            <div className="flex items-center justify-between pt-1 border-t border-glass-border/30">
-                              <span className="text-[10px] font-bold text-muted">
-                                Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
-                              </span>
-                              <button
-                                onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
-                                className="shrink-0 text-[10px] font-bold bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
-                                title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
-                              >
-                                <Plus size={11} />
-                                <span>Add ({sug.suggestedQty})</span>
-                              </button>
+                            <div className="flex items-center justify-between pt-1 border-t border-glass-border">
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] font-bold text-muted">
+                                  Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {/* Snooze Options */}
+                                <div className="relative group">
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        await api.snoozeReorderSuggestion(sug.medicineId, 7, '7_days');
+                                        toastEvent.trigger(`Ignored ${sug.medicineName} for 7 days.`, 'success');
+                                        fetchReorderSuggestions();
+                                      } catch (_) {
+                                        toastEvent.trigger('Failed to ignore suggestion', 'error');
+                                      }
+                                    }}
+                                    className="text-[9px] font-bold text-muted hover:text-text bg-bg2 hover:bg-bg3 border border-glass-border px-2 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1"
+                                    title="Ignore for 7 days (or hover for more options)"
+                                  >
+                                    <span>Ignore (7d)</span>
+                                  </button>
+                                  <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-bg2 border border-glass-border rounded-lg shadow-xl z-20 py-1 min-w-[120px]">
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await api.snoozeReorderSuggestion(sug.medicineId, 30, '30_days');
+                                          toastEvent.trigger(`Paused ${sug.medicineName} for 30 days.`, 'success');
+                                          fetchReorderSuggestions();
+                                        } catch (_) {
+                                          toastEvent.trigger('Failed to pause suggestion', 'error');
+                                        }
+                                      }}
+                                      className="text-left px-2.5 py-1 text-[10px] text-text hover:bg-glass-bg cursor-pointer font-medium"
+                                    >
+                                      Pause 1 Month (30d)
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          await api.snoozeReorderSuggestion(sug.medicineId, 180, '6_months');
+                                          toastEvent.trigger(`Paused ${sug.medicineName} for 6 Months (Seasonal).`, 'success');
+                                          fetchReorderSuggestions();
+                                        } catch (_) {
+                                          toastEvent.trigger('Failed to pause suggestion', 'error');
+                                        }
+                                      }}
+                                      className="text-left px-2.5 py-1 text-[10px] text-amber-400 hover:bg-glass-bg cursor-pointer font-medium"
+                                    >
+                                      Pause 6 Months (Seasonal)
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
+                                  className="shrink-0 text-[10px] font-bold bg-primary text-text hover:bg-primary/90 px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+                                  title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
+                                >
+                                  <Plus size={11} />
+                                  <span>Add ({sug.suggestedQty})</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))}
