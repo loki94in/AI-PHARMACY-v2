@@ -1885,7 +1885,7 @@ export async function ensureSchema(dbPath: string) {
                   }
                 }
                 if (parsedItems.length === 0) {
-                  const orderInfo = emailService.extractOrderInfo({
+                  const orderInfo = await emailService.extractOrderInfo({
                     subject: email.subject || '',
                     body: email.body || '',
                     from: email.from_addr || '',

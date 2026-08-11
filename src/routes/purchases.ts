@@ -2011,7 +2011,7 @@ router.get('/reconciliation', async (req, res) => {
 
       if (!extractedInvoiceNo || !distributorName) {
         // Extract invoice details dynamically
-        const orderInfo = emailService.extractOrderInfo({
+        const orderInfo = await emailService.extractOrderInfo({
           subject: email.subject || '',
           body: email.body || '',
           from: email.from_addr || '',
@@ -2065,7 +2065,7 @@ router.get('/reconciliation', async (req, res) => {
         }
         if (parsedItems.length === 0) {
           // Re-extract order info if medicines not populated
-          const orderInfo = emailService.extractOrderInfo({
+          const orderInfo = await emailService.extractOrderInfo({
             subject: email.subject || '',
             body: email.body || '',
             from: email.from_addr || '',
@@ -2361,7 +2361,7 @@ router.get('/reconciliation/preview/:email_uid', async (req, res) => {
     }
 
     if (parsedItems.length === 0) {
-      const orderInfo = emailService.extractOrderInfo({
+      const orderInfo = await emailService.extractOrderInfo({
         subject: email.subject || '',
         body: email.body || '',
         from: email.from_addr || '',
@@ -2451,7 +2451,7 @@ router.post('/reconciliation/reissue', async (req, res) => {
       }
     }
 
-    const orderInfo = emailService.extractOrderInfo({
+    const orderInfo = await emailService.extractOrderInfo({
       subject: email.subject || '',
       body: email.body || '',
       from: email.from_addr || '',

@@ -15,6 +15,8 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
 
+import { triggerSchedulerService } from '../services/triggerSchedulerService.js';
+
 const router = express.Router();
 
 // Get all settings
@@ -305,6 +307,13 @@ router.post('/save', async (req, res) => {
 
     // Run secondary service hot-reloads asynchronously in background without delaying HTTP response
     setImmediate(async () => {
+      try {
+        const db = await dbManager.getConnection();
+        await triggerSchedulerService.reloadSchedules(db);
+      } catch (tsErr) {
+        console.error('[Settings] Trigger scheduler reload error:', tsErr);
+      }
+
       if (payload['email_retention_limit'] !== undefined) {
         try {
           const db = await dbManager.getConnection();

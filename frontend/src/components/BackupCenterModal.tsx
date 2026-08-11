@@ -100,6 +100,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
   const handleManualBackup = async () => {
     setActionLoading(true);
     setLastBackupError(null);
+    window.dispatchEvent(new CustomEvent('backup-status-changed', { detail: { active: true, label: 'Creating Database Backup...' } }));
     try {
       const { data } = await apiClient.post('/utilities/backup/manual');
       if (data.success) {
@@ -113,6 +114,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
       toastEvent.trigger(msg, 'error');
     } finally {
       setActionLoading(false);
+      window.dispatchEvent(new CustomEvent('backup-status-changed', { detail: { active: false, label: '' } }));
     }
   };
 

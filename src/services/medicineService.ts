@@ -1,6 +1,7 @@
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
 import { config } from '../config/index.js';
+import { enhancedSimilarity, productNameFilterService } from './productNameFilterService.js';
 
 export interface MedicineData {
   name: string;
@@ -504,9 +505,15 @@ export class MedicineService {
    * Multi-Tier resolution engine:
    * Tier 1: Exact name match on medicines
    * Tier 2: Distributor-specific alias
+   * Tier 2b: Exact match against medicines this distributor has actually supplied before
    * Tier 3: Global medicine alias
    * Tier 4: Legacy ID mapping
-   * Tier 5: Prefix / FTS fuzzy fallback match
+   * Tier 5: Fuzzy match scoped to this distributor's purchase history (cheap, high-precision —
+   *         a distributor's own past items are a far smaller, more relevant candidate set than
+   *         the whole catalog, so this runs before any catalog-wide fuzzy search)
+   * Tier 6: Prefix match against the full catalog
+   * Tier 7: Full-catalog fuzzy fallback (FTS5 + Levenshtein/phonetic/n-gram) — last resort for
+   *         names with no distributor history yet (new item, or first order from a distributor)
    */
   async resolveMedicineNameMultiTier(
     db: any,
@@ -523,14 +530,26 @@ export class MedicineService {
       return { medicineId: exact.id, confidence: 1.0, matchType: 'exact_name' };
     }
 
-    // Tier 2: Distributor Alias
     if (distributorId) {
+      // Tier 2: Distributor Alias
       const distAlias = await db.get(
         'SELECT medicine_id FROM distributor_medicine_aliases WHERE distributor_id = ? AND LOWER(alias_name) = ?',
         [distributorId, key]
       );
       if (distAlias?.medicine_id) {
         return { medicineId: distAlias.medicine_id, confidence: 1.0, matchType: 'distributor_alias' };
+      }
+
+      // Tier 2b: Exact match against medicines actually purchased from this distributor before
+      const distHistoryExact = await db.get(
+        `SELECT DISTINCT m.id FROM purchase_items pi
+         JOIN purchases p ON pi.purchase_id = p.id
+         JOIN medicines m ON pi.medicine_id = m.id
+         WHERE p.distributor_id = ? AND LOWER(m.name) = ? LIMIT 1`,
+        [distributorId, key]
+      );
+      if (distHistoryExact?.id) {
+        return { medicineId: distHistoryExact.id, confidence: 1.0, matchType: 'distributor_history_exact' };
       }
     }
 
@@ -552,7 +571,28 @@ export class MedicineService {
       return { medicineId: legacyRow.canonical_medicine_id, confidence: 0.95, matchType: 'legacy_map' };
     }
 
-    // Tier 5: Prefix match fallback
+    // Tier 5: Fuzzy match scoped to this distributor's own purchase history
+    if (distributorId && cleanName.length >= 3) {
+      const distHistoryNames = await db.all(
+        `SELECT DISTINCT m.id, m.name FROM purchase_items pi
+         JOIN purchases p ON pi.purchase_id = p.id
+         JOIN medicines m ON pi.medicine_id = m.id
+         WHERE p.distributor_id = ? LIMIT 500`,
+        [distributorId]
+      );
+      let best: { id: number; score: number } | null = null;
+      for (const row of distHistoryNames || []) {
+        const score = enhancedSimilarity(cleanName, row.name);
+        if (score >= 0.72 && (!best || score > best.score)) {
+          best = { id: row.id, score };
+        }
+      }
+      if (best) {
+        return { medicineId: best.id, confidence: best.score, matchType: 'distributor_history_fuzzy' };
+      }
+    }
+
+    // Tier 6: Prefix match fallback
     if (cleanName.length >= 4) {
       const prefixMatch = await db.get(
         'SELECT id FROM medicines WHERE LOWER(name) LIKE ? LIMIT 1',
@@ -560,6 +600,25 @@ export class MedicineService {
       );
       if (prefixMatch?.id) {
         return { medicineId: prefixMatch.id, confidence: 0.75, matchType: 'prefix_fuzzy' };
+      }
+    }
+
+    // Tier 7: Full-catalog fuzzy fallback — last resort, only reached when nothing distributor-
+    // specific or exact was found (new item, or first order ever from this distributor).
+    if (cleanName.length >= 3) {
+      try {
+        const filterResult = await productNameFilterService.filterProductNames(cleanName, {
+          minConfidenceThreshold: 0.78
+        });
+        const topMatch = filterResult.scoredMatches?.[0];
+        if (topMatch) {
+          const catalogRow = await db.get('SELECT id FROM medicines WHERE name = ? LIMIT 1', [topMatch.name]);
+          if (catalogRow?.id) {
+            return { medicineId: catalogRow.id, confidence: topMatch.score, matchType: 'catalog_fuzzy' };
+          }
+        }
+      } catch (err) {
+        console.warn('[MedicineService] Catalog fuzzy fallback failed:', (err as any)?.message || err);
       }
     }
 

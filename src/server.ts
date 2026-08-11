@@ -623,94 +623,14 @@ async function setupCrons(db: any) {
     return;
   }
 
+  try {
+    const { triggerSchedulerService } = await import('./services/triggerSchedulerService.js');
+    await triggerSchedulerService.initSchedules(db);
+  } catch (err) {
+    console.error('[Boot] Failed to initialize dynamic trigger scheduler:', err);
+  }
+
   const cron = (await import('node-cron')).default;
-
-  // Daily check at 9:00 AM
-  cron.schedule('0 9 * * *', async () => {
-    try {
-      const mode = await getBackendFetchMode('bg.dailyScans', 'off');
-      if (mode === 'off') {
-        console.log('[Cron] Daily checks cron is disabled (mode=off)');
-        return;
-      }
-      if (mode === 'manual' && activityTracker.isIdle()) {
-        console.log('[Cron] Daily checks cron skipped (mode=manual, system is idle)');
-        return;
-      }
-
-      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      if (!autoRow || autoRow.value !== 'true') return;
-      console.log('Running daily patient refill, bounced products & overdue credit notes check...');
-      const { checkAllRefills } = await import('./services/refillService.js');
-      const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
-      await checkAllRefills(db);
-      await checkOverdueCreditNotes(db);
-      
-      try {
-        const { bouncedAlertService } = await import('./services/bouncedAlertService.js');
-        await bouncedAlertService.checkAndSendBouncedProductsAlert();
-      } catch (bErr) {
-        console.error('Failed running bounced products alert check:', bErr);
-      }
-      
-      const dayOfMonth = new Date().getDate();
-      if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-        const { autoCreateExpiryReturns } = await import('./services/returnsService.js');
-        await autoCreateExpiryReturns(db);
-      }
-
-      const d = new Date();
-      const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-    } catch (err) {
-      console.error('Failed running daily check cron:', err);
-    }
-  });
-
-  // Automatic near-expiry scan & alerts (Every 15 days at 9:00 AM)
-  cron.schedule('0 9 1,16 * *', async () => {
-    try {
-      const mode = await getBackendFetchMode('bg.dailyScans', 'off');
-      if (mode === 'off') {
-        console.log('[Cron] Near-expiry scan cron is disabled (mode=off)');
-        return;
-      }
-      if (mode === 'manual' && activityTracker.isIdle()) {
-        console.log('[Cron] Near-expiry scan cron skipped (mode=manual, system is idle)');
-        return;
-      }
-
-      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      if (!autoRow || autoRow.value !== 'true') return;
-      const { runExpiryScanAndAlert } = await import('./services/expiryAlertService.js');
-      await runExpiryScanAndAlert(90);
-    } catch (err) {
-      console.error('Failed running 15-day expiry scan cron:', err);
-    }
-  });
-
-  // Nightly 9:59 PM backup
-  cron.schedule('59 21 * * *', async () => {
-    try {
-      const mode = await getBackendFetchMode('bg.nightlyBackup', 'off');
-      if (mode === 'off') {
-        console.log('[Backup] Nightly backup is disabled (mode=off)');
-        return;
-      }
-      if (mode === 'manual' && activityTracker.isIdle()) {
-        console.log('[Backup] Nightly backup skipped (mode=manual, system is idle)');
-        return;
-      }
-
-      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      if (!autoRow || autoRow.value !== 'true') return;
-      const { createBackup } = await import('./services/backupService.js');
-      const result = await createBackup('Nightly 9:30 PM');
-      console.log(`[Backup] Nightly backup created: ${result.filename}`);
-    } catch (err) {
-      console.error('[Backup] Nightly backup failed:', err);
-    }
-  });
 
   // Periodic Pharmarack catalog sync every 35 minutes (WhatsApp OCR Pipeline)
   cron.schedule('*/35 * * * *', async () => {
@@ -734,7 +654,6 @@ async function setupCrons(db: any) {
   });
 
   // Pharmarack daily batch dispatch: runs every minute during the 11 AM hour.
-  // tryDailySend() is idempotent — it checks the exact window and today's sent-flag internally.
   cron.schedule('* 11 * * *', async () => {
     try {
       const { tryDailySend } = await import('./services/pharmarackDailyDispatchService.js');

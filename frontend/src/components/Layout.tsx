@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -42,6 +42,7 @@ import {
   Package,
   Download,
   Keyboard,
+  FileText,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -318,6 +319,20 @@ const Sidebar = ({
         </nav>
       </div>
 
+      {/* Sidebar Bottom Footer: Log Out */}
+      <div className="p-3 mx-2 border-t border-glass-border/60 shrink-0">
+        <button
+          onClick={() => {
+            toastEvent.trigger('Logged out of AI PHARMACY OS', 'info');
+          }}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-semibold text-muted hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+          title="Log Out of System"
+        >
+          <LogOut size={16} />
+          <span>Log Out</span>
+        </button>
+      </div>
+
       </div>
     </>
   );
@@ -472,11 +487,14 @@ const NotificationPanel = ({
                 whatsappQueueEvent.triggerOpen();
                 onClose();
               }}
-              className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 cursor-pointer shadow-xs"
+              className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 cursor-pointer shadow-sm"
               title="Open WhatsApp Queue & Live Message Controller"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-              <MessageSquareIcon size={12} />
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+              </span>
+              <MessageSquareIcon size={13} />
               <span>WhatsApp Queue</span>
             </button>
             <button
@@ -803,6 +821,7 @@ const Topbar = ({
   compactCacheLoaded?: boolean;
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
   const [showPanel, setShowPanel] = useState(false);
   const [flashToast, setFlashToast] = useState<(ToastEventDetail & { id: number }) | null>(null);
@@ -846,6 +865,35 @@ const Topbar = ({
     // Background enrichment permanently stopped by user
     setEnrichmentRunning(false);
   }, [compactCacheLoaded]);
+
+  const [backupStatus, setBackupStatus] = useState<{ active: boolean; label: string }>({ active: false, label: '' });
+  const [ocrStatus, setOcrStatus] = useState<{ active: boolean; label?: string; progress?: number; reviewNeeded?: boolean }>({ active: false });
+  const [isHoverExpanded, setIsHoverExpanded] = useState(false);
+
+  useEffect(() => {
+    const handleBackupStatus = (e: any) => {
+      if (e?.detail) {
+        setBackupStatus({ active: !!e.detail.active, label: e.detail.label || 'Database Backup in progress...' });
+      }
+    };
+    const handleOcrStatus = (e: any) => {
+      if (e?.detail) {
+        setOcrStatus({
+          active: !!e.detail.active,
+          label: e.detail.label || 'Scanning Distributor Invoice...',
+          progress: e.detail.progress !== undefined ? e.detail.progress : 65,
+          reviewNeeded: !!e.detail.reviewNeeded
+        });
+      }
+    };
+    window.addEventListener('backup-status-changed', handleBackupStatus);
+    window.addEventListener('ocr-status-changed', handleOcrStatus);
+    return () => {
+      window.removeEventListener('backup-status-changed', handleBackupStatus);
+      window.removeEventListener('ocr-status-changed', handleOcrStatus);
+    };
+  }, []);
+
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [connectedDevices, setConnectedDevices] = useState<{ token: string; device_name: string; os: string; is_online: number; last_seen: string; offline_seconds?: number }[]>([]);
@@ -989,6 +1037,247 @@ const Topbar = ({
     };
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded, waQueueDetail?.isProcessing, waQueueDetail?.counts?.pending, waQueueDetail?.counts?.sending, onOpenWaQueue]);
 
+  const [demoActive, setDemoActive] = useState(false);
+  const [countdownSec, setCountdownSec] = useState(278); // 4m 38s live ticking countdown
+  const [isCountdownPaused, setIsCountdownPaused] = useState(false);
+
+  useEffect(() => {
+    if (isCountdownPaused) return;
+    const interval = setInterval(() => {
+      setCountdownSec(prev => (prev > 0 ? prev - 1 : 300));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isCountdownPaused]);
+
+  const formattedCountdown = `${Math.floor(countdownSec / 60).toString().padStart(2, '0')}:${(countdownSec % 60).toString().padStart(2, '0')}`;
+
+  // Consolidate Active Header Notification Carousel Items
+  const isWaActive = (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0 || waQueueDetail?.isProcessing;
+  const isWaRecentlyDone = !isWaActive && (waQueueDetail?.counts?.sent || 0) > 0 && lastQueueCompletedAt !== null;
+
+  const activeHeaderItems = useMemo(() => {
+    const items: Array<{
+      id: string;
+      type: 'whatsapp' | 'backup' | 'catalog' | 'notification';
+      title: string;
+      subtitle?: string;
+      progress?: number;
+      badge?: string;
+      color: 'emerald' | 'purple' | 'sky' | 'amber';
+      action?: () => void;
+      actionLabel?: string;
+      icon: React.ReactNode;
+    }> = [];
+
+    // 1. WhatsApp Queue Progress
+    const waTotal = (waQueueDetail?.counts?.sent || 0) + (waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0);
+    const waSent = waQueueDetail?.counts?.sent || 0;
+    const waPercent = waTotal > 0 ? Math.round((waSent / waTotal) * 100) : 100;
+
+    if (isWaActive || isWaRecentlyDone) {
+      items.push({
+        id: 'wa-queue',
+        type: 'whatsapp',
+        title: waQueueDetail?.isPaused 
+          ? `⏰ Scheduled: WhatsApp ${waQueueDetail?.counts?.pending || waTotal} Messages Ready` 
+          : isWaRecentlyDone ? 'WhatsApp: All Sent' : `WhatsApp: ${waSent}/${waTotal} Sent (${waPercent}%)`,
+        subtitle: waQueueDetail?.isPaused
+          ? '⏸ Waiting for Play button to send'
+          : waQueueDetail?.activeTargetName ? `▶ ${waQueueDetail.activeTargetName}` : undefined,
+        progress: waPercent,
+        badge: isWaRecentlyDone ? 'Done' : waQueueDetail?.isPaused ? 'Waiting Play' : 'Sending',
+        color: waQueueDetail?.isPaused ? 'amber' : 'emerald',
+        action: waQueueDetail?.isPaused 
+          ? async () => {
+              try {
+                await apiClient.post('/whatsapp/queue/toggle-pause');
+                window.dispatchEvent(new CustomEvent('cache-invalidate'));
+              } catch (err) {
+                console.error('Failed to unpause queue:', err);
+              }
+            }
+          : onOpenWaQueue,
+        actionLabel: waQueueDetail?.isPaused ? '▶ SEND NOW' : 'View Queue',
+        icon: waQueueDetail?.isPaused ? <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" /> : <MessageSquareIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
+      });
+    }
+
+    // 2. Database Backup Progress
+    if (backupStatus.active) {
+      items.push({
+        id: 'backup',
+        type: 'backup',
+        title: 'Database Backup Running',
+        subtitle: backupStatus.label || 'Creating compressed database backup...',
+        progress: 100,
+        badge: 'Backing Up',
+        color: 'purple',
+        icon: <Database size={12} className="text-purple-400 animate-spin shrink-0" />
+      });
+    }
+
+    // 3. Catalog Sync Progress
+    if (catalogJob && catalogJob.status === 'processing') {
+      items.push({
+        id: 'catalog',
+        type: 'catalog',
+        title: `Catalog Syncing (${catalogJob.progress || 0}%)`,
+        subtitle: 'Updating inventory reference catalog...',
+        progress: catalogJob.progress || 0,
+        badge: 'Syncing',
+        color: 'sky',
+        icon: <RefreshCw size={12} className="text-sky-400 animate-spin shrink-0" />
+      });
+    }
+
+    // 4. Invoice OCR Scanning Progress
+    if (ocrStatus.active || ocrStatus.reviewNeeded) {
+      items.push({
+        id: 'ocr-scan',
+        type: 'notification',
+        title: ocrStatus.reviewNeeded ? '📄 OCR Review Needed' : `📄 Invoice OCR: ${ocrStatus.label || 'Scanning'} (${ocrStatus.progress || 0}%)`,
+        subtitle: ocrStatus.reviewNeeded ? 'Unmapped distributor layout detected — click to review' : 'Parsing invoice lines & GST tax fields...',
+        progress: ocrStatus.progress || 0,
+        badge: ocrStatus.reviewNeeded ? 'Review Needed' : 'Scanning',
+        color: ocrStatus.reviewNeeded ? 'amber' : 'sky',
+        action: () => navigate('/learning?tab=ocr'),
+        actionLabel: 'Review',
+        icon: <FileText size={12} className={ocrStatus.reviewNeeded ? 'text-amber-400 shrink-0' : 'text-sky-400 animate-pulse shrink-0'} />
+      });
+    }
+
+    // 5. Latest Unread System Notification
+    const unreadList = notifications.filter(n => !n.read);
+    if (unreadList.length > 0) {
+      const latest = unreadList[0];
+      items.push({
+        id: `noti-${latest.id}`,
+        type: 'notification',
+        title: latest.message,
+        subtitle: `${unreadList.length} unread notification${unreadList.length > 1 ? 's' : ''}`,
+        badge: 'Alert',
+        color: latest.type === 'error' ? 'amber' : 'sky',
+        action: () => setShowPanel(true),
+        actionLabel: 'View All',
+        icon: latest.type === 'error' ? <AlertIcon size={12} className="text-amber-400 shrink-0" /> : <BellRing size={12} className="text-sky-400 animate-pulse shrink-0" />
+      });
+    }
+
+    // 6. Demo / Preview Items (Active when staff clicks Test Mode to preview loading lines and controls)
+    if (demoActive) {
+      items.push({
+        id: 'demo-ocr-scan',
+        type: 'notification',
+        title: '📄 Invoice OCR: Scanning Distributor Bill (68%)',
+        subtitle: 'Parsing 24 medicine items & batch details from Sun Pharma.pdf',
+        progress: 68,
+        badge: 'Scanning',
+        color: 'sky',
+        action: () => setDemoActive(false),
+        actionLabel: 'Review',
+        icon: <FileText size={12} className="text-sky-400 animate-pulse shrink-0" />
+      });
+      items.push({
+        id: 'demo-advance-5m',
+        type: 'whatsapp',
+        title: isCountdownPaused 
+          ? `⏰ Scheduled: 12 Credit Reminders (PAUSED ${formattedCountdown})` 
+          : `⏰ Scheduled in ${formattedCountdown}: 12 Credit Reminders`,
+        subtitle: isCountdownPaused 
+          ? '⏸ Countdown Paused — Click timer to resume' 
+          : '⏱ Live Ticking — Click time to pause',
+        progress: 0,
+        badge: '5m Advance',
+        color: 'amber',
+        action: () => setDemoActive(false),
+        actionLabel: '▶ SEND NOW',
+        icon: <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" />
+      });
+      items.push({
+        id: 'demo-waiting-task',
+        type: 'whatsapp',
+        title: '⏰ Scheduled: 12 Credit Reminders Ready',
+        subtitle: '⏸ Waiting for Play button to send',
+        progress: 0,
+        badge: 'Waiting Play',
+        color: 'amber',
+        action: () => setDemoActive(false),
+        actionLabel: '▶ SEND NOW',
+        icon: <ClockIcon size={12} className="text-amber-400 animate-bounce shrink-0" />
+      });
+      items.push({
+        id: 'demo-wa',
+        type: 'whatsapp',
+        title: 'WhatsApp: 5/12 Sent (42%)',
+        subtitle: '▶ Patient Ramesh Kumar',
+        progress: 42,
+        badge: 'Sending',
+        color: 'emerald',
+        action: () => setDemoActive(false),
+        actionLabel: 'Close Demo',
+        icon: <MessageSquareIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
+      });
+      items.push({
+        id: 'demo-backup',
+        type: 'backup',
+        title: 'Database Backup Running (85%)',
+        subtitle: 'Creating compressed database backup...',
+        progress: 85,
+        badge: 'Backing Up',
+        color: 'purple',
+        action: () => setDemoActive(false),
+        actionLabel: 'Close Demo',
+        icon: <Database size={12} className="text-purple-400 animate-spin shrink-0" />
+      });
+      items.push({
+        id: 'demo-catalog',
+        type: 'catalog',
+        title: 'Catalog Index Syncing (65%)',
+        subtitle: 'Updating reference medicine database...',
+        progress: 65,
+        badge: 'Syncing',
+        color: 'sky',
+        action: () => setDemoActive(false),
+        actionLabel: 'Close Demo',
+        icon: <RefreshCw size={12} className="text-sky-400 animate-spin shrink-0" />
+      });
+    }
+
+    // 6. Default Always-Visible System Status (Guarantees Header Banner & Play/Pause controls are visible at all times)
+    if (items.length === 0) {
+      items.push({
+        id: 'system-idle',
+        type: 'notification',
+        title: 'AI PHARMACY OS: Operational',
+        subtitle: servicesStatus?.pharmarack?.connected ? '✓ Live Cart & Services Connected' : 'System Ready',
+        progress: 100,
+        badge: 'Ready',
+        color: 'emerald',
+        action: () => setDemoActive(true),
+        actionLabel: 'Test Mode',
+        icon: <ActivityIcon size={12} className="text-emerald-400 shrink-0" />
+      });
+    }
+
+    return items;
+  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, notifications, servicesStatus, demoActive, onOpenWaQueue]);
+
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const [isCarouselHovered, setIsCarouselHovered] = useState(false);
+  const [isManualCarouselPaused, setIsManualCarouselPaused] = useState(false);
+
+  // Auto-rotate ticker every 4 seconds unless hovered or manually paused
+  useEffect(() => {
+    if (activeHeaderItems.length <= 1 || isCarouselHovered || isManualCarouselPaused) return;
+    const timer = setInterval(() => {
+      setCarouselIndex(prev => (prev + 1) % activeHeaderItems.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [activeHeaderItems.length, isCarouselHovered, isManualCarouselPaused]);
+
+  const activeIndex = carouselIndex >= activeHeaderItems.length ? 0 : carouselIndex;
+  const currentHeaderItem = activeHeaderItems[activeIndex];
+
   useEffect(() => {
     fetchDevices();
   }, [fetchDevices]);
@@ -1112,7 +1401,185 @@ const Topbar = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* CENTER SECTION: Hover-Expanded Popover & Auto-Minimizing Line Fill Progress Bar */}
+        <div 
+          className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
+          onMouseEnter={() => { setIsCarouselHovered(true); setIsHoverExpanded(true); }}
+          onMouseLeave={() => { setIsCarouselHovered(false); setIsHoverExpanded(false); }}
+        >
+          {activeHeaderItems.length > 0 && currentHeaderItem && (
+            <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress">
+              {/* Default Minimized Sleek Inline Header Row */}
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  {currentHeaderItem.icon}
+                  <span className="truncate text-text font-bold text-xs tracking-tight">
+                    {currentHeaderItem.title}
+                  </span>
+                  {currentHeaderItem.subtitle && (
+                    <span className="text-[10px] text-muted truncate max-w-[140px] hidden md:inline">
+                      {currentHeaderItem.subtitle}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Interactive Click-on-Time Countdown Pill (Pause & Resume Timer by Clicking Directly on Time) */}
+                  {(demoActive || currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCountdownPaused(prev => !prev);
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 border ${
+                        isCountdownPaused
+                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'
+                          : 'bg-sky-500/15 border-sky-500/30 text-sky-400 hover:bg-sky-500/25'
+                      }`}
+                      title={isCountdownPaused ? "Click Time to Resume Live Countdown" : "Click Time to Pause Countdown"}
+                    >
+                      {isCountdownPaused ? <PauseIcon size={9} className="fill-current text-amber-300" /> : <ClockIcon size={9} className="animate-spin text-sky-400" />}
+                      <span>{isCountdownPaused ? `PAUSED ${formattedCountdown}` : formattedCountdown}</span>
+                    </button>
+                  )}
+
+                  {currentHeaderItem.action && (
+                    <button
+                      type="button"
+                      onClick={currentHeaderItem.action}
+                      className="text-[10px] font-bold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer uppercase tracking-wider pl-1"
+                    >
+                      {currentHeaderItem.actionLabel || 'View'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Direct Inline Line Filling Progress Bar Track inside header bar */}
+              {currentHeaderItem.progress !== undefined && (
+                <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${
+                      currentHeaderItem.color === 'purple'
+                        ? 'from-purple-500 via-indigo-500 to-sky-400'
+                        : currentHeaderItem.color === 'sky'
+                        ? 'from-sky-500 via-blue-500 to-cyan-400'
+                        : currentHeaderItem.color === 'amber'
+                        ? 'from-amber-500 to-orange-400'
+                        : 'from-emerald-500 via-teal-400 to-emerald-400'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, currentHeaderItem.progress))}%` }}
+                  >
+                    <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/80 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+                  </div>
+                </div>
+              )}
+
+              {/* Day/Night Theme-Adapted Operations Command Center Popover */}
+              {isHoverExpanded && (
+                <div 
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[460px] max-h-[480px] overflow-y-auto bg-bg3/95 backdrop-blur-2xl border border-glass-border shadow-2xl rounded-3xl p-4 z-dropdown flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
+                >
+                  {/* Header Title & Controls */}
+                  <div className="flex items-center justify-between border-b border-glass-border pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1 rounded-lg bg-primary/10 text-primary">
+                        <Activity size={14} className="animate-pulse" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black uppercase tracking-wider text-text">Automation & Operations Hub</span>
+                        <span className="text-[10px] text-muted font-medium">{activeHeaderItems.length} active trigger{activeHeaderItems.length > 1 ? 's' : ''} next in line</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsManualCarouselPaused(prev => !prev);
+                        }}
+                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                          isManualCarouselPaused
+                            ? 'bg-amber-500/20 border-amber-500/30 text-amber-300'
+                            : 'bg-glass-bg border-glass-border text-muted hover:text-text'
+                        }`}
+                      >
+                        {isManualCarouselPaused ? '⏸ Paused' : '▶ Auto-Ticker'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* All Active Automation Triggers & Next-in-Line Queue */}
+                  <div className="flex flex-col gap-2.5">
+                    {activeHeaderItems.map((item, index) => (
+                      <div 
+                        key={item.id}
+                        className={`p-3 rounded-2xl border transition-all ${
+                          index === activeIndex 
+                            ? 'bg-primary/10 border-primary/40 shadow-md' 
+                            : 'bg-bg/40 border-glass-border hover:bg-bg/80'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0 flex-1">
+                            <div className="mt-0.5">{item.icon}</div>
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-xs font-bold text-text truncate leading-tight">
+                                {item.title}
+                              </span>
+                              {item.subtitle && (
+                                <span className="text-[10px] text-muted truncate mt-0.5">
+                                  {item.subtitle}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {item.action && (
+                              <button
+                                type="button"
+                                onClick={item.action}
+                                className="px-2.5 py-1 rounded-lg bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                              >
+                                {item.actionLabel || 'View'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Individual Progress Fill Track for each active trigger */}
+                        {item.progress !== undefined && (
+                          <div className="w-full h-1.5 bg-bg border border-glass-border rounded-full overflow-hidden relative mt-2.5">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${
+                                item.color === 'purple'
+                                  ? 'from-purple-500 via-indigo-500 to-sky-400'
+                                  : item.color === 'sky'
+                                  ? 'from-sky-500 via-blue-500 to-cyan-400'
+                                  : item.color === 'amber'
+                                  ? 'from-amber-500 to-orange-400'
+                                  : 'from-emerald-500 via-teal-400 to-emerald-400'
+                              }`}
+                              style={{ width: `${Math.min(100, Math.max(0, item.progress))}%` }}
+                            >
+                              <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/90 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           {/* Mobile Connection / Devices Status (Auto-hides when no devices connected) */}
           {(connectedDevices.length > 0 || onlineDevicesCount > 0) && (
             <div className="relative" ref={popoverRef}>
@@ -1228,83 +1695,6 @@ const Topbar = ({
             </span>
           </Link>
 
-          {/* Background Silence Status Indicator — driven by gater flags, no new polling */}
-          {servicesStatus?.gaters && !servicesStatus.gaters.automation && (
-            <Link
-              to="/settings"
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-slate-500/20"
-              title="Background Automation is OFF — system is in Silent Mode (no automatic background sends or cron tasks). Click to configure in Settings."
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
-              <span>Silent</span>
-            </Link>
-          )}
-
-          {/* WhatsApp Connection & Background Queue Status (Live Header Pill with Auto-Hide & Inline Play/Pause) */}
-          {queuePillVisible && (
-            <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-semibold uppercase tracking-wider shrink-0 ${
-              queueCompletedRecently
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-lg shadow-emerald-500/10'
-                : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-lg shadow-emerald-500/10'
-            }`}>
-              {queueCompletedRecently ? (
-                <button
-                  type="button"
-                  onClick={onOpenWaQueue}
-                  className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
-                  title="All WhatsApp messages sent"
-                >
-                  <Check size={12} className="text-emerald-400 shrink-0" />
-                  <span className="font-bold text-white">All sent</span>
-                </button>
-              ) : (
-                <>
-              <button
-                type="button"
-                onClick={onOpenWaQueue}
-                className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer"
-                title={`WhatsApp Live Queue Controller (${(waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)} queued)`}
-              >
-                {waQueueDetail?.isPaused ? (
-                  <PauseIcon size={12} className="text-amber-400 shrink-0" />
-                ) : (
-                  <RefreshCw size={12} className="animate-spin text-emerald-400 shrink-0" />
-                )}
-                <span className="font-bold text-white font-mono">
-                  {waQueueDetail?.counts?.sent || 0}/{(waQueueDetail?.counts?.sent || 0) + (waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0)}
-                </span>
-                {waQueueDetail?.activeTargetName && (
-                  <span className="text-emerald-300 font-bold truncate max-w-[120px]">
-                    ▶ {waQueueDetail.activeTargetName}
-                  </span>
-                )}
-              </button>
-
-              {/* Inline Play / Pause Toggle Button */}
-              <button
-                type="button"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  try {
-                    await apiClient.post('/whatsapp/queue/toggle-pause');
-                    window.dispatchEvent(new CustomEvent('cache-invalidate'));
-                  } catch (err) {
-                    console.error('Failed to toggle queue pause:', err);
-                  }
-                }}
-                className={`p-1 rounded-lg transition-all cursor-pointer ${
-                  waQueueDetail?.isPaused
-                    ? 'bg-amber-500/30 text-amber-300 hover:bg-amber-500/50'
-                    : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40'
-                }`}
-                title={waQueueDetail?.isPaused ? "Resume WhatsApp Queue" : "Pause WhatsApp Queue"}
-              >
-                {waQueueDetail?.isPaused ? <PlayIcon size={12} className="fill-current" /> : <PauseIcon size={12} className="fill-current" />}
-              </button>
-                </>
-              )}
-            </div>
-          )}
 
           {/* Quick Order Shortcut Button */}
           <button
@@ -1324,34 +1714,6 @@ const Topbar = ({
             aria-label="Live cart"
           >
             <ShoppingCart size={18} />
-          </button>
-
-          {/* Refresh Page Cache Button */}
-          {/* Backup Center Shortcut Button */}
-          <button
-            onClick={() => {
-              if (typeof window.openBackupCenter === 'function') {
-                window.openBackupCenter();
-              }
-            }}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
-            title="Backup & Restore Panel"
-          >
-            <Database size={18} />
-          </button>
-
-          {/* WhatsApp Queue Direct Access Shortcut Button */}
-          <button
-            onClick={() => whatsappQueueEvent.triggerOpen()}
-            className="p-2 text-emerald-400 hover:text-emerald-300 transition-all flex items-center justify-center relative hover:bg-emerald-500/15 rounded-xl border border-emerald-500/25 bg-emerald-500/5 cursor-pointer shadow-xs"
-            title="Open WhatsApp Message Queue & Live Controller"
-            aria-label="WhatsApp Queue"
-          >
-            <MessageSquareIcon size={18} />
-            <span className="absolute top-1 right-1 flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-            </span>
           </button>
 
           {/* Notification bell */}
@@ -1394,16 +1756,6 @@ const Topbar = ({
             )}
           </div>
 
-          {/* Keyboard Shortcuts button */}
-          <button
-            onClick={() => setShowShortcutHelp(true)}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
-            aria-label="Keyboard Shortcuts"
-            title="Keyboard Shortcuts Cheat Sheet (Ctrl + /)"
-          >
-            <Keyboard size={18} />
-          </button>
-
           <KeyboardShortcutsModal
             isOpen={showShortcutHelp}
             onClose={() => setShowShortcutHelp(false)}
@@ -1419,8 +1771,14 @@ const Topbar = ({
             {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
 
-          <button className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer" aria-label="Log out" title="Log out">
-            <LogOut size={18} />
+          {/* Settings Page Button */}
+          <button 
+            onClick={() => navigate('/settings')}
+            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer" 
+            aria-label="Settings" 
+            title="Settings & Configuration"
+          >
+            <SettingsIcon size={18} />
           </button>
         </div>
       </header>

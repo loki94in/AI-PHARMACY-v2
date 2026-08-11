@@ -54,7 +54,7 @@ export class BouncedAlertService {
       const distributorBounces: Record<string, Array<{ name: string; ordered: number; received: number }>> = {};
 
       for (const email of orderEmails) {
-        const orderInfo = emailService.extractOrderInfo(email);
+        const orderInfo = await emailService.extractOrderInfo(email);
         const invoiceNo = orderInfo.invoiceNumber;
         const distName = orderInfo.distributorName || email.distributor_name || 'Unknown Distributor';
 

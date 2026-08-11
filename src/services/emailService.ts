@@ -17,6 +17,7 @@ import { aiCameraService } from './aiCameraService.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
 import { getEmailRetentionLimit } from './storeSettingsService.js';
 import { config, getAppDataDir } from '../config/index.js';
+import { medicineService } from './medicineService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1275,7 +1276,7 @@ export class EmailService {
   /**
    * Extracts order info from email
    */
-  public extractOrderInfo(email: ProcessedEmail) {
+  public async extractOrderInfo(email: ProcessedEmail) {
     const subject = email.subject || '';
     const body = email.body || '';
 
@@ -1335,31 +1336,73 @@ export class EmailService {
     const date = new Date();
     const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 
-  // Try to extract medicines and quantities
+  // Try to extract medicine candidates. A line doesn't need an explicit "qty:" label to be
+  // considered — many distributors just list items one per line — so every non-noise line is
+  // treated as a candidate name, and quantity defaults to 1 when no explicit marker is found.
+  // Whether a candidate is actually a medicine gets decided later, against the real catalog.
   const medicines: Array<{ name: string; quantity: string }> = [];
   const lines = body.split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+
     const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
+    let qty = '1';
+    let name = trimmed;
     if (qtyMatch) {
-      const qty = qtyMatch[1] || qtyMatch[2];
-      let name = trimmed.replace(qtyMatch[0], '').replace(/[:\-\t\r\n]/g, ' ').trim();
-      name = cleanMedicineName(name);
-      if (name && name.length > 2 && isNaN(Number(name)) && !isNonMedicineNoise(name)) {
-        medicines.push({ name, quantity: qty });
-      }
+      qty = qtyMatch[1] || qtyMatch[2];
+      name = trimmed.replace(qtyMatch[0], '');
+    }
+    name = cleanMedicineName(name.replace(/[:\-\t\r\n]/g, ' ').trim());
+
+    if (name && name.length > 2 && isNaN(Number(name)) && !isNonMedicineNoise(name)) {
+      medicines.push({ name, quantity: qty });
     }
   }
 
-  const displayMeds = medicines.slice(0, 15);
+  // Only keep names that actually resolve to a real catalog entry — snap the
+  // extracted text to the canonical medicines.name value instead of trusting
+  // whatever free text sat on the email line. Resolution is scoped to this
+  // distributor's own history first (far more precise than the whole catalog),
+  // falling back to global/fuzzy matching only when nothing distributor-specific fits.
+  const resolvedMedicines: Array<{ name: string; quantity: string }> = [];
+  if (medicines.length > 0) {
+    try {
+      const db = await dbManager.getConnection();
+
+      let distributorId: number | null = null;
+      try {
+        const senderEmail = extractCleanEmail(email.from || '');
+        const distRow = await db.get(
+          `SELECT id FROM distributors WHERE (email IS NOT NULL AND email != '' AND LOWER(email) = ?) OR LOWER(name) = ?`,
+          [(senderEmail || '').toLowerCase(), distributorName.toLowerCase()]
+        );
+        distributorId = distRow?.id ?? null;
+      } catch (distErr) {
+        console.warn('[EmailService] Distributor lookup for medicine resolution failed:', distErr);
+      }
+
+      for (const m of medicines) {
+        const resolution = await medicineService.resolveMedicineNameMultiTier(db, m.name, distributorId);
+        if (!resolution.medicineId) continue;
+        const catalogRow = await db.get('SELECT name FROM medicines WHERE id = ?', [resolution.medicineId]);
+        if (catalogRow?.name) {
+          resolvedMedicines.push({ name: catalogRow.name, quantity: m.quantity });
+        }
+      }
+    } catch (err) {
+      console.error('[EmailService] Failed to resolve extracted medicine names against catalog:', err);
+    }
+  }
+
+  const displayMeds = resolvedMedicines.slice(0, 15);
 
     return {
       distributorName,
       invoiceNumber,
       timeStr,
       medicines: displayMeds,
-      totalItems: medicines.reduce((sum, m) => sum + parseInt(m.quantity || '0'), 0) || displayMeds.length,
+      totalItems: resolvedMedicines.reduce((sum, m) => sum + parseInt(m.quantity || '0'), 0) || displayMeds.length,
       urgencyLevel: (body.toLowerCase().includes('urgent') || subject.toLowerCase().includes('urgent')) ? 'high' : 'normal'
     };
   }
@@ -1497,7 +1540,7 @@ export class EmailService {
 
       if (isOrderRelated) {
         // Extract order info
-        const orderInfo = this.extractOrderInfo(email);
+        const orderInfo = await this.extractOrderInfo(email);
         const logMsg = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
 
         // Log as potential order for follow-up
@@ -1603,7 +1646,7 @@ export class EmailService {
    */
   private async processMedicineOrder(email: ProcessedEmail): Promise<void> {
     try {
-      const orderInfo = this.extractOrderInfo(email);
+      const orderInfo = await this.extractOrderInfo(email);
       const db = await dbManager.getConnection();
       
       // Log order processing start
@@ -3078,15 +3121,15 @@ export class EmailService {
             }))
           };
 
-          const orderInfo = this.extractOrderInfo(processedEmail);
+          const orderInfo = await this.extractOrderInfo(processedEmail);
           const isOrder = this.isOrderRelatedEmail(processedEmail) ? 1 : 0;
           const hasAttachments = processedEmail.attachments.length > 0 ? 1 : 0;
 
           // Upsert email record into local DB
           await db.run(
             `INSERT OR IGNORE INTO emails
-             (uid, from_addr, subject, body, date, is_seen, is_order, is_saved, distributor_name, has_attachments)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+             (uid, from_addr, subject, body, date, is_seen, is_order, is_saved, distributor_name, has_attachments, extracted_invoice_no, extracted_distributor)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
             [
               uid,
               processedEmail.from,
@@ -3096,7 +3139,9 @@ export class EmailService {
               isSeen,
               isOrder,
               orderInfo.distributorName,
-              hasAttachments
+              hasAttachments,
+              orderInfo.invoiceNumber !== 'N/A' ? orderInfo.invoiceNumber : null,
+              orderInfo.distributorName !== 'Unknown Distributor' ? orderInfo.distributorName : null
             ]
           );
 
@@ -3425,7 +3470,7 @@ export function isNonMedicineNoise(name: string): boolean {
   }
 
   // Tax / Registration / Invoice Metadata / Header & Footer Noise
-  if (/^(invoice|inv|bill|date|dated|gstin|pan|fssai|tin|cin|state\s*code|lr\s*no|dear\s*sir|greetings|thanks|kindly|computer|auto-generated|subject|re:|fw:|fwd:)\b/i.test(clean) || clean.includes('auto-generated')) {
+  if (/^(invoice|inv|bill|date|dated|gstin|pan|fssai|tin|cin|state\s*code|lr\s*no|dear\s*sir|greetings|thanks|kindly|computer|auto-generated|subject|re:|fw:|fwd:|signature|signatory|distributor|supplier|vendor|consignee|consignor|declaration|jurisdiction|destination|regards|sincerely|yours\s*faithfully)\b/i.test(clean) || clean.includes('auto-generated')) {
     return true;
   }
 
@@ -3436,7 +3481,12 @@ export function isNonMedicineNoise(name: string): boolean {
     'invoice', 'bill', 'date', 'vessel', 'lr no', 'transporter', 'vehicle', 'dispatch', 'dispatch date',
     'address', 'phone', 'email', 'website', 'contact', 'thank you', 'page', 'sl no', 'sr no',
     'particulars', 'description', 'rate', 'disc', 'discount', 'free', 'amount', 'mrp', 'batch',
-    'exp', 'expiry', 'hsn', 'sac', 'qty', 'quantity', 'pack', 'unit', 'gross', 'taxable'
+    'exp', 'expiry', 'hsn', 'sac', 'qty', 'quantity', 'pack', 'unit', 'gross', 'taxable',
+    // Common footer/signoff/boilerplate words that appear in virtually any distributor email
+    'signature', 'signatory', 'authorised signatory', 'authorized signatory', 'distributor', 'supplier',
+    'vendor', 'consignee', 'consignor', 'declaration', 'jurisdiction', 'destination', 'mode of payment',
+    'e&oe', 'e. & o.e.', 'regards', 'sincerely', 'yours faithfully', 'courier', 'godown', 'warehouse',
+    'po no', 'order no', 'ack no', 'ack date', 'irn', 'eway bill', 'e-way bill', 'ref no', 'reference no'
   ];
 
   if (exactNoise.includes(clean)) return true;
@@ -3445,7 +3495,11 @@ export function isNonMedicineNoise(name: string): boolean {
     'total ', 'total:', 'subtotal', 'grand total', 'net amount', 'bank account', 'bank details',
     'gstin:', 'gstin ', 'pan:', 'terms & conditions', 'terms and conditions', 'payment terms',
     'invoice no', 'bill no', 'dispatch date', 'thank you', 'page ', 'sl no', 'sr no',
-    'dl :', 'dl no', 'dl.no', 'dl-', 'd.l.'
+    'dl :', 'dl no', 'dl.no', 'dl-', 'd.l.',
+    'signature', 'signatory', 'authorised signatory', 'authorized signatory',
+    'distributor', 'supplier', 'vendor', 'consignee', 'consignor',
+    'yours faithfully', 'declaration', 'jurisdiction', 'destination', 'mode of payment',
+    'ack no', 'ack date', 'eway bill', 'e-way bill', 'po no', 'order no', 'buyer order'
   ];
 
   for (const prefix of noisePrefixes) {

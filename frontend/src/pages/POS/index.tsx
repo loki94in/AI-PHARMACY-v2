@@ -538,6 +538,7 @@ const POS = () => {
   
   // Doctor Modal state
   const [showDoctorModal, setShowDoctorModal] = useState(false);
+  const [editingDoctorId, setEditingDoctorId] = useState<number | string | null>(null);
   const [newDoctorName, setNewDoctorName] = useState('');
   const [newDoctorSpecialty, setNewDoctorSpecialty] = useState('');
   const [newDoctorPhone, setNewDoctorPhone] = useState('');
@@ -2444,17 +2445,68 @@ const POS = () => {
     }
   };
 
+  const handleOpenNewDoctorModal = () => {
+    setEditingDoctorId(null);
+    setNewDoctorName('');
+    setNewDoctorSpecialty('');
+    setNewDoctorPhone('');
+    setNewDoctorClinic('');
+    setNewDoctorRegNo('');
+    setShowDoctorModal(true);
+  };
+
+  const handleOpenEditDoctorModal = () => {
+    const matchedDoc = (doctorsList || []).find((d: any) => d.id === selectedDoctorId) ||
+      allDoctors.find((d: any) => d.id === selectedDoctorId || (d.name && d.name.toLowerCase().trim() === doctor.toLowerCase().trim()));
+
+    if (matchedDoc) {
+      setEditingDoctorId(matchedDoc.id);
+      let cleanName = matchedDoc.name || doctor;
+      cleanName = cleanName.replace(/^Dr\.\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+      setNewDoctorName(cleanName);
+      setNewDoctorSpecialty(matchedDoc.specialization || matchedDoc.specialty || '');
+      setNewDoctorPhone(matchedDoc.phone || '');
+      setNewDoctorClinic(matchedDoc.clinic_name || matchedDoc.address || '');
+      setNewDoctorRegNo(matchedDoc.reg_no || matchedDoc.registration_number || '');
+    } else {
+      setEditingDoctorId(null);
+      let cleanName = doctor.replace(/^Dr\.\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+      setNewDoctorName(cleanName);
+      setNewDoctorSpecialty('');
+      setNewDoctorPhone('');
+      setNewDoctorClinic('');
+      setNewDoctorRegNo('');
+    }
+    setShowDoctorModal(true);
+  };
+
   const handleRegisterDoctor = async () => {
     try {
       if (!newDoctorName) return;
-      const docName = newDoctorSpecialty ? `Dr. ${newDoctorName} (${newDoctorSpecialty})` : `Dr. ${newDoctorName}`;
-      const res = await api.addDoctor({
-        name: docName,
-        specialization: newDoctorSpecialty || 'General',
-        phone: newDoctorPhone,
-        clinic_name: newDoctorClinic,
-        reg_no: newDoctorRegNo
-      });
+      const formattedName = newDoctorName.trim().toLowerCase().startsWith('dr.') ? newDoctorName.trim() : `Dr. ${newDoctorName.trim()}`;
+      const docName = newDoctorSpecialty ? `${formattedName} (${newDoctorSpecialty.trim()})` : formattedName;
+
+      let res: any = null;
+      if (editingDoctorId) {
+        res = await api.updateDoctor(editingDoctorId, {
+          name: docName,
+          specialization: newDoctorSpecialty || 'General',
+          phone: newDoctorPhone,
+          clinic_name: newDoctorClinic,
+          reg_no: newDoctorRegNo
+        });
+        toastEvent.trigger(`✅ Doctor details updated for ${docName}`, 'success');
+      } else {
+        res = await api.addDoctor({
+          name: docName,
+          specialization: newDoctorSpecialty || 'General',
+          phone: newDoctorPhone,
+          clinic_name: newDoctorClinic,
+          reg_no: newDoctorRegNo
+        });
+        toastEvent.trigger(`✅ New Doctor registered: ${docName}`, 'success');
+      }
+
       try {
         await api.saveContact({
           name: docName,
@@ -2465,6 +2517,7 @@ const POS = () => {
         window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
         window.dispatchEvent(new CustomEvent('contacts-updated'));
       } catch (e) {}
+
       // Refresh doctors list
       queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
       setDoctor(docName);
@@ -2472,6 +2525,7 @@ const POS = () => {
         setSelectedDoctorId(res.id);
       }
       setShowDoctorModal(false);
+      setEditingDoctorId(null);
       setNewDoctorName('');
       setNewDoctorSpecialty('');
       setNewDoctorPhone('');
@@ -2479,7 +2533,7 @@ const POS = () => {
       setNewDoctorRegNo('');
     } catch (err) {
       console.error(err);
-      alert('Failed to register doctor');
+      alert('Failed to save doctor details');
     }
   };
 
@@ -2854,8 +2908,23 @@ const POS = () => {
                       )}
                     </div>
                   )}
+
+                  {/* Inline Edit Doctor Button (Visible when Doctor is selected/typed) */}
+                  {doctor.trim() !== '' && (
+                    <button
+                      type="button"
+                      onClick={handleOpenEditDoctorModal}
+                      aria-label="Edit Selected Doctor Profile"
+                      className="h-8.5 w-8.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-sm"
+                      title="Edit Selected Doctor Profile Directly"
+                    >
+                      <Edit size={14} className="stroke-[2.5]" />
+                    </button>
+                  )}
+
                   <button
-                    onClick={() => setShowDoctorModal(true)}
+                    type="button"
+                    onClick={handleOpenNewDoctorModal}
                     aria-label="Register New Doctor"
                     className="h-8.5 w-8.5 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0 cursor-pointer"
                     title="Register New Doctor"
@@ -4251,14 +4320,14 @@ const POS = () => {
         document.body
       )}
 
-      {/* Doctor Registration Modal */}
+      {/* Doctor Registration / Edit Modal */}
       {showDoctorModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm fade-in">
           <div className="bg-bg border border-border rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col">
             <div className="px-5 py-4 border-b border-border bg-bg3/30 flex items-center justify-between">
               <h3 className="font-bold flex items-center gap-2 text-sky text-sm">
-                <Plus size={18} />
-                Register New Doctor
+                {editingDoctorId ? <Edit size={18} className="text-amber-400" /> : <Plus size={18} />}
+                {editingDoctorId ? 'Edit Doctor Profile' : 'Register New Doctor'}
               </h3>
               <button onClick={() => setShowDoctorModal(false)} className="text-muted hover:text-text transition-colors">
                 <X size={18} />

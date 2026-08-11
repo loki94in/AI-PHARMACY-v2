@@ -106,6 +106,7 @@ function normalizeSettingsTab(tabParam: string | null): string {
   if (lower === 'profile' || lower === 'store') return 'profile';
   if (lower === 'staff' || lower === 'security') return 'staff';
   if (lower === 'integrations' || lower === 'credentials') return 'integrations';
+  if (lower === 'triggers' || lower === 'schedules' || lower === 'cron' || lower === 'automation') return 'triggers';
   if (lower === 'backups' || lower === 'data' || lower === 'maintenance') return 'backups';
   return 'backups';
 }
@@ -125,6 +126,7 @@ export default function Settings() {
     { id: 'profile', label: 'Store Profile', icon: Building2, desc: 'Pharmacy details, license & store layout' },
     { id: 'staff', label: 'Staff & Security', icon: Shield, desc: 'Cashier accounts, admin access & devices' },
     { id: 'integrations', label: 'Integrations & Credentials', icon: Zap, desc: 'WhatsApp, Telegram, Gmail & Pharmarack' },
+    { id: 'triggers', label: 'Trigger Schedules', icon: Clock, desc: 'Manage automated trigger times, intervals & cron frequencies' },
     { id: 'backups', label: 'Data & Backups', icon: Database, desc: 'Database backups, fetch control & reset' }
   ];
 
@@ -182,6 +184,7 @@ export default function Settings() {
             {activeTab === 'profile' && <StoreProfileTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
             {activeTab === 'staff' && <StaffSecurityTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
             {activeTab === 'integrations' && <IntegrationsCredentialsTab rawSettings={rawSettings} refetchSettings={refetchSettings} isVisible={isPageVisible} />}
+            {activeTab === 'triggers' && <TriggerSchedulesTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
             {activeTab === 'backups' && <DataBackupsTab rawSettings={rawSettings} refetchSettings={refetchSettings} />}
           </>
         )}
@@ -1452,6 +1455,471 @@ function ResetDataModal({ initialMode = 'data', onClose, refetchSettings }: Rese
             {resetting ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
             <span>Execute {resetType === 'factory' ? 'Factory Reset' : 'System Reset'}</span>
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// SUB-TAB 5: TRIGGER SCHEDULES & AUTOMATION
+// ==========================================
+
+function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Record<string, string>; refetchSettings: () => void }) {
+  const [formData, setFormData] = useState({
+    automationEnabled: rawSettings.automation_enabled !== 'false',
+
+    // 1. Daily Operational Check
+    triggerDailyCheckEnabled: rawSettings.trigger_daily_check_enabled !== 'false',
+    triggerDailyCheckTime: rawSettings.trigger_daily_check_time || '09:00',
+
+    // 2. Near-Expiry Stock Scan
+    triggerExpiryScanEnabled: rawSettings.trigger_expiry_scan_enabled !== 'false',
+    triggerExpiryScanTime: rawSettings.trigger_expiry_scan_time || '09:00',
+    triggerExpiryScanDays: rawSettings.trigger_expiry_scan_days || '1,16',
+    triggerExpiryLookaheadDays: rawSettings.trigger_expiry_lookahead_days || '90',
+
+    // 3. Distributor Dispatch Reminder
+    triggerDispatchReminderEnabled: rawSettings.trigger_dispatch_reminder_enabled !== 'false',
+    triggerDispatchReminderTimeStart: rawSettings.trigger_dispatch_reminder_time_start || '12:30',
+    triggerDispatchReminderTimeEnd: rawSettings.trigger_dispatch_reminder_time_end || '13:00',
+
+    // 4. Nightly Database Backup
+    triggerBackupEnabled: rawSettings.trigger_backup_enabled !== 'false',
+    triggerBackupTime: rawSettings.trigger_backup_time || '21:59',
+
+    // 5. Auto Expiry Return Memos
+    triggerExpiryReturnEnabled: rawSettings.trigger_expiry_return_enabled !== 'false',
+    triggerExpiryReturnDays: rawSettings.trigger_expiry_return_days || '18,19,20',
+
+    // 6. Pharmarack Token Refresher
+    triggerPharmarackRefreshEnabled: rawSettings.trigger_pharmarack_refresh_enabled !== 'false',
+    triggerPharmarackRefreshIntervalMin: rawSettings.trigger_pharmarack_refresh_interval_min || '20',
+
+    // 7. WhatsApp Message Queue
+    triggerWhatsappQueueEnabled: rawSettings.trigger_whatsapp_queue_enabled !== 'false',
+    triggerWhatsappQueueIntervalSec: rawSettings.trigger_whatsapp_queue_interval_sec || '30',
+
+    // 8. Email PDF Invoice Poller
+    triggerEmailPollerEnabled: rawSettings.trigger_email_poller_enabled !== 'false',
+    triggerEmailPollerIntervalMin: rawSettings.trigger_email_poller_interval_min || '15',
+
+    // 9. Doctor Daily Reports
+    triggerDoctorReportEnabled: rawSettings.trigger_doctor_report_enabled !== 'false',
+    triggerDoctorReportTime: rawSettings.trigger_doctor_report_time || '20:00',
+
+    // 10. Patient Chronic Refill Evaluator
+    triggerRefillsEnabled: rawSettings.trigger_refills_enabled !== 'false',
+    triggerRefillsCheckTime: rawSettings.trigger_refills_check_time || '09:00',
+  });
+
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+
+  const handleSaveTriggers = async () => {
+    setSaving(true);
+    try {
+      const payload: Record<string, string> = {
+        automation_enabled: formData.automationEnabled ? 'true' : 'false',
+        trigger_daily_check_enabled: formData.triggerDailyCheckEnabled ? 'true' : 'false',
+        trigger_daily_check_time: formData.triggerDailyCheckTime,
+        trigger_expiry_scan_enabled: formData.triggerExpiryScanEnabled ? 'true' : 'false',
+        trigger_expiry_scan_time: formData.triggerExpiryScanTime,
+        trigger_expiry_scan_days: formData.triggerExpiryScanDays,
+        trigger_expiry_lookahead_days: formData.triggerExpiryLookaheadDays,
+        trigger_dispatch_reminder_enabled: formData.triggerDispatchReminderEnabled ? 'true' : 'false',
+        trigger_dispatch_reminder_time_start: formData.triggerDispatchReminderTimeStart,
+        trigger_dispatch_reminder_time_end: formData.triggerDispatchReminderTimeEnd,
+        trigger_backup_enabled: formData.triggerBackupEnabled ? 'true' : 'false',
+        trigger_backup_time: formData.triggerBackupTime,
+        trigger_expiry_return_enabled: formData.triggerExpiryReturnEnabled ? 'true' : 'false',
+        trigger_expiry_return_days: formData.triggerExpiryReturnDays,
+        trigger_pharmarack_refresh_enabled: formData.triggerPharmarackRefreshEnabled ? 'true' : 'false',
+        trigger_pharmarack_refresh_interval_min: formData.triggerPharmarackRefreshIntervalMin,
+        trigger_whatsapp_queue_enabled: formData.triggerWhatsappQueueEnabled ? 'true' : 'false',
+        trigger_whatsapp_queue_interval_sec: formData.triggerWhatsappQueueIntervalSec,
+        trigger_email_poller_enabled: formData.triggerEmailPollerEnabled ? 'true' : 'false',
+        trigger_email_poller_interval_min: formData.triggerEmailPollerIntervalMin,
+        trigger_doctor_report_enabled: formData.triggerDoctorReportEnabled ? 'true' : 'false',
+        trigger_doctor_report_time: formData.triggerDoctorReportTime,
+        trigger_refills_enabled: formData.triggerRefillsEnabled ? 'true' : 'false',
+        trigger_refills_check_time: formData.triggerRefillsCheckTime,
+      };
+
+      await api.saveSettings(payload);
+      refetchSettings();
+      updateSettingsCache(payload);
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      toastEvent.emit('show', { message: 'Automated trigger schedules saved & applied successfully!', type: 'success' });
+    } catch (err) {
+      console.error('Failed to save trigger schedules:', err);
+      toastEvent.emit('show', { message: 'Failed to save trigger schedules', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header Banner & Save Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-bg3/40 border border-border">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20 mt-0.5">
+            <Clock size={22} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-text">Automated Trigger Schedule Engine</h2>
+            <p className="text-xs text-muted mt-0.5">Configure execution times, frequency intervals & auto-triggers for every background worker in AI PHARMACY OS.</p>
+          </div>
+        </div>
+
+        <button
+          onClick={handleSaveTriggers}
+          disabled={saving}
+          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-white font-bold text-xs rounded-xl hover:bg-primary/90 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+        >
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          <span>{saving ? 'Applying Schedules...' : 'Save & Apply Schedules'}</span>
+        </button>
+      </div>
+
+      {/* Global Master Toggle */}
+      <div className="p-4 rounded-2xl bg-bg3/20 border border-border flex items-center justify-between">
+        <div>
+          <div className="text-xs font-bold text-text">Master Background Automation Switch</div>
+          <div className="text-[11px] text-muted">Master override to enable or pause all background automated workers across the system.</div>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={formData.automationEnabled}
+            onChange={(e) => setFormData({ ...formData, automationEnabled: e.target.checked })}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-bg3 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+        </label>
+      </div>
+
+      {/* Grid of 10 Trigger Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Trigger 1: Daily Operational Check */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <span className="text-xs font-bold text-text">Daily Operational Check</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerDailyCheckEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerDailyCheckEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Evaluates patient refills, checks overdue Khata credit notes, and triggers bounced product alerts daily.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Execution Time:</label>
+            <input
+              type="time"
+              value={formData.triggerDailyCheckTime}
+              onChange={(e) => setFormData({ ...formData, triggerDailyCheckTime: e.target.value })}
+              className="px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 2: Near-Expiry Stock Scan */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-500" />
+              <span className="text-xs font-bold text-text">Near-Expiry Stock Scan & Alerts</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerExpiryScanEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerExpiryScanEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Scans inventory for batches nearing expiration and sends alerts to store owner.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-text">Time:</label>
+              <input
+                type="time"
+                value={formData.triggerExpiryScanTime}
+                onChange={(e) => setFormData({ ...formData, triggerExpiryScanTime: e.target.value })}
+                className="w-full px-2 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-text">Days:</label>
+              <input
+                type="text"
+                placeholder="1,16"
+                value={formData.triggerExpiryScanDays}
+                onChange={(e) => setFormData({ ...formData, triggerExpiryScanDays: e.target.value })}
+                className="w-full px-2 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Trigger 3: Distributor Dispatch Reminder */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Truck size={16} className="text-blue-500" />
+              <span className="text-xs font-bold text-text">Distributor Dispatch Reminders</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerDispatchReminderEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerDispatchReminderEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Sends automated daily dispatches and stock reminders to suppliers during active window.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-text">Start:</label>
+              <input
+                type="time"
+                value={formData.triggerDispatchReminderTimeStart}
+                onChange={(e) => setFormData({ ...formData, triggerDispatchReminderTimeStart: e.target.value })}
+                className="w-full px-2 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-text">End:</label>
+              <input
+                type="time"
+                value={formData.triggerDispatchReminderTimeEnd}
+                onChange={(e) => setFormData({ ...formData, triggerDispatchReminderTimeEnd: e.target.value })}
+                className="w-full px-2 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Trigger 4: Nightly Database Backup */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Database size={16} className="text-purple-500" />
+              <span className="text-xs font-bold text-text">Nightly Database Backup</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerBackupEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerBackupEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Automatically compiles compressed database backups every night.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Backup Time:</label>
+            <input
+              type="time"
+              value={formData.triggerBackupTime}
+              onChange={(e) => setFormData({ ...formData, triggerBackupTime: e.target.value })}
+              className="px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 5: Auto Expiry Return Memos */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <RotateCcw size={16} className="text-indigo-500" />
+              <span className="text-xs font-bold text-text">Auto Expiry Return Memos</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerExpiryReturnEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerExpiryReturnEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Auto-creates distributor return memos for expired batches on selected days of the month.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Days of Month:</label>
+            <input
+              type="text"
+              placeholder="18,19,20"
+              value={formData.triggerExpiryReturnDays}
+              onChange={(e) => setFormData({ ...formData, triggerExpiryReturnDays: e.target.value })}
+              className="w-full px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 6: Pharmarack Token Refresher */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <RefreshCw size={16} className="text-teal-500" />
+              <span className="text-xs font-bold text-text">Pharmarack Token Refresher</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerPharmarackRefreshEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerPharmarackRefreshEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Keeps Pharmarack session rolling and refreshes OAuth tokens headlessly.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Interval (Minutes):</label>
+            <input
+              type="number"
+              min="5"
+              max="120"
+              value={formData.triggerPharmarackRefreshIntervalMin}
+              onChange={(e) => setFormData({ ...formData, triggerPharmarackRefreshIntervalMin: e.target.value })}
+              className="w-24 px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 7: WhatsApp Message Queue */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MessageCircle size={16} className="text-green-500" />
+              <span className="text-xs font-bold text-text">WhatsApp Message Queue</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerWhatsappQueueEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerWhatsappQueueEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Processes pending outbound WhatsApp messages with rate-limiting and anti-ban protection.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Interval (Seconds):</label>
+            <input
+              type="number"
+              min="5"
+              max="300"
+              value={formData.triggerWhatsappQueueIntervalSec}
+              onChange={(e) => setFormData({ ...formData, triggerWhatsappQueueIntervalSec: e.target.value })}
+              className="w-24 px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 8: Email PDF Invoice Poller */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail size={16} className="text-cyan-500" />
+              <span className="text-xs font-bold text-text">Email PDF Invoice Poller</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerEmailPollerEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerEmailPollerEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Scans linked store email inbox for incoming distributor invoices and queues OCR parsing.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Polling (Minutes):</label>
+            <input
+              type="number"
+              min="5"
+              max="120"
+              value={formData.triggerEmailPollerIntervalMin}
+              onChange={(e) => setFormData({ ...formData, triggerEmailPollerIntervalMin: e.target.value })}
+              className="w-24 px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 9: Doctor Daily Reports */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Stethoscope size={16} className="text-rose-500" />
+              <span className="text-xs font-bold text-text">Doctor Daily Summary Reports</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerDoctorReportEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerDoctorReportEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Compiles daily prescription statistics and emails/whatsapps reports to partner doctors.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Report Time:</label>
+            <input
+              type="time"
+              value={formData.triggerDoctorReportTime}
+              onChange={(e) => setFormData({ ...formData, triggerDoctorReportTime: e.target.value })}
+              className="px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Trigger 10: Chronic Refill Evaluator */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap size={16} className="text-sky-500" />
+              <span className="text-xs font-bold text-text">Chronic Medication Refill Alerts</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerRefillsEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerRefillsEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Scans chronic dosage schedules and queues 3-day refill alerts for patients.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Check Time:</label>
+            <input
+              type="time"
+              value={formData.triggerRefillsCheckTime}
+              onChange={(e) => setFormData({ ...formData, triggerRefillsCheckTime: e.target.value })}
+              className="px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
+          </div>
         </div>
       </div>
     </div>
