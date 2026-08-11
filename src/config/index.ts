@@ -127,7 +127,11 @@ export const config: AppConfig = {
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${resolvedPort}`,
   taxRate: parseFloat(process.env.TAX_RATE || '0.05'),
   maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE || '50', 10) * 1024 * 1024, // 50MB default
-  nodeEnv: process.env.NODE_ENV || 'development',
+  // Packaged builds default to production even if NODE_ENV wasn't set by the
+  // launcher (e.g. the portable .bat runs the .exe directly, bypassing the
+  // installer step that copies portable.env). Source/dev runs keep the old
+  // 'development' default since they're never packaged.
+  nodeEnv: process.env.NODE_ENV || (isPackagedApp() ? 'production' : 'development'),
   // Telegram
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramChatId: process.env.TELEGRAM_CHAT_ID,

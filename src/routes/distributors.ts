@@ -164,7 +164,7 @@ router.post('/returns/reconcile-credit', async (req, res) => {
   }
 });
 
-router.get('/:id/pending-returns', async (req, res) => {
+router.get(['/distributors/:id/pending-returns', '/:id/pending-returns'], async (req, res) => {
   const { id } = req.params;
   try {
     const db = await dbManager.getConnection();

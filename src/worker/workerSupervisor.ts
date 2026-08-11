@@ -80,7 +80,15 @@ export class WorkerSupervisor {
     config.spawnTime = Date.now();
     config.lastPongTime = Date.now();
 
-    if (process.env.SINGLE_PROCESS_WORKERS === 'true') {
+    // Default to in-process workers for packaged installs so a production
+    // deploy that never got SINGLE_PROCESS_WORKERS into its .env doesn't
+    // silently fall back to forked workers and reintroduce SQLite lock
+    // contention on POS bill saves. Explicit 'false' still opts out.
+    const useSingleProcessWorkers = process.env.SINGLE_PROCESS_WORKERS
+      ? process.env.SINGLE_PROCESS_WORKERS === 'true'
+      : isPackagedApp();
+
+    if (useSingleProcessWorkers) {
       console.log(`[WorkerSupervisor] Running ${config.name} in-process (Low-RAM Single Process mode)...`);
       if (config.role === 'catalog') {
         import('./catalogWorker.js').then(m => {

@@ -582,6 +582,134 @@ router.post('/medicines/seed-master', async (req, res) => {
   }
 });
 
+// POST /api/medicines/sync-from-inventory - pull purchase/sale items missing from master catalog
+router.post('/medicines/sync-from-inventory', async (req, res) => {
+  try {
+    const { syncInventoryToMaster } = await import('../services/masterMedicinesSeedService.js');
+    const result = await syncInventoryToMaster();
+    res.json({ success: true, message: `Synced ${result.synced} medicine(s) from inventory into master catalog`, ...result });
+  } catch (error: any) {
+    console.error('Failed to sync inventory to master:', error);
+    res.status(500).json({ error: 'Failed to sync inventory to master: ' + error.message });
+  }
+});
+
+// PUT /api/medicines/:id/quick-edit - universal quick-edit save (medicine + primary inventory row)
+router.put('/medicines/:id/quick-edit', async (req, res) => {
+  let db;
+  const { id } = req.params;
+  const {
+    name, generic_name, manufacturer, marketed_by,
+    packaging, pack_unit, item_code, category, api_reference,
+    inventory_id, quantity, rack_location, hsn_code,
+    item_type, therapeutic, sub_therapeutic, schedule_type,
+    short_code, ucode, cgst_per, sgst_per, igst_per,
+    reorder_level, max_stock_level, rack, disable_auto_barcode, tb_medicine,
+    sell_price, metadata, allow_loose_sale
+  } = req.body;
+
+  try {
+    if (!id) {
+      return res.status(400).json({ error: 'id is required' });
+    }
+    db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (name !== undefined) { updates.push('name = ?'); params.push(name); }
+    if (generic_name !== undefined) { updates.push('generic_name = ?'); params.push(generic_name); }
+    if (manufacturer !== undefined) { updates.push('manufacturer = ?'); params.push(manufacturer); }
+    if (marketed_by !== undefined) { updates.push('marketed_by = ?'); params.push(marketed_by); }
+    if (packaging !== undefined) {
+      updates.push('packaging = ?');
+      params.push(packaging);
+      const parsedSize = parsePackSizeFromPackaging(packaging);
+      if (parsedSize !== null) {
+        updates.push('pack_size = ?');
+        params.push(parsedSize);
+      }
+    }
+    if (pack_unit !== undefined) { updates.push('pack_unit = ?'); params.push(pack_unit); }
+    if (item_code !== undefined) { updates.push('item_code = ?'); params.push(item_code); }
+    if (category !== undefined) { updates.push('category = ?'); params.push(category); }
+    if (api_reference !== undefined) { updates.push('api_reference = ?'); params.push(api_reference); }
+    if (hsn_code !== undefined) { updates.push('hsn_code = ?'); params.push(hsn_code); }
+    if (item_type !== undefined) { updates.push('item_type = ?'); params.push(item_type); }
+    if (therapeutic !== undefined) { updates.push('therapeutic = ?'); params.push(therapeutic); }
+    if (sub_therapeutic !== undefined) { updates.push('sub_therapeutic = ?'); params.push(sub_therapeutic); }
+    if (schedule_type !== undefined) { updates.push('schedule_type = ?'); params.push(schedule_type); }
+    if (short_code !== undefined) { updates.push('short_code = ?'); params.push(short_code); }
+    if (ucode !== undefined) { updates.push('ucode = ?'); params.push(ucode); }
+    if (cgst_per !== undefined) { updates.push('cgst_per = ?'); params.push(parseFloat(cgst_per) || 0); }
+    if (sgst_per !== undefined) { updates.push('sgst_per = ?'); params.push(parseFloat(sgst_per) || 0); }
+    if (igst_per !== undefined) { updates.push('igst_per = ?'); params.push(parseFloat(igst_per) || 0); }
+    if (allow_loose_sale !== undefined) { updates.push('allow_loose_sale = ?'); params.push(allow_loose_sale ? 1 : 0); }
+    if (max_stock_level !== undefined) { updates.push('max_stock_level = ?'); params.push(parseInt(max_stock_level, 10) || null); }
+    if (rack !== undefined) { updates.push('rack = ?'); params.push(rack); }
+    if (disable_auto_barcode !== undefined) { updates.push('disable_auto_barcode = ?'); params.push(disable_auto_barcode ? 1 : 0); }
+    if (tb_medicine !== undefined) { updates.push('tb_medicine = ?'); params.push(tb_medicine ? 1 : 0); }
+    if (sell_price !== undefined) {
+      const parsedPrice = (sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : null;
+      updates.push('sell_price = ?');
+      params.push(parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null);
+    }
+    if (metadata !== undefined) { updates.push('metadata = ?'); params.push(typeof metadata === 'string' ? metadata : JSON.stringify(metadata)); }
+
+    if (updates.length > 0) {
+      params.push(id);
+      await db.run(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
+    }
+
+    if (inventory_id) {
+      const invUpdates: string[] = [];
+      const invParams: any[] = [];
+      if (quantity !== undefined) { invUpdates.push('quantity = ?'); invParams.push(quantity); }
+      if (rack_location !== undefined || rack !== undefined) {
+        invUpdates.push('rack_location = ?');
+        invParams.push(rack_location !== undefined ? rack_location : rack);
+      }
+      if (reorder_level !== undefined) { invUpdates.push('reorder_level = ?'); invParams.push(parseInt(reorder_level, 10) || 10); }
+
+      if (invUpdates.length > 0) {
+        invParams.push(inventory_id);
+        await db.run(`UPDATE inventory_master SET ${invUpdates.join(', ')} WHERE id = ?`, invParams);
+      }
+    }
+
+    await db.run('COMMIT');
+    inventoryCache.invalidate();
+
+    res.json({ success: true, message: 'Medicine updated' });
+  } catch (error: any) {
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (e) {}
+    }
+    console.error('Medicine quick-edit error:', error);
+    res.status(500).json({ error: 'Internal server error during update' });
+  }
+});
+
+// PATCH /api/medicines/:id/allow-loose-sale - fast cross-page toggle
+router.patch('/medicines/:id/allow-loose-sale', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { allow_loose_sale } = req.body;
+    if (!id || allow_loose_sale === undefined) {
+      return res.status(400).json({ error: 'id and allow_loose_sale boolean/number are required' });
+    }
+    const val = allow_loose_sale ? 1 : 0;
+    const db = await dbManager.getConnection();
+    await db.run('UPDATE medicines SET allow_loose_sale = ? WHERE id = ?', [val, id]);
+    inventoryCache.invalidate();
+    res.json({ success: true, medicine_id: Number(id), allow_loose_sale: val });
+  } catch (err: any) {
+    console.error('Error toggling allow_loose_sale:', err);
+    res.status(500).json({ error: err.message || 'Failed to toggle allow_loose_sale' });
+  }
+});
+
 // DELETE /api/medicines/:id - permanent medicine deletion & cache invalidation
 router.delete('/medicines/:id', async (req, res) => {
   const { id } = req.params;
