@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle } from 'lucide-react';
+import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle, EyeOff, Ban, Package } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent, liveCartAddEvent } from '../services/events';
 
@@ -382,6 +382,30 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   // Pending Orders States and Functions
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
+
+  // Pending Filter Tab State
+  const [pendingFilterTab, setPendingFilterTab] = useState<'all' | 'bounced' | 'orders' | 'minstock' | 'skipped'>('all');
+
+  // Temporary Session Skip Handlers (valid medicines skipped for current order run only)
+  const [skippedItemKeys, setSkippedItemKeys] = useState<Set<string>>(new Set());
+
+  const handleSkipItem = (itemKey: string, medicineName: string) => {
+    setSkippedItemKeys((prev) => {
+      const next = new Set(prev);
+      next.add(itemKey);
+      return next;
+    });
+    toastEvent.trigger(`Skipped "${medicineName}" for this order run`, 'info');
+  };
+
+  const handleUnskipItem = (itemKey: string, medicineName: string) => {
+    setSkippedItemKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(itemKey);
+      return next;
+    });
+    toastEvent.trigger(`Restored "${medicineName}" to pending list`, 'success');
+  };
 
   // Pending Refills States and Functions
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(cachedPendingRefills);
@@ -1451,26 +1475,59 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           {/* Left Column: Unified Pending Table */}
           <div className="flex flex-col h-full overflow-hidden bg-bg3/15 rounded-2xl p-3.5 border border-glass-border/20">
             {/* Header */}
-            <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30">
+            <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30 gap-1.5 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold uppercase tracking-widest text-muted">
-                  Pending ({pendingOrders.length + pendingRefills.length + reconOrders.length + autoRefillItems.length})
+                  Pending ({pendingOrders.filter(o => !skippedItemKeys.has(`order-${o.id}`)).length + pendingRefills.filter(r => !skippedItemKeys.has(`refill-${r.id}`)).length + reconOrders.filter(rc => (rc.medicine_names || [rc.subject]).some((m: string) => !skippedItemKeys.has(`recon-${rc.email_uid || m}-${m}`))).length + autoRefillItems.filter(a => !skippedItemKeys.has(`minstock-${a.medicine_id}`)).length})
                 </span>
               </div>
-              <div className="flex gap-1 text-[8px] font-bold uppercase flex-wrap">
-                <span className="px-1 py-0.5 rounded bg-bg2 text-muted border border-border">{autoRefillItems.length} Auto</span>
-                <span className="px-1 py-0.5 rounded bg-bg2 text-muted border border-border">{pendingOrders.length} Ord</span>
-                <span className="px-1 py-0.5 rounded bg-bg2 text-muted border border-border">{pendingRefills.length} Refill</span>
-                <span className="px-1 py-0.5 rounded bg-bg2 text-muted border border-border">{reconOrders.length} Recon</span>
+              <div className="flex gap-1 text-[8.5px] font-bold uppercase select-none flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setPendingFilterTab('all')}
+                  className={`px-1.5 py-0.5 rounded border transition-all cursor-pointer ${pendingFilterTab === 'all' ? 'bg-bg3 text-text border-glass-border font-extrabold shadow-sm' : 'bg-bg2 text-muted border-border hover:bg-bg3'}`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingFilterTab('bounced')}
+                  className={`px-1.5 py-0.5 rounded border transition-all cursor-pointer ${pendingFilterTab === 'bounced' ? 'bg-bg3 text-text border-glass-border font-extrabold shadow-sm' : 'bg-bg2 text-muted border-border hover:bg-bg3'}`}
+                >
+                  Bounced ({reconOrders.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingFilterTab('orders')}
+                  className={`px-1.5 py-0.5 rounded border transition-all cursor-pointer ${pendingFilterTab === 'orders' ? 'bg-bg3 text-text border-glass-border font-extrabold shadow-sm' : 'bg-bg2 text-muted border-border hover:bg-bg3'}`}
+                >
+                  Orders ({pendingOrders.length + pendingRefills.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingFilterTab('minstock')}
+                  className={`px-1.5 py-0.5 rounded border transition-all cursor-pointer ${pendingFilterTab === 'minstock' ? 'bg-bg3 text-text border-glass-border font-extrabold shadow-sm' : 'bg-bg2 text-muted border-border hover:bg-bg3'}`}
+                >
+                  MinStock ({autoRefillItems.length})
+                </button>
+                {skippedItemKeys.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingFilterTab('skipped')}
+                    className={`px-1.5 py-0.5 rounded border transition-all cursor-pointer ${pendingFilterTab === 'skipped' ? 'bg-bg3 text-text border-glass-border font-extrabold shadow-sm' : 'bg-bg2 text-muted border-border hover:bg-bg3'}`}
+                  >
+                    Skipped ({skippedItemKeys.size})
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Inline New Special Request Form */}
             {showNewRequestForm && (
-              <form onSubmit={handleCreateSpecialRequest} className="my-2 p-2.5 bg-bg3/60 border border-primary/30 rounded-xl space-y-2 animate-in fade-in zoom-in-95 duration-150 shrink-0">
+              <form onSubmit={handleCreateSpecialRequest} className="my-2 p-2.5 bg-bg3/60 border border-glass-border/30 rounded-xl space-y-2 animate-in fade-in zoom-in-95 duration-150 shrink-0">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary flex items-center gap-1">
-                    <Sparkles size={11} /> New Special Medicine Request
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-text flex items-center gap-1">
+                    <Sparkles size={11} className="text-muted" /> New Special Medicine Request
                   </span>
                   <button type="button" onClick={() => setShowNewRequestForm(false)} className="text-muted hover:text-text text-xs">✕</button>
                 </div>
@@ -1503,9 +1560,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSavingNewReq}
-                  className="w-full py-1 bg-primary hover:bg-primary/90 text-bg font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-all disabled:opacity-50"
+                  className="w-full py-1 bg-bg3 hover:bg-bg2 text-text border border-border font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-all disabled:opacity-50"
                 >
-                  {isSavingNewReq ? <Loader2 size={12} className="animate-spin" /> : 'Save Request'}
+                  {isSavingNewReq ? <Loader2 size={12} className="animate-spin text-muted" /> : 'Save Request'}
                 </button>
               </form>
             )}
@@ -1521,197 +1578,108 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               ) : (
                 <table className="w-full text-xs border-collapse">
                   <thead>
-                    <tr className="text-muted border-b border-glass-border/20">
-                      <th className="text-left py-1.5 px-1 font-semibold w-14">Type</th>
-                      <th className="text-left py-1.5 px-1 font-semibold">Product / Detail</th>
-                      <th className="text-right py-1.5 px-1 font-semibold w-10">Qty</th>
-                      <th className="text-right py-1.5 px-1 font-semibold w-12">Action</th>
+                    <tr className="text-muted border-b border-glass-border/20 text-[10px]">
+                      <th className="text-left py-1 px-1 font-semibold w-7">Tag</th>
+                      <th className="text-left py-1 px-1 font-semibold">Product & Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-glass-border/10">
 
-                    {/* Orders */}
-                    {pendingOrders.map(order => {
-                      const cartMatch = getOrderCartMatch(order);
-                      const inCart = Boolean(cartMatch?.item);
-                      const matchScore = cartMatch?.result?.score || 0;
+                    {/* 1. TOP PRIORITY: Reconcile & Bounced Email Orders */}
+                    {reconOrders.flatMap((recon, reconIdx) => {
+                      const addedList = addedReconMedicines[recon.email_uid] || [];
+                      const medNames: string[] = recon.medicine_names && recon.medicine_names.length > 0 ? recon.medicine_names : [recon.subject || 'Recon Medicine'];
 
-                      const handleConfirmOrdered = async () => {
-                        try {
-                          await api.updateOrder(order.id, { status: 'Ordered' });
-                          toastEvent.trigger(`Confirmed & marked "${order.product}" as Ordered!`, 'success');
-                          await fetchPendingOrders();
-                        } catch (err: any) {
-                          toastEvent.trigger('Failed to update status', 'error');
+                      return medNames.map((medName: string, medIdx: number) => {
+                        const itemKey = `recon-${recon.email_uid || reconIdx}-${medName}`;
+                        const isSkipped = skippedItemKeys.has(itemKey);
+                        const isAdded = addedList.includes(medName);
+
+                        if (pendingFilterTab === 'skipped' ? !isSkipped : (isSkipped || (pendingFilterTab !== 'all' && pendingFilterTab !== 'bounced'))) {
+                          return null;
                         }
-                      };
 
-                      return (
-                        <tr
-                          key={`order-${order.id}`}
-                          className={`transition-colors cursor-pointer ${
-                            inCart ? 'bg-bg3/30' : 'hover:bg-bg3/40'
-                          }`}
-                          onClick={() => !inCart && handleTransferToSearch(order.product, order.qty, order.id, undefined)}
-                        >
-                          <td className="py-2.5 px-1">
-                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border">Ord</span>
-                          </td>
-                          <td className="py-2.5 px-1 min-w-0">
-                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={order.product}>
-                              {order.product}
-                            </div>
-                            <div className="text-[11px] text-muted truncate max-w-[140px]">{order.requester}</div>
-                          </td>
-                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{order.qty}</td>
-                          <td className="py-2.5 px-1 text-right">
-                            {inCart ? (
-                              <div className="flex flex-col items-end gap-0.5">
-                                <span className="text-[9px] font-bold text-muted" title={`Fuzzy match score: ${matchScore}%`}>
-                                  ✓ {matchScore}%
-                                </span>
-                                {order.status === 'Pending' && (
+                        return (
+                          <tr
+                            key={itemKey}
+                            className={`transition-colors cursor-pointer border-l-2 border-border ${
+                              isAdded ? 'bg-bg3/30' : 'hover:bg-bg3/40'
+                            }`}
+                            onClick={() => !isAdded && !isSkipped && handleTransferToSearch(medName, 1, undefined, undefined)}
+                          >
+                            <td className="py-2 px-1 align-top">
+                              <span className="text-xs p-1 rounded bg-bg2 text-muted border border-border inline-flex items-center justify-center" title={recon.status === 'Bounced' ? 'Bounced Email Order' : 'Reconciliation Order'}>
+                                <AlertCircle size={13} className="text-muted" />
+                              </span>
+                            </td>
+                            <td className="py-2 px-1 min-w-0 align-top">
+                              <div className="flex items-center justify-between gap-1">
+                                <div className={`text-xs font-bold truncate max-w-[180px] ${isAdded || isSkipped ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={medName}>
+                                  {medName}
+                                </div>
+                                <span className="text-[10px] text-muted font-mono font-bold shrink-0">Qty: 1</span>
+                              </div>
+                              
+                              <div className="text-[10px] text-muted font-medium truncate mt-0.5 max-w-[240px]">
+                                {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
+                                  <span className="inline-block text-[9px] font-semibold px-1 py-0.25 rounded bg-bg2 text-muted border border-border truncate max-w-[230px]">
+                                    {recon.extracted_distributor}
+                                  </span>
+                                ) : (
+                                  <span>{recon.subject || 'Email Order'}</span>
+                                )}
+                              </div>
+
+                              {/* All 3 Buttons under distributor name */}
+                              {isSkipped ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleUnskipItem(itemKey, medName);
+                                  }}
+                                  className="mt-1.5 text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer"
+                                >
+                                  Un-skip
+                                </button>
+                              ) : isAdded ? (
+                                <span className="mt-1.5 text-[9px] font-semibold text-muted inline-block">✓ Added</span>
+                              ) : (
+                                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleConfirmOrdered();
+                                      handleTransferToSearch(medName, 1, undefined, undefined);
                                     }}
-                                    className="text-[9px] font-bold bg-bg3 hover:bg-bg2 text-text px-2 py-0.5 rounded border border-border transition-all shrink-0 cursor-pointer"
-                                    title="Click to confirm order placed"
+                                    className="text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                    title={`Search "${medName}" in search box`}
                                   >
-                                    Confirm
+                                    <Plus size={10} className="text-muted" /> Add
                                   </button>
-                                )}
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleTransferToSearch(order.product, order.qty, order.id, undefined);
-                                }}
-                                className="text-[10px] font-bold text-text hover:text-primary transition-colors bg-bg2 hover:bg-bg3 px-2 py-1 rounded border border-border cursor-pointer"
-                                title={`Search "${order.product}" in Live Cart`}
-                              >
-                                Add
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* Refills */}
-                    {pendingRefills.map(refill => {
-                      const inCart = getRefillItemInCart(refill);
-                      const refillQty = Math.max(1, Number(refill.quantity_needed) || 1);
-                      return (
-                        <tr
-                          key={`refill-${refill.id}`}
-                          className={`transition-colors cursor-pointer ${
-                            inCart ? 'bg-bg3/30' : 'hover:bg-bg3/40'
-                          }`}
-                          onClick={() => !inCart && handleTransferToSearch(refill.medicine_name || '', refillQty, undefined, refill.id)}
-                        >
-                          <td className="py-2.5 px-1">
-                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border">Refill</span>
-                          </td>
-                          <td className="py-2.5 px-1 min-w-0">
-                            <div className={`text-sm font-bold truncate max-w-[140px] ${inCart ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={refill.medicine_name}>
-                              {refill.medicine_name}
-                            </div>
-                            <div className="text-[11px] text-muted truncate max-w-[140px]">Patient: {refill.patient_name}</div>
-                          </td>
-                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{refillQty}</td>
-                          <td className="py-2.5 px-1 text-right">
-                            {inCart ? (
-                              <span className="text-[9px] font-bold text-muted">✓ Added</span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleTransferToSearch(refill.medicine_name || '', refillQty, undefined, refill.id);
-                                }}
-                                className="text-[10px] font-bold text-text hover:text-primary transition-colors bg-bg2 hover:bg-bg3 px-2 py-1 rounded border border-border cursor-pointer"
-                                title={`Search "${refill.medicine_name}" in Live Cart`}
-                              >
-                                Add
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* Reconcile Orders */}
-                    {reconOrders.flatMap((recon, reconIdx) => {
-                      const addedList = addedReconMedicines[recon.email_uid] || [];
-                      const medNames: string[] = recon.medicine_names && recon.medicine_names.length > 0 ? recon.medicine_names : [recon.subject || 'Recon Medicine'];
-                      const distColorIdx = getDistributorColorIndex(recon.extracted_distributor);
-                      const reconDistColor = DISTRIBUTOR_COLORS[distColorIdx];
-
-                      return medNames.map((medName: string, medIdx: number) => {
-                        const isAdded = addedList.includes(medName);
-
-                        return (
-                          <tr
-                            key={`recon-${recon.email_uid || reconIdx}-${medIdx}`}
-                            className={`transition-colors cursor-pointer border-l-2 border-border ${
-                              isAdded ? 'bg-bg3/30' : 'hover:bg-bg3/40'
-                            } ${getReconAgeStyle(recon.date)}`}
-                            onClick={() => !isAdded && handleTransferToSearch(medName, 1, undefined, undefined)}
-                          >
-                            <td className="py-2.5 px-1">
-                              <div className="flex flex-col gap-0.5 items-start">
-                                <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border">Recon</span>
-                                {recon.status === 'Bounced' && (
-                                  <span className="text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-bg2 text-muted border border-border">Bounced</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-1 min-w-0">
-                              <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={medName}>
-                                {medName}
-                              </div>
-                              <div className="flex items-center gap-1 mt-0.5 max-w-[140px] flex-wrap">
-                                {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
-                                  <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border truncate max-w-[85px]">
-                                    {recon.extracted_distributor}
-                                  </span>
-                                ) : (
-                                  <div className="text-[11px] text-muted font-medium truncate max-w-[85px]">{recon.subject || 'Email Order'}</div>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleIgnoreWord(medName);
-                                  }}
-                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg3/60 hover:bg-bg2 px-1 py-0.5 rounded border border-border cursor-pointer flex items-center gap-0.5 shrink-0"
-                                  title={`Permanently ignore "${medName}" (stop showing in Recon & OCR)`}
-                                >
-                                  <span>⛔</span> Ignore
-                                </button>
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">1</td>
-                            <td className="py-2.5 px-1 text-right">
-                              {isAdded ? (
-                                <span className="text-[9px] font-bold text-muted">✓ Added</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTransferToSearch(medName, 1, undefined, undefined);
-                                  }}
-                                  className="text-[10px] font-bold text-text hover:text-primary transition-colors bg-bg2 hover:bg-bg3 px-2 py-1 rounded border border-border cursor-pointer"
-                                  title={`Search "${medName}" in search box`}
-                                >
-                                  Add
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSkipItem(itemKey, medName);
+                                    }}
+                                    className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                    title={`Skip "${medName}" for this order run`}
+                                  >
+                                    <EyeOff size={10} className="text-muted" /> Skip
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleIgnoreWord(medName);
+                                    }}
+                                    className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                    title={`Permanently ignore non-medicine word "${medName}" in OCR`}
+                                  >
+                                    <Ban size={10} className="text-muted" /> Ignore
+                                  </button>
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -1719,36 +1687,268 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       });
                     })}
 
-                    {/* High-Velocity Low Stock Auto-Refills */}
-                    {autoRefillItems.map((item) => {
+                    {/* 2. Special Customer Orders */}
+                    {pendingOrders.map(order => {
+                      const itemKey = `order-${order.id}`;
+                      const isSkipped = skippedItemKeys.has(itemKey);
+                      const cartMatch = getOrderCartMatch(order);
+                      const inCart = Boolean(cartMatch?.item);
+                      const matchScore = cartMatch?.result?.score || 0;
+
+                      if (pendingFilterTab === 'skipped' ? !isSkipped : (isSkipped || (pendingFilterTab !== 'all' && pendingFilterTab !== 'orders'))) {
+                        return null;
+                      }
+
                       return (
                         <tr
-                          key={`auto-refill-${item.medicine_id}`}
-                          className="transition-colors hover:bg-bg3/40 cursor-pointer"
-                          onClick={() => handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined)}
+                          key={itemKey}
+                          className={`transition-colors cursor-pointer ${
+                            inCart ? 'bg-bg3/30' : 'hover:bg-bg3/40'
+                          }`}
+                          onClick={() => !inCart && !isSkipped && handleTransferToSearch(order.product, order.qty, order.id, undefined)}
                         >
-                          <td className="py-2.5 px-1">
-                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border">Auto</span>
+                          <td className="py-2 px-1 align-top">
+                            <span className="text-xs p-1 rounded bg-bg2 text-muted border border-border inline-flex items-center justify-center" title="Special Customer Order">
+                              <ShoppingCart size={13} className="text-muted" />
+                            </span>
                           </td>
-                          <td className="py-2.5 px-1 min-w-0">
-                            <div className="text-sm font-bold truncate max-w-[140px] text-text" title={item.medicine_name}>
-                              {item.medicine_name}
+                          <td className="py-2 px-1 min-w-0 align-top">
+                            <div className="flex items-center justify-between gap-1">
+                              <div className={`text-xs font-bold truncate max-w-[180px] ${inCart || isSkipped ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={order.product}>
+                                {order.product}
+                              </div>
+                              <span className="text-[10px] text-muted font-mono font-bold shrink-0">Qty: {order.qty}</span>
                             </div>
-                            <div className="text-[11px] text-muted font-mono truncate max-w-[140px]">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
+                            
+                            <div className="text-[10px] text-muted truncate max-w-[240px] mt-0.5">{order.requester}</div>
+
+                            {/* Action buttons under requester */}
+                            {isSkipped ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUnskipItem(itemKey, order.product);
+                                }}
+                                className="mt-1.5 text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer"
+                              >
+                                Un-skip
+                              </button>
+                            ) : inCart ? (
+                              <span className="mt-1.5 text-[9px] font-semibold text-muted inline-block" title={`Fuzzy match score: ${matchScore}%`}>
+                                ✓ Added ({matchScore}%)
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTransferToSearch(order.product, order.qty, order.id, undefined);
+                                  }}
+                                  className="text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Search "${order.product}" in Live Cart`}
+                                >
+                                  <Plus size={10} className="text-muted" /> Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSkipItem(itemKey, order.product);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Skip "${order.product}" for this order run`}
+                                >
+                                  <EyeOff size={10} className="text-muted" /> Skip
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleIgnoreWord(order.product);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Permanently ignore word "${order.product}"`}
+                                >
+                                  <Ban size={10} className="text-muted" /> Ignore
+                                </button>
+                              </div>
+                            )}
                           </td>
-                          <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">{item.recommended_qty}</td>
-                          <td className="py-2.5 px-1 text-right">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined);
-                              }}
-                              className="text-[9.5px] font-bold text-text hover:text-primary transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer"
-                              title={`Search "${item.medicine_name}" in search box`}
-                            >
-                              Add
-                            </button>
+                        </tr>
+                      );
+                    })}
+
+                    {/* 3. Refills */}
+                    {pendingRefills.map(refill => {
+                      const itemKey = `refill-${refill.id}`;
+                      const isSkipped = skippedItemKeys.has(itemKey);
+                      const inCart = getRefillItemInCart(refill);
+                      const refillQty = Math.max(1, Number(refill.quantity_needed) || 1);
+
+                      if (pendingFilterTab === 'skipped' ? !isSkipped : (isSkipped || (pendingFilterTab !== 'all' && pendingFilterTab !== 'orders'))) {
+                        return null;
+                      }
+
+                      return (
+                        <tr
+                          key={itemKey}
+                          className={`transition-colors cursor-pointer ${
+                            inCart ? 'bg-bg3/30' : 'hover:bg-bg3/40'
+                          }`}
+                          onClick={() => !inCart && !isSkipped && handleTransferToSearch(refill.medicine_name || '', refillQty, undefined, refill.id)}
+                        >
+                          <td className="py-2 px-1 align-top">
+                            <span className="text-xs p-1 rounded bg-bg2 text-muted border border-border inline-flex items-center justify-center" title="Patient Refill">
+                              <RefreshCw size={13} className="text-muted" />
+                            </span>
+                          </td>
+                          <td className="py-2 px-1 min-w-0 align-top">
+                            <div className="flex items-center justify-between gap-1">
+                              <div className={`text-xs font-bold truncate max-w-[180px] ${inCart || isSkipped ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={refill.medicine_name}>
+                                {refill.medicine_name}
+                              </div>
+                              <span className="text-[10px] text-muted font-mono font-bold shrink-0">Qty: {refillQty}</span>
+                            </div>
+                            
+                            <div className="text-[10px] text-muted truncate max-w-[240px] mt-0.5">Patient: {refill.patient_name}</div>
+
+                            {/* Action buttons under patient */}
+                            {isSkipped ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUnskipItem(itemKey, refill.medicine_name || '');
+                                }}
+                                className="mt-1.5 text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer"
+                              >
+                                Un-skip
+                              </button>
+                            ) : inCart ? (
+                              <span className="mt-1.5 text-[9px] font-semibold text-muted inline-block">✓ Added</span>
+                            ) : (
+                              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTransferToSearch(refill.medicine_name || '', refillQty, undefined, refill.id);
+                                  }}
+                                  className="text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Search "${refill.medicine_name}" in Live Cart`}
+                                >
+                                  <Plus size={10} className="text-muted" /> Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSkipItem(itemKey, refill.medicine_name || '');
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Skip "${refill.medicine_name}" for this order run`}
+                                >
+                                  <EyeOff size={10} className="text-muted" /> Skip
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (refill.medicine_name) handleIgnoreWord(refill.medicine_name);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Permanently ignore word "${refill.medicine_name}"`}
+                                >
+                                  <Ban size={10} className="text-muted" /> Ignore
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* 4. Minimum Inventory / Low Stock Reorder Items */}
+                    {autoRefillItems.map((item) => {
+                      const itemKey = `minstock-${item.medicine_id}`;
+                      const isSkipped = skippedItemKeys.has(itemKey);
+
+                      if (pendingFilterTab === 'skipped' ? !isSkipped : (isSkipped || (pendingFilterTab !== 'all' && pendingFilterTab !== 'minstock'))) {
+                        return null;
+                      }
+
+                      return (
+                        <tr
+                          key={itemKey}
+                          className="transition-colors hover:bg-bg3/40 cursor-pointer"
+                          onClick={() => !isSkipped && handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined)}
+                        >
+                          <td className="py-2 px-1 align-top">
+                            <span className="text-xs p-1 rounded bg-bg2 text-muted border border-border inline-flex items-center justify-center" title="Low Stock Auto-Refill">
+                              <Sparkles size={13} className="text-muted" />
+                            </span>
+                          </td>
+                          <td className="py-2 px-1 min-w-0 align-top">
+                            <div className="flex items-center justify-between gap-1">
+                              <div className={`text-xs font-bold truncate max-w-[180px] ${isSkipped ? 'line-through opacity-50 text-muted' : 'text-text'}`} title={item.medicine_name}>
+                                {item.medicine_name}
+                              </div>
+                              <span className="text-[10px] text-muted font-mono font-bold shrink-0">Qty: {item.recommended_qty}</span>
+                            </div>
+                            
+                            <div className="text-[10px] text-muted font-mono truncate max-w-[240px] mt-0.5">Stock: {item.current_stock} • 🔥 {item.sales_30d}/mo</div>
+
+                            {/* Action buttons under stock info */}
+                            {isSkipped ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUnskipItem(itemKey, item.medicine_name);
+                                }}
+                                className="mt-1.5 text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer"
+                              >
+                                Un-skip
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTransferToSearch(item.medicine_name, item.recommended_qty, undefined, undefined);
+                                  }}
+                                  className="text-[9px] font-semibold text-text hover:bg-bg3 transition-colors bg-bg2 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Search "${item.medicine_name}" in search box`}
+                                >
+                                  <Plus size={10} className="text-muted" /> Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSkipItem(itemKey, item.medicine_name);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Skip low stock item "${item.medicine_name}" for this order run`}
+                                >
+                                  <EyeOff size={10} className="text-muted" /> Skip
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleIgnoreWord(item.medicine_name);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-text transition-colors bg-bg2 hover:bg-bg3 px-2 py-0.5 rounded border border-border cursor-pointer flex items-center gap-1"
+                                  title={`Permanently ignore word "${item.medicine_name}"`}
+                                >
+                                  <Ban size={10} className="text-muted" /> Ignore
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1767,7 +1967,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 className="w-full flex items-center justify-between text-[11px] font-semibold text-muted hover:text-text px-2 py-1 rounded bg-bg2/40 hover:bg-bg3/40 transition-colors"
               >
                 <span className="flex items-center gap-1.5">
-                  <span>🚫</span>
+                  <Ban size={12} className="text-muted" />
                   <span>Ignored Words ({ignoredWords.length})</span>
                 </span>
                 <span className="text-[9px]">{showIgnoredList ? '▲' : '▼'}</span>
@@ -1904,7 +2104,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                 )}
                                 {med.stock !== undefined && (
                                   <span className="font-bold font-mono px-1.5 py-0.5 rounded text-[10px] flex items-center gap-1 bg-bg3 text-muted border border-border">
-                                    📦 {med.stock}
+                                    <Package size={10} /> {med.stock}
                                   </span>
                                 )}
                               </div>
