@@ -1119,6 +1119,7 @@ const Returns: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
 
       {/* Column 2: Right Content Pane */}
       <div className="flex-1 flex flex-col gap-0 min-h-0 overflow-hidden bg-bg2 border border-border rounded-xl">

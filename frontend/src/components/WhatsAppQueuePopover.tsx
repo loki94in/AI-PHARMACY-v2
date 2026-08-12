@@ -24,7 +24,7 @@ interface WhatsAppQueuePopoverProps {
   onClose: () => void;
 }
 
-type TabType = 'all' | 'special' | 'distributor' | 'delivery' | 'pending' | 'failed';
+type TabType = 'all' | 'special' | 'distributor' | 'delivery' | 'pending' | 'sent' | 'failed';
 
 export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onClose }) => {
   const [queueState, setQueueState] = useState<any | null>(null);
@@ -176,9 +176,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     if (activeTab === 'special') return isSpecialOrder(item.type);
     if (activeTab === 'distributor') return isDistributor(item.type);
     if (activeTab === 'delivery') return isDelivery(item.type);
-    if (activeTab === 'pending') return item.status === 'pending' || item.status === 'sending';
-    if (activeTab === 'failed') return item.status === 'failed_offline' || item.status === 'failed_perm';
-    return true;
+    if (activeTab === 'pending') return (item.status === 'pending' || item.status === 'sending') && !isDistributor(item.type);
+    if (activeTab === 'sent') return item.status === 'sent' && !isDistributor(item.type);
+    if (activeTab === 'failed') return (item.status === 'failed_offline' || item.status === 'failed_perm') && !isDistributor(item.type);
+    return !isDistributor(item.type);
   });
 
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
@@ -223,11 +224,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className="relative bg-bg border border-glass-border/40 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scaleIn">
+    <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md transition-all duration-300 animate-in fade-in">
+      <div className="relative bg-bg3 border border-glass-border shadow-[0_25px_60px_rgba(0,0,0,0.6)] rounded-3xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="p-4 border-b border-glass-border/30 flex items-center justify-between gap-3 bg-bg2/50 shrink-0">
+        <div className="p-4 border-b border-glass-border/30 flex items-center justify-between gap-3 bg-bg2/80 shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className={`p-2 rounded-xl border shrink-0 ${
               !queueState?.isOnline 
@@ -256,15 +257,15 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 hover:bg-bg3 rounded-lg text-muted hover:text-text transition-all shrink-0"
-            title="Close"
+            className="p-1.5 hover:bg-bg2 rounded-lg text-muted hover:text-text transition-all shrink-0 cursor-pointer"
+            title="Close Modal (Esc)"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Live Status & Quick Actions Bar */}
-        <div className="p-4 bg-bg3/30 border-b border-glass-border/30 space-y-3 shrink-0">
+        <div className="p-4 bg-bg2/40 border-b border-glass-border/30 space-y-3 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
             
             {/* Status Pills */}
@@ -300,14 +301,14 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <button
                 onClick={handleFlushNow}
                 disabled={pendingTotal === 0}
-                className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-40 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm"
+                className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-40 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 <Play size={12} /> Flush Now
               </button>
               {failedTotal > 0 && (
                 <button
                   onClick={handleRetryFailed}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
                   <RefreshCw size={12} /> Retry Failed
                 </button>
@@ -317,10 +318,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
         </div>
 
         {/* Category Filter Tabs */}
-        <div className="flex border-b border-glass-border/30 px-4 bg-bg2/30 overflow-x-auto custom-scrollbar gap-2 shrink-0 items-center">
+        <div className="flex border-b border-glass-border/30 px-4 bg-bg2/50 overflow-x-auto custom-scrollbar gap-2 shrink-0 items-center">
           <button
             onClick={() => setActiveTab('all')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'all' 
                 ? 'border-sky text-sky' 
                 : 'border-transparent text-muted hover:text-text'
@@ -329,8 +330,30 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             All Queue ({items.length})
           </button>
           <button
+            onClick={() => setActiveTab('pending')}
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+              activeTab === 'pending' 
+                ? 'border-sky text-sky' 
+                : 'border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <Clock size={11} className="text-sky" />
+            <span>Upcoming / Pending ({pendingTotal})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('sent')}
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+              activeTab === 'sent' 
+                ? 'border-emerald-400 text-emerald-400' 
+                : 'border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <CheckCircle2 size={11} className="text-emerald-400" />
+            <span>Sent / Completed ({counts.sent || 0})</span>
+          </button>
+          <button
             onClick={() => setActiveTab('special')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
               activeTab === 'special' 
                 ? 'border-purple-400 text-purple-300' 
                 : 'border-transparent text-muted hover:text-text'
@@ -341,7 +364,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           </button>
           <button
             onClick={() => setActiveTab('distributor')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
               activeTab === 'distributor' 
                 ? 'border-amber-400 text-amber-300' 
                 : 'border-transparent text-muted hover:text-text'
@@ -352,7 +375,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           </button>
           <button
             onClick={() => setActiveTab('delivery')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
               activeTab === 'delivery' 
                 ? 'border-cyan-400 text-cyan-300' 
                 : 'border-transparent text-muted hover:text-text'
@@ -361,20 +384,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             <Truck size={11} className="text-cyan-400" />
             <span>Delivery Staff ({deliveryCount})</span>
           </button>
-          <button
-            onClick={() => setActiveTab('pending')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
-              activeTab === 'pending' 
-                ? 'border-sky text-sky' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            Pending ({pendingTotal})
-          </button>
           {failedTotal > 0 && (
             <button
               onClick={() => setActiveTab('failed')}
-              className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 ${
+              className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'failed' 
                   ? 'border-rose-500 text-rose-400' 
                   : 'border-transparent text-muted hover:text-text'
@@ -404,7 +417,8 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               return (
                 <div 
                   key={item.id}
-                  className={`rounded-xl border transition-all overflow-hidden ${
+                  onMouseEnter={() => setExpandedIds(prev => ({ ...prev, [item.id]: true }))}
+                  className={`rounded-xl border transition-all overflow-hidden cursor-pointer ${
                     item.status === 'sending'
                       ? 'bg-sky-500/10 border-sky-500/30 ring-1 ring-sky-500/20'
                       : item.status === 'sent'
