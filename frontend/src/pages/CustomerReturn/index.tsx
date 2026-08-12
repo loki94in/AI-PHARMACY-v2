@@ -201,49 +201,49 @@ export default function CustomerReturn() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             <div className="premium-card p-0 overflow-hidden">
-              <div className="p-4 border-b border-white/5 bg-white/2">
-                <h2 className="font-semibold text-text flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald" />
-                  Invoice Details: {invoice.invoice_no}
+              <div className="p-4 border-b border-glass-border bg-bg3/40">
+                <h2 className="font-bold text-text flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                  Invoice Details: <span className="font-mono">{invoice.invoice_no}</span>
                 </h2>
-                <p className="text-xs text-muted mt-1">Date: {formatDisplayDate(invoice.date)}</p>
+                <p className="text-xs text-muted font-medium mt-1">Date: {formatDisplayDate(invoice.date)}</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-white/5 border-b border-white/10 text-muted">
+                  <thead className="bg-bg3/60 border-b border-glass-border text-muted">
                     <tr>
-                      <th className="p-4 font-medium">Medicine</th>
-                      <th className="p-4 font-medium">Batch & Exp</th>
-                      <th className="p-4 font-medium text-right">Sold Qty</th>
-                      <th className="p-4 font-medium text-right">Already Returned</th>
-                      <th className="p-4 font-medium text-right">Return Qty</th>
+                      <th className="p-4 font-semibold">Medicine</th>
+                      <th className="p-4 font-semibold">Batch & Exp</th>
+                      <th className="p-4 font-semibold text-right">Sold Qty</th>
+                      <th className="p-4 font-semibold text-right">Already Returned</th>
+                      <th className="p-4 font-semibold text-right">Return Qty</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody className="divide-y divide-glass-border/40">
                     {items.map((item) => {
                       const availableToReturn = item.quantity - item.returned_qty;
                       return (
-                        <tr key={item.sale_item_id} className="hover:bg-white/5 transition-colors">
-                          <td className="p-4 text-text font-medium">{item.medicine_name}</td>
+                        <tr key={item.sale_item_id} className="hover:bg-bg3/40 transition-colors">
+                          <td className="p-4 text-text font-bold">{item.medicine_name}</td>
                           <td className="p-4">
-                            <span className="text-xs font-mono px-2 py-1 bg-white/5 rounded text-muted">
+                            <span className="text-xs font-mono px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-text font-bold">
                               {item.batch_no}
                             </span>
                           </td>
-                          <td className="p-4 text-right text-muted">{item.quantity}</td>
-                          <td className="p-4 text-right text-rose/80">{item.returned_qty > 0 ? item.returned_qty : '-'}</td>
+                          <td className="p-4 text-right text-text font-mono font-semibold">{item.quantity}</td>
+                          <td className="p-4 text-right text-rose-400 font-mono font-semibold">{item.returned_qty > 0 ? item.returned_qty : '-'}</td>
                           <td className="p-4 text-right">
                             <input
                               type="number"
                               min="0"
                               max={availableToReturn}
-                              className="premium-input w-24 text-right py-1.5"
+                              className="premium-input w-24 text-right py-1.5 font-mono font-bold"
                               placeholder="0"
                               disabled={availableToReturn <= 0}
                               value={returnQuantities[item.sale_item_id] || ''}
                               onChange={(e) => handleQtyChange(item.sale_item_id, e.target.value, availableToReturn)}
                             />
-                            {availableToReturn <= 0 && <span className="block text-[10px] text-muted mt-1">Max returned</span>}
+                            {availableToReturn <= 0 && <span className="block text-[10px] text-muted font-semibold mt-1">Max returned</span>}
                           </td>
                         </tr>
                       );

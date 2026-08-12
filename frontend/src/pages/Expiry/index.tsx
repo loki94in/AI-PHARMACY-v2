@@ -290,10 +290,10 @@ const Expiry = () => {
         </div>
 
         {/* RIGHT COLUMN: Table — fills remaining space */}
-        <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border min-h-0">
+        <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-bg2/80 border-glass-border min-h-0 shadow-sm rounded-2xl">
           
           {/* Table Toolbar */}
-          <div className="px-3 py-2.5 border-b border-glass-border bg-black/10 flex items-center gap-3">
+          <div className="px-3 py-2.5 border-b border-glass-border bg-bg3/40 flex items-center gap-3">
             <div className="relative flex-1">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
               <input
@@ -301,16 +301,16 @@ const Expiry = () => {
                 placeholder="Search medicine or batch..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-xs focus:outline-none focus:border-primary/50 transition-colors"
+                className="w-full pl-8 pr-3 py-1.5 bg-bg3/80 border border-glass-border rounded-xl text-xs text-text focus:outline-none focus:border-primary/50 transition-colors"
               />
             </div>
-            <span className="text-[11px] text-muted font-semibold shrink-0">{filteredItems.length} items</span>
+            <span className="text-[11px] text-muted font-bold shrink-0">{filteredItems.length} items</span>
           </div>
 
           {/* Table Container */}
-          <div className="flex-1 overflow-auto bg-black/20">
+          <div className="flex-1 overflow-auto bg-bg/40">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="sticky top-0 bg-[#18181b]/95 backdrop-blur z-10 select-none">
+              <thead className="sticky top-0 bg-bg2/95 backdrop-blur-md z-10 select-none border-b border-glass-border">
                 <tr>
                   <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 w-8">
                     <input type="checkbox" className="rounded" onChange={e => {
@@ -452,7 +452,7 @@ const Expiry = () => {
                       <CheckCircle2 size={36} className="mx-auto mb-3 text-muted/30" />
                       <span>No items matching expiry thresholds in inventory.</span>
                       {colFilterMedName && colFilterMedName.trim().length >= 2 && (
-                        <div className="mt-2 text-[12px] text-amber-400 font-medium">
+                        <div className="mt-2 text-[12px] text-amber-500 font-medium">
                           🔍 No expiring items match "{colFilterMedName}". Please check spelling or clear medicine filter.
                         </div>
                       )}
@@ -466,49 +466,60 @@ const Expiry = () => {
                     return (
                       <tr 
                         key={item.id} 
-                        className={`hover:bg-white/5 border-b border-glass-border/20 transition-all ${details.rowClass} ${isSelected ? 'bg-red-500/10' : ''}`}
+                        className={`transition-all border-b border-glass-border/30 ${
+                          isSelected 
+                            ? 'bg-primary/15 border-l-4 border-l-primary text-text font-bold shadow-sm' 
+                            : `hover:bg-bg3/40 ${details.rowClass}`
+                        }`}
                       >
                         <td className="p-4">
-                          <input
-                            type="checkbox"
-                            className="rounded cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                            checked={isSelected}
-                            onChange={() => toggleSelect(item.id)}
-                            disabled={!item.purchase_invoice_no}
-                          />
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 rounded accent-primary cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(item.id)}
+                              disabled={!item.purchase_invoice_no}
+                            />
+                            {isSelected && (
+                              <span className="px-1.5 py-0.5 rounded bg-primary text-white text-[9px] font-black uppercase tracking-wider shadow-sm animate-in fade-in">
+                                Selected
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-4 text-muted font-mono select-none">
                           {item.id}
                         </td>
-                        <td className="p-4 font-semibold text-text">
+                        <td className="p-4 font-bold text-text">
                           {item.medicine_name}
                         </td>
                         <td className="p-4 select-none">
-                          <span className="font-mono bg-white/5 border border-glass-border/30 rounded px-2 py-0.5 font-semibold text-text">
+                          <span className="font-mono bg-bg3/60 border border-glass-border/40 rounded-lg px-2.5 py-1 font-bold text-text">
                             {item.batch_no}
                           </span>
                         </td>
-                        <td className="p-4 text-center font-mono select-none">
+                        <td className="p-4 text-center font-mono select-none text-muted font-semibold">
                           {new Date(item.expiry_date).toLocaleDateString([], { month: '2-digit', year: '2-digit' })}
                         </td>
                         <td className="p-4 text-center font-semibold select-none">
                           <div className="flex flex-col items-center gap-1">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${details.colorClass}`}>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-extrabold border ${details.colorClass}`}>
                               {details.label}
                             </span>
                             <span className="text-[10px] text-muted font-medium">{details.daysText}</span>
                           </div>
                         </td>
-                        <td className="p-4 text-center font-bold font-mono">
+                        <td className="p-4 text-center font-extrabold font-mono text-text">
                           {item.quantity}
                         </td>
-                        <td className="p-4 text-right font-mono font-bold text-sky">
+                        <td className="p-4 text-right font-mono font-extrabold text-sky">
                           ₹{item.mrp?.toFixed(2) || '0.00'}
                         </td>
                         <td className="p-4 select-none">
                           {item.purchase_invoice_no ? (
                             <div className="flex flex-col gap-0.5">
-                              <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[9px] font-semibold font-mono w-max">
+                              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[9px] font-bold font-mono w-max">
                                 {item.purchase_invoice_no}
                               </span>
                               <span className="text-[10px] text-muted truncate max-w-[130px] font-semibold" title={item.distributor_name}>
@@ -519,7 +530,7 @@ const Expiry = () => {
                             <span className="text-[10px] text-muted/65 italic font-medium">Unmatched (match manually)</span>
                           )}
                         </td>
-                        <td className="p-4 text-muted select-none">
+                        <td className="p-4 text-muted font-medium select-none">
                           {item.rack_location || '-'}
                         </td>
                         <td className="p-4 text-center select-none">
@@ -530,14 +541,14 @@ const Expiry = () => {
                               }
                             }}
                             disabled={!item.purchase_invoice_no}
-                            className={`flex items-center gap-1 mx-auto px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                            className={`flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all cursor-pointer ${
                               item.purchase_invoice_no
-                                ? 'bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-500/30'
-                                : 'opacity-40 bg-white/5 border-glass-border text-muted cursor-not-allowed'
+                                ? 'bg-red-500/15 border-red-500/30 text-red hover:bg-red-500/25 active:scale-95'
+                                : 'opacity-40 bg-bg3 border-glass-border text-muted cursor-not-allowed'
                             }`}
                             title={item.purchase_invoice_no ? 'Create Return' : 'Cannot return: no purchase invoice found, match manually'}
                           >
-                            <RotateCcw size={10} />
+                            <RotateCcw size={11} />
                             Return
                           </button>
                         </td>
@@ -549,12 +560,67 @@ const Expiry = () => {
             </table>
           </div>
 
+          {/* Live Multi-Distributor Selection Summary Bar */}
+          {selectedIds.size > 0 && (() => {
+            const selectedList = filteredItems.filter(i => selectedIds.has(i.id));
+            const totalVal = selectedList.reduce((sum, item) => sum + (item.mrp || 0) * (item.quantity || 1), 0);
+            
+            const distCounts: Record<string, number> = {};
+            selectedList.forEach(item => {
+              const dName = item.distributor_name ? item.distributor_name.trim() : 'Unknown Supplier';
+              distCounts[dName] = (distCounts[dName] || 0) + 1;
+            });
+            const distEntries = Object.entries(distCounts);
+
+            return (
+              <div className="p-3 border-t border-primary/30 bg-primary/10 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 px-5 animate-in slide-in-from-bottom-2">
+                <div className="flex items-center gap-3 flex-wrap text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-extrabold text-text">
+                      {selectedIds.size} Medicine{selectedIds.size !== 1 ? 's' : ''} Selected
+                    </span>
+                  </div>
+                  <span className="text-muted font-bold">|</span>
+                  <span className="font-extrabold text-emerald-400 font-mono">
+                    Est. Value: ₹{totalVal.toFixed(2)}
+                  </span>
+                  <span className="text-muted font-bold">|</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-muted font-semibold">Suppliers ({distEntries.length}):</span>
+                    {distEntries.map(([dName, count]) => (
+                      <span key={dName} className="px-2 py-0.5 rounded-lg bg-bg2/90 border border-primary/30 text-text text-[10px] font-bold font-mono shadow-sm">
+                        🏭 {dName}: <span className="text-primary">{count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-xs text-muted hover:text-red font-bold px-2 py-1"
+                  >
+                    Deselect All
+                  </button>
+                  <button
+                    onClick={handleSendToReturns}
+                    className="bg-red-500 hover:bg-red-600 text-white font-black px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                  >
+                    <RotateCcw size={14} />
+                    <span>Generate Supplier Return Drafts ({distEntries.length} Supplier{distEntries.length !== 1 ? 's' : ''})</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Table Footer */}
-          <div className="p-3 border-t border-glass-border bg-black/10 text-muted select-none flex justify-between items-center px-4">
-            <span>Expired/Expiring Items: <strong>{filteredItems.length}</strong></span>
+          <div className="p-3.5 border-t border-glass-border bg-bg3/40 text-muted select-none flex justify-between items-center px-5 font-semibold">
+            <span>Expired/Expiring Items: <strong className="text-text font-mono font-black">{filteredItems.length}</strong></span>
             {items.some(item => getExpiryDaysDiff(item.expiry_date) <= 0) && (
-              <span className="flex items-center gap-1.5 text-xs text-red animate-pulse">
-                <AlertTriangle size={12} />
+              <span className="flex items-center gap-1.5 text-xs text-red font-bold animate-pulse">
+                <AlertTriangle size={13} />
                 Attention required: Expired batches in stock
               </span>
             )}
@@ -569,15 +635,15 @@ const Expiry = () => {
         <button 
           onClick={() => queryClient.invalidateQueries({ queryKey: expiryKey })} 
           disabled={refreshing}
-          className="p-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all shadow-xl hover:scale-105 active:scale-95"
-          title="Refresh"
+          className="p-3 rounded-full bg-glass-bg border border-glass-border hover:bg-bg3 text-text transition-all shadow-xl hover:scale-105 active:scale-95 cursor-pointer"
+          title="Refresh Expiry List"
         >
-          <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+          <RefreshCw size={18} className={refreshing ? 'animate-spin text-primary' : ''} />
         </button>
 
         <button
           onClick={() => handleExport('csv')}
-          className="flex items-center gap-2 px-5 py-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-glass-bg border border-glass-border hover:bg-bg3 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs cursor-pointer"
         >
           <FileText size={16} className="text-primary" />
           Export CSV
@@ -585,7 +651,7 @@ const Expiry = () => {
 
         <button
           onClick={() => handleExport('pdf')}
-          className="flex items-center gap-2 px-5 py-3 rounded-full bg-glass-bg border border-glass-border hover:bg-white/10 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-glass-bg border border-glass-border hover:bg-bg3 text-text transition-all hover:scale-105 active:scale-95 shadow-xl font-bold text-xs cursor-pointer"
         >
           <FileText size={16} className="text-red" />
           Export PDF

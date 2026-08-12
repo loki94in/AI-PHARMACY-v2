@@ -1447,14 +1447,14 @@ const Topbar = ({
                 </div>
               )}
 
-              {/* Day/Night Theme-Adapted Operations Command Center Popover */}
+              {/* Day/Night Theme-Adapted Operations Command Center Popover (Solid Opaque Background) */}
               {isHoverExpanded && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[460px] max-h-[480px] overflow-y-auto bg-bg3/95 backdrop-blur-2xl border border-glass-border shadow-2xl rounded-3xl p-4 z-dropdown flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
+                  className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[460px] max-h-[480px] overflow-y-auto bg-bg2 border border-border shadow-2xl rounded-3xl p-4 z-dropdown flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
                 >
                   {/* Header Title & Controls */}
-                  <div className="flex items-center justify-between border-b border-glass-border pb-2.5">
+                  <div className="flex items-center justify-between border-b border-border pb-2.5">
                     <div className="flex items-center gap-2">
                       <div className="p-1 rounded-lg bg-primary/10 text-primary">
                         <Activity size={14} className="animate-pulse" />
@@ -1475,7 +1475,7 @@ const Topbar = ({
                         className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${
                           isManualCarouselPaused
                             ? 'bg-amber-500/20 border-amber-500/30 text-amber-300'
-                            : 'bg-glass-bg border-glass-border text-muted hover:text-text'
+                            : 'bg-bg3 border-border text-muted hover:text-text'
                         }`}
                       >
                         {isManualCarouselPaused ? '⏸ Paused' : '▶ Auto-Ticker'}
@@ -1491,7 +1491,7 @@ const Topbar = ({
                         className={`p-3 rounded-2xl border transition-all ${
                           index === activeIndex 
                             ? 'bg-primary/10 border-primary/40 shadow-md' 
-                            : 'bg-bg/40 border-glass-border hover:bg-bg/80'
+                            : 'bg-bg border border-border hover:bg-bg3'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
