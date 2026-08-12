@@ -3109,8 +3109,8 @@ export default function PharmarackCart() {
                                 <button
                                   onClick={() => handleOpenEditModal(dist)}
                                   className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 ${activePhone
-                                    ? 'bg-white text-emerald-600 border-emerald-500 hover:bg-emerald-50'
-                                    : 'bg-white text-amber-600 border-amber-500 hover:bg-amber-50'
+                                    ? 'bg-bg2 text-text border-border hover:bg-bg3'
+                                    : 'bg-bg2 text-muted border-border hover:bg-bg3'
                                     }`}
                                   title="Search saved distributors & edit WhatsApp phone number"
                                 >
@@ -3147,13 +3147,13 @@ export default function PharmarackCart() {
                             <button
                               onClick={() => handleSendDeliveryBoyNotification(dist)}
                               disabled={sendingDeliveryBoyNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white text-teal-600 border border-teal-500 hover:bg-teal-50 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
                               title="Manually trigger and send WhatsApp order notification to assigned Delivery Boy anytime"
                             >
                               {sendingDeliveryBoyNotifId === dist.storeId ? (
-                                <span className="w-2.5 h-2.5 border border-teal-300/30 border-t-teal-300 rounded-full animate-spin" />
+                                <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
                               ) : (
-                                <Truck size={11} className="text-teal-300" />
+                                <Truck size={11} className="text-muted" />
                               )}
                               <span>Send to Delivery Boy</span>
                             </button>
@@ -3162,11 +3162,11 @@ export default function PharmarackCart() {
                             <button
                               onClick={() => handleSendManualNotification(dist)}
                               disabled={sendingNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white text-sky-600 border border-sky-500 hover:bg-sky-50 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
                               title="Send notification / place order in Pharmarack"
                             >
                               {sendingNotifId === dist.storeId ? (
-                                <span className="w-2.5 h-2.5 border border-sky/20 border-t-sky rounded-full animate-spin" />
+                                <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
                               ) : (
                                 <Send size={10} />
                               )}

@@ -429,11 +429,11 @@ const NotificationPanel = ({
   }, [onClose]);
 
   const typeConfig = (type: string) => {
-    if (type === 'success') return { dot: 'bg-emerald-400', text: 'text-emerald-400', icon: <Check size={14} />, label: 'Success' };
-    if (type === 'error')   return { dot: 'bg-red-400',     text: 'text-red-400',     icon: <AlertTriangle size={14} />, label: 'Error' };
-    if (type === 'mail')    return { dot: 'bg-indigo-400',  text: 'text-indigo-400',  icon: <MailIcon size={14} />,      label: 'Mail' };
-    if (type === 'automation') return { dot: 'bg-purple-400', text: 'text-purple-400', icon: <Activity size={14} />,      label: 'Automation' };
-    return                         { dot: 'bg-sky-400',     text: 'text-sky-400',     icon: <Info size={14} />,          label: 'Info' };
+    if (type === 'success') return { badgeBg: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400', icon: <Check size={13} />, label: 'Success' };
+    if (type === 'error')   return { badgeBg: 'bg-rose-500/10 border-rose-500/20 text-rose-400',     icon: <AlertTriangle size={13} />, label: 'Error' };
+    if (type === 'mail')    return { badgeBg: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',  icon: <MailIcon size={13} />,      label: 'Mail' };
+    if (type === 'automation') return { badgeBg: 'bg-purple-500/10 border-purple-500/20 text-purple-400', icon: <Activity size={13} />, label: 'Automation' };
+    return                         { badgeBg: 'bg-sky-500/10 border-sky-500/20 text-sky-400',         icon: <Info size={13} />,          label: 'Info' };
   };
 
   const formatTime = (date: Date) => {
@@ -456,285 +456,287 @@ const NotificationPanel = ({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-3 w-96 max-w-[calc(100vw-2rem)] z-dropdown flex flex-col rounded-2xl overflow-hidden glass-panel border border-glass-border bg-bg2/95 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+      className="absolute right-0 top-full mt-3 w-[420px] max-w-[calc(100vw-1.5rem)] z-dropdown flex flex-col rounded-3xl overflow-hidden bg-bg2/95 border border-border shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
       style={{
-        backdropFilter: 'blur(24px)',
-        boxShadow: '0 25px 60px rgba(0,0,0,0.35), 0 0 30px rgba(56, 189, 248, 0.08)',
+        backdropFilter: 'blur(28px)',
+        boxShadow: '0 25px 65px rgba(0,0,0,0.4), 0 0 35px rgba(56, 189, 248, 0.08)',
       }}
     >
-      {/* Header */}
-      <div className="flex flex-col border-b border-glass-border bg-bg/50">
-        <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-inner">
-              <BellRing size={16} className="animate-pulse" />
+      {/* Header Bar */}
+      <div className="p-4 border-b border-border bg-bg/40 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm relative">
+              <BellRing size={17} className="animate-pulse" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-sky-400 border-2 border-bg2 animate-ping" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-text tracking-wide">Notifications</span>
+                <h3 className="text-sm font-black text-text tracking-tight">Activity & Alerts</h3>
                 {unreadCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-sky-500/20 border border-sky-500/30 text-sky-400 text-[10px] font-extrabold animate-pulse">
-                    {unreadCount} new
+                  <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[10px] font-extrabold">
+                    {unreadCount} unread
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-muted font-medium">Activity & System Alerts</p>
+              <p className="text-[11px] text-muted font-medium">Real-time store events & system status</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+
+          <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => {
                 whatsappQueueEvent.triggerOpen();
                 onClose();
               }}
-              className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 cursor-pointer shadow-sm"
-              title="Open WhatsApp Queue & Live Message Controller"
+              className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 cursor-pointer shadow-sm"
+              title="Open WhatsApp Queue Controller"
             >
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
               </span>
-              <MessageSquareIcon size={13} />
-              <span>WhatsApp Queue</span>
+              <MessageSquareIcon size={12} />
+              <span>Queue</span>
             </button>
             <button
+              type="button"
               onClick={() => {
                 navigate('/settings');
                 onClose();
               }}
-              className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-glass-bg transition-all cursor-pointer"
-              title="Manage Notification & Message Settings"
-              aria-label="Notification settings"
+              className="p-1.5 rounded-xl text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer"
+              title="Notification Settings"
             >
-              <SettingsIcon size={14} />
+              <SettingsIcon size={15} />
             </button>
             {notifications.length > 0 && (
               <button
+                type="button"
                 onClick={onClearAll}
-                className="flex items-center gap-1 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors px-2 py-1 rounded-lg hover:bg-red-500/10 cursor-pointer"
-                title="Clear all notifications"
+                className="p-1.5 rounded-xl text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
+                title="Clear All Notifications"
               >
-                <Trash2 size={12} />
-                <span className="hidden sm:inline">Clear</span>
+                <Trash2 size={15} />
               </button>
             )}
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-glass-bg transition-all cursor-pointer"
-              aria-label="Close notifications panel"
+              className="p-1.5 rounded-xl text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer"
+              title="Close"
             >
               <X size={15} />
             </button>
           </div>
         </div>
 
-        {/* Category Tabs */}
-        {notifications.length > 0 && (
-          <div className="flex items-center gap-1 px-4 pb-2.5 pt-1 overflow-x-auto no-scrollbar">
+        {/* Filter Segmented Control Bar */}
+        <div className="flex items-center justify-between bg-bg3/60 p-1 rounded-2xl border border-border/50">
+          <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => setActiveFilter('all')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeFilter === 'all'
-                  ? 'bg-primary/20 text-primary border border-primary/30'
-                  : 'text-muted hover:text-text hover:bg-glass-bg'
+                  ? 'bg-bg text-text shadow-sm border border-border'
+                  : 'text-muted hover:text-text hover:bg-bg3'
               }`}
             >
               All ({notifications.length})
             </button>
             <button
+              type="button"
               onClick={() => setActiveFilter('unread')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeFilter === 'unread'
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                  : 'text-muted hover:text-text hover:bg-glass-bg'
+                  ? 'bg-bg text-sky-400 shadow-sm border border-border'
+                  : 'text-muted hover:text-text hover:bg-bg3'
               }`}
             >
               Unread
               {unreadCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-sky-500 text-white text-[9px] font-bold flex items-center justify-center">
+                <span className="px-1.5 py-0.2 rounded-md bg-sky-500/20 text-sky-400 text-[10px] font-black">
                   {unreadCount}
                 </span>
               )}
             </button>
             {alertCount > 0 && (
               <button
+                type="button"
                 onClick={() => setActiveFilter('alerts')}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeFilter === 'alerts'
-                    ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                    : 'text-muted hover:text-text hover:bg-glass-bg'
+                    ? 'bg-bg text-purple-400 shadow-sm border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3'
                 }`}
               >
                 Alerts ({alertCount})
               </button>
             )}
           </div>
-        )}
+
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => notifications.forEach(n => { if (!n.read) onMarkRead(n.id); })}
+              className="text-[11px] font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1 cursor-pointer px-2 py-1 rounded-xl hover:bg-sky-500/10"
+              title="Mark all notifications as read"
+            >
+              <Check size={12} />
+              <span>Mark all read</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Notification List */}
-      <div className="max-h-[380px] min-h-[160px] overflow-y-auto custom-scrollbar divide-y divide-glass-border">
+      {/* Notification Cards List Container */}
+      <div className="max-h-[400px] min-h-[180px] overflow-y-auto custom-scrollbar p-3 space-y-2">
         {filteredNotifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center mb-3 shadow-inner">
-              <Bell size={24} className="text-sky-400 opacity-60 animate-pulse" />
+            <div className="w-14 h-14 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3 shadow-inner">
+              <Bell size={24} className="text-primary opacity-80" />
             </div>
-            <p className="text-text text-sm font-semibold">
+            <h4 className="text-text text-sm font-bold">
               {activeFilter === 'unread' ? 'No unread notifications' : activeFilter === 'alerts' ? 'No system alerts' : 'All caught up!'}
-            </p>
-            <p className="text-muted text-xs mt-1 max-w-[220px]">
-              {activeFilter === 'all' ? 'You have reviewed all recent updates and activity alerts.' : 'Check back later for updates.'}
+            </h4>
+            <p className="text-muted text-xs mt-1 max-w-[240px] leading-relaxed">
+              {activeFilter === 'all'
+                ? 'You have reviewed all recent updates and operational alerts.'
+                : 'No pending items matching this view.'}
             </p>
           </div>
         ) : (
-          <div>
-            {filteredNotifications.map((notif) => {
-              const cfg = typeConfig(notif.type);
-              return (
-                <div
-                  key={notif.id}
-                  className={`
-                    group flex items-start gap-3 px-4 py-3.5 relative transition-all duration-200 cursor-pointer
-                    ${!notif.read ? 'bg-sky-500/[0.06] border-l-2 border-l-sky-400' : 'hover:bg-glass-bg border-l-2 border-l-transparent'}
-                  `}
-                  onClick={() => onMarkRead(notif.id)}
-                >
-                  {/* Type Icon */}
-                  <div className={`
-                    shrink-0 w-8 h-8 rounded-xl flex items-center justify-center mt-0.5 shadow-sm
-                    ${notif.type === 'success' ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400' : 
-                      notif.type === 'error'   ? 'bg-red-500/15 border border-red-500/30 text-red-400' : 
-                      notif.type === 'mail'    ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-400' :
-                      notif.type === 'automation' ? 'bg-purple-500/15 border border-purple-500/30 text-purple-400' :
-                                                 'bg-sky-500/15 border border-sky-500/30 text-sky-400'}
-                  `}>
-                    {cfg.icon}
+          filteredNotifications.map((notif) => {
+            const cfg = typeConfig(notif.type);
+            return (
+              <div
+                key={notif.id}
+                onClick={() => { if (!notif.read) onMarkRead(notif.id); }}
+                className={`
+                  group rounded-2xl p-3.5 border transition-all duration-200 cursor-pointer relative overflow-hidden flex flex-col gap-2
+                  ${!notif.read 
+                    ? 'bg-sky-500/[0.04] border-sky-500/30 shadow-sm hover:border-sky-500/50' 
+                    : 'bg-bg/40 border-border/60 hover:bg-bg3/60 hover:border-border'}
+                `}
+              >
+                {/* Vertical Indicator Strip for Unread Items */}
+                {!notif.read && (
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-sky-400 to-indigo-500 rounded-l-2xl" />
+                )}
+
+                {/* Top Row: Type Pill + Time + Unread Dot */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${cfg.badgeBg}`}>
+                      {cfg.icon}
+                      <span>{cfg.label}</span>
+                    </span>
+                    <span className="text-[10px] text-muted font-mono font-medium">{formatTime(notif.time)}</span>
                   </div>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs leading-relaxed ${!notif.read ? 'text-text font-semibold' : 'text-muted'}`}>
-                      {notif.message}
-                    </p>
-
-                    {/* Badges for Distributor / Qty */}
-                    {(notif.distributor || notif.qty !== undefined) && (
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        {notif.distributor && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-[10px] font-bold">
-                            <Building2 size={10} />
-                            {notif.distributor}
-                          </span>
-                        )}
-                        {notif.qty !== undefined && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
-                            Qty: {notif.qty}
-                          </span>
-                        )}
-                      </div>
+                  <div className="flex items-center gap-1">
+                    {!notif.read && (
+                      <span className="w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
                     )}
-
-                    <div className="flex items-center justify-between mt-2 pt-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${cfg.dot} bg-opacity-20 ${cfg.text}`}>
-                          {cfg.label}
-                        </span>
-                        <span className="text-[10px] text-muted font-mono">{formatTime(notif.time)}</span>
-                      </div>
-
-                      {(notif.link || notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation') && (
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            if (!notif.read) onMarkRead(notif.id);
-                            if (notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' || !notif.link) {
-                              whatsappQueueEvent.triggerOpen();
-                            } else {
-                              navigate(notif.link!);
-                            }
-                            onClose();
-                          }}
-                          className={`flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer px-2 py-0.5 rounded-md ${
-                            notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation'
-                              ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-500/20'
-                              : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/10'
-                          }`}
-                          title={notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? "Open WhatsApp Queue Controller" : "Navigate to item link"}
-                        >
-                          {notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? (
-                            <>
-                              <MessageSquareIcon size={11} />
-                              <span>View Queue</span>
-                            </>
-                          ) : (
-                            <>
-                              <ExternalLink size={11} />
-                              <span>Open</span>
-                            </>
-                          )}
-                          <ChevronRight size={11} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions (Mark read/unread & Clear) */}
-                  <div className="shrink-0 flex items-center gap-1">
                     <button
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        e.preventDefault();
                         onMarkRead(notif.id);
                       }}
-                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                      className={`p-1 rounded-lg transition-all ${
                         notif.read
-                          ? 'text-muted/50 hover:text-sky-400 hover:bg-sky-500/15'
-                          : 'text-sky-400 bg-sky-500/10 border border-sky-500/25 hover:bg-sky-500/25 shadow-sm'
+                          ? 'text-muted/40 hover:text-sky-400 hover:bg-sky-500/10'
+                          : 'text-sky-400 hover:bg-sky-500/20'
                       }`}
-                      aria-label={notif.read ? "Mark as unread" : "Mark as read"}
                       title={notif.read ? "Mark as unread" : "Mark as read"}
                     >
-                      <Check size={14} className={notif.read ? 'opacity-50' : 'opacity-100'} />
+                      <Check size={13} />
                     </button>
                     <button
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        e.preventDefault();
                         onClearOne(notif.id);
                       }}
-                      className="p-1.5 rounded-lg text-muted hover:text-red-400 hover:bg-red-500/15 border border-transparent hover:border-red-500/30 transition-all cursor-pointer"
-                      aria-label="Remove notification"
+                      className="p-1 rounded-lg text-muted/40 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
                       title="Remove notification"
                     >
-                      <X size={14} />
+                      <X size={13} />
                     </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Middle Content */}
+                <p className={`text-xs leading-relaxed ${!notif.read ? 'text-text font-semibold' : 'text-muted font-medium'}`}>
+                  {notif.message}
+                </p>
+
+                {/* Metadata Tags & Action Row */}
+                <div className="flex items-center justify-between pt-1 border-t border-border/30 mt-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {notif.distributor && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold">
+                        <Building2 size={10} />
+                        {notif.distributor}
+                      </span>
+                    )}
+                    {notif.qty !== undefined && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        Qty: {notif.qty}
+                      </span>
+                    )}
+                  </div>
+
+                  {(notif.link || notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation') && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!notif.read) onMarkRead(notif.id);
+                        if (notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' || !notif.link) {
+                          whatsappQueueEvent.triggerOpen();
+                        } else {
+                          navigate(notif.link!);
+                        }
+                        onClose();
+                      }}
+                      className={`inline-flex items-center gap-1 text-[11px] font-bold transition-all px-2.5 py-1 rounded-xl cursor-pointer ${
+                        notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation'
+                          ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25'
+                          : 'text-sky-400 hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25'
+                      }`}
+                    >
+                      {notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? (
+                        <>
+                          <MessageSquareIcon size={11} />
+                          <span>View Queue</span>
+                        </>
+                      ) : (
+                        <>
+                          <ExternalLink size={11} />
+                          <span>Open</span>
+                        </>
+                      )}
+                      <ChevronRight size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
-      {/* Footer */}
+      {/* Footer Summary */}
       {notifications.length > 0 && (
-        <div className="px-4 py-2.5 border-t border-glass-border bg-bg/50 flex items-center justify-between">
-          <span className="text-xs text-muted font-medium">
-            {notifications.length} total notification{notifications.length !== 1 ? 's' : ''}
-          </span>
-          {unreadCount > 0 && (
-            <button
-              onClick={() => notifications.forEach(n => { if (!n.read) onMarkRead(n.id); })}
-              className="text-xs font-bold text-sky-400 hover:text-sky-300 transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              <Check size={13} />
-              Mark all read
-            </button>
-          )}
+        <div className="px-4 py-2.5 border-t border-border bg-bg/40 flex items-center justify-between text-xs text-muted font-medium">
+          <span>{notifications.length} total notification{notifications.length !== 1 ? 's' : ''}</span>
+          <span className="text-[10px] font-mono text-muted/70">Live Activity Feed</span>
         </div>
       )}
     </div>
@@ -869,6 +871,35 @@ const Topbar = ({
   const [backupStatus, setBackupStatus] = useState<{ active: boolean; label: string }>({ active: false, label: '' });
   const [ocrStatus, setOcrStatus] = useState<{ active: boolean; label?: string; progress?: number; reviewNeeded?: boolean }>({ active: false });
   const [isHoverExpanded, setIsHoverExpanded] = useState(false);
+  const hubHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleHubMouseEnter = () => {
+    if (hubHoverTimerRef.current) {
+      clearTimeout(hubHoverTimerRef.current);
+      hubHoverTimerRef.current = null;
+    }
+    setIsCarouselHovered(true);
+    setIsHoverExpanded(true);
+  };
+
+  const handleHubMouseLeave = () => {
+    if (hubHoverTimerRef.current) {
+      clearTimeout(hubHoverTimerRef.current);
+    }
+    hubHoverTimerRef.current = setTimeout(() => {
+      setIsCarouselHovered(false);
+      setIsHoverExpanded(false);
+      hubHoverTimerRef.current = null;
+    }, 1500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hubHoverTimerRef.current) {
+        clearTimeout(hubHoverTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const handleBackupStatus = (e: any) => {
@@ -1375,8 +1406,8 @@ const Topbar = ({
         {/* CENTER SECTION: Hover-Expanded Popover & Auto-Minimizing Line Fill Progress Bar */}
         <div 
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
-          onMouseEnter={() => { setIsCarouselHovered(true); setIsHoverExpanded(true); }}
-          onMouseLeave={() => { setIsCarouselHovered(false); setIsHoverExpanded(false); }}
+          onMouseEnter={handleHubMouseEnter}
+          onMouseLeave={handleHubMouseLeave}
         >
           {activeHeaderItems.length > 0 && currentHeaderItem && (
             <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress">
@@ -1451,6 +1482,8 @@ const Topbar = ({
               {isHoverExpanded && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
+                  onMouseEnter={handleHubMouseEnter}
+                  onMouseLeave={handleHubMouseLeave}
                   className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[460px] max-h-[480px] overflow-y-auto bg-bg2 border border-border shadow-2xl rounded-3xl p-4 z-dropdown flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
                 >
                   {/* Header Title & Controls */}
@@ -1479,6 +1512,22 @@ const Topbar = ({
                         }`}
                       >
                         {isManualCarouselPaused ? '⏸ Paused' : '▶ Auto-Ticker'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (hubHoverTimerRef.current) {
+                            clearTimeout(hubHoverTimerRef.current);
+                            hubHoverTimerRef.current = null;
+                          }
+                          setIsCarouselHovered(false);
+                          setIsHoverExpanded(false);
+                        }}
+                        className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer text-xs font-bold"
+                        title="Close Hub Popover"
+                      >
+                        ✕
                       </button>
                     </div>
                   </div>
