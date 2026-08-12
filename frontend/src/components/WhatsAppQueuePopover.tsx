@@ -110,13 +110,19 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const [isFlushing, setIsFlushing] = useState(false);
+
   const handleFlushNow = async () => {
+    if (isFlushing) return;
+    setIsFlushing(true);
     try {
       await api.flushWhatsAppQueue();
       toastEvent.trigger('Queue flush triggered', 'info');
       await fetchStatus();
     } catch (err) {
       toastEvent.trigger('Failed to flush queue', 'error');
+    } finally {
+      setTimeout(() => setIsFlushing(false), 2000);
     }
   };
 

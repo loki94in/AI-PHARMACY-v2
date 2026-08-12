@@ -1175,20 +1175,6 @@ const Topbar = ({
       });
     }
 
-    // 5. Default Always-Visible System Status (Guarantees Header Banner & Controls are visible at all times)
-    if (items.length === 0) {
-      items.push({
-        id: 'system-idle',
-        type: 'notification',
-        title: 'AI PHARMACY OS: Operational',
-        subtitle: servicesStatus?.pharmarack?.connected ? '✓ Live Cart & Services Connected' : 'System Ready',
-        progress: 100,
-        badge: 'Ready',
-        color: 'emerald',
-        icon: <ActivityIcon size={12} className="text-emerald-400 shrink-0" />
-      });
-    }
-
     return items;
   }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, onOpenWaQueue]);
 
@@ -1331,31 +1317,31 @@ const Topbar = ({
           )}
         </div>
 
-        {/* CENTER SECTION: Hover-Expanded Popover & Auto-Minimizing Line Fill Progress Bar */}
+        {/* CENTER SECTION: Auto-Hides in Idle state; Smooth Center-Outward Expansion Reveal Animation on Active Task or Hover */}
         <div 
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
           onMouseEnter={handleHubMouseEnter}
           onMouseLeave={handleHubMouseLeave}
         >
-          {activeHeaderItems.length > 0 && currentHeaderItem && (
-            <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress">
+          {(activeHeaderItems.length > 0 || isHoverExpanded) && (
+            <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95">
               {/* Default Minimized Sleek Inline Header Row */}
               <div className="flex items-center justify-between gap-2 text-xs font-semibold">
                 <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  {currentHeaderItem.icon}
+                  {currentHeaderItem ? currentHeaderItem.icon : <ActivityIcon size={12} className="text-emerald-400 shrink-0" />}
                   <span className="truncate text-text font-bold text-xs tracking-tight">
-                    {currentHeaderItem.title}
+                    {currentHeaderItem ? currentHeaderItem.title : 'AI PHARMACY OS: Operational'}
                   </span>
-                  {currentHeaderItem.subtitle && (
+                  {(currentHeaderItem?.subtitle || !currentHeaderItem) && (
                     <span className="text-[10px] text-muted truncate max-w-[140px] hidden md:inline">
-                      {currentHeaderItem.subtitle}
+                      {currentHeaderItem ? currentHeaderItem.subtitle : 'System Ready'}
                     </span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {/* Interactive Click-on-Time Countdown Pill (Pause & Resume Timer by Clicking Directly on Time) */}
-                  {(currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
+                  {currentHeaderItem && (currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -1374,7 +1360,7 @@ const Topbar = ({
                     </button>
                   )}
 
-                  {currentHeaderItem.action && (
+                  {currentHeaderItem && currentHeaderItem.action && (
                     <button
                       type="button"
                       onClick={currentHeaderItem.action}
@@ -1387,7 +1373,7 @@ const Topbar = ({
               </div>
 
               {/* Direct Inline Line Filling Progress Bar Track inside header bar */}
-              {currentHeaderItem.progress !== undefined && (
+              {currentHeaderItem && currentHeaderItem.progress !== undefined && (
                 <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
                   <div
                     className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${

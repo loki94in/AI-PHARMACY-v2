@@ -212,6 +212,30 @@ class WhatsAppQueueWorker {
       }
     }
 
+    // For distributor order types: Check if an unsent pending queue item already exists for this distributor today
+    if (type.includes('distributor') || type.includes('pharmarack_distributor_order')) {
+      const existingPending = await db.get(
+        `SELECT id, message FROM whatsapp_send_queue 
+         WHERE number = ? AND status = 'pending' AND created_at >= ? AND (type LIKE '%distributor%' OR type LIKE '%pharmarack%')
+         ORDER BY id DESC LIMIT 1`,
+        [cleanPhone, startOfDayMs]
+      );
+
+      if (existingPending && existingPending.message !== message && !existingPending.message.includes(message.trim())) {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const combinedMessage = `${existingPending.message}\n\n📦 *SAME-DAY ADDITION (${timeStr})*:\n${message}`;
+        await db.run(
+          `UPDATE whatsapp_send_queue SET message = ?, created_at = ? WHERE id = ?`,
+          [combinedMessage, now, existingPending.id]
+        );
+        console.log(`[Queue Concatenation] Merged new same-day order items into existing pending queue item #${existingPending.id} for ${cleanPhone}.`);
+        if (scheduledAt <= now) {
+          this.triggerProcessing();
+        }
+        return existingPending.id;
+      }
+    }
+
     // Atomic dedup + insert: the WHERE NOT EXISTS runs inside the same statement as the INSERT,
     // so two near-simultaneous enqueue() calls for the same number+message can't both pass a
     // separate SELECT check and both insert (that race caused duplicate WhatsApp sends).
