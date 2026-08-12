@@ -353,12 +353,12 @@ const FlashToast = ({
   if (!toast) return null;
 
   const cfg = {
-    success: { bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400', icon: <Check size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(16,185,129,0.15)]' },
-    error:   { bg: 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400',                 icon: <AlertTriangle size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(239,68,68,0.15)]' },
-    info:    { bg: 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400',                 icon: <Info size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(14,165,233,0.15)]' },
-    mail:    { bg: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400',     icon: <MailIcon size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(99,102,241,0.15)]' },
-    automation: { bg: 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400', icon: <Activity size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(168,85,247,0.15)]' },
-  }[toast.type] || { bg: 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400',                 icon: <Info size={15} className="shrink-0" />, glow: 'shadow-[0_0_20px_rgba(14,165,233,0.15)]' };
+    success: { bg: 'bg-bg2 border-emerald-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Check size={15} className="shrink-0 text-emerald-400" /> },
+    error:   { bg: 'bg-bg2 border-red-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',     icon: <AlertTriangle size={15} className="shrink-0 text-red-400" /> },
+    info:    { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',         icon: <Info size={15} className="shrink-0 text-muted" /> },
+    mail:    { bg: 'bg-bg2 border-indigo-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',  icon: <MailIcon size={15} className="shrink-0 text-indigo-400" /> },
+    automation: { bg: 'bg-bg2 border-purple-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Activity size={15} className="shrink-0 text-purple-400" /> },
+  }[toast.type] || { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',         icon: <Info size={15} className="shrink-0 text-muted" /> };
 
   const isStagedSync = toast.message.toLowerCase().includes('sync') || toast.message.toLowerCase().includes('staged');
 
@@ -368,8 +368,8 @@ const FlashToast = ({
       className={`
         fixed top-4 left-1/2 -translate-x-1/2 z-toast
         flex items-center gap-2.5 px-4 py-2.5 rounded-2xl
-        border backdrop-blur-2xl ${cfg.bg} ${cfg.glow}
-        animate-soft-toast
+        border ${cfg.bg}
+        animate-soft-toast opacity-100
         min-w-[260px] max-w-[450px]
       `}
     >
@@ -456,14 +456,13 @@ const NotificationPanel = ({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-3 w-[420px] max-w-[calc(100vw-1.5rem)] z-dropdown flex flex-col rounded-3xl overflow-hidden bg-bg2/95 border border-border shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+      className="absolute right-0 top-full mt-3 w-[420px] max-w-[calc(100vw-1.5rem)] z-dropdown flex flex-col rounded-3xl overflow-hidden bg-bg2 border border-border shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 opacity-100"
       style={{
-        backdropFilter: 'blur(28px)',
-        boxShadow: '0 25px 65px rgba(0,0,0,0.4), 0 0 35px rgba(56, 189, 248, 0.08)',
+        boxShadow: '0 25px 65px rgba(0,0,0,0.5), 0 0 35px rgba(0, 0, 0, 0.2)',
       }}
     >
       {/* Header Bar */}
-      <div className="p-4 border-b border-border bg-bg/40 flex flex-col gap-3">
+      <div className="p-4 border-b border-border bg-bg flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm relative">
