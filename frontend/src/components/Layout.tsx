@@ -1067,7 +1067,6 @@ const Topbar = ({
     };
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded, waQueueDetail?.isProcessing, waQueueDetail?.counts?.pending, waQueueDetail?.counts?.sending, onOpenWaQueue]);
 
-  const [demoActive, setDemoActive] = useState(false);
   const [countdownSec, setCountdownSec] = useState(278); // 4m 38s live ticking countdown
   const [isCountdownPaused, setIsCountdownPaused] = useState(false);
 
@@ -1176,75 +1175,7 @@ const Topbar = ({
       });
     }
 
-    // 5. Demo / Preview Items (Active when staff clicks Test Mode to preview loading lines and controls)
-    if (demoActive) {
-      items.push({
-        id: 'demo-advance-5m',
-        type: 'whatsapp',
-        title: isCountdownPaused 
-          ? `⏰ Scheduled: 12 Credit Reminders (PAUSED ${formattedCountdown})` 
-          : `⏰ Scheduled in ${formattedCountdown}: 12 Credit Reminders`,
-        subtitle: isCountdownPaused 
-          ? '⏸ Countdown Paused — Click timer to resume' 
-          : '⏱ Live Ticking — Click time to pause',
-        progress: 0,
-        badge: '5m Advance',
-        color: 'amber',
-        action: () => setDemoActive(false),
-        actionLabel: '▶ SEND NOW',
-        icon: <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" />
-      });
-      items.push({
-        id: 'demo-waiting-task',
-        type: 'whatsapp',
-        title: '⏰ Scheduled: 12 Credit Reminders Ready',
-        subtitle: '⏸ Waiting for Play button to send',
-        progress: 0,
-        badge: 'Waiting Play',
-        color: 'amber',
-        action: () => setDemoActive(false),
-        actionLabel: '▶ SEND NOW',
-        icon: <ClockIcon size={12} className="text-amber-400 animate-bounce shrink-0" />
-      });
-      items.push({
-        id: 'demo-wa',
-        type: 'whatsapp',
-        title: 'WhatsApp: 5/12 Sent (42%)',
-        subtitle: '▶ Patient Ramesh Kumar',
-        progress: 42,
-        badge: 'Sending',
-        color: 'emerald',
-        action: () => setDemoActive(false),
-        actionLabel: 'Close Demo',
-        icon: <MessageSquareIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
-      });
-      items.push({
-        id: 'demo-backup',
-        type: 'backup',
-        title: 'Database Backup Running (85%)',
-        subtitle: 'Creating compressed database backup...',
-        progress: 85,
-        badge: 'Backing Up',
-        color: 'purple',
-        action: () => setDemoActive(false),
-        actionLabel: 'Close Demo',
-        icon: <Database size={12} className="text-purple-400 animate-spin shrink-0" />
-      });
-      items.push({
-        id: 'demo-catalog',
-        type: 'catalog',
-        title: 'Catalog Index Syncing (65%)',
-        subtitle: 'Updating reference medicine database...',
-        progress: 65,
-        badge: 'Syncing',
-        color: 'sky',
-        action: () => setDemoActive(false),
-        actionLabel: 'Close Demo',
-        icon: <RefreshCw size={12} className="text-sky-400 animate-spin shrink-0" />
-      });
-    }
-
-    // 6. Default Always-Visible System Status (Guarantees Header Banner & Play/Pause controls are visible at all times)
+    // 5. Default Always-Visible System Status (Guarantees Header Banner & Controls are visible at all times)
     if (items.length === 0) {
       items.push({
         id: 'system-idle',
@@ -1254,14 +1185,12 @@ const Topbar = ({
         progress: 100,
         badge: 'Ready',
         color: 'emerald',
-        action: () => setDemoActive(true),
-        actionLabel: 'Test Mode',
         icon: <ActivityIcon size={12} className="text-emerald-400 shrink-0" />
       });
     }
 
     return items;
-  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, demoActive, onOpenWaQueue]);
+  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, onOpenWaQueue]);
 
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [isCarouselHovered, setIsCarouselHovered] = useState(false);
@@ -1426,7 +1355,7 @@ const Topbar = ({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {/* Interactive Click-on-Time Countdown Pill (Pause & Resume Timer by Clicking Directly on Time) */}
-                  {(demoActive || currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
+                  {(currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
                     <button
                       type="button"
                       onClick={(e) => {
