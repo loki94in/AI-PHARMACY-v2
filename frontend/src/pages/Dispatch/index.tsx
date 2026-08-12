@@ -5,6 +5,7 @@ import {
   Package,
   Clock,
   CheckCircle,
+  XCircle,
   MapPin,
   Plus,
   X,
@@ -19,7 +20,11 @@ import {
   Layers,
   Filter,
   Calendar,
-  Eye,
+  Phone,
+  Copy,
+  Zap,
+  ShoppingCart,
+  Info,
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { whatsappQueueEvent, toastEvent } from '../../services/events';
@@ -142,15 +147,18 @@ const Dispatch = () => {
       const formatted = hours > 0
         ? `${hours}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`
         : `${mins}m ${String(secs).padStart(2, '0')}s`;
-      return { status: 'BEFORE', countdownText: formatted, label: `Auto-send window starts in ${formatted}` };
+      return { status: 'BEFORE' as const, countdownText: formatted, label: `Auto-send window starts in ${formatted}`, progressPct: 0 };
     } else if (now >= startTime && now <= endTime) {
       const diffMs = endTime.getTime() - now.getTime();
       const mins = Math.floor(diffMs / (1000 * 60));
       const secs = Math.floor((diffMs % (1000 * 60)) / 1000);
       const formatted = `${mins}m ${String(secs).padStart(2, '0')}s`;
-      return { status: 'ACTIVE', countdownText: formatted, label: `Active Window — ${formatted} remaining` };
+      const totalMs = endTime.getTime() - startTime.getTime();
+      const elapsedMs = now.getTime() - startTime.getTime();
+      const progressPct = totalMs > 0 ? Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100)) : 0;
+      return { status: 'ACTIVE' as const, countdownText: formatted, label: `Active Window — ${formatted} remaining`, progressPct };
     } else {
-      return { status: 'CLOSED', countdownText: 'Window Closed', label: `Today's window closed at 1:00 PM` };
+      return { status: 'CLOSED' as const, countdownText: 'Window Closed', label: `Today's window closed at 1:00 PM`, progressPct: 100 };
     }
   };
 
@@ -482,247 +490,166 @@ const Dispatch = () => {
 
   return (
     <div className="w-full flex-1 flex flex-col gap-5 pb-8 text-left animate-in fade-in duration-300">
-      {/* ── TOP HERO HEADER & CONTROLS ── */}
-      <div className="glass-panel p-6 rounded-2xl bg-bg2/40 border border-glass-border/80 shadow-2xl backdrop-blur-xl relative overflow-hidden transition-all">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-primary/10 via-amber-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-glass-border/60 pb-5">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 text-primary flex items-center justify-center font-bold border border-primary/40 shadow-lg shadow-primary/10 shrink-0">
-                <Truck size={22} className="animate-pulse" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-2xl font-black tracking-tight text-text">Dispatch & Delivery Command Center</h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-primary/15 text-primary border border-primary/30">
-                    Live Operations
-                  </span>
-                </div>
-                <p className="text-muted text-xs font-medium mt-0.5">
-                  Real-time home delivery dispatching, daily distributor WhatsApp status reminders, and staff tracking.
-                </p>
-              </div>
-            </div>
+      {/* ── HEADER ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center border border-primary/30 shrink-0">
+            <Truck size={20} />
           </div>
-
-          {/* Action Hub */}
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <button
-              onClick={() => { fetchAll(); fetchDistributorReminders(); fetchMessageDates(); }}
-              className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 border border-glass-border text-muted hover:text-text transition-all shadow-sm active:scale-95 cursor-pointer"
-              title="Refresh All Data"
-            >
-              <RefreshCw size={16} className={loading || loadingDistributorReminders ? 'animate-spin text-primary' : ''} />
-            </button>
-
-            <button
-              onClick={handleSendAllViaWhatsApp}
-              className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all shadow-md hover:shadow-emerald-500/10 active:scale-95 cursor-pointer"
-              title="Send all active collection orders via WhatsApp with 8s-12s pacing"
-            >
-              <Send size={15} className="text-emerald-400" />
-              <span>Send All via WhatsApp</span>
-            </button>
-
-            <button
-              onClick={() => setShowBoysModal(true)}
-              className="bg-sky/20 border border-sky/40 text-sky hover:bg-sky/30 text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all shadow-md hover:shadow-sky/10 active:scale-95 cursor-pointer"
-            >
-              <User size={15} />
-              <span>Manage Staff ({allBoys.length})</span>
-            </button>
-
-            <button
-              onClick={() => setShowModal(true)}
-              className="bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-primary-foreground text-xs px-4 py-2.5 rounded-xl font-black flex items-center gap-2 shadow-lg shadow-primary/25 transition-all active:scale-95 cursor-pointer"
-            >
-              <Plus size={16} />
-              <span>New Dispatch Order</span>
-            </button>
+          <div>
+            <h2 className="text-lg font-bold tracking-tight text-text">Dispatch &amp; Delivery</h2>
+            <p className="text-muted text-xs mt-0.5">Home delivery queue, distributor collection reminders, and staff tracking.</p>
           </div>
         </div>
 
-        {/* Dynamic Metric KPI Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-5 gap-3 mt-4 pt-1">
-          {/* Pending */}
-          <div
-            onClick={() => { setActiveTab('queue'); setStatusFilter('Pending'); }}
-            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
-              activeTab === 'queue' && statusFilter === 'Pending'
-                ? 'bg-amber-500/20 border-amber-500/50 shadow-amber-500/10 scale-[1.02]'
-                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-amber-500/30'
-            }`}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { fetchAll(); fetchDistributorReminders(); fetchMessageDates(); }}
+            className="p-2.5 rounded-xl bg-bg2/60 hover:bg-bg3 border border-glass-border text-muted hover:text-text transition-colors active:scale-95 cursor-pointer"
+            title="Refresh All Data"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <Clock size={13} className="text-amber-400" /> Pending Orders
-              </span>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            </div>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-amber-400 font-mono">{pendingCount}</span>
-              <span className="text-[10px] text-muted font-medium">awaiting pickup</span>
-            </div>
-          </div>
+            <RefreshCw size={16} className={loading || loadingDistributorReminders ? 'animate-spin text-primary' : ''} />
+          </button>
 
-          {/* In Transit */}
-          <div
-            onClick={() => { setActiveTab('queue'); setStatusFilter('In Transit'); }}
-            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
-              activeTab === 'queue' && statusFilter === 'In Transit'
-                ? 'bg-sky/20 border-sky/50 shadow-sky/10 scale-[1.02]'
-                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-sky/30'
-            }`}
+          <button
+            onClick={handleSendAllViaWhatsApp}
+            className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-semibold transition-colors active:scale-95 cursor-pointer"
+            title="Send all active collection orders via WhatsApp with 8s-12s pacing"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <Truck size={13} className="text-sky" /> In Transit
-              </span>
-              <span className="w-2 h-2 rounded-full bg-sky" />
-            </div>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-sky font-mono">{inTransitCount}</span>
-              <span className="text-[10px] text-muted font-medium">on delivery route</span>
-            </div>
-          </div>
+            <Send size={14} />
+            <span>Send All via WhatsApp</span>
+          </button>
 
-          {/* Delivered Today */}
-          <div
-            onClick={() => { setActiveTab('queue'); setStatusFilter('Delivered'); }}
-            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
-              activeTab === 'queue' && statusFilter === 'Delivered'
-                ? 'bg-emerald-500/20 border-emerald-500/50 shadow-emerald-500/10 scale-[1.02]'
-                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-emerald-500/30'
-            }`}
+          <button
+            onClick={() => setShowBoysModal(true)}
+            className="bg-sky/15 border border-sky/30 text-sky hover:bg-sky/25 text-xs flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-semibold transition-colors active:scale-95 cursor-pointer"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <CheckCircle size={13} className="text-emerald-400" /> Delivered Today
-              </span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            </div>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-emerald-400 font-mono">{deliveredTodayCount}</span>
-              <span className="text-[10px] text-muted font-medium">completed today</span>
-            </div>
-          </div>
+            <User size={14} />
+            <span>Staff ({allBoys.length})</span>
+          </button>
 
-          {/* Active Staff */}
-          <div
-            onClick={() => setActiveTab('staff')}
-            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
-              activeTab === 'staff'
-                ? 'bg-purple-500/20 border-purple-500/50 shadow-purple-500/10 scale-[1.02]'
-                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-purple-500/30'
-            }`}
+          <button
+            onClick={() => setShowModal(true)}
+            className="bg-primary hover:bg-primary/90 text-black text-xs px-3.5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-md shadow-primary/20 transition-colors active:scale-95 cursor-pointer"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <User size={13} className="text-purple-400" /> Active Staff
-              </span>
-              <span className="w-2 h-2 rounded-full bg-purple-400" />
-            </div>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-purple-400 font-mono">{deliveryBoys.length}</span>
-              <span className="text-[10px] text-muted font-medium">active personnel</span>
-            </div>
-          </div>
-
-          {/* Distributor Reminders */}
-          <div
-            onClick={() => setActiveTab('reminders')}
-            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
-              activeTab === 'reminders'
-                ? 'bg-rose-500/20 border-rose-500/50 shadow-rose-500/10 scale-[1.02]'
-                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-rose-500/30'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
-                <Bell size={13} className="text-rose-400" /> Uncollected Orders
-              </span>
-              <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-            </div>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-rose-400 font-mono">{uncollectedDistributorsCount}</span>
-              <span className="text-[10px] text-muted font-medium">distributors pending</span>
-            </div>
-          </div>
+            <Plus size={16} />
+            <span>New Dispatch Order</span>
+          </button>
         </div>
       </div>
 
-      {/* ── NAVIGATION TABS SWITCHER ── */}
-      <div className="flex items-center justify-between flex-wrap gap-2 bg-bg2/50 p-2 rounded-2xl border border-glass-border/80 backdrop-blur-xl shadow-xl">
-        <div className="flex items-center gap-2 overflow-x-auto p-0.5 scrollbar-none">
-          <button
-            onClick={() => setActiveTab('queue')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
-              activeTab === 'queue'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 border border-primary/50'
-                : 'text-muted hover:text-text hover:bg-bg3/60'
-            }`}
-          >
-            <Package size={15} /> Active Dispatch Queue
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black ${
-              activeTab === 'queue' ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-bg/60 text-muted border border-glass-border'
+      {/* ── SIGNATURE: LIVE DISTRIBUTOR COLLECTION WINDOW ── */}
+      {(() => {
+        const cd = getWindowCountdownInfo(nowTime, windowSchedule.start, windowSchedule.end);
+        return (
+          <div className={`rounded-xl border px-4 py-3 flex items-center gap-3 transition-colors duration-500 ${
+            cd.status === 'ACTIVE'
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-bg2/40 border-glass-border/80'
+          }`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              cd.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-bg3/80 text-muted'
             }`}>
-              {orders.length}
-            </span>
-          </button>
+              <MessageSquare size={16} className={cd.status === 'ACTIVE' ? 'animate-pulse' : ''} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-text">Distributor collection window</span>
+                <span className={`text-xs font-mono font-bold whitespace-nowrap ${
+                  cd.status === 'ACTIVE' ? 'text-emerald-400' : cd.status === 'BEFORE' ? 'text-amber-400' : 'text-muted'
+                }`}>
+                  {cd.status === 'CLOSED' ? 'Closed for today' : cd.countdownText}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 rounded-full bg-bg3/80 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-1000 ${cd.status === 'ACTIVE' ? 'bg-emerald-400' : cd.status === 'CLOSED' ? 'bg-glass-border' : 'bg-amber-400/70'}`}
+                  style={{ width: `${cd.progressPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
-          <button
-            onClick={() => setActiveTab('reminders')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
-              activeTab === 'reminders'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-md shadow-amber-500/10'
-                : 'text-muted hover:text-text hover:bg-bg3/60'
-            }`}
-          >
-            <Bell size={15} className="text-amber-400" /> Distributor Dispatch Reminders
+      {/* ── TAB STRIP ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <button
+          onClick={() => setActiveTab('queue')}
+          className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+            activeTab === 'queue'
+              ? 'bg-primary/15 border-primary/40'
+              : 'bg-bg2/40 border-glass-border/80 hover:border-primary/25'
+          }`}
+        >
+          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'queue' ? 'text-primary' : 'text-text'}`}>
+            <Package size={14} /> Dispatch Queue
+            <span className="ml-auto text-[10px] font-mono font-bold text-muted">{orders.length}</span>
+          </span>
+          <span className="mt-1.5 block text-[10px] text-muted truncate">
+            {pendingCount} pending &middot; {inTransitCount} in transit &middot; {deliveredTodayCount} delivered today
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('reminders')}
+          className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+            activeTab === 'reminders'
+              ? 'bg-amber-500/15 border-amber-500/40'
+              : 'bg-bg2/40 border-glass-border/80 hover:border-amber-500/25'
+          }`}
+        >
+          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'reminders' ? 'text-amber-400' : 'text-text'}`}>
+            <Bell size={14} /> Reminders
             {uncollectedDistributorsCount > 0 && (
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-black bg-amber-500/30 text-amber-300 border border-amber-500/40">
-                {uncollectedDistributorsCount}
-              </span>
+              <span className="ml-auto text-[10px] font-mono font-bold text-rose-400">{uncollectedDistributorsCount}</span>
             )}
-          </button>
+          </span>
+          <span className="mt-1.5 block text-[10px] text-muted truncate">distributor collection status</span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('staff')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
-              activeTab === 'staff'
-                ? 'bg-sky/20 text-sky border border-sky/50 shadow-md shadow-sky/10'
-                : 'text-muted hover:text-text hover:bg-bg3/60'
-            }`}
-          >
-            <User size={15} /> Delivery Staff Directory
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-black bg-sky/20 text-sky border border-sky/30">
-              {allBoys.length}
-            </span>
-          </button>
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+            activeTab === 'staff'
+              ? 'bg-sky/15 border-sky/40'
+              : 'bg-bg2/40 border-glass-border/80 hover:border-sky/25'
+          }`}
+        >
+          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'staff' ? 'text-sky' : 'text-text'}`}>
+            <User size={14} /> Staff
+            <span className="ml-auto text-[10px] font-mono font-bold text-muted">{allBoys.length}</span>
+          </span>
+          <span className="mt-1.5 block text-[10px] text-muted truncate">delivery personnel directory</span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
-              activeTab === 'logs'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-500/10'
-                : 'text-muted hover:text-text hover:bg-bg3/60'
-            }`}
-          >
-            <Send size={15} className="text-emerald-400" /> WhatsApp Message Logs
-          </button>
+        <button
+          onClick={() => setActiveTab('logs')}
+          className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+            activeTab === 'logs'
+              ? 'bg-emerald-500/15 border-emerald-500/40'
+              : 'bg-bg2/40 border-glass-border/80 hover:border-emerald-500/25'
+          }`}
+        >
+          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'logs' ? 'text-emerald-400' : 'text-text'}`}>
+            <Send size={14} /> Message Logs
+          </span>
+          <span className="mt-1.5 block text-[10px] text-muted truncate">WhatsApp send history</span>
+        </button>
 
-          <button
-            onClick={() => setActiveTab('all')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
-              activeTab === 'all'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-md shadow-purple-500/10'
-                : 'text-muted hover:text-text hover:bg-bg3/60'
-            }`}
-          >
-            <Layers size={15} className="text-purple-400" /> All In One View
-          </button>
-        </div>
+        <button
+          onClick={() => setActiveTab('all')}
+          className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+            activeTab === 'all'
+              ? 'bg-bg3 border-glass-border'
+              : 'bg-bg2/40 border-glass-border/80 hover:border-glass-border'
+          }`}
+        >
+          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'all' ? 'text-text' : 'text-text'}`}>
+            <Layers size={14} /> All In One
+          </span>
+          <span className="mt-1.5 block text-[10px] text-muted truncate">everything on one page</span>
+        </button>
       </div>
 
       {/* ── TAB CONTENT 1: ACTIVE DISPATCH QUEUE ── */}
@@ -882,17 +809,12 @@ const Dispatch = () => {
           {/* Section Header & High-Level Actions */}
           <div className="flex flex-wrap justify-between items-center gap-4 border-b border-glass-border/60 pb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/25 to-amber-600/10 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30 shadow-lg shadow-amber-500/10">
-                <Bell size={20} className="animate-pulse" />
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
+                <Bell size={18} />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-black text-sm uppercase tracking-wider text-text">Today's Distributor Dispatch & Collection Reminders</h3>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                    Live Dispatch Hub
-                  </span>
-                </div>
-                <p className="text-xs text-muted mt-0.5">Auto-detects suppliers ordered from today & coordinates dispatch/collection status.</p>
+                <h3 className="font-bold text-sm text-text">Distributor Dispatch &amp; Collection Reminders</h3>
+                <p className="text-xs text-muted mt-0.5">Auto-detects suppliers ordered from today and coordinates dispatch/collection status.</p>
               </div>
             </div>
 
@@ -903,7 +825,7 @@ const Dispatch = () => {
                   fetchGlobalTemplate();
                   setShowTemplateModal(true);
                 }}
-                className="px-3.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-all border border-amber-500/30 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md hover:shadow-amber-500/10 active:scale-95"
+                className="px-3.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors border border-amber-500/30 font-semibold text-xs flex items-center gap-2 cursor-pointer active:scale-95"
                 title="Customize default reminder message format"
               >
                 <Edit3 size={14} />
@@ -913,7 +835,7 @@ const Dispatch = () => {
               <button
                 type="button"
                 onClick={() => fetchDistributorReminders()}
-                className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 text-muted hover:text-text transition-all border border-glass-border cursor-pointer shadow-sm active:scale-95"
+                className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 text-muted hover:text-text transition-colors border border-glass-border cursor-pointer active:scale-95"
                 title="Refresh Distributor Reminders"
               >
                 <RefreshCw size={15} className={loadingDistributorReminders ? 'animate-spin text-amber-400' : ''} />
@@ -921,7 +843,7 @@ const Dispatch = () => {
             </div>
           </div>
 
-          {/* ── SPATIAL HERO METRIC CARDS ── */}
+          {/* ── METRIC ROW ── */}
           {(() => {
             const todayCount = distributorReminders.filter(r => r.has_order_today === 1).length;
             const sentTodayCount = distributorReminders.filter(r =>
@@ -930,71 +852,44 @@ const Dispatch = () => {
             const notSentTodayCount = distributorReminders.filter(r =>
               r.has_order_today === 1 && r.latest_notif_status !== 'sent' && r.latest_notif_status !== 'delivered'
             ).length;
-            const cd = getWindowCountdownInfo(nowTime, windowSchedule.start, windowSchedule.end);
 
             return (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Metric 1: Today's Orders */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-amber-500/30 transition-all duration-200">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center font-bold border border-amber-500/20 shrink-0">
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
                     <Package size={18} />
                   </div>
                   <div>
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Today's Orders</div>
-                    <div className="text-base font-black text-text font-mono flex items-center gap-1.5">
+                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Today's Orders</div>
+                    <div className="text-base font-bold text-text font-mono flex items-center gap-1.5">
                       {todayCount} <span className="text-[10px] font-normal text-muted">distributors</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Metric 2: Messages Sent */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-emerald-500/30 transition-all duration-200">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/20 shrink-0">
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
                     <CheckCircle size={18} />
                   </div>
                   <div>
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Messages Sent</div>
-                    <div className="text-base font-black text-emerald-400 font-mono flex items-center gap-1.5">
+                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Messages Sent</div>
+                    <div className="text-base font-bold text-emerald-400 font-mono flex items-center gap-1.5">
                       {sentTodayCount} <span className="text-[10px] font-normal text-muted">/ {todayCount}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Metric 3: Handover Pending */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-sky/30 transition-all duration-200">
-                  <div className="w-9 h-9 rounded-xl bg-sky/15 text-sky flex items-center justify-center font-bold border border-sky/20 shrink-0">
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky/15 text-sky flex items-center justify-center shrink-0">
                     <Clock size={18} />
                   </div>
                   <div>
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Pending Handover</div>
-                    <div className="text-base font-black text-amber-300 font-mono flex items-center gap-1.5">
+                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Pending Handover</div>
+                    <div className="text-base font-bold text-amber-300 font-mono flex items-center gap-1.5">
                       {notSentTodayCount} <span className="text-[10px] font-normal text-muted">remaining</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Metric 4: Auto-Send Window Countdown */}
-                <div className={`p-3.5 rounded-xl border flex items-center gap-3 shadow-md transition-all duration-200 ${
-                  cd.status === 'ACTIVE'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                    : cd.status === 'BEFORE'
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                    : 'bg-bg/50 border-glass-border/70 text-muted'
-                }`}>
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold shrink-0 ${
-                    cd.status === 'ACTIVE'
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
-                      : cd.status === 'BEFORE'
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                      : 'bg-bg2 text-muted border border-glass-border'
-                  }`}>
-                    <MessageSquare size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider truncate">Auto-Send Window</div>
-                    <div className="text-xs font-mono font-black truncate flex items-center gap-1">
-                      {cd.status === 'ACTIVE' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />}
-                      <span>{cd.label}</span>
                     </div>
                   </div>
                 </div>
@@ -1009,34 +904,36 @@ const Dispatch = () => {
               <button
                 type="button"
                 onClick={() => setDistributorTodayOnly(true)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer ${
                   distributorTodayOnly
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-md font-black'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'text-muted hover:text-text'
                 }`}
               >
-                <span>📦 Today's Orders Only</span>
-                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
+                <Package size={13} />
+                <span>Today's Orders Only</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-bold">
                   {distributorReminders.filter(r => r.has_order_today === 1).length}
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => setDistributorTodayOnly(false)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer ${
                   !distributorTodayOnly
-                    ? 'bg-bg2 text-text border border-glass-border shadow-md font-black'
+                    ? 'bg-bg2 text-text border border-glass-border'
                     : 'text-muted hover:text-text'
                 }`}
               >
-                <span>📋 All Distributors</span>
+                <Layers size={13} />
+                <span>All Distributors</span>
                 <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-bg3 text-muted font-bold">
                   {distributorReminders.length}
                 </span>
               </button>
             </div>
 
-            {/* Search Input & Schedule Window Info */}
+            {/* Search Input */}
             <div className="flex items-center gap-3 flex-wrap flex-1 justify-end">
               <div className="relative flex-1 min-w-[200px] max-w-[320px]">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -1057,12 +954,6 @@ const Dispatch = () => {
                     <X size={13} />
                   </button>
                 )}
-              </div>
-
-              {/* Schedule window badge */}
-              <div className="hidden xl:flex items-center gap-2 text-xs font-mono bg-bg px-3 py-1.5 rounded-xl border border-glass-border text-muted">
-                <Clock size={13} className="text-amber-400" />
-                <span>Schedule Window: <strong className="text-text font-extrabold">12:30 PM – 01:00 PM</strong></span>
               </div>
             </div>
           </div>
@@ -1106,7 +997,7 @@ const Dispatch = () => {
                           <p className="font-extrabold text-sm text-text">No matching distributors found</p>
                           <p className="text-xs text-muted mt-1">
                             {distributorTodayOnly
-                              ? "No distributor orders sent today. Switch to '📋 All Distributors' to view full directory."
+                              ? "No distributor orders sent today. Switch to 'All Distributors' to view full directory."
                               : "Try clearing your search query or placing a new purchase/cart order."}
                           </p>
                         </td>
@@ -1126,25 +1017,25 @@ const Dispatch = () => {
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-extrabold text-text text-xs tracking-tight">{item.distributor_name}</span>
                               {item.has_pharmarack_order_today === 1 ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0 shadow-sm">
-                                  🛒 Pharmarack Cart Sent
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                                  <ShoppingCart size={10} /> Pharmarack Cart Sent
                                 </span>
                               ) : item.has_order_today === 1 ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-sky/20 text-sky border border-sky/30 flex items-center gap-1 shrink-0 shadow-sm">
-                                  📦 Today's Order
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-sky/20 text-sky border border-sky/30 flex items-center gap-1 shrink-0">
+                                  <Package size={10} /> Today's Order
                                 </span>
                               ) : null}
 
                               {item.latest_notif_status === 'failed' || item.latest_notif_error ? (
-                                <span 
-                                  className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
                                   title={item.latest_notif_error || 'WhatsApp message failed to deliver'}
                                 >
-                                  ❌ Failed: {item.latest_notif_error ? item.latest_notif_error.substring(0, 24) + '...' : 'Delivery Error'}
+                                  <XCircle size={10} /> Failed: {item.latest_notif_error ? item.latest_notif_error.substring(0, 24) + '...' : 'Delivery Error'}
                                 </span>
                               ) : item.latest_notif_status === 'sent' || item.latest_notif_status === 'delivered' ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
-                                  ✅ Message Sent
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                                  <CheckCircle size={10} /> Message Sent
                                 </span>
                               ) : null}
                             </div>

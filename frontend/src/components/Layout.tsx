@@ -1130,53 +1130,24 @@ const Topbar = ({
       });
     }
 
-    // 4. Invoice OCR Scanning Progress
-    if (ocrStatus.active || ocrStatus.reviewNeeded) {
+    // 4. Invoice OCR Scanning Progress (Active background scanning process)
+    if (ocrStatus.active) {
       items.push({
         id: 'ocr-scan',
         type: 'notification',
-        title: ocrStatus.reviewNeeded ? '📄 OCR Review Needed' : `📄 Invoice OCR: ${ocrStatus.label || 'Scanning'} (${ocrStatus.progress || 0}%)`,
-        subtitle: ocrStatus.reviewNeeded ? 'Unmapped distributor layout detected — click to review' : 'Parsing invoice lines & GST tax fields...',
+        title: `📄 Invoice OCR: ${ocrStatus.label || 'Scanning'} (${ocrStatus.progress || 0}%)`,
+        subtitle: 'Parsing invoice lines & GST tax fields...',
         progress: ocrStatus.progress || 0,
-        badge: ocrStatus.reviewNeeded ? 'Review Needed' : 'Scanning',
-        color: ocrStatus.reviewNeeded ? 'amber' : 'sky',
-        action: () => navigate('/learning?tab=ocr'),
-        actionLabel: 'Review',
-        icon: <FileText size={12} className={ocrStatus.reviewNeeded ? 'text-amber-400 shrink-0' : 'text-sky-400 animate-pulse shrink-0'} />
-      });
-    }
-
-    // 5. Latest Unread System Notification
-    const unreadList = notifications.filter(n => !n.read);
-    if (unreadList.length > 0) {
-      const latest = unreadList[0];
-      items.push({
-        id: `noti-${latest.id}`,
-        type: 'notification',
-        title: latest.message,
-        subtitle: `${unreadList.length} unread notification${unreadList.length > 1 ? 's' : ''}`,
-        badge: 'Alert',
-        color: latest.type === 'error' ? 'amber' : 'sky',
-        action: () => setShowPanel(true),
-        actionLabel: 'View All',
-        icon: latest.type === 'error' ? <AlertIcon size={12} className="text-amber-400 shrink-0" /> : <BellRing size={12} className="text-sky-400 animate-pulse shrink-0" />
-      });
-    }
-
-    // 6. Demo / Preview Items (Active when staff clicks Test Mode to preview loading lines and controls)
-    if (demoActive) {
-      items.push({
-        id: 'demo-ocr-scan',
-        type: 'notification',
-        title: '📄 Invoice OCR: Scanning Distributor Bill (68%)',
-        subtitle: 'Parsing 24 medicine items & batch details from Sun Pharma.pdf',
-        progress: 68,
         badge: 'Scanning',
         color: 'sky',
-        action: () => setDemoActive(false),
+        action: () => navigate('/learning?tab=ocr'),
         actionLabel: 'Review',
         icon: <FileText size={12} className="text-sky-400 animate-pulse shrink-0" />
       });
+    }
+
+    // 5. Demo / Preview Items (Active when staff clicks Test Mode to preview loading lines and controls)
+    if (demoActive) {
       items.push({
         id: 'demo-advance-5m',
         type: 'whatsapp',
@@ -1260,7 +1231,7 @@ const Topbar = ({
     }
 
     return items;
-  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, notifications, servicesStatus, demoActive, onOpenWaQueue]);
+  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, demoActive, onOpenWaQueue]);
 
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [isCarouselHovered, setIsCarouselHovered] = useState(false);

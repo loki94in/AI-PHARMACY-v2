@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
-import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Layers, Camera, X, Loader2, Edit, Wand2 } from 'lucide-react';
+import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Camera, X, Loader2, Edit, Wand2 } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -398,9 +397,9 @@ const Returns: React.FC = () => {
       return Array.isArray(response) ? response : (response.data || []);
     }
   );
-  const [showGroupedPreview, setShowGroupedPreview] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraTargetIndex, setCameraTargetIndex] = useState<number | null>(null);
+
 
   // Edit history state
   const [isEditingHistory, setIsEditingHistory] = useState(false);
@@ -673,7 +672,6 @@ const Returns: React.FC = () => {
   const handlePreviewGrouped = () => {
     const grouped = groupItemsByInvoice();
     setGroupedReturns(grouped);
-    setShowGroupedPreview(true);
   };
 
   const processReturn = async () => {
@@ -701,7 +699,7 @@ const Returns: React.FC = () => {
 
       alert(`Successfully processed ${grouped.length} return(s)!`);
       setItems([createEmptyItem()]);
-      setShowGroupedPreview(false);
+      setGroupedReturns([]);
       // Centralized cache invalidation for frontend lists and local infinite scroll caches
       invalidateAfterStockWrite(queryClient);
 
@@ -791,7 +789,7 @@ const Returns: React.FC = () => {
       </div>
 
       {currentTab === 'expiry' ? (
-        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0">
           <Expiry />
         </div>
       ) : currentTab === 'customer' ? (
@@ -1121,12 +1119,11 @@ const Returns: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
 
-      {/* Column 2: Right Content Pane: Active Return Bill Editor OR History Viewer */}
-      <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden bg-bg2 border border-border rounded-xl p-5">
+      {/* Column 2: Right Content Pane */}
+      <div className="flex-1 flex flex-col gap-0 min-h-0 overflow-hidden bg-bg2 border border-border rounded-xl">
         {selectedHistoryReturn !== null ? (
-          <>
+          <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden p-5">
             {/* History Header */}
             <div className="flex justify-between items-center border-b border-glass-border pb-3">
               <div>
@@ -1349,29 +1346,33 @@ const Returns: React.FC = () => {
                 </table>
               )}
             </div>
-          </>
+          </div>
         ) : (
-          <>
-            {/* Workspace Header */}
-            <div className="flex justify-between items-center border-b border-glass-border pb-3">
-              <div>
-                <h2 className="text-base font-bold text-text">
-                  {items.some(i => i.distributor_name) 
-                    ? `Return to: ${[...new Set(items.map(i => i.distributor_name).filter(Boolean))].join(', ')}`
-                    : 'New Return Bill'}
-                </h2>
-                <p className="text-xs text-muted">
-                  Edit the return items below. Items are automatically grouped by invoice reference when processed.
-                </p>
+          /* Draft editor — split into table (left) + live distributor groups (right) */
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+
+            {/* Left: Table Editor */}
+            <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden p-4">
+              {/* Workspace Header */}
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-sm font-bold text-text">
+                    {items.some(i => i.distributor_name) 
+                      ? `Return to: ${[...new Set(items.map(i => i.distributor_name).filter(Boolean))].join(', ')}`
+                      : 'New Return Bill'}
+                  </h2>
+                  <p className="text-[11px] text-muted mt-0.5">Items auto-group by distributor in the panel →</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={addItem}
+                    className="bg-primary hover:bg-primary/95 text-white font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                  >
+                    <Plus size={13} />
+                    <span>Add Row</span>
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={addItem}
-                className="bg-primary hover:bg-primary/95 text-white font-semibold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-              >
-                <Plus size={14} />
-                <span>Add Row</span>
-              </button>
-            </div>
 
             {/* Table Editor */}
             <div className="flex-1 overflow-auto bg-bg/50 rounded-xl border border-glass-border">
@@ -1538,99 +1539,80 @@ const Returns: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          </>
-        )}
-      </div>
-
-      {/* Grouped Preview Modal */}
-      {showGroupedPreview && createPortal(
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-modal">
-          <div className="bg-bg2 border border-glass-border rounded-xl p-6 w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in duration-200">
-            <div className="flex justify-between items-center mb-4 pb-3 border-b border-glass-border flex-shrink-0">
-              <h3 className="text-base font-bold text-text flex items-center gap-2">
-                <Layers size={18} className="text-yellow-500" />
-                <span>Preview: {groupedReturns.length} Separate Return Bill(s)</span>
-              </h3>
-              <button
-                onClick={() => setShowGroupedPreview(false)}
-                className="text-muted hover:text-text p-1 hover:bg-bg3 rounded-lg transition-all"
-              >
-                <X size={16} />
-              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
-              {groupedReturns.map((group, idx) => (
-                <div key={idx} className="bg-bg3/30 rounded-lg p-4 border border-glass-border">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h4 className="text-text font-bold text-sm">{group.distributor_name}</h4>
-                      <p className="text-xs text-muted">
-                        Invoice: <span className="text-blue-500 font-semibold">{group.invoice_no}</span> | 
-                        Date: {group.purchase_date}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-emerald-500 font-black text-sm">₹{group.total_amount.toFixed(2)}</p>
-                      <p className="text-[10px] text-muted">{group.items.length} item(s)</p>
-                    </div>
-                  </div>
+            {/* Right: Live Distributor Groups Panel (28% width) */}
+            <div className="w-72 flex-shrink-0 flex flex-col gap-3 border-l border-border bg-bg3/30 p-3 overflow-y-auto scrollbar-thin min-h-0">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted">Live Groups</h3>
+                <span className="text-[10px] text-muted font-semibold">{groupItemsByInvoice().length} distributor{groupItemsByInvoice().length !== 1 ? 's' : ''}</span>
+              </div>
 
-                  <table className="w-full text-xs text-left border-collapse">
-                    <thead>
-                      <tr className="text-muted border-b border-glass-border">
-                        <th className="pb-2 text-left font-semibold">Medicine</th>
-                        <th className="pb-2 text-left font-semibold">Batch</th>
-                        <th className="pb-2 text-left font-semibold">Expiry</th>
-                        <th className="pb-2 text-right font-semibold">Qty</th>
-                        <th className="pb-2 text-right font-semibold">Cost</th>
-                        <th className="pb-2 text-right font-semibold">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.items.map((item, i) => (
-                        <tr key={i} className="border-b border-glass-border/30 last:border-0 hover:bg-bg3/30">
-                          <td className="py-2 text-text font-medium">{item.medicine_name}</td>
-                          <td className="py-2 text-muted">{item.batch_no}</td>
-                          <td className="py-2 text-muted">{item.expiry_date}</td>
-                          <td className="py-2 text-right text-muted">{item.quantity}</td>
-                          <td className="py-2 text-right text-muted">₹{item.cost_price}</td>
-                          <td className="py-2 text-right text-text font-semibold">₹{((Number(item.cost_price) || 0) * (Number(item.quantity) || 0)).toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {groupItemsByInvoice().length === 0 ? (
+                <div className="flex flex-col items-center justify-center flex-1 py-8 gap-2 text-muted">
+                  <Package size={24} className="opacity-30" />
+                  <p className="text-[11px] font-medium text-center">Add items above — groups appear here automatically</p>
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="space-y-2">
+                  {groupItemsByInvoice().map((group, idx) => (
+                    <div key={idx} className="rounded-xl border border-glass-border bg-bg2 p-3">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-bold text-text truncate">{group.distributor_name}</p>
+                          <span className="text-[9px] text-blue-400 font-semibold font-mono bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded mt-0.5 inline-block">{group.invoice_no}</span>
+                        </div>
+                        <p className="text-xs font-black text-emerald-500 shrink-0 ml-2">₹{group.total_amount.toFixed(0)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        {group.items.map((item, i) => (
+                          <div key={i} className="flex justify-between items-center text-[10px] text-muted">
+                            <span className="truncate max-w-[120px] font-medium">{item.medicine_name}</span>
+                            <span className="font-mono shrink-0">×{item.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            <div className="flex justify-end gap-3 mt-6 pt-3 border-t border-glass-border flex-shrink-0">
-              <button
-                onClick={() => setShowGroupedPreview(false)}
-                className="bg-bg3 hover:bg-bg3/80 text-text border border-glass-border px-4 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={processReturn}
-                disabled={saving}
-                className="bg-green hover:bg-green/90 text-white px-6 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 active:scale-95"
-              >
-                {saving ? 'Processing...' : 'Confirm & Process All'}
-              </button>
+              {/* Grand Total + Actions */}
+              {groupItemsByInvoice().length > 0 && (
+                <div className="mt-auto pt-3 border-t border-border flex flex-col gap-2">
+                  <div className="flex justify-between items-center bg-bg3/60 px-3 py-2 rounded-xl border border-glass-border">
+                    <span className="text-[11px] text-muted font-semibold">Grand Total</span>
+                    <span className="text-sm font-black text-text">₹{calculateGrandTotal().toFixed(2)}</span>
+                  </div>
+                  <button
+                    onClick={exportPDF}
+                    disabled={groupItemsByInvoice().length === 0}
+                    className="bg-purple-600/80 hover:bg-purple-600 text-white py-2 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95"
+                  >
+                    <FileText size={12} />
+                    <span>Export PDF</span>
+                  </button>
+                  <button
+                    onClick={processReturn}
+                    disabled={saving || groupItemsByInvoice().length === 0}
+                    className="bg-green hover:bg-green/90 text-white py-2.5 rounded-xl font-black text-[12px] flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95"
+                  >
+                    <RotateCcw size={13} />
+                    <span>{saving ? 'Processing…' : 'Process All Returns'}</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-        </div>,
-        document.body
+        )}
+      </div>
+      </div>
       )}
-
       {showCamera && (
         <AICamera 
           onClose={() => { setShowCamera(false); setCameraTargetIndex(null); }}
           onScanResult={handleCameraScanResult}
         />
-      )}
-      </div>
       )}
     </div>
   );

@@ -43,6 +43,8 @@ uploads/temp/
 # ─── Build Outputs & Cache ───────────────────────────────────────────────────
 dist/
 **/dist/
+dist-pkg/
+**/dist-pkg/
 .expo/
 **/.expo/
 web-build/
@@ -61,10 +63,15 @@ eng.traineddata
 # ─── SQL Dumps ───────────────────────────────────────────────────────────────
 *.sql
 
-# ─── IDE / Tool Caches ───────────────────────────────────────────────────────
+# ─── IDE / Tool Caches & Agent State ─────────────────────────────────────────
 .understand-anything/
 .codegraph/
 .opencode/
+.claude/
+
+# ─── Binaries & Large Installers ──────────────────────────────────────────────
+*.exe
+vc_redist.x64.exe
 
 # ─── Graphify & Knowledge Graph (generated — run node scripts/quick-update.mjs) ──
 graphify-out/
@@ -83,6 +90,8 @@ logs/
 # ─── Misc Temp / Test Artifacts ──────────────────────────────────────────────
 temp.json
 test.csv
+SAMPLE IMAGE/
+catalogue/
 
 # ─── Large Archives and Database Backups ─────────────────────────────────────
 *.zip

@@ -2,9 +2,6 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Search, 
-  Bell, 
-  Check, 
-  AlertCircle, 
   AlertTriangle, 
   RefreshCw, 
   CheckCircle2,
@@ -62,8 +59,6 @@ const Expiry = () => {
     })
   );
   const [searchQuery, setSearchQuery] = useState('');
-  const [customPhone, setCustomPhone] = useState('');
-  const [sendingAlerts, setSendingAlerts] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   
   // Custom Filters
@@ -80,16 +75,6 @@ const Expiry = () => {
   const [colFilterMaxMrp, setColFilterMaxMrp] = useState('');
   const [colFilterLocation, setColFilterLocation] = useState('');
 
-  // Dynamically calculate daysFilter for WhatsApp and UI digests
-  const daysFilter = Math.max(
-    1,
-    Math.ceil(
-      (new Date(dateRangeHelper.dateRange.to).getTime() -
-        new Date(dateRangeHelper.dateRange.from).getTime()) /
-        (1000 * 60 * 60 * 24)
-    )
-  );
-  
 
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
@@ -129,28 +114,6 @@ const Expiry = () => {
     } catch (err) {
       console.error(`Failed to export expiry report:`, err);
       showNotification('Failed to export expiry report.', 'error');
-    }
-  };
-
-  const handleSendWhatsAppAlerts = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSendingAlerts(true);
-    try {
-      const res = await api.sendExpiryAlerts({
-        phone: customPhone.trim() || undefined,
-        days: daysFilter
-      });
-      if (res.success) {
-        showNotification(res.message || 'WhatsApp alert digest sent successfully!', 'success');
-      } else {
-        showNotification('No expiring items found to report.', 'info');
-      }
-    } catch (err: any) {
-      console.error('Failed to trigger WhatsApp alerts:', err);
-      const errMsg = err.response?.data?.error || 'Failed to dispatch WhatsApp alerts.';
-      showNotification(errMsg, 'error');
-    } finally {
-      setSendingAlerts(false);
     }
   };
 
@@ -240,140 +203,33 @@ const Expiry = () => {
   });
 
   return (
-    <div className="h-full flex flex-col fade-in space-y-6">
-      
+    <div className="h-full flex flex-col fade-in gap-3">
 
-
-      {/* Title Bar */}
+      {/* Selection action bar — only visible when items are selected */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 select-none">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSendToReturns}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition-all text-xs font-bold"
-            >
-              <RotateCcw size={13} />
-              Return {selectedIds.size} Selected
-            </button>
-          </div>
+        <div className="flex items-center justify-between gap-3 px-1 select-none animate-in slide-in-from-top-1 duration-150">
+          <span className="text-xs font-semibold text-muted">{selectedIds.size} item{selectedIds.size > 1 ? 's' : ''} selected</span>
+          <button
+            onClick={handleSendToReturns}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition-all text-xs font-bold active:scale-95"
+          >
+            <RotateCcw size={12} />
+            Send {selectedIds.size} to Returns ↗
+          </button>
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 flex-1 min-h-0">
+      <div className="flex gap-4 flex-1 min-h-0">
         
-        {/* LEFT COLUMN: Summary & Dispatch Widget */}
-        <div className="xl:col-span-1 flex flex-col space-y-6">
-          
-          {/* Dispatch Widget Card */}
-          <div className="glass-panel p-6">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-sm text-text border-b border-glass-border/30 pb-3">
-              <Bell size={16} className="text-amber-500 animate-pulse" /> 
-              WhatsApp Alert Summary
-            </h3>
-            
-            <form onSubmit={handleSendWhatsAppAlerts} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Recipient Phone Number</label>
-                <input 
-                  type="tel" 
-                  value={customPhone}
-                  onChange={e => setCustomPhone(e.target.value)}
-                  className="premium-input w-full font-mono font-semibold" 
-                  placeholder="e.g. 9876543210" 
-                  maxLength={10}
-                />
-                <p className="text-[9px] text-muted">Leave empty to use the default configured `owner_phone` in settings.</p>
-              </div>
+        {/* LEFT SIDEBAR: Compact filters + summary stats (~22% width) */}
+        <div className="w-56 flex-shrink-0 flex flex-col gap-3 overflow-y-auto scrollbar-thin">
 
-              <div className="bg-white/5 p-4 rounded-xl border border-glass-border/40 space-y-2.5">
-                <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Digest Scope</div>
-                <div className="text-xs flex justify-between font-semibold">
-                  <span className="text-muted">Target Horizon:</span>
-                  <span className="text-white">{daysFilter} Days</span>
-                </div>
-                <div className="text-xs flex justify-between font-semibold">
-                  <span className="text-muted">Matching Items:</span>
-                  <span className="text-amber-500 font-bold">{filteredItems.length} items</span>
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                disabled={sendingAlerts || filteredItems.length === 0}
-                className="premium-btn bg-amber-500 text-black shadow-[0_4px_14px_rgba(245,158,11,0.3)] hover:bg-amber-600 w-full mt-4 font-bold disabled:opacity-50"
-              >
-                {sendingAlerts ? 'Sending Reports...' : 'Send WhatsApp Digest'}
-                <Bell size={14} className="ml-1" />
-              </button>
-            </form>
-          </div>
-
-          {/* Quick Statistics Card */}
-          <div className="glass-panel p-6 flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-            <h3 className="font-bold mb-4 text-xs text-muted uppercase tracking-wider">Summary Statistics</h3>
-            <div className="space-y-3.5">
-              <div className="flex justify-between items-center bg-[#18181b]/50 p-3 rounded-lg border border-glass-border/30">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded bg-red shrink-0" />
-                  <span className="text-xs font-semibold">Expired Batches</span>
-                </div>
-                <span className="font-mono text-sm font-bold text-red">
-                  {items.filter(item => getExpiryDaysDiff(item.expiry_date) <= 0).length}
-                </span>
-              </div>
-              
-              <div className="flex justify-between items-center bg-[#18181b]/50 p-3 rounded-lg border border-glass-border/30">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded bg-orange-500 shrink-0" />
-                  <span className="text-xs font-semibold">Nearing (30 Days)</span>
-                </div>
-                <span className="font-mono text-sm font-bold text-orange-500">
-                  {items.filter(item => {
-                    const diff = getExpiryDaysDiff(item.expiry_date);
-                    return diff > 0 && diff <= 30;
-                  }).length}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center bg-[#18181b]/50 p-3 rounded-lg border border-glass-border/30">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded bg-amber-500 shrink-0" />
-                  <span className="text-xs font-semibold">Nearing (60 Days)</span>
-                </div>
-                <span className="font-mono text-sm font-bold text-amber-500">
-                  {items.filter(item => {
-                    const diff = getExpiryDaysDiff(item.expiry_date);
-                    return diff > 30 && diff <= 60;
-                  }).length}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center bg-[#18181b]/50 p-3 rounded-lg border border-glass-border/30">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded bg-indigo-500 shrink-0" />
-                  <span className="text-xs font-semibold">Nearing (90 Days)</span>
-                </div>
-                <span className="font-mono text-sm font-bold text-indigo-400">
-                  {items.filter(item => {
-                    const diff = getExpiryDaysDiff(item.expiry_date);
-                    return diff > 60 && diff <= 90;
-                  }).length}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Table Directory of Nearing Expiry */}
-        <div className="xl:col-span-3 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border min-h-0">
-          
-          {/* Table Toolbar (Search, Days Filters) */}
-          <div className="p-4 border-b border-glass-border bg-black/10 flex flex-col gap-4">
-            
-            {/* Filter Tabs for Expiry Thresholds */}
+          {/* Date Range */}
+          <div className="glass-panel p-4">
+            <h3 className="font-bold text-[10px] text-muted uppercase tracking-wider mb-3">Date Range</h3>
             <DateRangeFilter
               helper={dateRangeHelper}
-              label="Expiry Date Range"
+              label=""
               showInputs={true}
               presets={[
                 { label: '30d', days: 30 },
@@ -382,54 +238,73 @@ const Expiry = () => {
                 { label: '180d', days: 180 }
               ]}
             />
-            
-            <div className="flex items-center justify-between gap-4">
-              <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search by medicine or batch..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-black/20 border border-glass-border rounded-lg text-sm focus:outline-none focus:border-primary/50 transition-colors"
-                />
-              </div>
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${
-                  showFilters ? 'bg-primary/20 border-primary/40 text-primary' : 'bg-white/5 border-glass-border text-muted hover:text-text'
-                }`}
-              >
-                Filters
-              </button>
-            </div>
-            
-            {showFilters && (
-              <div className="pt-4 border-t border-glass-border flex flex-wrap gap-4">
+          </div>
+
+          {/* Status Summary */}
+          <div className="glass-panel p-4 flex flex-col gap-2">
+            <h3 className="font-bold text-[10px] text-muted uppercase tracking-wider mb-1">Status Breakdown</h3>
+
+            {[
+              { label: 'Expired', color: 'bg-red-500', textColor: 'text-red-500', count: items.filter(i => getExpiryDaysDiff(i.expiry_date) <= 0).length },
+              { label: 'Critical ≤30d', color: 'bg-orange-500', textColor: 'text-orange-500', count: items.filter(i => { const d = getExpiryDaysDiff(i.expiry_date); return d > 0 && d <= 30; }).length },
+              { label: 'Warning ≤60d', color: 'bg-amber-500', textColor: 'text-amber-500', count: items.filter(i => { const d = getExpiryDaysDiff(i.expiry_date); return d > 30 && d <= 60; }).length },
+              { label: 'Near ≤90d', color: 'bg-indigo-500', textColor: 'text-indigo-400', count: items.filter(i => { const d = getExpiryDaysDiff(i.expiry_date); return d > 60 && d <= 90; }).length },
+            ].map(stat => (
+              <div key={stat.label} className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-bg3/40 border border-glass-border/30">
                 <div className="flex items-center gap-2">
-                  <label className="text-xs font-semibold text-muted">Qty</label>
-                  <input
-                    type="number"
-                    value={minQty}
-                    onChange={e => setMinQty(e.target.value)}
-                    placeholder="Min"
-                    min="0"
-                    max="100000000"
-                    className="px-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50 w-24"
-                  />
-                  <span className="text-muted text-xs">-</span>
-                  <input
-                    type="number"
-                    value={maxQty}
-                    onChange={e => setMaxQty(e.target.value)}
-                    placeholder="Max"
-                    min="0"
-                    max="100000000"
-                    className="px-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50 w-24"
-                  />
+                  <span className={`w-2 h-2 rounded-full ${stat.color} shrink-0`} />
+                  <span className="text-[11px] font-semibold text-text">{stat.label}</span>
                 </div>
+                <span className={`font-mono text-sm font-bold ${stat.textColor}`}>{stat.count}</span>
               </div>
-            )}
+            ))}
+
+            <div className="mt-1 pt-2 border-t border-glass-border/30 flex justify-between items-center">
+              <span className="text-[10px] text-muted font-semibold">Total showing</span>
+              <span className="font-mono text-xs font-bold text-text">{items.length}</span>
+            </div>
+          </div>
+
+          {/* Quick Qty Filter */}
+          <div className="glass-panel p-4">
+            <h3 className="font-bold text-[10px] text-muted uppercase tracking-wider mb-3">Stock Qty Filter</h3>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={minQty}
+                onChange={e => setMinQty(e.target.value)}
+                placeholder="Min"
+                min="0"
+                className="w-1/2 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50"
+              />
+              <input
+                type="number"
+                value={maxQty}
+                onChange={e => setMaxQty(e.target.value)}
+                placeholder="Max"
+                min="0"
+                className="w-1/2 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Table — fills remaining space */}
+        <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border min-h-0">
+          
+          {/* Table Toolbar */}
+          <div className="px-3 py-2.5 border-b border-glass-border bg-black/10 flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Search medicine or batch..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-black/20 border border-glass-border rounded-lg text-xs focus:outline-none focus:border-primary/50 transition-colors"
+              />
+            </div>
+            <span className="text-[11px] text-muted font-semibold shrink-0">{filteredItems.length} items</span>
           </div>
 
           {/* Table Container */}
