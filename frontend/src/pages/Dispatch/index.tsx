@@ -19,6 +19,7 @@ import {
   Layers,
   Filter,
   Calendar,
+  Eye,
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { whatsappQueueEvent, toastEvent } from '../../services/events';
@@ -107,6 +108,51 @@ const Dispatch = () => {
   const [distributorTodayOnly, setDistributorTodayOnly] = useState<boolean>(true);
   const [sendingReminderId, setSendingReminderId] = useState<number | null>(null);
   const [loadingDistributorReminders, setLoadingDistributorReminders] = useState(false);
+  const [expandedPreviewId, setExpandedPreviewId] = useState<number | null>(null);
+  const [customMessages, setCustomMessages] = useState<Record<number, string>>({});
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [globalTemplate, setGlobalTemplate] = useState('');
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [windowSchedule, setWindowSchedule] = useState({ start: '12:30', end: '13:00' });
+  const [nowTime, setNowTime] = useState<Date>(new Date());
+
+  // 1-second interval live clock for auto-reminder countdown
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getWindowCountdownInfo = (now: Date, startStr = '12:30', endStr = '13:00') => {
+    const [startH, startM] = startStr.split(':').map(Number);
+    const [endH, endM] = endStr.split(':').map(Number);
+
+    const startTime = new Date(now);
+    startTime.setHours(startH, startM, 0, 0);
+
+    const endTime = new Date(now);
+    endTime.setHours(endH, endM, 0, 0);
+
+    if (now < startTime) {
+      const diffMs = startTime.getTime() - now.getTime();
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const secs = Math.floor((diffMs % (1000 * 60)) / 1000);
+      const formatted = hours > 0
+        ? `${hours}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`
+        : `${mins}m ${String(secs).padStart(2, '0')}s`;
+      return { status: 'BEFORE', countdownText: formatted, label: `Auto-send window starts in ${formatted}` };
+    } else if (now >= startTime && now <= endTime) {
+      const diffMs = endTime.getTime() - now.getTime();
+      const mins = Math.floor(diffMs / (1000 * 60));
+      const secs = Math.floor((diffMs % (1000 * 60)) / 1000);
+      const formatted = `${mins}m ${String(secs).padStart(2, '0')}s`;
+      return { status: 'ACTIVE', countdownText: formatted, label: `Active Window — ${formatted} remaining` };
+    } else {
+      return { status: 'CLOSED', countdownText: 'Window Closed', label: `Today's window closed at 1:00 PM` };
+    }
+  };
 
   const showNotif = (msg: string, type: 'success' | 'error' = 'success') => {
     toastEvent.trigger(msg, type);
@@ -174,6 +220,9 @@ const Dispatch = () => {
       const res = await api.getTodayDistributorReminders();
       if (res && res.success && Array.isArray(res.reminders)) {
         setDistributorReminders(res.reminders);
+        if (res.window_start && res.window_end) {
+          setWindowSchedule({ start: res.window_start, end: res.window_end });
+        }
       }
     } catch (err) {
       console.error('Failed to fetch distributor reminders:', err);
@@ -205,16 +254,41 @@ const Dispatch = () => {
     }
   };
 
-  const handleSendReminderNow = async (id: number) => {
+  const handleSendReminderNow = async (id: number, customMessageOverride?: string) => {
     setSendingReminderId(id);
     try {
-      await api.sendDistributorReminderNow(id);
+      const msgToSend = customMessageOverride !== undefined ? customMessageOverride : customMessages[id];
+      await api.sendDistributorReminderNow(id, msgToSend);
       showNotif('WhatsApp reminder sent to distributor!');
       await fetchDistributorReminders(true);
     } catch (err: any) {
       showNotif(err.message || 'Failed to send WhatsApp reminder', 'error');
     } finally {
       setSendingReminderId(null);
+    }
+  };
+
+  const fetchGlobalTemplate = async () => {
+    try {
+      const res = await api.getDistributorReminderTemplate();
+      if (res && res.template) {
+        setGlobalTemplate(res.template);
+      }
+    } catch (err) {
+      console.error('Failed to fetch reminder template:', err);
+    }
+  };
+
+  const handleSaveGlobalTemplate = async () => {
+    setSavingTemplate(true);
+    try {
+      await api.saveDistributorReminderTemplate(globalTemplate);
+      showNotif('Default message template saved successfully!');
+      setShowTemplateModal(false);
+    } catch (err: any) {
+      showNotif('Failed to save template', 'error');
+    } finally {
+      setSavingTemplate(false);
     }
   };
 
@@ -409,74 +483,85 @@ const Dispatch = () => {
   return (
     <div className="w-full flex-1 flex flex-col gap-5 pb-8 text-left animate-in fade-in duration-300">
       {/* ── TOP HERO HEADER & CONTROLS ── */}
-      <div className="glass-panel p-5 rounded-2xl bg-bg2/40 border border-glass-border shadow-xl backdrop-blur-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="glass-panel p-6 rounded-2xl bg-bg2/40 border border-glass-border/80 shadow-2xl backdrop-blur-xl relative overflow-hidden transition-all">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-primary/10 via-amber-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-glass-border/60 pb-5">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-primary/20 text-primary flex items-center justify-center font-bold border border-primary/30 shadow-inner">
-                <Truck size={18} />
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary/30 to-primary/10 text-primary flex items-center justify-center font-bold border border-primary/40 shadow-lg shadow-primary/10 shrink-0">
+                <Truck size={22} className="animate-pulse" />
               </div>
-              <h2 className="text-2xl font-black tracking-tight text-text">Dispatch & Delivery Command Center</h2>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-2xl font-black tracking-tight text-text">Dispatch & Delivery Command Center</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-primary/15 text-primary border border-primary/30">
+                    Live Operations
+                  </span>
+                </div>
+                <p className="text-muted text-xs font-medium mt-0.5">
+                  Real-time home delivery dispatching, daily distributor WhatsApp status reminders, and staff tracking.
+                </p>
+              </div>
             </div>
-            <p className="text-muted text-xs font-medium">
-              Real-time home delivery dispatching, daily distributor WhatsApp status reminders, and staff tracking.
-            </p>
           </div>
 
           {/* Action Hub */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <button
               onClick={() => { fetchAll(); fetchDistributorReminders(); fetchMessageDates(); }}
-              className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 border border-glass-border text-muted hover:text-text transition-all shadow-sm"
+              className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 border border-glass-border text-muted hover:text-text transition-all shadow-sm active:scale-95 cursor-pointer"
               title="Refresh All Data"
             >
-              <RefreshCw size={15} className={loading || loadingDistributorReminders ? 'animate-spin text-primary' : ''} />
+              <RefreshCw size={16} className={loading || loadingDistributorReminders ? 'animate-spin text-primary' : ''} />
             </button>
 
             <button
               onClick={handleSendAllViaWhatsApp}
-              className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-bold transition-all shadow-sm active:scale-95"
+              className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all shadow-md hover:shadow-emerald-500/10 active:scale-95 cursor-pointer"
               title="Send all active collection orders via WhatsApp with 8s-12s pacing"
             >
-              <Send size={14} className="text-emerald-400" /> Send All via WhatsApp
+              <Send size={15} className="text-emerald-400" />
+              <span>Send All via WhatsApp</span>
             </button>
 
             <button
               onClick={() => setShowBoysModal(true)}
-              className="bg-sky/15 border border-sky/30 text-sky hover:bg-sky/25 text-xs flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-bold transition-all shadow-sm active:scale-95"
+              className="bg-sky/20 border border-sky/40 text-sky hover:bg-sky/30 text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all shadow-md hover:shadow-sky/10 active:scale-95 cursor-pointer"
             >
-              <User size={14} /> Manage Staff ({allBoys.length})
+              <User size={15} />
+              <span>Manage Staff ({allBoys.length})</span>
             </button>
 
             <button
               onClick={() => setShowModal(true)}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-[0_4px_16px_rgba(59,130,246,0.3)] transition-all active:scale-95"
+              className="bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-primary-foreground text-xs px-4 py-2.5 rounded-xl font-black flex items-center gap-2 shadow-lg shadow-primary/25 transition-all active:scale-95 cursor-pointer"
             >
-              <Plus size={16} /> New Dispatch Order
+              <Plus size={16} />
+              <span>New Dispatch Order</span>
             </button>
           </div>
         </div>
 
         {/* Dynamic Metric KPI Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-5 gap-3 mt-5 pt-4 border-t border-glass-border/40">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-5 gap-3 mt-4 pt-1">
           {/* Pending */}
           <div
             onClick={() => { setActiveTab('queue'); setStatusFilter('Pending'); }}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
               activeTab === 'queue' && statusFilter === 'Pending'
-                ? 'bg-amber-500/15 border-amber-500/40 shadow-md scale-[1.02]'
-                : 'bg-bg/40 border-glass-border hover:bg-bg3/30'
+                ? 'bg-amber-500/20 border-amber-500/50 shadow-amber-500/10 scale-[1.02]'
+                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-amber-500/30'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
-                <Clock size={12} className="text-amber-400" /> Pending Orders
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <Clock size={13} className="text-amber-400" /> Pending Orders
               </span>
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-amber-400">{pendingCount}</span>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-amber-400 font-mono">{pendingCount}</span>
               <span className="text-[10px] text-muted font-medium">awaiting pickup</span>
             </div>
           </div>
@@ -484,20 +569,20 @@ const Dispatch = () => {
           {/* In Transit */}
           <div
             onClick={() => { setActiveTab('queue'); setStatusFilter('In Transit'); }}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
               activeTab === 'queue' && statusFilter === 'In Transit'
-                ? 'bg-sky/15 border-sky/40 shadow-md scale-[1.02]'
-                : 'bg-bg/40 border-glass-border hover:bg-bg3/30'
+                ? 'bg-sky/20 border-sky/50 shadow-sky/10 scale-[1.02]'
+                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-sky/30'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
-                <Truck size={12} className="text-sky" /> In Transit
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <Truck size={13} className="text-sky" /> In Transit
               </span>
               <span className="w-2 h-2 rounded-full bg-sky" />
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-sky">{inTransitCount}</span>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-sky font-mono">{inTransitCount}</span>
               <span className="text-[10px] text-muted font-medium">on delivery route</span>
             </div>
           </div>
@@ -505,20 +590,20 @@ const Dispatch = () => {
           {/* Delivered Today */}
           <div
             onClick={() => { setActiveTab('queue'); setStatusFilter('Delivered'); }}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
               activeTab === 'queue' && statusFilter === 'Delivered'
-                ? 'bg-emerald-500/15 border-emerald-500/40 shadow-md scale-[1.02]'
-                : 'bg-bg/40 border-glass-border hover:bg-bg3/30'
+                ? 'bg-emerald-500/20 border-emerald-500/50 shadow-emerald-500/10 scale-[1.02]'
+                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-emerald-500/30'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
-                <CheckCircle size={12} className="text-emerald-400" /> Delivered Today
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <CheckCircle size={13} className="text-emerald-400" /> Delivered Today
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-emerald-400">{deliveredTodayCount}</span>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-emerald-400 font-mono">{deliveredTodayCount}</span>
               <span className="text-[10px] text-muted font-medium">completed today</span>
             </div>
           </div>
@@ -526,20 +611,20 @@ const Dispatch = () => {
           {/* Active Staff */}
           <div
             onClick={() => setActiveTab('staff')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
               activeTab === 'staff'
-                ? 'bg-purple-500/15 border-purple-500/40 shadow-md scale-[1.02]'
-                : 'bg-bg/40 border-glass-border hover:bg-bg3/30'
+                ? 'bg-purple-500/20 border-purple-500/50 shadow-purple-500/10 scale-[1.02]'
+                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-purple-500/30'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
-                <User size={12} className="text-purple-400" /> Active Staff
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <User size={13} className="text-purple-400" /> Active Staff
               </span>
               <span className="w-2 h-2 rounded-full bg-purple-400" />
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-purple-400">{deliveryBoys.length}</span>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-purple-400 font-mono">{deliveryBoys.length}</span>
               <span className="text-[10px] text-muted font-medium">active personnel</span>
             </div>
           </div>
@@ -547,20 +632,20 @@ const Dispatch = () => {
           {/* Distributor Reminders */}
           <div
             onClick={() => setActiveTab('reminders')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
+            className={`p-3.5 rounded-xl border transition-all cursor-pointer shadow-md ${
               activeTab === 'reminders'
-                ? 'bg-rose-500/15 border-rose-500/40 shadow-md scale-[1.02]'
-                : 'bg-bg/40 border-glass-border hover:bg-bg3/30'
+                ? 'bg-rose-500/20 border-rose-500/50 shadow-rose-500/10 scale-[1.02]'
+                : 'bg-bg/40 border-glass-border/70 hover:bg-bg3/40 hover:border-rose-500/30'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
-                <Bell size={12} className="text-rose-400" /> Uncollected Orders
+              <span className="text-[10px] font-black uppercase tracking-wider text-muted flex items-center gap-1.5">
+                <Bell size={13} className="text-rose-400" /> Uncollected Orders
               </span>
               <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-rose-400">{uncollectedDistributorsCount}</span>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-rose-400 font-mono">{uncollectedDistributorsCount}</span>
               <span className="text-[10px] text-muted font-medium">distributors pending</span>
             </div>
           </div>
@@ -568,33 +653,35 @@ const Dispatch = () => {
       </div>
 
       {/* ── NAVIGATION TABS SWITCHER ── */}
-      <div className="flex items-center justify-between flex-wrap gap-2 bg-bg2/40 p-1.5 rounded-2xl border border-glass-border backdrop-blur-md">
-        <div className="flex items-center gap-1.5 overflow-x-auto p-0.5">
+      <div className="flex items-center justify-between flex-wrap gap-2 bg-bg2/50 p-2 rounded-2xl border border-glass-border/80 backdrop-blur-xl shadow-xl">
+        <div className="flex items-center gap-2 overflow-x-auto p-0.5 scrollbar-none">
           <button
             onClick={() => setActiveTab('queue')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
               activeTab === 'queue'
-                ? 'bg-primary text-primary-foreground shadow-md'
-                : 'text-muted hover:text-text hover:bg-bg3/50'
+                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 border border-primary/50'
+                : 'text-muted hover:text-text hover:bg-bg3/60'
             }`}
           >
-            <Package size={14} /> Active Dispatch Queue
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-black ${activeTab === 'queue' ? 'bg-black/20 text-white' : 'bg-bg3 text-muted'}`}>
+            <Package size={15} /> Active Dispatch Queue
+            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-black ${
+              activeTab === 'queue' ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-bg/60 text-muted border border-glass-border'
+            }`}>
               {orders.length}
             </span>
           </button>
 
           <button
             onClick={() => setActiveTab('reminders')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
               activeTab === 'reminders'
-                ? 'bg-amber-500 text-black shadow-md'
-                : 'text-muted hover:text-text hover:bg-bg3/50'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-md shadow-amber-500/10'
+                : 'text-muted hover:text-text hover:bg-bg3/60'
             }`}
           >
-            <Bell size={14} /> Distributor Dispatch Reminders
+            <Bell size={15} className="text-amber-400" /> Distributor Dispatch Reminders
             {uncollectedDistributorsCount > 0 && (
-              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-black ${activeTab === 'reminders' ? 'bg-black/30 text-white' : 'bg-amber-500/20 text-amber-400'}`}>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-black bg-amber-500/30 text-amber-300 border border-amber-500/40">
                 {uncollectedDistributorsCount}
               </span>
             )}
@@ -602,77 +689,93 @@ const Dispatch = () => {
 
           <button
             onClick={() => setActiveTab('staff')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
               activeTab === 'staff'
-                ? 'bg-sky text-black shadow-md'
-                : 'text-muted hover:text-text hover:bg-bg3/50'
+                ? 'bg-sky/20 text-sky border border-sky/50 shadow-md shadow-sky/10'
+                : 'text-muted hover:text-text hover:bg-bg3/60'
             }`}
           >
-            <User size={14} /> Delivery Staff Directory
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-black ${activeTab === 'staff' ? 'bg-black/20 text-white' : 'bg-bg3 text-muted'}`}>
+            <User size={15} /> Delivery Staff Directory
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-black bg-sky/20 text-sky border border-sky/30">
               {allBoys.length}
             </span>
           </button>
 
           <button
             onClick={() => setActiveTab('logs')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
               activeTab === 'logs'
-                ? 'bg-emerald-500 text-black shadow-md'
-                : 'text-muted hover:text-text hover:bg-bg3/50'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-500/10'
+                : 'text-muted hover:text-text hover:bg-bg3/60'
             }`}
           >
-            <Send size={14} /> WhatsApp Message Logs
+            <Send size={15} className="text-emerald-400" /> WhatsApp Message Logs
           </button>
 
           <button
             onClick={() => setActiveTab('all')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer active:scale-95 ${
               activeTab === 'all'
-                ? 'bg-purple-500 text-white shadow-md'
-                : 'text-muted hover:text-text hover:bg-bg3/50'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-md shadow-purple-500/10'
+                : 'text-muted hover:text-text hover:bg-bg3/60'
             }`}
           >
-            <Layers size={14} /> All In One View
+            <Layers size={15} className="text-purple-400" /> All In One View
           </button>
         </div>
       </div>
 
       {/* ── TAB CONTENT 1: ACTIVE DISPATCH QUEUE ── */}
       {(activeTab === 'queue' || activeTab === 'all') && (
-        <div className="glass-panel rounded-2xl overflow-hidden bg-bg2/30 border border-glass-border shadow-xl flex flex-col">
+        <div className="glass-panel rounded-2xl overflow-hidden bg-bg2/40 border border-glass-border/80 shadow-2xl backdrop-blur-xl flex flex-col">
           {/* Section Bar */}
-          <div className="p-4 bg-bg3/30 border-b border-glass-border flex flex-wrap justify-between items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Package size={16} className="text-primary" />
-              <h3 className="font-extrabold text-xs uppercase tracking-wider text-text">Active Home Delivery Dispatch Queue</h3>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-bg text-muted border border-glass-border">
-                {filteredOrders.length} Orders Shown
-              </span>
+          <div className="p-4 bg-bg3/40 border-b border-glass-border/60 flex flex-wrap justify-between items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-primary/20 text-primary flex items-center justify-center font-bold border border-primary/30 shrink-0">
+                <Package size={16} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-xs uppercase tracking-wider text-text">Active Home Delivery Dispatch Queue</h3>
+                  <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-bg text-muted border border-glass-border">
+                    {filteredOrders.length} Orders Shown
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Queue Search & Status Filter */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
                   placeholder="Search patient, phone, invoice..."
                   value={queueSearch}
                   onChange={e => setQueueSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-primary/50 font-medium"
+                  className="pl-9 pr-7 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-primary/50 font-medium shadow-inner transition-all w-56"
                 />
+                {queueSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setQueueSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5"
+                    title="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-center gap-1 bg-bg p-0.5 rounded-xl border border-glass-border text-xs">
-                <Filter size={11} className="ml-2 text-muted" />
+              <div className="flex items-center gap-1 bg-bg p-1 rounded-xl border border-glass-border text-xs shadow-inner">
+                <Filter size={12} className="ml-2 mr-1 text-muted" />
                 {(['ALL', 'Pending', 'In Transit', 'Delivered'] as const).map(st => (
                   <button
                     key={st}
                     onClick={() => setStatusFilter(st)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                    className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
                       statusFilter === st
-                        ? 'bg-bg2 text-text shadow-sm border border-glass-border'
+                        ? 'bg-bg2 text-text shadow-sm border border-glass-border font-black'
                         : 'text-muted hover:text-text'
                     }`}
                   >
@@ -686,10 +789,10 @@ const Dispatch = () => {
           {/* Orders Table */}
           <div className="overflow-x-auto bg-bg/20">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-bg2/90 sticky top-0 backdrop-blur z-10">
+              <thead className="bg-bg2/90 sticky top-0 backdrop-blur z-10 border-b border-glass-border">
                 <tr>
-                  {['Patient Name', 'Phone', 'Medicines / Items', 'Delivery Address', 'Assigned Staff', 'Invoice', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
+                  {['Patient Name', 'Phone Number', 'Order Items', 'Delivery Address', 'Assigned Staff', 'Invoice #', 'Status', 'Actions'].map(h => (
+                    <th key={h} className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -774,121 +877,212 @@ const Dispatch = () => {
 
       {/* ── TAB CONTENT 2: DISTRIBUTOR DISPATCH REMINDERS ── */}
       {(activeTab === 'reminders' || activeTab === 'all') && (
-        <div className="glass-panel p-5 space-y-4 bg-bg2/30 border border-glass-border rounded-2xl shadow-xl">
-          <div className="flex flex-wrap justify-between items-center gap-3 border-b border-glass-border pb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
-                <Bell size={16} />
+        <div className="glass-panel p-5 space-y-5 bg-bg2/40 border border-glass-border/80 rounded-2xl shadow-2xl backdrop-blur-xl transition-all duration-300">
+          
+          {/* Section Header & High-Level Actions */}
+          <div className="flex flex-wrap justify-between items-center gap-4 border-b border-glass-border/60 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/25 to-amber-600/10 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30 shadow-lg shadow-amber-500/10">
+                <Bell size={20} className="animate-pulse" />
               </div>
               <div>
-                <h3 className="font-extrabold text-xs uppercase tracking-wider text-text">Today's Distributor Dispatch & Collection Reminders</h3>
-                <p className="text-[11px] text-muted">Auto-detects suppliers ordered from today & asks if dispatch/collection is complete.</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-sm uppercase tracking-wider text-text">Today's Distributor Dispatch & Collection Reminders</h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                    Live Dispatch Hub
+                  </span>
+                </div>
+                <p className="text-xs text-muted mt-0.5">Auto-detects suppliers ordered from today & coordinates dispatch/collection status.</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Daily Order Toggle Pill */}
-              <div className="flex items-center gap-1 bg-bg p-0.5 rounded-xl border border-glass-border text-xs">
-                <button
-                  type="button"
-                  onClick={() => setDistributorTodayOnly(true)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1.5 ${
-                    distributorTodayOnly
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm font-black'
-                      : 'text-muted hover:text-text'
-                  }`}
-                >
-                  <span>📦 Today's Orders Only</span>
-                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
-                    {distributorReminders.filter(r => r.has_order_today === 1).length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDistributorTodayOnly(false)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1.5 ${
-                    !distributorTodayOnly
-                      ? 'bg-bg2 text-text border border-glass-border shadow-sm font-black'
-                      : 'text-muted hover:text-text'
-                  }`}
-                >
-                  <span>📋 All Distributors</span>
-                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-bg3 text-muted font-bold">
-                    {distributorReminders.length}
-                  </span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  fetchGlobalTemplate();
+                  setShowTemplateModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-all border border-amber-500/30 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md hover:shadow-amber-500/10 active:scale-95"
+                title="Customize default reminder message format"
+              >
+                <Edit3 size={14} />
+                <span>Message Template</span>
+              </button>
 
-              {/* Sent / Not Sent Count Badges (scoped to today's orders) */}
-              <div className="flex items-center gap-1.5 text-[10px] font-bold">
-                <span className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                  ✅ Sent Today
-                  <span className="font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
-                    {distributorReminders.filter(r =>
-                      r.has_order_today === 1 &&
-                      (r.latest_notif_status === 'sent' || r.latest_notif_status === 'delivered')
-                    ).length}
-                  </span>
-                </span>
-                <span className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                  🕓 Not Sent
-                  <span className="font-mono px-1.5 py-0.2 rounded-full bg-amber-500/30 text-amber-300 font-extrabold">
-                    {distributorReminders.filter(r =>
-                      r.has_order_today === 1 &&
-                      r.latest_notif_status !== 'sent' && r.latest_notif_status !== 'delivered'
-                    ).length}
-                  </span>
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => fetchDistributorReminders()}
+                className="p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 text-muted hover:text-text transition-all border border-glass-border cursor-pointer shadow-sm active:scale-95"
+                title="Refresh Distributor Reminders"
+              >
+                <RefreshCw size={15} className={loadingDistributorReminders ? 'animate-spin text-amber-400' : ''} />
+              </button>
+            </div>
+          </div>
 
-              <div className="relative">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          {/* ── SPATIAL HERO METRIC CARDS ── */}
+          {(() => {
+            const todayCount = distributorReminders.filter(r => r.has_order_today === 1).length;
+            const sentTodayCount = distributorReminders.filter(r =>
+              r.has_order_today === 1 && (r.latest_notif_status === 'sent' || r.latest_notif_status === 'delivered')
+            ).length;
+            const notSentTodayCount = distributorReminders.filter(r =>
+              r.has_order_today === 1 && r.latest_notif_status !== 'sent' && r.latest_notif_status !== 'delivered'
+            ).length;
+            const cd = getWindowCountdownInfo(nowTime, windowSchedule.start, windowSchedule.end);
+
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Metric 1: Today's Orders */}
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-amber-500/30 transition-all duration-200">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center font-bold border border-amber-500/20 shrink-0">
+                    <Package size={18} />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Today's Orders</div>
+                    <div className="text-base font-black text-text font-mono flex items-center gap-1.5">
+                      {todayCount} <span className="text-[10px] font-normal text-muted">distributors</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metric 2: Messages Sent */}
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-emerald-500/30 transition-all duration-200">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/20 shrink-0">
+                    <CheckCircle size={18} />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Messages Sent</div>
+                    <div className="text-base font-black text-emerald-400 font-mono flex items-center gap-1.5">
+                      {sentTodayCount} <span className="text-[10px] font-normal text-muted">/ {todayCount}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metric 3: Handover Pending */}
+                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3 shadow-md hover:border-sky/30 transition-all duration-200">
+                  <div className="w-9 h-9 rounded-xl bg-sky/15 text-sky flex items-center justify-center font-bold border border-sky/20 shrink-0">
+                    <Clock size={18} />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider">Pending Handover</div>
+                    <div className="text-base font-black text-amber-300 font-mono flex items-center gap-1.5">
+                      {notSentTodayCount} <span className="text-[10px] font-normal text-muted">remaining</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metric 4: Auto-Send Window Countdown */}
+                <div className={`p-3.5 rounded-xl border flex items-center gap-3 shadow-md transition-all duration-200 ${
+                  cd.status === 'ACTIVE'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : cd.status === 'BEFORE'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                    : 'bg-bg/50 border-glass-border/70 text-muted'
+                }`}>
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold shrink-0 ${
+                    cd.status === 'ACTIVE'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                      : cd.status === 'BEFORE'
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      : 'bg-bg2 text-muted border border-glass-border'
+                  }`}>
+                    <MessageSquare size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider truncate">Auto-Send Window</div>
+                    <div className="text-xs font-mono font-black truncate flex items-center gap-1">
+                      {cd.status === 'ACTIVE' && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />}
+                      <span>{cd.label}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── AUTO-SEND SCHEDULE WINDOW & FILTER TOOLBAR ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-bg/40 p-3 rounded-xl border border-glass-border/60 backdrop-blur-md">
+            {/* Today Filter Segmented Selector */}
+            <div className="flex items-center gap-1 bg-bg p-1 rounded-xl border border-glass-border text-xs shadow-inner">
+              <button
+                type="button"
+                onClick={() => setDistributorTodayOnly(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  distributorTodayOnly
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-md font-black'
+                    : 'text-muted hover:text-text'
+                }`}
+              >
+                <span>📦 Today's Orders Only</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 font-extrabold">
+                  {distributorReminders.filter(r => r.has_order_today === 1).length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDistributorTodayOnly(false)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  !distributorTodayOnly
+                    ? 'bg-bg2 text-text border border-glass-border shadow-md font-black'
+                    : 'text-muted hover:text-text'
+                }`}
+              >
+                <span>📋 All Distributors</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-bg3 text-muted font-bold">
+                  {distributorReminders.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Search Input & Schedule Window Info */}
+            <div className="flex items-center gap-3 flex-wrap flex-1 justify-end">
+              <div className="relative flex-1 min-w-[200px] max-w-[320px]">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
                   placeholder="Search distributor, phone, staff, status..."
                   value={distributorSearch}
                   onChange={e => setDistributorSearch(e.target.value)}
-                  className="pl-8 pr-7 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-primary/50 w-64 font-medium"
+                  className="w-full pl-9 pr-8 py-1.5 rounded-xl bg-bg text-text border border-glass-border text-xs focus:outline-none focus:border-amber-400/50 font-medium transition-all shadow-inner"
                 />
                 {distributorSearch && (
                   <button
                     type="button"
                     onClick={() => setDistributorSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5 transition-colors"
                     title="Clear search"
                   >
-                    <X size={12} />
+                    <X size={13} />
                   </button>
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => fetchDistributorReminders()}
-                className="p-2 rounded-xl bg-bg3/50 hover:bg-bg3 text-muted hover:text-text transition-colors border border-glass-border"
-                title="Refresh Distributor Reminders"
-              >
-                <RefreshCw size={14} className={loadingDistributorReminders ? 'animate-spin text-amber-400' : ''} />
-              </button>
+              {/* Schedule window badge */}
+              <div className="hidden xl:flex items-center gap-2 text-xs font-mono bg-bg px-3 py-1.5 rounded-xl border border-glass-border text-muted">
+                <Clock size={13} className="text-amber-400" />
+                <span>Schedule Window: <strong className="text-text font-extrabold">12:30 PM – 01:00 PM</strong></span>
+              </div>
             </div>
           </div>
 
           {/* Table of Today's Distributors */}
-          <div className="overflow-x-auto bg-bg/20 rounded-xl border border-glass-border">
+          <div className="overflow-x-auto bg-bg/30 rounded-2xl border border-glass-border/80 shadow-lg backdrop-blur-md">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-bg2/90">
+              <thead className="bg-bg2/90 border-b border-glass-border/80">
                 <tr>
-                  {['Distributor Name', 'Contact Phone', 'Assigned Delivery Staff', 'Dispatch / Collection Status', 'Action'].map(h => (
-                    <th key={h} className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
+                  {['Distributor Name & Tags', 'Contact Phone', 'Assigned Delivery Staff', 'Dispatch / Collection Status', 'Actions'].map(h => (
+                    <th key={h} className="px-4 py-3.5 text-[10px] font-black text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border/30">
                 {loadingDistributorReminders ? (
                   <tr>
-                    <td colSpan={5} className="p-10 text-center text-muted">
-                      <RefreshCw size={20} className="animate-spin mx-auto mb-2 text-amber-400" />
-                      Checking today's active distributor orders...
+                    <td colSpan={5} className="p-12 text-center text-muted">
+                      <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-amber-400" />
+                      <p className="font-bold text-text text-xs">Checking today's active distributor orders...</p>
                     </td>
                   </tr>
                 ) : (() => {
@@ -907,10 +1101,10 @@ const Dispatch = () => {
                   if (displayList.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={5} className="p-10 text-center text-muted">
-                          <Bell size={28} className="mx-auto mb-2 opacity-30 text-amber-400" />
-                          <p className="font-bold text-text">No matching distributors found</p>
-                          <p className="text-xs text-muted">
+                        <td colSpan={5} className="p-12 text-center text-muted">
+                          <Bell size={32} className="mx-auto mb-2 opacity-30 text-amber-400" />
+                          <p className="font-extrabold text-sm text-text">No matching distributors found</p>
+                          <p className="text-xs text-muted mt-1">
                             {distributorTodayOnly
                               ? "No distributor orders sent today. Switch to '📋 All Distributors' to view full directory."
                               : "Try clearing your search query or placing a new purchase/cart order."}
@@ -920,82 +1114,182 @@ const Dispatch = () => {
                     );
                   }
 
-                  return displayList.map(item => (
-                    <tr key={item.id} className="hover:bg-bg3/30 transition-colors">
-                      <td className="p-3">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-text">{item.distributor_name}</span>
-                          {item.has_pharmarack_order_today === 1 ? (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
-                              🛒 Pharmarack Cart Sent
-                            </span>
-                          ) : item.has_order_today === 1 ? (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-sky/20 text-sky border border-sky/30 flex items-center gap-1 shrink-0">
-                              📦 Today's Order
-                            </span>
-                          ) : null}
+                  return displayList.map(item => {
+                    const isPreviewOpen = expandedPreviewId === item.id;
+                    const boyName = item.delivery_boy_name || '👤 Admin / Store Owner';
+                    const boyPhone = item.delivery_boy_phone ? `(${item.delivery_boy_phone})` : '';
 
-                          {item.latest_notif_status === 'failed' || item.latest_notif_error ? (
-                            <span 
-                              className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
-                              title={item.latest_notif_error || 'WhatsApp message failed to deliver'}
+                    return (
+                      <tbody key={item.id} className="divide-y divide-glass-border/30 group">
+                        <tr className="hover:bg-bg3/30 transition-colors">
+                          <td className="p-3.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-extrabold text-text text-xs tracking-tight">{item.distributor_name}</span>
+                              {item.has_pharmarack_order_today === 1 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0 shadow-sm">
+                                  🛒 Pharmarack Cart Sent
+                                </span>
+                              ) : item.has_order_today === 1 ? (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-sky/20 text-sky border border-sky/30 flex items-center gap-1 shrink-0 shadow-sm">
+                                  📦 Today's Order
+                                </span>
+                              ) : null}
+
+                              {item.latest_notif_status === 'failed' || item.latest_notif_error ? (
+                                <span 
+                                  className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
+                                  title={item.latest_notif_error || 'WhatsApp message failed to deliver'}
+                                >
+                                  ❌ Failed: {item.latest_notif_error ? item.latest_notif_error.substring(0, 24) + '...' : 'Delivery Error'}
+                                </span>
+                              ) : item.latest_notif_status === 'sent' || item.latest_notif_status === 'delivered' ? (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                                  ✅ Message Sent
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="p-3.5 font-mono text-muted text-xs">{item.distributor_phone || 'No phone set'}</td>
+                          <td className="p-3.5">
+                            <select
+                              value={item.delivery_boy_id || ''}
+                              onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
+                              className="text-xs px-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border focus:outline-none font-medium transition-all shadow-sm cursor-pointer hover:border-glass-border/80"
                             >
-                              ❌ Failed: {item.latest_notif_error ? item.latest_notif_error.substring(0, 24) + '...' : 'Delivery Error'}
-                            </span>
-                          ) : item.latest_notif_status === 'sent' || item.latest_notif_status === 'delivered' ? (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center gap-1 shrink-0">
-                              ✅ Message Sent
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="p-3 font-mono text-muted">{item.distributor_phone || 'No phone set'}</td>
-                      <td className="p-3">
-                        <select
-                          value={item.delivery_boy_id || ''}
-                          onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
-                          className="text-xs px-2.5 py-1 rounded-lg bg-bg text-text border border-glass-border focus:outline-none font-medium"
-                        >
-                            <option value="">👤 Unassigned / Admin Fallback</option>
-                            {deliveryBoys.map(b => (
-                              <option key={b.id} value={b.id}>{b.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="p-3">
-                          <select
-                            value={item.status}
-                            onChange={e => handleUpdateDistributorStatus(item.id, e.target.value, item.delivery_boy_id)}
-                            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border cursor-pointer bg-bg transition-all ${
-                              item.status === 'Collected'
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                                : item.status === 'Dispatched'
-                                ? 'bg-sky/20 text-sky border-sky/30'
-                                : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                            }`}
-                          >
-                            <option value="Pending">⏳ Pending Handover</option>
-                            <option value="Dispatched">📦 Dispatched by Warehouse</option>
-                            <option value="Collected">✅ Collected by Staff</option>
-                          </select>
-                        </td>
-                        <td className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => handleSendReminderNow(item.id)}
-                            disabled={sendingReminderId === item.id}
-                            className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30 disabled:opacity-50 transition-all active:scale-95 cursor-pointer"
-                          >
-                            {sendingReminderId === item.id ? (
-                              <RefreshCw size={12} className="animate-spin" />
-                            ) : (
-                              <MessageSquare size={12} />
-                            )}
-                            {sendingReminderId === item.id ? 'Sending...' : 'Send Reminder Now'}
-                          </button>
-                        </td>
-                      </tr>
-                    ));
+                              <option value="">👤 Unassigned / Admin Fallback</option>
+                              {deliveryBoys.map(b => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="p-3.5">
+                            <select
+                              value={item.status}
+                              onChange={e => handleUpdateDistributorStatus(item.id, e.target.value, item.delivery_boy_id)}
+                              className={`text-[11px] font-extrabold px-3 py-1.5 rounded-xl border cursor-pointer bg-bg transition-all shadow-sm ${
+                                item.status === 'Collected'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10'
+                                  : item.status === 'Dispatched'
+                                  ? 'bg-sky/20 text-sky border-sky/40 shadow-sky/10'
+                                  : 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-amber-500/10'
+                              }`}
+                            >
+                              <option value="Pending">⏳ Pending Handover</option>
+                              <option value="Dispatched">📦 Dispatched by Warehouse</option>
+                              <option value="Collected">✅ Collected by Staff</option>
+                            </select>
+                          </td>
+                          <td className="p-3.5">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSendReminderNow(item.id)}
+                                disabled={sendingReminderId === item.id}
+                                className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 disabled:opacity-50 transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-emerald-500/20"
+                              >
+                                {sendingReminderId === item.id ? (
+                                  <RefreshCw size={13} className="animate-spin" />
+                                ) : (
+                                  <Send size={13} />
+                                )}
+                                <span>{sendingReminderId === item.id ? 'Sending...' : 'Send Now'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPreviewId(isPreviewOpen ? null : item.id)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                                  isPreviewOpen
+                                    ? 'bg-amber-500/25 text-amber-300 border-amber-500/50 shadow-md font-black'
+                                    : 'bg-bg3/60 text-muted hover:text-text border-glass-border hover:bg-bg3'
+                                }`}
+                                title="Edit Direct Text Message"
+                              >
+                                <Edit3 size={13} />
+                                <span>{isPreviewOpen ? 'Close Editor' : 'Edit Text'}</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* WhatsApp Reminder Direct Message Editor Sub-Row */}
+                        {isPreviewOpen && (
+                          <tr className="bg-bg3/20 border-b border-glass-border/50">
+                            <td colSpan={5} className="p-4">
+                              <div className="p-4 rounded-2xl bg-bg2/95 border border-glass-border/80 space-y-3.5 text-xs shadow-2xl backdrop-blur-xl transition-all">
+                                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-glass-border/40 pb-2.5">
+                                  <span className="font-extrabold text-amber-400 flex items-center gap-2 text-xs">
+                                    <Edit3 size={16} /> Direct WhatsApp Message Editor <span className="text-text font-black">({item.distributor_name})</span>
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const defaultMsg = `📦 Has today's order been dispatched or collected by ${boyName}${boyPhone ? ` ${boyPhone}` : ''}? - Pharmacy Store`;
+                                        setCustomMessages(prev => ({ ...prev, [item.id]: defaultMsg }));
+                                        showNotif('Reset to default message');
+                                      }}
+                                      className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-bg hover:bg-bg3 text-muted hover:text-text border border-glass-border flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                                    >
+                                      <RefreshCw size={11} /> Reset Text
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const currentText = customMessages[item.id] !== undefined
+                                          ? customMessages[item.id]
+                                          : `📦 Has today's order been dispatched or collected by ${boyName}${boyPhone ? ` ${boyPhone}` : ''}? - Pharmacy Store`;
+                                        navigator.clipboard.writeText(currentText);
+                                        showNotif('Message text copied to clipboard');
+                                      }}
+                                      className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-bg hover:bg-bg3 text-text border border-glass-border flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                                    >
+                                      📋 Copy Text
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Direct Text Editor Box */}
+                                <textarea
+                                  rows={3}
+                                  value={
+                                    customMessages[item.id] !== undefined
+                                      ? customMessages[item.id]
+                                      : `📦 Has today's order been dispatched or collected by ${boyName}${boyPhone ? ` ${boyPhone}` : ''}? - Pharmacy Store`
+                                  }
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setCustomMessages(prev => ({ ...prev, [item.id]: val }));
+                                  }}
+                                  placeholder="Type or edit reminder message directly..."
+                                  className="w-full p-3.5 rounded-xl bg-bg text-text font-mono text-xs border border-glass-border focus:outline-none focus:border-amber-400/60 leading-relaxed shadow-inner transition-all"
+                                />
+
+                                <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                                  <span className="text-[11px] text-muted font-medium flex items-center gap-1">
+                                    💡 Edit the text directly above and click <strong className="text-emerald-400 font-bold">⚡ Send Custom Text Now</strong> to dispatch via WhatsApp.
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendReminderNow(item.id, customMessages[item.id])}
+                                    disabled={sendingReminderId === item.id}
+                                    className="flex items-center gap-2 text-xs font-black px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 disabled:opacity-50 transition-all cursor-pointer shadow-lg hover:shadow-emerald-500/20 active:scale-95"
+                                  >
+                                    {sendingReminderId === item.id ? (
+                                      <RefreshCw size={14} className="animate-spin" />
+                                    ) : (
+                                      <Send size={14} />
+                                    )}
+                                    <span>{sendingReminderId === item.id ? 'Sending...' : '⚡ Send Custom Text Now'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    );
+                  });
                 })()}
               </tbody>
             </table>
@@ -1005,19 +1299,24 @@ const Dispatch = () => {
 
       {/* ── TAB CONTENT 3: DELIVERY STAFF DIRECTORY ── */}
       {(activeTab === 'staff' || activeTab === 'all') && (
-        <div className="glass-panel p-5 space-y-4 bg-bg2/30 border border-glass-border rounded-2xl shadow-xl">
-          <div className="flex justify-between items-center flex-wrap gap-2 border-b border-glass-border pb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold border border-purple-500/30">
-                <User size={16} />
+        <div className="glass-panel p-5 space-y-5 bg-bg2/40 border border-glass-border/80 rounded-2xl shadow-2xl backdrop-blur-xl transition-all duration-300">
+          <div className="flex justify-between items-center flex-wrap gap-3 border-b border-glass-border/60 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500/25 to-purple-600/10 text-purple-400 flex items-center justify-center font-bold border border-purple-500/30 shadow-lg shadow-purple-500/10 shrink-0">
+                <User size={20} />
               </div>
               <div>
-                <h3 className="font-extrabold text-xs uppercase tracking-wider text-text">Delivery Personnel Directory</h3>
-                <p className="text-[11px] text-muted">Manage active store staff, assigned WhatsApp contact numbers, and status.</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-sm uppercase tracking-wider text-text">Delivery Personnel Directory</h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                    Active Staff Hub
+                  </span>
+                </div>
+                <p className="text-xs text-muted mt-0.5">Manage active store staff, assigned WhatsApp contact numbers, and status.</p>
               </div>
             </div>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30">
-              {allBoys.length} Total Registered
+            <span className="text-xs font-mono font-black px-3 py-1.5 rounded-xl bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-sm">
+              {allBoys.length} Registered Staff
             </span>
           </div>
 
@@ -1159,28 +1458,33 @@ const Dispatch = () => {
 
       {/* ── TAB CONTENT 4: WHATSAPP MESSAGE HISTORY LOGS ── */}
       {(activeTab === 'logs' || activeTab === 'all') && (
-        <div className="glass-panel p-5 space-y-4 bg-bg2/30 border border-glass-border rounded-2xl shadow-xl">
-          <div className="flex justify-between items-center flex-wrap gap-2 border-b border-glass-border pb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/30">
-                <Send size={16} />
+        <div className="glass-panel p-5 space-y-5 bg-bg2/40 border border-glass-border/80 rounded-2xl shadow-2xl backdrop-blur-xl transition-all duration-300">
+          <div className="flex justify-between items-center flex-wrap gap-3 border-b border-glass-border/60 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500/25 to-emerald-600/10 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/30 shadow-lg shadow-emerald-500/10 shrink-0">
+                <Send size={20} />
               </div>
               <div>
-                <h3 className="font-extrabold text-xs uppercase tracking-wider text-text">WhatsApp Message History Logs</h3>
-                <p className="text-[11px] text-muted">Complete trace of all automated collection and dispatch messages sent to staff & distributors.</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-sm uppercase tracking-wider text-text">WhatsApp Message History Logs</h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    Audit Trail
+                  </span>
+                </div>
+                <p className="text-xs text-muted mt-0.5">Complete trace of all automated collection and dispatch messages sent to staff & distributors.</p>
               </div>
             </div>
 
             {/* Date Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted font-bold uppercase flex items-center gap-1">
-                <Calendar size={11} /> Select Date:
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs text-muted font-bold uppercase flex items-center gap-1.5">
+                <Calendar size={13} className="text-emerald-400" /> Select Date:
               </span>
               {messageDates.length > 0 ? (
                 <select
                   value={selectedDate}
                   onChange={e => setSelectedDate(e.target.value)}
-                  className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl bg-bg border border-glass-border text-text cursor-pointer focus:outline-none"
+                  className="text-xs font-mono font-black px-3.5 py-1.5 rounded-xl bg-bg border border-glass-border text-text cursor-pointer focus:outline-none focus:border-emerald-400/50 shadow-inner transition-all"
                 >
                   {messageDates.map(d => (
                     <option key={d} value={d}>{d}</option>
@@ -1191,7 +1495,7 @@ const Dispatch = () => {
                   type="date"
                   value={toDateInputValue(selectedDate)}
                   onChange={e => setSelectedDate(e.target.value)}
-                  className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl bg-bg border border-glass-border text-text"
+                  className="text-xs font-mono font-black px-3.5 py-1.5 rounded-xl bg-bg border border-glass-border text-text focus:outline-none shadow-inner"
                 />
               )}
             </div>
@@ -1199,13 +1503,13 @@ const Dispatch = () => {
 
           <div className="overflow-x-auto rounded-xl border border-glass-border bg-bg/20">
             <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-bg2/90">
+              <thead className="bg-bg2/90 border-b border-glass-border">
                 <tr>
-                  <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Time</th>
-                  <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[130px]">Recipient</th>
-                  <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[110px]">Phone Number</th>
-                  <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Status</th>
-                  <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider">Exact WhatsApp Message Body</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Time</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[130px]">Recipient</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[110px]">Phone Number</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Status</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">Exact WhatsApp Message Body</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border/30">
@@ -1517,6 +1821,66 @@ const Dispatch = () => {
                 className="px-4 py-2 bg-bg3/60 border border-glass-border text-xs text-muted hover:text-text font-bold rounded-xl transition-all"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showTemplateModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-panel p-6 rounded-2xl max-w-lg w-full bg-bg2 border border-glass-border shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-glass-border pb-3">
+              <h3 className="text-base font-bold text-text flex items-center gap-2">
+                <MessageSquare className="text-amber-400" size={18} /> Edit Default Reminder Message Template
+              </h3>
+              <button type="button" onClick={() => setShowTemplateModal(false)} className="text-muted hover:text-text p-1 cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted">
+              Customize the default format used for auto-reminders and manual dispatches. Use placeholder tags to insert live data dynamically.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-text">Template Format:</label>
+              <textarea
+                rows={4}
+                value={globalTemplate}
+                onChange={e => setGlobalTemplate(e.target.value)}
+                className="w-full p-3 rounded-xl bg-bg text-text font-mono text-xs border border-glass-border focus:outline-none focus:border-amber-400/60 leading-relaxed"
+                placeholder="📦 Has today's order been dispatched or collected by {delivery_boy} ({phone})? - {store_name}"
+              />
+            </div>
+
+            <div className="p-3 rounded-xl bg-bg/50 border border-glass-border text-[11px] space-y-1 text-muted">
+              <p className="font-bold text-text">Available Dynamic Placeholders:</p>
+              <div className="flex flex-wrap gap-1.5 font-mono text-[10px]">
+                <span className="px-1.5 py-0.5 rounded bg-bg3 text-amber-300 font-bold">{'{distributor_name}'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-bg3 text-sky font-bold">{'{delivery_boy}'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-bg3 text-emerald-300 font-bold">{'{phone}'}</span>
+                <span className="px-1.5 py-0.5 rounded bg-bg3 text-purple-300 font-bold">{'{store_name}'}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-glass-border">
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(false)}
+                className="px-4 py-2 rounded-xl bg-bg3 hover:bg-bg3/80 text-muted font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGlobalTemplate}
+                disabled={savingTemplate}
+                className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                {savingTemplate ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                Save Template
               </button>
             </div>
           </div>

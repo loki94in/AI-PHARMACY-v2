@@ -26,12 +26,14 @@ describe('Distributor Phone Number Persistence & Sync Tests', () => {
     const { default: distributorsRouter } = await import('../src/routes/distributors.js');
     const { default: pharmarackRouter } = await import('../src/routes/pharmarack.js');
     const { default: contactsRouter } = await import('../src/routes/contacts.js');
+    const { default: dispatchRouter } = await import('../src/routes/dispatch.js');
 
     app = express();
     app.use(express.json());
     app.use('/api/distributors', distributorsRouter);
     app.use('/api/pharmarack', pharmarackRouter);
     app.use('/api/contacts', contactsRouter);
+    app.use('/api/dispatch', dispatchRouter);
   });
 
   afterAll(async () => {
@@ -148,5 +150,24 @@ describe('Distributor Phone Number Persistence & Sync Tests', () => {
     const updatedAlpha = getRes.body.mappings.find((m: any) => m.store_name === 'Alpha Pharma Wholesalers');
     expect(updatedAlpha).toBeDefined();
     expect(updatedAlpha.distributor_phone || updatedAlpha.phone).toBe('9998887776');
+  });
+
+  test('GET /api/dispatch/distributor-reminders/today syncs updated phone number and returns schedule window', async () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const db = await open({ filename: dbPath, driver: sqlite3.Database });
+    const distRow = await db.get('SELECT id FROM distributors WHERE name = ?', ['Alpha Pharma Wholesalers']);
+    await db.run('INSERT INTO purchases (distributor_id, invoice_no, total_amount, date) VALUES (?, ?, ?, ?)',
+      [distRow.id, 'INV-TODAY-101', 500, todayStr]);
+    await db.close();
+
+    const res = await request(app).get('/api/dispatch/distributor-reminders/today');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.window_start).toBe('12:30');
+    expect(res.body.window_end).toBe('13:00');
+
+    const alphaReminder = res.body.reminders.find((r: any) => r.distributor_name === 'Alpha Pharma Wholesalers');
+    expect(alphaReminder).toBeDefined();
+    expect(alphaReminder.distributor_phone).toBe('9998887776');
   });
 });

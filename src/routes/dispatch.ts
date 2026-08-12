@@ -290,7 +290,12 @@ router.get('/messages', async (req, res) => {
 router.get('/distributor-reminders/today', async (_req, res) => {
   try {
     const reminders = await syncTodayActiveDistributors();
-    res.json({ success: true, reminders });
+    res.json({
+      success: true,
+      window_start: '12:30',
+      window_end: '13:00',
+      reminders
+    });
   } catch (error: any) {
     console.error('Fetch distributor reminders error:', error);
     res.status(500).json({ error: 'Failed to fetch distributor reminders' });
@@ -347,11 +352,40 @@ router.put('/distributor-reminders/:id/status', async (req, res) => {
   }
 });
 
-// POST send WhatsApp reminder now
+// GET global reminder message template
+router.get('/distributor-reminders/template', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get("SELECT value FROM app_settings WHERE key = 'distributor_reminder_template'");
+    res.json({
+      success: true,
+      template: row?.value || "📦 Has today's order been dispatched or collected by {delivery_boy} ({phone})? - {store_name}"
+    });
+  } catch (error: any) {
+    console.error('Fetch reminder template error:', error);
+    res.status(500).json({ error: 'Failed to fetch reminder template' });
+  }
+});
+
+// POST save global reminder message template
+router.post('/distributor-reminders/template', async (req, res) => {
+  const { template } = req.body;
+  try {
+    const db = await dbManager.getConnection();
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('distributor_reminder_template', ?)", [template || '']);
+    res.json({ success: true, message: 'Reminder template saved', template });
+  } catch (error: any) {
+    console.error('Save reminder template error:', error);
+    res.status(500).json({ error: 'Failed to save reminder template' });
+  }
+});
+
+// POST send WhatsApp reminder now (supports custom message)
 router.post('/distributor-reminders/:id/send-now', async (req, res) => {
   const { id } = req.params;
+  const { custom_message } = req.body || {};
   try {
-    const ok = await notificationService.sendDistributorDispatchReminder(Number(id));
+    const ok = await notificationService.sendDistributorDispatchReminder(Number(id), custom_message);
     if (ok) {
       res.json({ success: true, message: 'WhatsApp reminder sent successfully' });
     } else {

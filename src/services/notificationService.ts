@@ -800,7 +800,7 @@ export class NotificationService {
   /**
    * Send ultra-short dispatch status reminder message to a distributor
    */
-  async sendDistributorDispatchReminder(reminderId: number): Promise<boolean> {
+  async sendDistributorDispatchReminder(reminderId: number, customMessage?: string): Promise<boolean> {
     try {
       const db = await dbManager.getConnection();
       const reminder = await db.get(
@@ -822,40 +822,57 @@ export class NotificationService {
         return false;
       }
 
-      // Resolve Delivery Boy details (or fallback to Store Admin)
-      let boyName = '👤 Admin / Store Owner';
-      let boyPhone = 'N/A';
+      let message = '';
+      if (customMessage && String(customMessage).trim()) {
+        message = String(customMessage).trim();
+      } else {
+        // Resolve Delivery Boy details (or fallback to Store Admin)
+        let boyName = '👤 Admin / Store Owner';
+        let boyPhone = 'N/A';
 
-      if (reminder.delivery_boy_id) {
-        const boy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE id = ?', [reminder.delivery_boy_id]);
-        if (boy && boy.name) {
-          boyName = boy.name;
-          boyPhone = formatDisplayPhone(boy.whatsapp_number);
-        }
-      }
-
-      if (boyName === '👤 Admin / Store Owner') {
-        // Find first active delivery boy as primary assigned staff
-        const activeBoy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 LIMIT 1');
-        if (activeBoy && activeBoy.name) {
-          boyName = activeBoy.name;
-          boyPhone = formatDisplayPhone(activeBoy.whatsapp_number);
-        } else {
-          // Store Admin fallback
-          const storePhoneRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_phone', 'owner_whatsapp_number') AND value IS NOT NULL AND value != '' LIMIT 1");
-          if (storePhoneRow && storePhoneRow.value) {
-            boyPhone = formatDisplayPhone(storePhoneRow.value);
+        if (reminder.delivery_boy_id) {
+          const boy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE id = ?', [reminder.delivery_boy_id]);
+          if (boy && boy.name) {
+            boyName = boy.name;
+            boyPhone = formatDisplayPhone(boy.whatsapp_number);
           }
         }
+
+        if (boyName === '👤 Admin / Store Owner') {
+          // Find first active delivery boy as primary assigned staff
+          const activeBoy = await db.get('SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 LIMIT 1');
+          if (activeBoy && activeBoy.name) {
+            boyName = activeBoy.name;
+            boyPhone = formatDisplayPhone(activeBoy.whatsapp_number);
+          } else {
+            // Store Admin fallback
+            const storePhoneRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_phone', 'owner_whatsapp_number') AND value IS NOT NULL AND value != '' LIMIT 1");
+            if (storePhoneRow && storePhoneRow.value) {
+              boyPhone = formatDisplayPhone(storePhoneRow.value);
+            }
+          }
+        }
+
+        // Store Name
+        const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key = 'shop_name'");
+        const storeName = shopNameRow?.value || 'Pharmacy';
+
+        // Check if custom global template is configured
+        const templateRow = await db.get("SELECT value FROM app_settings WHERE key = 'distributor_reminder_template'");
+        const rawTemplate = templateRow?.value;
+
+        if (rawTemplate && String(rawTemplate).trim()) {
+          message = String(rawTemplate)
+            .replace(/\{distributor_name\}/g, reminder.distributor_name || 'Distributor')
+            .replace(/\{delivery_boy\}/g, boyName)
+            .replace(/\{phone\}/g, boyPhone)
+            .replace(/\{store_name\}/g, storeName);
+        } else {
+          // Ultra-short message format:
+          // "📦 Has today's order been dispatched or collected by [Delivery Boy Name] ([Delivery Boy Phone])? - [Store Name]"
+          message = `📦 Has today's order been dispatched or collected by ${boyName} (${boyPhone})? - ${storeName}`;
+        }
       }
-
-      // Store Name
-      const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key = 'shop_name'");
-      const storeName = shopNameRow?.value || 'Pharmacy';
-
-      // Ultra-short message format selected by user:
-      // "📦 Has today's order been dispatched or collected by [Delivery Boy Name] ([Delivery Boy Phone])? - [Store Name]"
-      const message = `📦 Has today's order been dispatched or collected by ${boyName} (${boyPhone})? - ${storeName}`;
 
       console.log(`[DistributorReminder] Sending reminder to ${reminder.distributor_name} (${recipientPhone}): ${message}`);
       const sendResult = await sendMessage(recipientPhone, undefined, message);

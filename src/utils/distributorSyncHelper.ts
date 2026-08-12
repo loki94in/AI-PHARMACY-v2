@@ -267,5 +267,24 @@ export async function syncDistributorPhoneAcrossTables(db: any, params: SyncDist
     console.warn('[distributorSync] Failed to sync contacts:', err);
   }
 
+  // 4. Update 'distributor_dispatch_reminders' active records to keep numbers in sync with AI Learning & settings
+  try {
+    if (effectivePhone || effectiveName) {
+      await db.run(
+        `UPDATE distributor_dispatch_reminders
+         SET distributor_phone = CASE WHEN ? != '' THEN ? ELSE distributor_phone END,
+             distributor_name = CASE WHEN ? != '' THEN ? ELSE distributor_name END
+         WHERE distributor_id = ? OR LOWER(TRIM(distributor_name)) = LOWER(TRIM(?))`,
+        [
+          effectivePhone || '', effectivePhone || '',
+          effectiveName.trim(), effectiveName.trim(),
+          targetId, effectiveName.trim()
+        ]
+      );
+    }
+  } catch (err) {
+    console.warn('[distributorSync] Failed to sync distributor_dispatch_reminders:', err);
+  }
+
   return finalDistributor;
 }
