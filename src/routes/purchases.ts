@@ -1956,6 +1956,10 @@ router.get('/reconciliation', async (req, res) => {
       if (o.raw_text && o.corrected_text) aliasMap.set(o.raw_text, o.corrected_text);
     }
     
+    // Fetch permanently ignored words
+    const piwRows = await db.all(`SELECT word FROM permanently_ignored_words`).catch(() => []);
+    const ignoredSet = new Set(piwRows.map((r: any) => String(r.word || '').trim().toLowerCase()));
+    
     // Fetch latest order/invoice emails up to limit of 50
     const orderEmails = await db.all(`
       SELECT uid, from_addr, subject, body, date, is_seen, is_saved, distributor_name, has_attachments, medicine_names, extracted_invoice_no, extracted_distributor
@@ -2248,6 +2252,10 @@ router.get('/reconciliation', async (req, res) => {
         }
       }
 
+      if (ignoredSet.size > 0 && Array.isArray(displayMedicines)) {
+        displayMedicines = displayMedicines.filter((m: string) => !ignoredSet.has(m.trim().toLowerCase()));
+      }
+
       result.push({
         email_uid: group.email_uid,
         from: group.from,
@@ -2274,6 +2282,57 @@ router.get('/reconciliation', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Fetch reconciliation error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /ignored-words - Fetch all permanently ignored words
+router.get('/ignored-words', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all('SELECT id, word, source, created_at FROM permanently_ignored_words ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (error) {
+    console.error('Fetch ignored words error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /ignored-words - Add a word to permanently_ignored_words table
+router.post('/ignored-words', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const { word, source = 'recon' } = req.body;
+    if (!word || typeof word !== 'string' || !word.trim()) {
+      return res.status(400).json({ error: 'Valid word is required' });
+    }
+    const cleanWord = word.trim();
+    const result = await db.run(
+      'INSERT OR IGNORE INTO permanently_ignored_words (word, source) VALUES (?, ?)',
+      [cleanWord, source]
+    );
+    
+    const row = await db.get('SELECT id, word, source, created_at FROM permanently_ignored_words WHERE word = ? COLLATE NOCASE', [cleanWord]);
+    
+    res.json({ success: true, id: row?.id || result.lastID, word: cleanWord });
+  } catch (error) {
+    console.error('Add ignored word error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /ignored-words/:id - Remove a word from permanently_ignored_words table
+router.delete('/ignored-words/:id', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: 'Invalid ID' });
+    }
+    await db.run('DELETE FROM permanently_ignored_words WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Word un-ignored successfully' });
+  } catch (error) {
+    console.error('Remove ignored word error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -182,6 +182,7 @@ let cachedPendingOrders: SpecialOrder[] = [];
 let cachedPendingRefills: Refill[] = [];
 let cachedReconOrders: any[] = [];
 let cachedAutoRefillItems: any[] = [];
+let cachedIgnoredWords: Array<{ id: number; word: string; source: string; created_at: string }> = [];
 let cachedPrMode: 'Live' | 'Unknown' = 'Live';
 
 export interface LiveCartAddModalProps {
@@ -409,6 +410,55 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [distributorPickerReconIdx, setDistributorPickerReconIdx] = useState<number | null>(null);
   const [distributorPickerReconMedicine, setDistributorPickerReconMedicine] = useState<string>('');
   const [addedReconMedicines, setAddedReconMedicines] = useState<Record<number, string[]>>({});
+
+  // Permanently Ignored Words State
+  const [ignoredWords, setIgnoredWords] = useState<Array<{ id: number; word: string; source: string; created_at: string }>>(cachedIgnoredWords);
+  const [showIgnoredList, setShowIgnoredList] = useState(false);
+
+  const fetchIgnoredWords = async () => {
+    try {
+      const data = await api.getIgnoredWords();
+      if (Array.isArray(data)) {
+        cachedIgnoredWords = data;
+        setIgnoredWords(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch ignored words in modal:', err);
+    }
+  };
+
+  const handleIgnoreWord = async (word: string) => {
+    if (!word || !word.trim()) return;
+    const clean = word.trim();
+    try {
+      await api.addIgnoredWord(clean, 'recon');
+      setReconOrders((prev) =>
+        prev
+          .map((r) => ({
+            ...r,
+            medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => m.toLowerCase() !== clean.toLowerCase()) : []
+          }))
+          .filter((r) => r.medicine_names && r.medicine_names.length > 0)
+      );
+      await fetchIgnoredWords();
+      toastEvent.trigger(`Ignored "${clean}" from Recon & OCR`, 'success');
+    } catch (err) {
+      console.error('Failed to ignore word:', err);
+      toastEvent.trigger('Failed to ignore word', 'error');
+    }
+  };
+
+  const handleUnignoreWord = async (id: number, word: string) => {
+    try {
+      await api.removeIgnoredWord(id);
+      await fetchIgnoredWords();
+      await fetchReconOrders();
+      toastEvent.trigger(`Removed "${word}" from ignore list`, 'info');
+    } catch (err) {
+      console.error('Failed to remove ignored word:', err);
+      toastEvent.trigger('Failed to remove ignored word', 'error');
+    }
+  };
 
   // High-Frequency Low Stock Auto-Refills State
   const [autoRefillItems, setAutoRefillItems] = useState<Array<{
@@ -1032,7 +1082,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       // Also run secondary background refills & recon concurrently immediately
       Promise.allSettled([
         fetchPendingRefills(),
-        fetchReconOrders()
+        fetchReconOrders(),
+        fetchIgnoredWords()
       ]);
     }
   }, [isOpen]);
@@ -1043,7 +1094,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         Promise.allSettled([
           fetchLiveCartSummary(true),
           fetchPendingRefills(),
-          fetchReconOrders()
+          fetchReconOrders(),
+          fetchIgnoredWords()
         ]);
       }
     };
@@ -1641,13 +1693,26 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               <div className={`text-sm font-bold truncate max-w-[140px] ${isAdded ? 'line-through opacity-50 text-blue-400' : 'text-blue-300'}`} title={medName}>
                                 {medName}
                               </div>
-                              {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
-                                <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border mt-0.5 truncate max-w-[140px] ${reconDistColor.badge}`}>
-                                  {recon.extracted_distributor}
-                                </span>
-                              ) : (
-                                <div className="text-[11px] text-blue-400/80 font-medium truncate max-w-[140px]">{recon.subject || 'Email Order'}</div>
-                              )}
+                              <div className="flex items-center gap-1 mt-0.5 max-w-[140px] flex-wrap">
+                                {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
+                                  <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border truncate max-w-[85px] ${reconDistColor.badge}`}>
+                                    {recon.extracted_distributor}
+                                  </span>
+                                ) : (
+                                  <div className="text-[11px] text-blue-400/80 font-medium truncate max-w-[85px]">{recon.subject || 'Email Order'}</div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleIgnoreWord(medName);
+                                  }}
+                                  className="text-[9px] font-semibold text-muted hover:text-red transition-colors bg-bg3/60 hover:bg-red-500/10 px-1 py-0.5 rounded border border-border hover:border-red-500/30 cursor-pointer flex items-center gap-0.5 shrink-0"
+                                  title={`Permanently ignore "${medName}" (stop showing in Recon & OCR)`}
+                                >
+                                  <span>⛔</span> Ignore
+                                </button>
+                              </div>
                             </td>
                             <td className="py-2.5 px-1 text-right text-muted font-mono font-bold">1</td>
                             <td className="py-2.5 px-1 text-right">
@@ -1709,6 +1774,45 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
                   </tbody>
                 </table>
+              )}
+            </div>
+
+            {/* Ignored Words Accordion */}
+            <div className="mt-3 border-t border-border pt-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowIgnoredList(!showIgnoredList)}
+                className="w-full flex items-center justify-between text-[11px] font-semibold text-muted hover:text-text px-2 py-1 rounded bg-bg2/40 hover:bg-bg3/40 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span>🚫</span>
+                  <span>Ignored Words ({ignoredWords.length})</span>
+                </span>
+                <span className="text-[9px]">{showIgnoredList ? '▲' : '▼'}</span>
+              </button>
+
+              {showIgnoredList && (
+                <div className="mt-1.5 p-2 bg-bg2/60 rounded border border-border max-h-36 overflow-y-auto space-y-1.5 scrollbar-thin">
+                  {ignoredWords.length === 0 ? (
+                    <div className="text-[11px] text-muted italic text-center py-1">No permanently ignored words</div>
+                  ) : (
+                    ignoredWords.map((iw) => (
+                      <div key={iw.id} className="flex items-center justify-between text-xs px-2 py-1 bg-bg3/40 rounded border border-border/50">
+                        <span className="font-semibold text-text truncate max-w-[150px]" title={iw.word}>
+                          {iw.word}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUnignoreWord(iw.id, iw.word)}
+                          className="text-[10px] font-bold text-muted hover:text-red transition-colors px-1.5 py-0.5 rounded hover:bg-red-500/10 border border-transparent hover:border-red-500/20 cursor-pointer shrink-0"
+                          title="Remove from ignore list"
+                        >
+                          ✕ Un-ignore
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               )}
             </div>
           </div>

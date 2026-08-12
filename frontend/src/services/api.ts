@@ -762,12 +762,15 @@ export const api = {
   enrichCatalogReview: (id: number) => apiClient.post(`/catalog/review/${id}/enrich`).then(res => res.data),
   getGoogleSearchStatus: () => apiClient.get(`/catalog/search-status`).then(res => res.data),
   
-  // Reconciliation
+  // Reconciliation & Permanently Ignored Words
   getReconciliationList: () => apiClient.get('/purchases/reconciliation').then(res => res.data),
   getReconciliationPreview: (emailUid: number) => apiClient.get(`/purchases/reconciliation/preview/${emailUid}`).then(res => res.data),
   reissueOrder: (emailUid: number) => apiClient.post('/purchases/reconciliation/reissue', { email_uid: emailUid }).then(res => res.data),
   resolveOrderManually: (emailUid: number) => apiClient.post('/purchases/reconciliation/resolve', { email_uid: emailUid }).then(res => res.data),
   saveDistributorMapping: (data: { distributor_id?: number; distributor_name?: string; mapping_config: any }) => apiClient.post('/purchases/reconciliation/learn-mapping', data).then(res => res.data),
+  getIgnoredWords: () => apiClient.get('/purchases/ignored-words').then(res => res.data),
+  addIgnoredWord: (word: string, source = 'recon') => apiClient.post('/purchases/ignored-words', { word, source }).then(res => res.data),
+  removeIgnoredWord: (id: number) => apiClient.delete(`/purchases/ignored-words/${id}`).then(res => res.data),
 
   // Staged / Offline Sync Review
   getStagedSales: (all?: boolean) => apiClient.get(all ? '/sales/staged?all=true' : '/sales/staged').then(res => res.data),

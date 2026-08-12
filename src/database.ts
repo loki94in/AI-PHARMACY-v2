@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 33;
+const CURRENT_SCHEMA_VERSION = 34;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -1721,6 +1721,15 @@ export async function ensureSchema(dbPath: string) {
       reason TEXT,
       added_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Permanent Ignore Words (for recon/bounced items & OCR stop words)
+    CREATE TABLE IF NOT EXISTS permanently_ignored_words (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      word TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      source TEXT DEFAULT 'recon',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_piw_word ON permanently_ignored_words (word COLLATE NOCASE);
 
     -- WhatsApp OCR Pipeline: Prevents re-scanning the same image
     CREATE TABLE IF NOT EXISTS scanned_messages (

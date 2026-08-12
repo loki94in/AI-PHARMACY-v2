@@ -94,6 +94,19 @@ class AICameraService {
         console.warn('[AiCamera] Could not load from medicine_reference table:', refErr);
       }
 
+      // 3. Fetch user permanently ignored words
+      try {
+        const userIgnored = await db.all('SELECT word FROM permanently_ignored_words');
+        for (const row of userIgnored) {
+          if (row.word) {
+            const clean = row.word.trim().toLowerCase();
+            if (clean) this.STOP_WORDS.add(clean);
+          }
+        }
+      } catch (piwErr) {
+        console.warn('[AiCamera] Could not load permanently_ignored_words:', piwErr);
+      }
+
       this.ignoreListLoaded = true;
       console.log(`[AiCamera] Dynamically loaded drug generic/API ignore list from DB. Total stop words: ${this.STOP_WORDS.size}`);
     } catch (err) {
