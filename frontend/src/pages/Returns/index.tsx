@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { useLocation } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
-import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Camera, X, Loader2, Edit, Wand2 } from 'lucide-react';
+import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Camera, X, Loader2, Edit, Wand2, ChevronDown, ChevronUp, Building2, Filter, Layers } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -114,7 +114,33 @@ const formatExpiryToMMYY = (val: string): string => {
   return val;
 };
 
+const getExpiryUrgencyStatus = (expiryStr: string): { label: string; className: string; rank: number } | null => {
+  if (!expiryStr) return null;
+  let expDate: Date | null = null;
+  if (expiryStr.includes('/')) {
+    const parts = expiryStr.split('/');
+    let year = parseInt(parts[1], 10);
+    const month = parseInt(parts[0], 10) - 1;
+    if (year < 100) year += 2000;
+    expDate = new Date(year, month + 1, 0);
+  } else if (/^\d{4}-\d{2}-\d{2}/.test(expiryStr)) {
+    expDate = new Date(expiryStr);
+  }
+  if (!expDate || isNaN(expDate.getTime())) return null;
 
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (expDate < today) {
+    return { label: 'EXPIRED', className: 'bg-red-500/10 text-red-500 border-red-500/20', rank: 1 };
+  }
+  const sixtyDaysFromNow = new Date();
+  sixtyDaysFromNow.setDate(today.getDate() + 60);
+  if (expDate <= sixtyDaysFromNow) {
+    return { label: 'NEAR EXPIRY', className: 'bg-amber-500/10 text-amber-500 border-amber-500/20', rank: 2 };
+  }
+  return { label: 'VALID', className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20', rank: 3 };
+};
 
 let cachedReturnHistory: any[] | null = null;
 
@@ -385,7 +411,7 @@ const Returns: React.FC = () => {
   const [searchFilterText, setSearchFilterText] = useState('');
   const queryClient = useQueryClient();
   const returnHistoryKey = ['return-history', dateFrom, dateTo, minAmount, maxAmount] as const;
-  const { data: returnHistory = [], isLoading: loading } = useApiQuery(
+  const { data: returnHistory = [], isLoading: loading, refetch: refetchHistory } = useApiQuery(
     returnHistoryKey,
     async () => {
       const params = {
@@ -395,9 +421,47 @@ const Returns: React.FC = () => {
         max_amount: maxAmount ? parseFloat(maxAmount) : undefined,
       };
       const response = await api.getReturns(params);
-      return Array.isArray(response) ? response : (response.data || []);
+      const list = Array.isArray(response) ? response : (response.data || []);
+      cachedReturnHistory = list;
+      return list;
+    },
+    {
+      initialData: cachedReturnHistory || undefined,
+      staleTime: 10000,
     }
   );
+
+  // Master active distributors directory
+  const { data: masterDistributors = [] } = useApiQuery(
+    ['distributors-list'],
+    async () => {
+      const res = await api.getDistributors();
+      return Array.isArray(res) ? res : (res?.data || []);
+    },
+    { staleTime: 30000 }
+  );
+
+  // Live background update polling and real-time event listener
+  useEffect(() => {
+    const handleStockWrite = () => {
+      refetchHistory().catch(() => {});
+    };
+
+    window.addEventListener('stock-write-completed', handleStockWrite);
+
+    // Silent background poll every 10 seconds while component is mounted
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refetchHistory().catch(() => {});
+      }
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('stock-write-completed', handleStockWrite);
+      clearInterval(interval);
+    };
+  }, [refetchHistory]);
+
   const [showCamera, setShowCamera] = useState(false);
   const [cameraTargetIndex, setCameraTargetIndex] = useState<number | null>(null);
 
@@ -460,6 +524,27 @@ const Returns: React.FC = () => {
         const list = Array.isArray(res) ? res : (res?.data || []);
         if (list.length > 0) {
           const purchase = list[0];
+
+          const existingIndex = items.findIndex(
+            (it, idx) => idx !== cameraTargetIndex &&
+              it.medicine_id === purchase.medicine_id &&
+              (it.batch_no || '').trim().toLowerCase() === (purchase.batch_no || '').trim().toLowerCase()
+          );
+
+          if (existingIndex !== -1) {
+            alert(`Scanned drug "${purchase.medicine_name}" (Batch: ${purchase.batch_no}) is already in your return cart!\n\nIncrementing quantity of the existing line.`);
+            const updatedItems = [...items];
+            const existingQty = parseFloat(updatedItems[existingIndex].quantity as any) || 0;
+            updatedItems[existingIndex].quantity = (existingQty + 1).toString();
+            if (updatedItems.length > 1) {
+              updatedItems.splice(cameraTargetIndex, 1);
+            } else {
+              updatedItems[cameraTargetIndex] = createEmptyItem();
+            }
+            setItems(updatedItems);
+            return;
+          }
+
           item.medicine_id = purchase.medicine_id;
           item.medicine_name = purchase.medicine_name;
           item.batch_no = purchase.batch_no;
@@ -497,43 +582,34 @@ const Returns: React.FC = () => {
   }
 
   useEffect(() => {
-    // Auto-prefill from Expiry page navigation - group by distributor into separate draft cards
+    // Auto-prefill from Expiry page navigation or location state with robust property fallbacks
     const prefilledItems = location.state?.prefilledReturnItems;
-    if (prefilledItems && prefilledItems.length > 0) {
-      const groups: Record<string, any[]> = {};
-      prefilledItems.forEach((item: any) => {
-        const distName = item.distributor_name ? item.distributor_name.trim() : 'Unknown Supplier';
-        if (!groups[distName]) groups[distName] = [];
-        groups[distName].push({
-          id: generateUUID(),
-          medicine_id: item.medicine_id ?? null,
-          medicine_name: item.medicine_name || '',
-          batch_no: item.batch_no || '',
-          expiry_date: formatExpiryToMMYY(item.expiry_date || ''),
-          quantity: item.quantity || '',
-          cost_price: item.purchase_cost_price ?? item.cost_price ?? item.mrp ?? '',
-          mrp: item.mrp || '',
-          purchase_item_id: item.purchase_item_id || undefined,
-          invoice_no: item.purchase_invoice_no || '',
-          distributor_name: item.distributor_name || '',
-          distributor_id: item.distributor_id || undefined,
-        });
-      });
-
-      const distNames = Object.keys(groups);
-      const newTabs: any[] = distNames.map(distName => ({
-        id: generateUUID(),
-        name: `Ret: ${distName}`,
-        items: groups[distName]
+    if (prefilledItems && Array.isArray(prefilledItems) && prefilledItems.length > 0) {
+      const mappedItems: ReturnItem[] = prefilledItems.map((item: any) => ({
+        id: item.id || item.medicine_id || generateUUID(),
+        medicine_id: item.medicine_id || item.id || undefined,
+        medicine_name: item.medicine_name || item.name || item.item_name || '',
+        batch_no: item.batch_no || item.batch || '',
+        expiry_date: formatExpiryToMMYY(item.expiry_date || item.expiry || ''),
+        quantity: (item.quantity ?? item.pack_quantity ?? item.current_stock ?? item.stock_quantity ?? 1).toString(),
+        cost_price: (item.cost_price ?? item.purchase_cost_price ?? item.purchase_cost ?? item.mrp ?? 0).toString(),
+        mrp: (item.mrp ?? 0).toString(),
+        purchase_item_id: item.purchase_item_id || undefined,
+        invoice_no: item.invoice_no || item.purchase_invoice_no || undefined,
+        purchase_date: item.purchase_date || undefined,
+        distributor_name: item.distributor_name || item.supplier_name || item.distributor || undefined,
+        distributor_id: item.distributor_id || item.supplier_id || undefined,
       }));
 
-      if (newTabs.length > 0) {
-        setTabs(newTabs);
-        setActiveTabId(newTabs[0].id);
-        setItems(newTabs[0].items);
-      }
+      // Append prefilled items without duplicating existing batch IDs
+      setItems(prev => {
+        const existingKeys = new Set(prev.map(i => `${i.medicine_id}_${i.batch_no}`));
+        const newUnique = mappedItems.filter(i => !existingKeys.has(`${i.medicine_id}_${i.batch_no}`));
+        const nonEmptyExisting = prev.filter(i => i.medicine_name || i.medicine_id);
+        return [...nonEmptyExisting, ...(newUnique.length > 0 ? newUnique : mappedItems)];
+      });
     }
-  }, []);
+  }, [location.state]);
 
   // RQ re-fetches automatically when returnHistoryKey changes (dateFrom/dateTo/minAmount/maxAmount)
 
@@ -593,6 +669,33 @@ const Returns: React.FC = () => {
       clearTimeout(searchTimeoutRef.current);
     }
 
+    // Check if this medicine batch is already in the return cart at another row
+    const existingIndex = items.findIndex(
+      (it, idx) => idx !== index && 
+        it.medicine_id === purchase.medicine_id && 
+        (it.batch_no || '').trim().toLowerCase() === (purchase.batch_no || '').trim().toLowerCase()
+    );
+
+    if (existingIndex !== -1) {
+      alert(`"${purchase.medicine_name}" (Batch: ${purchase.batch_no}) is already in your return cart!\n\nIncrementing the quantity of the existing line.`);
+      
+      const newItems = [...items];
+      const existingQty = parseFloat(newItems[existingIndex].quantity as any) || 0;
+      newItems[existingIndex].quantity = (existingQty + 1).toString();
+      
+      if (newItems.length > 1) {
+        newItems.splice(index, 1);
+      } else {
+        newItems[index] = createEmptyItem();
+      }
+
+      setItems(newItems);
+      setSearchResults([]);
+      setActiveSearchIndex(null);
+      setSearchHighlightIndex(-1);
+      return;
+    }
+
     const newItems = [...items];
     const item = newItems[index];
 
@@ -639,6 +742,209 @@ const Returns: React.FC = () => {
 
   const addItem = () => {
     setItems([...items, createEmptyItem()]);
+  };
+
+  interface DraftGroup {
+    key: string;
+    distributor_id: number | null;
+    distributor_name: string;
+    invoice_no: string;
+    purchase_date: string;
+    items: { item: ReturnItem; originalIndex: number }[];
+    total_amount: number;
+  }
+
+  const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [distributorSidebarSearch, setDistributorSidebarSearch] = useState('');
+  const [focusedDistributorKey, setFocusedDistributorKey] = useState<string | null>(null);
+
+  const toggleCardCollapse = (key: string) => {
+    setCollapsedCards(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const collapseAllCards = () => {
+    const all = groupAllItemsByDistributor();
+    const map: Record<string, boolean> = {};
+    all.forEach(g => { map[g.key] = true; });
+    setCollapsedCards(map);
+  };
+
+  const expandAllCards = () => {
+    setCollapsedCards({});
+  };
+
+  const groupAllItemsByDistributor = (): DraftGroup[] => {
+    const grouped: { [key: string]: DraftGroup } = {};
+
+    items.forEach((item, index) => {
+      const hasDist = Boolean(item.distributor_name || item.distributor_id);
+      const key = hasDist
+        ? `${item.distributor_id || 'name_' + item.distributor_name}_${item.invoice_no || 'N/A'}`
+        : 'unassigned';
+
+      const distName = hasDist ? (item.distributor_name || 'Unknown Supplier') : 'New / Unassigned Items';
+      const invNo = hasDist ? (item.invoice_no || 'N/A') : 'Draft';
+      const purchaseDate = item.purchase_date || '';
+
+      const qty = parseFloat(item.quantity as any) || 0;
+      const costPrice = parseFloat(item.cost_price as any) || 0;
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          key,
+          distributor_id: item.distributor_id || null,
+          distributor_name: distName,
+          invoice_no: invNo,
+          purchase_date: purchaseDate,
+          items: [],
+          total_amount: 0,
+        };
+      }
+
+      grouped[key].items.push({ item, originalIndex: index });
+      grouped[key].total_amount += costPrice * qty;
+    });
+
+    const result = Object.values(grouped);
+    // Auto-Sort items in each distributor card by Expiry Urgency Rank then Expiry Date
+    result.forEach(group => {
+      group.items.sort((a, b) => {
+        const statusA = getExpiryUrgencyStatus(a.item.expiry_date);
+        const statusB = getExpiryUrgencyStatus(b.item.expiry_date);
+        const rankA = statusA ? statusA.rank : 99;
+        const rankB = statusB ? statusB.rank : 99;
+        if (rankA !== rankB) return rankA - rankB;
+        return (a.item.expiry_date || '').localeCompare(b.item.expiry_date || '');
+      });
+    });
+
+    return result;
+  };
+
+  const processSingleGroup = async (group: DraftGroup) => {
+    const validItems = group.items.filter(entry => {
+      const qty = parseFloat(entry.item.quantity as any) || 0;
+      return entry.item.medicine_id && qty > 0;
+    });
+
+    if (validItems.length === 0) {
+      alert(`Please add at least one valid medicine with quantity for ${group.distributor_name}`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.processReturns(validItems.map(entry => ({
+        medicine_id: entry.item.medicine_id,
+        batch_no: entry.item.batch_no,
+        quantity: parseFloat(entry.item.quantity as any) || 0,
+        cost_price: parseFloat(entry.item.cost_price as any) || 0,
+        mrp: parseFloat(entry.item.mrp as any) || 0,
+        distributor_id: group.distributor_id,
+        invoice_no: group.invoice_no,
+      })));
+
+      alert(`Successfully processed return for ${group.distributor_name} (${validItems.length} item(s))!`);
+      
+      const processedIndices = new Set(validItems.map(e => e.originalIndex));
+      const remainingItems = items.filter((_, idx) => !processedIndices.has(idx));
+      setItems(remainingItems.length > 0 ? remainingItems : [createEmptyItem()]);
+
+      invalidateAfterStockWrite(queryClient);
+      api.getCompactInventory().catch(() => {});
+    } catch (error) {
+      console.error('Error processing single return:', error);
+      alert('Failed to process return for ' + group.distributor_name);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const exportSingleGroupPDF = async (group: DraftGroup) => {
+    const validItems = group.items
+      .map(e => e.item)
+      .filter(item => (parseFloat(item.quantity as any) || 0) > 0);
+
+    if (validItems.length === 0) {
+      alert('No valid items with quantity to export for ' + group.distributor_name);
+      return;
+    }
+
+    try {
+      const parsedItemsForExport = validItems.map(item => ({
+        ...item,
+        quantity: parseFloat(item.quantity as any) || 0,
+        cost_price: parseFloat(item.cost_price as any) || 0,
+        mrp: parseFloat(item.mrp as any) || 0
+      }));
+      const blob = await api.exportReturnsPDF(parsedItemsForExport);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `return-${group.distributor_name}-${group.invoice_no}-${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error exporting PDF:', error);
+      alert('Failed to export PDF');
+    }
+  };
+
+  const addItemToDistributorGroup = (group: DraftGroup) => {
+    const newItem = createEmptyItem();
+    if (group.distributor_name !== 'New / Unassigned Items') {
+      newItem.distributor_name = group.distributor_name;
+      newItem.distributor_id = group.distributor_id || undefined;
+      newItem.invoice_no = group.invoice_no !== 'N/A' ? group.invoice_no : undefined;
+    }
+    setItems(prev => [...prev, newItem]);
+  };
+
+  const handleSelectDistributorFromSidebar = (dist: { id?: number; name: string }) => {
+    const allGroups = groupAllItemsByDistributor();
+    const existing = allGroups.find(g => 
+      (dist.id && g.distributor_id === dist.id) || 
+      g.distributor_name.toLowerCase() === dist.name.toLowerCase()
+    );
+
+    if (existing) {
+      setCollapsedCards(prev => ({ ...prev, [existing.key]: false }));
+      setFocusedDistributorKey(existing.key);
+      setTimeout(() => {
+        const elem = document.getElementById(`dist-card-${existing.key}`);
+        if (elem) {
+          elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 50);
+    } else {
+      // Automatically generate a new dedicated return card for this distributor!
+      const newItem = createEmptyItem();
+      newItem.distributor_id = dist.id || undefined;
+      newItem.distributor_name = dist.name;
+      newItem.invoice_no = 'N/A';
+
+      const emptyUnassignedIdx = items.findIndex(i => !i.medicine_name && !i.distributor_name && !i.distributor_id);
+      if (emptyUnassignedIdx !== -1 && items.length === 1) {
+        setItems([newItem]);
+      } else {
+        setItems(prev => [...prev, newItem]);
+      }
+
+      const newKey = `${dist.id || 'name_' + dist.name}_N/A`;
+      setCollapsedCards(prev => ({ ...prev, [newKey]: false }));
+      setFocusedDistributorKey(newKey);
+      setTimeout(() => {
+        const elem = document.getElementById(`dist-card-${newKey}`);
+        if (elem) {
+          elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 100);
+    }
   };
 
   // Group items by distributor + invoice
@@ -1319,236 +1625,555 @@ const Returns: React.FC = () => {
                 </div>
               </div>
             ) : (
-              /* Draft Editor Workspace — Full Width */
-              <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden p-5">
-                {/* Workspace Header */}
-                <div className="flex justify-between items-center pb-2 border-b border-border/60">
-                  <div>
-                    <h2 className="text-base font-bold text-text flex items-center gap-2">
-                      <span>{items.some(i => i.distributor_name) 
-                        ? `Return to: ${[...new Set(items.map(i => i.distributor_name).filter(Boolean))].join(', ')}`
-                        : 'New Supplier Return Bill'}</span>
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                        {items.length} Row{items.length !== 1 ? 's' : ''}
-                      </span>
-                    </h2>
-                    <p className="text-xs text-muted font-medium mt-0.5">
-                      Search medicines below. Line items will automatically split into separate distributor return bills when processed.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={addItem}
-                      className="bg-primary hover:bg-primary/95 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
-                    >
-                      <Plus size={14} />
-                      <span>Add Medicine Row</span>
-                    </button>
-                  </div>
-                </div>
+              /* Draft Editor Workspace — Multi-Distributor Auto-Cards + Right Sidebar Navigation */
+              <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text p-4">
+                {/* Center / Left: Cards List Workspace */}
+                <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+                  
+                  {/* Workspace Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg3/40 p-4 rounded-2xl border border-border/70 shrink-0">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-sm font-extrabold text-text uppercase tracking-wider flex items-center gap-2">
+                          <Layers size={16} className="text-primary" />
+                          <span>Supplier Return Cards Workspace</span>
+                        </h2>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30 font-mono">
+                          {groupAllItemsByDistributor().length} Card{groupAllItemsByDistributor().length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted font-medium mt-1">
+                        Medicines are automatically grouped into separate distributor cards. Review or process each supplier card independently below.
+                      </p>
+                    </div>
 
-                {/* Table Editor - 100% Width */}
-                <div className="flex-1 overflow-auto bg-bg/40 rounded-2xl border border-border/60 shadow-inner">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 z-20 bg-bg2/95 backdrop-blur-sm border-b border-border/60 shadow-sm">
-                      <tr className="text-left text-muted border-b border-border/60">
-                        <th className="p-3.5 text-xs font-bold w-12">#</th>
-                        <th className="p-3.5 text-xs font-bold min-w-[260px]">Medicine Name</th>
-                        <th className="p-3.5 text-xs font-bold w-32">Batch No</th>
-                        <th className="p-3.5 text-xs font-bold w-32">Expiry Date</th>
-                        <th className="p-3.5 text-xs font-bold w-24 text-center">Qty</th>
-                        <th className="p-3.5 text-xs font-bold w-28 text-right">Cost Price</th>
-                        <th className="p-3.5 text-xs font-bold w-28 text-right">Total</th>
-                        <th className="p-3.5 text-xs font-bold w-36 text-center">Invoice Ref</th>
-                        <th className="p-3.5 text-xs font-bold min-w-[160px]">Distributor</th>
-                        <th className="p-3.5 text-xs font-bold w-12 text-center"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((item, index) => (
-                        <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/40 transition-colors">
-                          <td className="p-3.5 text-xs text-muted font-mono">{index + 1}</td>
-                          
-                          {/* Medicine Select / Search */}
-                          <td className="p-3">
-                            <div ref={activeSearchIndex === index ? activeSearchRef : null} className="relative">
-                              <div className="flex gap-1.5 items-center">
-                                <input
-                                  type="text"
-                                  value={item.medicine_name}
-                                  onChange={(e) => {
-                                    updateItem(index, 'medicine_name', e.target.value);
-                                    searchMedicines(e.target.value, index);
-                                  }}
-                                  onKeyDown={e => {
-                                    if (activeSearchIndex !== index || searchResults.length === 0) return;
-                                    if (e.key === 'ArrowDown') {
-                                      e.preventDefault();
-                                      setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
-                                    } else if (e.key === 'ArrowUp') {
-                                      e.preventDefault();
-                                      setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                                    } else if (e.key === 'Enter' || e.key === 'Tab') {
-                                      if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
-                                        e.preventDefault();
-                                        selectMedicine(searchResults[searchHighlightIndex], index);
-                                      }
-                                    } else if (e.key === 'Escape') {
-                                      setActiveSearchIndex(null);
-                                      setSearchResults([]);
-                                      setSearchHighlightIndex(-1);
-                                    }
-                                  }}
-                                  className="w-full bg-bg3 border border-border/60 rounded-xl px-3.5 py-2 text-text font-bold text-xs focus:ring-1 focus:ring-primary focus:outline-none transition-all shadow-inner"
-                                  placeholder="Type 2+ chars to search purchase history..."
-                                />
-                                <button
-                                  onClick={() => {
-                                    setCameraTargetIndex(index);
-                                    setShowCamera(true);
-                                  }}
-                                  className="bg-sky/15 hover:bg-sky/30 border border-sky/30 text-sky w-9 h-9 rounded-xl text-xs flex-shrink-0 flex items-center justify-center transition-all cursor-pointer shadow-sm"
-                                  title="Scan drug package using AI Camera"
-                                >
-                                  <Camera size={16} />
-                                </button>
-                              </div>
-                              {activeSearchIndex === index && searchResults.length > 0 && (
-                                <div ref={searchResultsRef} className="absolute z-30 w-full mt-1.5 bg-bg2 border border-border rounded-xl shadow-xl max-h-60 overflow-y-auto">
-                                  {searchResults.map((result, idx) => (
-                                    <button
-                                      key={result.purchase_item_id}
-                                      type="button"
-                                      data-highlighted={idx === searchHighlightIndex ? "true" : "false"}
-                                      onClick={() => selectMedicine(result, index)}
-                                      className={`w-full text-left px-3.5 py-2.5 hover:bg-bg3 text-text text-xs border-b border-border/30 last:border-0 cursor-pointer transition-colors ${idx === searchHighlightIndex ? 'bg-primary/10 border-l-4 border-primary' : ''}`}
-                                    >
-                                      <div className="font-bold text-text">{result.medicine_name}</div>
-                                      <div className="text-[10px] text-muted font-mono mt-0.5">
-                                        Batch: <span className="font-bold text-text">{result.batch_no}</span> | Cost: ₹{result.cost_price} | {result.distributor_name} | Inv: {result.invoice_no}
-                                      </div>
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Batch */}
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.batch_no}
-                              onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
-                              className="w-full bg-bg3 border border-border/60 rounded-xl px-3 py-2 text-text font-mono text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                              placeholder="Batch No"
-                            />
-                          </td>
-
-                          {/* Expiry */}
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={item.expiry_date}
-                              onChange={(e) => updateItem(index, 'expiry_date', e.target.value, false)}
-                              onBlur={(e) => updateItem(index, 'expiry_date', e.target.value, true)}
-                              className="w-full bg-bg3 border border-border/60 rounded-xl px-3 py-2 text-text font-mono text-xs focus:ring-1 focus:ring-primary focus:outline-none"
-                              placeholder="MM/YY"
-                            />
-                          </td>
-
-                          {/* Qty */}
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-                              className="w-full bg-bg3 border border-border/60 rounded-xl px-3 py-2 text-text font-mono text-xs text-center focus:ring-1 focus:ring-primary focus:outline-none"
-                              min="0"
-                            />
-                          </td>
-
-                          {/* Cost Price */}
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              value={item.cost_price}
-                              onChange={(e) => updateItem(index, 'cost_price', e.target.value)}
-                              className="w-full bg-bg3 border border-border/60 rounded-xl px-3 py-2 text-text font-mono text-xs text-right focus:ring-1 focus:ring-primary focus:outline-none"
-                              min="0"
-                            />
-                          </td>
-
-                          {/* Total */}
-                          <td className="p-3 text-text font-extrabold text-xs font-mono text-right">
-                            ₹{((parseFloat(item.cost_price as any) || 0) * (parseFloat(item.quantity as any) || 0)).toFixed(2)}
-                          </td>
-
-                          {/* Invoice Ref */}
-                          <td className="p-3 text-center">
-                            <span className="px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[10px] font-bold font-mono block truncate text-center max-w-[120px] mx-auto">
-                              {item.invoice_no || 'N/A'}
-                            </span>
-                          </td>
-
-                          {/* Distributor */}
-                          <td className="p-3">
-                            <span className="px-2.5 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-lg text-[10px] font-bold block truncate text-center max-w-[150px]" title={item.distributor_name}>
-                              {item.distributor_name || 'N/A'}
-                            </span>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="p-3 text-center">
-                            <button
-                              onClick={() => removeItem(index)}
-                              className="text-red/80 hover:text-red p-1.5 hover:bg-red/10 rounded-lg transition-all cursor-pointer"
-                              title="Remove Row"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Bottom Sticky Action Bar */}
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-bg3/60 p-3.5 px-5 rounded-2xl border border-border/70 shadow-sm shrink-0">
-                  <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted font-bold">Total Claim:</span>
-                      <span className="text-xl font-black text-emerald-500 font-mono">
-                        ₹{calculateGrandTotal().toFixed(2)}
+                      <button
+                        onClick={expandAllCards}
+                        className="px-2.5 py-1.5 rounded-xl bg-bg border border-border/70 text-text hover:bg-bg3 text-[11px] font-semibold transition-all cursor-pointer"
+                        title="Expand all cards"
+                      >
+                        Expand All
+                      </button>
+                      <button
+                        onClick={collapseAllCards}
+                        className="px-2.5 py-1.5 rounded-xl bg-bg border border-border/70 text-text hover:bg-bg3 text-[11px] font-semibold transition-all cursor-pointer"
+                        title="Collapse all cards"
+                      >
+                        Collapse All
+                      </button>
+                      <button
+                        onClick={addItem}
+                        className="bg-primary hover:bg-primary/95 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                      >
+                        <Plus size={14} />
+                        <span>Add Row</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Multi-Distributor Auto-Cards Render */}
+                  {groupAllItemsByDistributor()
+                    .filter(group => {
+                      if (!focusedDistributorKey) return true;
+                      return group.key === focusedDistributorKey;
+                    })
+                    .map(group => {
+                      const isCollapsed = Boolean(collapsedCards[group.key]);
+                      const validCount = group.items.filter(e => (parseFloat(e.item.quantity as any) || 0) > 0).length;
+
+                      return (
+                        <div
+                          key={group.key}
+                          id={`dist-card-${group.key}`}
+                          className={`flex flex-col rounded-2xl border transition-all duration-300 shadow-sm overflow-hidden ${
+                            focusedDistributorKey === group.key
+                              ? 'bg-bg2 border-primary ring-2 ring-primary/40'
+                              : 'bg-bg2/90 border-border/80 hover:border-border'
+                          }`}
+                        >
+                          {/* Card Top Banner Header */}
+                          <div
+                            onClick={() => toggleCardCollapse(group.key)}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-bg3/40 border-b border-border/60 cursor-pointer select-none hover:bg-bg3/70 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                className="p-1 rounded-lg bg-bg border border-border/60 text-muted hover:text-text transition-colors"
+                              >
+                                {isCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                              </button>
+                              
+                              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                <Building2 size={18} />
+                              </div>
+
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="text-sm font-extrabold text-text tracking-tight">
+                                    {group.distributor_name}
+                                  </h3>
+                                  {group.invoice_no && group.invoice_no !== 'N/A' && (
+                                    <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono text-[10px] font-extrabold">
+                                      Invoice #{group.invoice_no}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-[11px] text-muted font-medium mt-0.5">
+                                  <span>{group.items.length} Row{group.items.length !== 1 ? 's' : ''} ({validCount} valid)</span>
+                                  {group.purchase_date && (
+                                    <>
+                                      <span>•</span>
+                                      <span>Date: {group.purchase_date.substring(0, 10)}</span>
+                                    </>
+                                  )}
+                                </div>
+                                {(() => {
+                                  const medNames = group.items.map(i => i.item.medicine_name).filter(Boolean);
+                                  return medNames.length > 0 ? (
+                                    <div className="text-[11px] text-primary font-semibold mt-1 flex items-center gap-1 truncate max-w-lg">
+                                      <span>💊 Medicines:</span>
+                                      <span className="truncate font-medium text-text">{medNames.join(', ')}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[11px] text-muted/60 italic font-medium mt-0.5">
+                                      No medicines added yet — type or scan to add medicines
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+
+                            {/* Card Header Actions & Subtotal */}
+                            <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
+                              <div className="text-right mr-1">
+                                <div className="text-[10px] text-muted uppercase font-bold tracking-wider">Subtotal Claim</div>
+                                <div className="text-base font-black text-emerald-500 font-mono">
+                                  ₹{group.total_amount.toFixed(2)}
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => exportSingleGroupPDF(group)}
+                                disabled={validCount === 0}
+                                className="p-2 px-3 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 hover:bg-purple-600 hover:text-white transition-all text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                                title="Export PDF debit note for this distributor"
+                              >
+                                <FileText size={13} />
+                                <span className="hidden md:inline">PDF</span>
+                              </button>
+
+                              <button
+                                onClick={() => processSingleGroup(group)}
+                                disabled={saving || validCount === 0}
+                                className="p-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-40 cursor-pointer active:scale-95"
+                                title="Process return for this supplier only"
+                              >
+                                <RotateCcw size={13} />
+                                <span>Process Card</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Card Items Table Body */}
+                          {!isCollapsed && (
+                            <div className="flex-1 flex flex-col p-4 gap-3 bg-bg/30">
+                              <div className="overflow-x-auto rounded-xl border border-border/60 shadow-inner">
+                                <table className="w-full text-left border-collapse min-w-[700px]">
+                                  <thead className="bg-bg2/90 border-b border-border/60">
+                                    <tr className="text-muted text-[11px] font-bold">
+                                      <th className="p-2.5 w-10 text-center">#</th>
+                                      <th className="p-2.5 min-w-[220px]">Medicine Name</th>
+                                      <th className="p-2.5 w-28">Batch No</th>
+                                      <th className="p-2.5 w-28">Expiry</th>
+                                      <th className="p-2.5 w-20 text-center">Qty</th>
+                                      <th className="p-2.5 w-24 text-right">Cost Price</th>
+                                      <th className="p-2.5 w-24 text-right">Total</th>
+                                      <th className="p-2.5 w-10 text-center"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {group.items.map(({ item, originalIndex }, localIdx) => (
+                                      <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/30 transition-colors text-xs">
+                                        <td className="p-2.5 text-center font-mono text-muted text-[10px]">{localIdx + 1}</td>
+                                        
+                                        {/* Medicine Name Search */}
+                                        <td className="p-2">
+                                          <div ref={activeSearchIndex === originalIndex ? activeSearchRef : null} className="relative">
+                                            <div className="flex gap-1 items-center">
+                                              <input
+                                                type="text"
+                                                value={item.medicine_name}
+                                                onChange={(e) => {
+                                                  updateItem(originalIndex, 'medicine_name', e.target.value);
+                                                  searchMedicines(e.target.value, originalIndex);
+                                                }}
+                                                className="w-full bg-bg3 border border-border/60 rounded-lg px-2.5 py-1.5 text-text font-bold text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                                                placeholder="Type 2+ chars to search..."
+                                              />
+                                              <button
+                                                onClick={() => {
+                                                  setCameraTargetIndex(originalIndex);
+                                                  setShowCamera(true);
+                                                }}
+                                                className="bg-sky/15 hover:bg-sky/30 border border-sky/30 text-sky w-7 h-7 rounded-lg text-xs flex-shrink-0 flex items-center justify-center transition-all cursor-pointer"
+                                                title="Scan drug package using AI Camera"
+                                              >
+                                                <Camera size={13} />
+                                              </button>
+                                            </div>
+                                            {activeSearchIndex === originalIndex && searchResults.length > 0 && (
+                                              <div ref={searchResultsRef} className="absolute z-30 w-full mt-1 bg-bg2 border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                                                {searchResults.map((result, idx) => (
+                                                  <button
+                                                    key={result.purchase_item_id}
+                                                    type="button"
+                                                    data-highlighted={idx === searchHighlightIndex ? "true" : "false"}
+                                                    onClick={() => selectMedicine(result, originalIndex)}
+                                                    className={`w-full text-left px-3 py-2 hover:bg-bg3 text-text text-xs border-b border-border/30 last:border-0 cursor-pointer transition-colors ${idx === searchHighlightIndex ? 'bg-primary/10 border-l-4 border-primary' : ''}`}
+                                                  >
+                                                    <div className="font-bold text-text">{result.medicine_name}</div>
+                                                    <div className="text-[10px] text-muted font-mono mt-0.5">
+                                                      Batch: <span className="font-bold text-text">{result.batch_no}</span> | Cost: ₹{result.cost_price} | {result.distributor_name}
+                                                    </div>
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </td>
+
+                                        {/* Batch */}
+                                        <td className="p-2">
+                                          <input
+                                            type="text"
+                                            value={item.batch_no}
+                                            onChange={(e) => updateItem(originalIndex, 'batch_no', e.target.value)}
+                                            className="w-full bg-bg3 border border-border/60 rounded-lg px-2 py-1.5 text-text font-mono text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                                            placeholder="Batch"
+                                          />
+                                        </td>
+
+                                        {/* Expiry */}
+                                        <td className="p-2">
+                                          <div className="flex flex-col gap-1">
+                                            <input
+                                              type="text"
+                                              value={item.expiry_date}
+                                              onChange={(e) => updateItem(originalIndex, 'expiry_date', e.target.value, false)}
+                                              onBlur={(e) => updateItem(originalIndex, 'expiry_date', e.target.value, true)}
+                                              className="w-full bg-bg3 border border-border/60 rounded-lg px-2 py-1.5 text-text font-mono text-xs focus:ring-1 focus:ring-primary focus:outline-none"
+                                              placeholder="MM/YY"
+                                            />
+                                            {(() => {
+                                              const st = getExpiryUrgencyStatus(item.expiry_date);
+                                              return st ? (
+                                                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border text-center font-mono ${st.className}`}>
+                                                  {st.label}
+                                                </span>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        </td>
+
+                                        {/* Qty */}
+                                        <td className="p-2">
+                                          <div className="flex items-center gap-1 justify-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const current = parseFloat(item.quantity as any) || 0;
+                                                if (current > 0) updateItem(originalIndex, 'quantity', (current - 1).toString());
+                                              }}
+                                              className="w-6 h-7 rounded bg-bg3 border border-border/60 text-muted hover:text-text hover:bg-bg2 font-bold text-xs flex items-center justify-center cursor-pointer transition-colors"
+                                              title="Decrease quantity"
+                                            >
+                                              -
+                                            </button>
+                                            <input
+                                              type="number"
+                                              value={item.quantity}
+                                              onChange={(e) => updateItem(originalIndex, 'quantity', e.target.value)}
+                                              className="w-14 bg-bg3 border border-border/60 rounded-lg px-1 py-1.5 text-text font-mono text-xs text-center focus:ring-1 focus:ring-primary focus:outline-none"
+                                              min="0"
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const current = parseFloat(item.quantity as any) || 0;
+                                                updateItem(originalIndex, 'quantity', (current + 1).toString());
+                                              }}
+                                              className="w-6 h-7 rounded bg-bg3 border border-border/60 text-muted hover:text-text hover:bg-bg2 font-bold text-xs flex items-center justify-center cursor-pointer transition-colors"
+                                              title="Increase quantity"
+                                            >
+                                              +
+                                            </button>
+                                          </div>
+                                        </td>
+
+                                        {/* Cost */}
+                                        <td className="p-2">
+                                          <input
+                                            type="number"
+                                            value={item.cost_price}
+                                            onChange={(e) => updateItem(originalIndex, 'cost_price', e.target.value)}
+                                            className="w-full bg-bg3 border border-border/60 rounded-lg px-2 py-1.5 text-text font-mono text-xs text-right focus:ring-1 focus:ring-primary focus:outline-none"
+                                            min="0"
+                                          />
+                                        </td>
+
+                                        {/* Total */}
+                                        <td className="p-2.5 text-text font-extrabold text-xs font-mono text-right">
+                                          ₹{((parseFloat(item.cost_price as any) || 0) * (parseFloat(item.quantity as any) || 0)).toFixed(2)}
+                                        </td>
+
+                                        {/* Remove */}
+                                        <td className="p-2 text-center">
+                                          <button
+                                            onClick={() => removeItem(originalIndex)}
+                                            className="text-red/80 hover:text-red p-1 hover:bg-red/10 rounded transition-all cursor-pointer"
+                                            title="Remove Row"
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              <div className="flex justify-between items-center pt-1">
+                                <button
+                                  onClick={() => addItemToDistributorGroup(group)}
+                                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Plus size={13} /> Add item to {group.distributor_name}
+                                </button>
+                                <span className="text-[11px] text-muted font-medium">
+                                  Card Subtotal: <strong className="text-emerald-500 font-mono">₹{group.total_amount.toFixed(2)}</strong>
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                  {/* Bottom Master Actions Bar */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-bg3/60 p-4 rounded-2xl border border-border/70 shadow-sm shrink-0 mt-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted font-bold">Total Return Claim Across All Suppliers:</span>
+                        <span className="text-xl font-black text-emerald-500 font-mono">
+                          ₹{calculateGrandTotal().toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="h-4 w-[1px] bg-border/60 hidden sm:block" />
+                      <span className="text-[11px] text-muted font-semibold hidden sm:block">
+                        {items.filter(i => (parseFloat(i.quantity as any) || 0) > 0).length} items across {groupAllItemsByDistributor().length} supplier card{groupAllItemsByDistributor().length !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <div className="h-4 w-[1px] bg-border/60 hidden sm:block" />
-                    <span className="text-[11px] text-muted font-semibold hidden sm:block">
-                      {items.filter(i => (parseFloat(i.quantity as any) || 0) > 0).length} valid items across {groupItemsByInvoice().length} supplier{groupItemsByInvoice().length !== 1 ? 's' : ''}
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        onClick={exportPDF}
+                        disabled={groupItemsByInvoice().length === 0}
+                        className="flex-1 sm:flex-none bg-purple-600/90 hover:bg-purple-600 text-white px-4 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95 shadow-sm cursor-pointer"
+                      >
+                        <FileText size={14} />
+                        <span>Export All PDF Statements</span>
+                      </button>
+                      <button
+                        onClick={processReturn}
+                        disabled={saving || groupItemsByInvoice().length === 0}
+                        className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95 shadow-sm cursor-pointer"
+                      >
+                        <RotateCcw size={14} />
+                        <span>{saving ? 'Processing Returns…' : 'Process All Returns'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right-Side Sidebar: Distributor Navigation & Quick Actions */}
+                <div className="w-72 flex-shrink-0 flex flex-col gap-3 min-h-0 bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl p-4 shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Building2 size={16} className="text-primary" />
+                      <h3 className="text-xs font-black uppercase tracking-wider text-text">Distributors Nav</h3>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-mono">
+                      {groupAllItemsByDistributor().length}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {/* Sidebar Distributor Search */}
+                  <div className="relative flex-shrink-0">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                    <input
+                      type="text"
+                      placeholder="Filter distributors..."
+                      value={distributorSidebarSearch}
+                      onChange={e => setDistributorSidebarSearch(e.target.value)}
+                      className="w-full pl-7 pr-6 py-1.5 bg-bg3/80 border border-border/70 rounded-xl text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary font-medium"
+                    />
+                    {distributorSidebarSearch && (
+                      <button
+                        onClick={() => setDistributorSidebarSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Focused Filter Clear Badge */}
+                  {focusedDistributorKey && (
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-primary/10 border border-primary/30 text-xs">
+                      <span className="text-primary font-bold text-[10px] truncate">Focusing 1 Card</span>
+                      <button
+                        onClick={() => setFocusedDistributorKey(null)}
+                        className="text-[10px] text-primary hover:underline font-extrabold cursor-pointer"
+                      >
+                        Show All
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Distributors List Cards Nav (Master Active Directory + Active Draft Cards) */}
+                  <div className="flex-1 overflow-y-auto pr-0.5 space-y-2 custom-scrollbar">
+                    {(() => {
+                      const activeGroups = groupAllItemsByDistributor();
+                      const activeDistNames = new Set(activeGroups.map(g => g.distributor_name.toLowerCase()));
+
+                      const sidebarEntries: Array<{
+                        id: string;
+                        distributor_id?: number;
+                        distributor_name: string;
+                        invoice_no?: string;
+                        group?: DraftGroup;
+                      }> = [];
+
+                      // 1. Add ALL active card groups (each invoice card gets its own distinct entry!)
+                      activeGroups.forEach(g => {
+                        sidebarEntries.push({
+                          id: `active_card_${g.key}`,
+                          distributor_id: g.distributor_id || undefined,
+                          distributor_name: g.distributor_name,
+                          invoice_no: g.invoice_no,
+                          group: g,
+                        });
+                      });
+
+                      // 2. Add master active distributors from DB that have no active cards yet
+                      masterDistributors.forEach((d: any) => {
+                        const distName = d.name || 'Unknown';
+                        if (!activeDistNames.has(distName.toLowerCase())) {
+                          sidebarEntries.push({
+                            id: `master_dist_${d.id || distName}`,
+                            distributor_id: d.id,
+                            distributor_name: distName,
+                            invoice_no: undefined,
+                            group: undefined,
+                          });
+                        }
+                      });
+
+                      return sidebarEntries
+                        .filter(entry => !distributorSidebarSearch || entry.distributor_name.toLowerCase().includes(distributorSidebarSearch.toLowerCase()))
+                        .map(entry => {
+                          const g = entry.group;
+                          const isFocused = g && focusedDistributorKey === g.key;
+                          const validItemCount = g ? g.items.filter(e => (parseFloat(e.item.quantity as any) || 0) > 0).length : 0;
+                          
+                          // Inline preview of medicine names inside this card
+                          const medNames = g
+                            ? g.items.map(it => it.item.medicine_name).filter(Boolean)
+                            : [];
+                          const medPreviewText = medNames.length > 0
+                            ? medNames.slice(0, 2).join(', ') + (medNames.length > 2 ? '...' : '')
+                            : '';
+
+                          return (
+                            <div
+                              key={entry.id}
+                              onClick={() => {
+                                if (g) {
+                                  setCollapsedCards(prev => ({ ...prev, [g.key]: false }));
+                                  setFocusedDistributorKey(isFocused ? null : g.key);
+                                  const elem = document.getElementById(`dist-card-${g.key}`);
+                                  if (elem) {
+                                    elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                  }
+                                } else {
+                                  handleSelectDistributorFromSidebar({ id: entry.distributor_id, name: entry.distributor_name });
+                                }
+                              }}
+                              className={`p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-1.5 text-xs select-none ${
+                                isFocused
+                                  ? 'bg-primary/15 border-primary text-text font-bold ring-1 ring-primary/40'
+                                  : g
+                                    ? 'bg-bg3/60 border-primary/40 hover:bg-bg3 text-text shadow-sm'
+                                    : 'bg-bg3/20 border-border/40 hover:bg-bg3/60 hover:border-border text-muted hover:text-text'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="font-extrabold text-text truncate text-xs flex items-center gap-1.5">
+                                  <Building2 size={13} className={g ? "text-primary shrink-0" : "text-muted shrink-0"} />
+                                  <span className="truncate">{entry.distributor_name}</span>
+                                </div>
+                                {g ? (
+                                  <span className="text-[10px] font-mono text-emerald-500 font-extrabold shrink-0">
+                                    ₹{g.total_amount.toFixed(2)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20 shrink-0 hover:bg-purple-500/20">
+                                    + Open Card
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Medicine List Preview */}
+                              {medPreviewText && (
+                                <div className="text-[10px] text-primary/90 font-semibold truncate flex items-center gap-1">
+                                  <span>💊</span>
+                                  <span className="truncate">{medPreviewText}</span>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between text-[10px] text-muted font-medium">
+                                <span className="font-mono truncate">
+                                  {entry.invoice_no && entry.invoice_no !== 'N/A' ? `Inv #${entry.invoice_no}` : (g ? 'Draft Card' : 'Active Supplier')}
+                                </span>
+                                {g ? (
+                                  <span className="px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 font-bold shrink-0">
+                                    {validItemCount} item{validItemCount !== 1 ? 's' : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] text-muted font-medium italic">Click to create card</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        });
+                    })()}
+                  </div>
+
+                  {/* Sidebar Bottom Quick Add */}
+                  <div className="border-t border-border/60 pt-2.5">
                     <button
-                      onClick={exportPDF}
-                      disabled={groupItemsByInvoice().length === 0}
-                      className="flex-1 sm:flex-none bg-purple-600/90 hover:bg-purple-600 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95 shadow-sm cursor-pointer"
+                      onClick={addItem}
+                      className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 p-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
-                      <FileText size={14} />
-                      <span>Export PDF Statements</span>
-                    </button>
-                    <button
-                      onClick={processReturn}
-                      disabled={saving || groupItemsByInvoice().length === 0}
-                      className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 active:scale-95 shadow-sm cursor-pointer"
-                    >
-                      <RotateCcw size={14} />
-                      <span>{saving ? 'Processing Returns…' : 'Process All Returns'}</span>
+                      <Plus size={14} />
+                      <span>Add New Draft Item</span>
                     </button>
                   </div>
-                </div>
 
+                </div>
               </div>
             )}
           </div>

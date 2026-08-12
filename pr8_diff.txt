@@ -1,0 +1,2016 @@
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 1f11013..0c88db3 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -42,12 +42,10 @@ const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
+ const InvestigationCenter = lazy(pageImports['/investigation']);
+ const PhoneSales = lazy(pageImports['/phone-sales']);
+ const DispatchPage = lazy(pageImports['/dispatch']);
+-const NonMappedDistributorsPage = lazy(pageImports['/non-mapped-distributors']);
+ 
+ // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
+ // NOTE: /non-mapped-distributors redirects to /learning?tab=distributors (see Routes below),
+-// so NonMappedDistributorsPage above is intentionally not included here — it wasn't rendered
+-// by the old route table either.
++// so it has no page component or chunk to prefetch here.
+ const pageRoutes: KeepAliveRoute[] = [
+   { path: '/dashboard', element: <Dashboard /> },
+   { path: '/inventory', element: <Inventory /> },
+diff --git a/frontend/src/lib/pageImports.ts b/frontend/src/lib/pageImports.ts
+index 334ee21..43ceaa9 100644
+--- a/frontend/src/lib/pageImports.ts
++++ b/frontend/src/lib/pageImports.ts
+@@ -20,5 +20,4 @@ export const pageImports: Record<string, () => Promise<any>> = {
+   '/investigation': () => import('../pages/Investigation'),
+   '/phone-sales': () => import('../pages/PhoneSales'),
+   '/dispatch': () => import('../pages/Dispatch'),
+-  '/non-mapped-distributors': () => import('../pages/NonMappedDistributors'),
+ };
+diff --git a/frontend/src/pages/AutomationCenter/index.tsx b/frontend/src/pages/AutomationCenter/index.tsx
+deleted file mode 100644
+index 410414a..0000000
+--- a/frontend/src/pages/AutomationCenter/index.tsx
++++ /dev/null
+@@ -1,998 +0,0 @@
+-// @ts-nocheck
+-import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+-import { createPortal } from 'react-dom';
+-import { 
+-  Bell, 
+-  Plus, 
+-  Trash2, 
+-  Send, 
+-  Play, 
+-  Pause, 
+-  CheckCircle2, 
+-  AlertCircle, 
+-  Search, 
+-  RefreshCw,
+-  Clock, 
+-  Sliders,
+-  ExternalLink,
+-  MessageSquare,
+-  Users,
+-  Mail,
+-  Settings,
+-  Copy,
+-} from 'lucide-react';
+-import { api, apiClient } from '../../services/api';
+-import type { Refill, AutomationNotification } from '../../services/api';
+-import { toastEvent, refillEvent } from '../../services/events';
+-import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+-import { useApiQuery } from '../../hooks/useApiQuery';
+-import { useQueryClient } from '@tanstack/react-query';
+-
+-// Module-level cache to persist data across page navigation (unmount/remount)
+-let cachedRefills: Refill[] = [];
+-let cachedLogs: AutomationNotification[] = [];
+-
+-const AutomationCenter = () => {
+-  const queryClient = useQueryClient();
+-  const [activeTab, setActiveTab] = useState<'reminders' | 'logs'>('reminders');
+-
+-  // Refill global notice days setting
+-  const [noticeDays, setNoticeDays] = useState<number>(3);
+-
+-  useEffect(() => {
+-    const loadSettings = async () => {
+-      try {
+-        const response = await apiClient.get('/settings');
+-        if (response.data && response.data.refill_notice_days) {
+-          setNoticeDays(parseInt(response.data.refill_notice_days, 10) || 3);
+-        }
+-      } catch (err) {
+-        console.error('Failed to load notice days:', err);
+-      }
+-    };
+-    loadSettings();
+-  }, []);
+-
+-  const handleUpdateNoticeDays = async (val: number) => {
+-    const clamped = Math.max(1, Math.min(30, val));
+-    setNoticeDays(clamped);
+-    try {
+-      await apiClient.post('/settings/save', { refill_notice_days: String(clamped) });
+-      showToast(`Refill notice lead time updated to ${clamped} days.`, 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    } catch (err) {
+-      console.error('Failed to save notice days:', err);
+-      showToast('Failed to update lead time.', 'error');
+-    }
+-  };
+-
+-  // Reminders States
+-  const { data: refills = [], isLoading: loadingRefills, refetch: refetchRefills } = useApiQuery<Refill[]>(
+-    'automation-refills',
+-    () => api.getRefills().then(d => (Array.isArray(d) ? d.slice(0, 100) : [])),
+-    { enabled: activeTab === 'reminders' }
+-  );
+-  const [refillSearch, setRefillSearch] = useState('');
+-  const [logsSearch, setLogsSearch] = useState('');
+-  const [logsStatusFilter, setLogsStatusFilter] = useState('All');
+-  const [logsTypeFilter, setLogsTypeFilter] = useState('All');
+-
+-  // Communication Logs Query
+-  const [logsSearchTerm, setLogsSearchTerm] = useState('');
+-  const logsKey = ['automation-logs', logsTypeFilter, logsStatusFilter, logsSearchTerm] as const;
+-  const { data: logs = [], isLoading: loadingLogs, refetch: refetchLogs } = useApiQuery<AutomationNotification[]>(
+-    logsKey,
+-    () => {
+-      const type = logsTypeFilter === 'All' ? undefined : logsTypeFilter;
+-      const status = logsStatusFilter === 'All' ? undefined : logsStatusFilter;
+-      return api.getAutomationNotifications({ type, status, search: logsSearchTerm || undefined, limit: 100 }).then(d => Array.isArray(d) ? d : []);
+-    },
+-    { enabled: activeTab === 'logs' }
+-  );
+-
+-
+-  const [editingRefillId, setEditingRefillId] = useState<number | null>(null);
+-  const [patientName, setPatientName] = useState('');
+-  const [patientPhone, setPatientPhone] = useState('');
+-  const [refillInterval, setRefillInterval] = useState<number>(30);
+-  const [medicineQuery, setMedicineQuery] = useState('');
+-  const [selectedMedicines, setSelectedMedicines] = useState<Array<{ id: number; name: string }>>([]);
+-  const [medicineSearchResults, setMedicineSearchResults] = useState<any[]>([]);
+-  const [showMedicineDropdown, setShowMedicineDropdown] = useState(false);
+-  const [loadingMedicineSearch, setLoadingMedicineSearch] = useState(false);
+-  const [modalSubmitting, setModalSubmitting] = useState(false);
+-
+-  const [showReminderModal, setShowReminderModal] = useState(false);
+-
+-  // Manual Send Details Dialog State
+-  const [manualSendNotification, setManualSendNotification] = useState<AutomationNotification | null>(null);
+-
+-  const filteredRefills = useMemo(() => {
+-    const term = refillSearch.toLowerCase();
+-    if (!term) return refills;
+-    return refills.filter(r =>
+-      r.patient_name.toLowerCase().includes(term) ||
+-      r.patient_phone.includes(term) ||
+-      (r.medicine_name && r.medicine_name.toLowerCase().includes(term))
+-    );
+-  }, [refills, refillSearch]);
+-
+-  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
+-    toastEvent.trigger(message, type === 'success' ? 'automation' : type, '/automation-center');
+-  }, []);
+-
+-  // ponytail: RQ handles fetch triggering via enabled flag and key changes — no useDeferredEffect needed.
+-
+-  const medicineSearchTimeout = useRef<number | null>(null);
+-  useEffect(() => {
+-    if (!medicineQuery.trim() || medicineQuery.trim().length < 2) {
+-      setMedicineSearchResults([]);
+-      setShowMedicineDropdown(false);
+-      setLoadingMedicineSearch(false);
+-      return;
+-    }
+-
+-    if (medicineSearchTimeout.current) {
+-      window.clearTimeout(medicineSearchTimeout.current);
+-    }
+-
+-    setLoadingMedicineSearch(true);
+-    medicineSearchTimeout.current = window.setTimeout(async () => {
+-      try {
+-        // Search from medicines table directly instead of heavy inventory master (AC3)
+-        const searchData = await api.searchMedicine(medicineQuery.trim());
+-        const medsList = Array.isArray(searchData) ? searchData : [];
+-        const uniqueMeds = medsList
+-          .map((item: any, idx: number) => {
+-            const name = item.name || item.medicine_name || '';
+-            const id = item.id || item.medicine_id || idx;
+-            return { id, name };
+-          })
+-          .filter((item) => item.name && !selectedMedicines.find(m => m.name === item.name))
+-          .slice(0, 15); // limit display to 15 items
+-        
+-        setMedicineSearchResults(uniqueMeds);
+-        setShowMedicineDropdown(uniqueMeds.length > 0);
+-      } catch (err) {
+-        console.error('Medicine query failed:', err);
+-        setMedicineSearchResults([]);
+-      } finally {
+-        setLoadingMedicineSearch(false);
+-      }
+-    }, 300);
+-
+-    return () => {
+-      if (medicineSearchTimeout.current) window.clearTimeout(medicineSearchTimeout.current);
+-    };
+-  }, [medicineQuery, selectedMedicines]);
+-
+-  const handleSelectMedicine = useCallback((med: any) => {
+-    // Add to selected medicines array (multi-select)
+-    setSelectedMedicines(prev => {
+-      if (!prev.find(m => m.id === med.id)) {
+-        return [...prev, { id: med.id, name: med.name }];
+-      }
+-      return prev;
+-    });
+-    setMedicineQuery(''); // Clear input after selection
+-    setShowMedicineDropdown(false);
+-  }, []);
+-
+-  const handleRemoveMedicine = useCallback((medId: number) => {
+-    setSelectedMedicines(prev => prev.filter(m => m.id !== medId));
+-  }, []);
+-
+-  const handleSaveReminder = useCallback(async (e?: React.FormEvent<HTMLFormElement>) => {
+-    if (e) e.preventDefault();
+-    if (!patientName.trim()) return showToast('Patient name is required.', 'error');
+-    if (!patientPhone.trim()) return showToast('Phone number is required.', 'error');
+-    if (patientPhone.replace(/\D/g, '').length < 10) return showToast('Please enter a valid 10-digit phone number.', 'error');
+-    if (selectedMedicines.length === 0) return showToast('Please select at least one medicine from inventory.', 'error');
+-    if (refillInterval < 0 || refillInterval > 120) return showToast('Refill interval must be 0 to 120 days.', 'error');
+-
+-    setModalSubmitting(true);
+-    const cleanPhone = patientPhone.replace(/\D/g, '');
+-    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+-
+-    try {
+-      if (editingRefillId) {
+-        // For editing, just update the first medicine (backward compatibility)
+-        await api.updateRefill(editingRefillId, {
+-          patient_name: patientName.trim(),
+-          patient_phone: formattedPhone,
+-          medicine_id: selectedMedicines[0].id,
+-          refill_interval_days: refillInterval,
+-        });
+-        showToast('Prescription refill reminder updated.', 'success');
+-      } else {
+-        // Create multiple refill entries (one for each medicine)
+-        for (const medicine of selectedMedicines) {
+-          await api.createRefill({
+-            patient_name: patientName.trim(),
+-            patient_phone: formattedPhone,
+-            medicine_id: medicine.id,
+-            refill_interval_days: refillInterval,
+-          });
+-        }
+-        showToast(`Refill reminders created for ${selectedMedicines.length} medicine${selectedMedicines.length > 1 ? 's' : ''}.`, 'success');
+-      }
+-
+-      setShowReminderModal(false);
+-      setEditingRefillId(null);
+-      setPatientName('');
+-      setPatientPhone('');
+-      setRefillInterval(30);
+-      setMedicineQuery('');
+-      setSelectedMedicines([]);
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    } catch (err) {
+-      console.error('Error saving reminder:', err);
+-      showToast('Failed to save refill reminder.', 'error');
+-    } finally {
+-      setModalSubmitting(false);
+-    }
+-  }, [editingRefillId, patientName, patientPhone, refillInterval, selectedMedicines, queryClient, showToast]);
+-
+-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+-      e.preventDefault();
+-      handleSaveReminder();
+-      return;
+-    }
+-    if (e.key === 'Escape') {
+-      setShowReminderModal(false);
+-      setEditingRefillId(null);
+-      setPatientName('');
+-      setPatientPhone('');
+-      setRefillInterval(30);
+-      setMedicineQuery('');
+-      setSelectedMedicines([]);
+-      setManualSendNotification(null);
+-    }
+-  }, [handleSaveReminder]);
+-
+-  useEffect(() => {
+-    window.addEventListener('keydown', handleKeyDown);
+-    return () => window.removeEventListener('keydown', handleKeyDown);
+-  }, [handleKeyDown]);
+-
+-  const handleEditReminderClick = useCallback((refill: Refill) => {
+-    setEditingRefillId(refill.id);
+-    setPatientName(refill.patient_name);
+-    setPatientPhone(refill.patient_phone);
+-    setRefillInterval(refill.refill_interval_days);
+-    // For edit mode, pre-select the current medicine
+-    setSelectedMedicines([{ id: refill.medicine_id, name: refill.medicine_name || `Medicine ${refill.medicine_id}` }]);
+-    setMedicineQuery('');
+-    setShowReminderModal(true);
+-  }, []);
+-
+-  const handleToggleActive = useCallback(async (refill: Refill) => {
+-    const nextActive = refill.is_active === 1 ? 0 : 1;
+-    try {
+-      await api.updateRefill(refill.id, { is_active: nextActive });
+-      showToast(`Refill schedule is now ${nextActive === 1 ? 'Active' : 'Paused'}.`, 'success');
+-      refillEvent.triggerRefresh();
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    } catch (err) {
+-      console.error('Failed to toggle active status:', err);
+-      showToast('Failed to change status. Reverting.', 'error');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleSendNow = useCallback(async (id: number) => {
+-    try {
+-      showToast('Triggering manual message dispatch...', 'info');
+-      await api.sendRefillNow(id);
+-      showToast('Refill reminder dispatched via WhatsApp!', 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    } catch (err: any) {
+-      console.error('Failed to trigger send:', err);
+-      showToast('WhatsApp dispatch failed: ' + (err.response?.data?.error || err.message), 'error');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleSaveIntervalInline = useCallback(async (id: number, interval: number) => {
+-    if (interval < 0 || interval > 120) return showToast('Interval must be 0 to 120 days.', 'error');
+-    try {
+-      await api.updateRefill(id, { refill_interval_days: interval });
+-      showToast('Refill interval updated.', 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    } catch (err) {
+-      console.error('Failed to update interval inline:', err);
+-      showToast('Failed to update interval.', 'error');
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleDeleteReminder = useCallback(async (id: number) => {
+-    if (!confirm('Are you sure you want to cancel this refill schedule?')) return;
+-    try {
+-      await api.deleteRefill(id);
+-      showToast('Refill schedule deleted successfully.', 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    } catch (err) {
+-      console.error('Failed to delete refill:', err);
+-      showToast('Failed to delete refill schedule.', 'error');
+-      queryClient.invalidateQueries({ queryKey: ['automation-refills'] });
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleRetryDispatch = useCallback(async (id: number) => {
+-    try {
+-      showToast('Retrying message dispatch...', 'info');
+-      await api.retryNotification(id);
+-      showToast('Message resent successfully!', 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    } catch (err: any) {
+-      console.error('Failed to retry:', err);
+-      showToast('Resend failed: ' + (err.response?.data?.error || err.message), 'error');
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleCancelDispatch = useCallback(async (id: number) => {
+-    try {
+-      showToast('Cancelling notification...', 'info');
+-      await api.cancelNotification(id);
+-      showToast('Notification successfully cancelled.', 'success');
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    } catch (err: any) {
+-      console.error('Failed to cancel:', err);
+-      showToast('Cancel failed: ' + (err.response?.data?.error || err.message), 'error');
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleMarkSentManually = useCallback(async (notification: AutomationNotification) => {
+-    try {
+-      await api.manualNotification(notification.id);
+-      showToast('Message marked as sent manually.', 'success');
+-      setManualSendNotification(null);
+-      queryClient.invalidateQueries({ queryKey: ['automation-logs'] });
+-
+-      // Use built-in WhatsApp client — same as CRM WhatsApp tab
+-      const phone = notification.recipient_phone;
+-      try {
+-        let cleanPhone = String(phone).replace(/\D/g, '');
+-        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+-        await apiClient.post('/messaging/send', {
+-          number: cleanPhone,
+-          message: notification.message
+-        });
+-        showToast('Message sent via built-in WhatsApp!', 'success');
+-      } catch (waErr: any) {
+-        // Fallback: open wa.me if built-in WhatsApp is not connected
+-        const url = `https://wa.me/${phone}?text=${encodeURIComponent(notification.message)}`;
+-        window.open(url, '_blank');
+-        showToast('WhatsApp client not connected — opened in browser.', 'info');
+-      }
+-    } catch (err) {
+-      console.error('Failed to mark sent manually:', err);
+-      showToast('Failed to update message status.', 'error');
+-    }
+-  }, [queryClient, showToast]);
+-
+-  const handleCopyMessage = useCallback((text: string) => {
+-    navigator.clipboard.writeText(text);
+-    showToast('Copied to clipboard!', 'success');
+-  }, [showToast]);
+-
+-  const getLogTypeLabel = useCallback((type: string) => {
+-    switch (type) {
+-      case 'refill_reminder':
+-        return 'Patient Refill';
+-      case 'distributor_invoice':
+-        return 'Invoice Summary';
+-      case 'delivery_boy':
+-        return 'Delivery Alert';
+-      case 'quick_order':
+-        return 'Quick Order Confirm';
+-      case 'order_ready':
+-        return 'Order Ready Notification';
+-      case 'uncollected_reminder':
+-        return 'Uncollected Reminder';
+-      default:
+-        return type;
+-    }
+-  }, []);
+-
+-  const getLogTypeIcon = useCallback((type: string) => {
+-    switch (type) {
+-      case 'refill_reminder':
+-        return <Users size={14} className="text-primary" />;
+-      case 'distributor_invoice':
+-        return <Mail size={14} className="text-purple-400" />;
+-      case 'delivery_boy':
+-        return <Sliders size={14} className="text-amber-400" />;
+-      default:
+-        return <MessageSquare size={14} className="text-sky-400" />;
+-    }
+-  }, []);
+-
+-  return (
+-    <div className="h-full flex flex-col fade-in gap-4 pb-4 overflow-hidden">
+-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 bg-bg2/40 backdrop-blur-md p-5 rounded-2xl border border-glass-border/40 shadow-sm">
+-        <div>
+-          <h2 className="text-lg font-extrabold bg-gradient-to-r from-text to-sky bg-clip-text text-transparent flex items-center gap-2">
+-            <Sliders size={20} className="text-sky animate-pulse-slow" />
+-            Communication & Automation Center
+-          </h2>
+-          <p className="text-xs text-muted mt-1 leading-relaxed">Manage patient refill intervals, monitor message delivery status logs, and configure manual retry controls.</p>
+-        </div>
+-
+-        <div className="flex bg-bg3/50 border border-glass-border/30 rounded-xl p-1 gap-1 w-full sm:w-auto shrink-0 shadow-sm">
+-          <button
+-            onClick={() => setActiveTab('reminders')}
+-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 ${
+-              activeTab === 'reminders'
+-                ? 'bg-primary/10 border border-primary/20 text-primary shadow-[0_2px_8px_rgba(34,197,94,0.06)]'
+-                : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
+-            }`}
+-          >
+-            <Clock size={14} />
+-            Refills & Reminders
+-          </button>
+-          <button
+-            onClick={() => setActiveTab('logs')}
+-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase flex items-center justify-center gap-2 ${
+-              activeTab === 'logs'
+-                ? 'bg-primary/10 border border-primary/20 text-primary shadow-[0_2px_8px_rgba(34,197,94,0.06)]'
+-                : 'border border-transparent text-muted hover:text-text hover:bg-bg3/30'
+-            }`}
+-          >
+-            <MessageSquare size={14} />
+-            Communication Logs
+-          </button>
+-        </div>
+-      </div>
+-
+-      {activeTab === 'reminders' && (
+-        <div className="flex-1 flex flex-col min-h-0 bg-bg2/30 border border-glass-border/40 rounded-2xl overflow-hidden shadow-xl">
+-          <div className="p-4 border-b border-glass-border/30 bg-bg3/30 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+-            <div className="relative w-full sm:max-w-xs">
+-              <Search className="absolute left-3 top-3 text-muted" size={14} />
+-              <input
+-                type="text"
+-                value={refillSearch}
+-                onChange={e => setRefillSearch(e.target.value)}
+-                placeholder="Search patient, phone, or medicine..."
+-                className="premium-input pl-9 pr-4 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/10 transition-all"
+-              />
+-            </div>
+-
+-            <div className="flex items-center gap-3.5 w-full sm:w-auto justify-end">
+-              <div className="flex items-center gap-2 bg-bg3/60 px-3.5 py-1.5 rounded-xl border border-glass-border/30 shadow-inner">
+-                <span className="text-[10px] font-black text-muted uppercase tracking-wider">Notice Days:</span>
+-                <input
+-                  type="number"
+-                  min="1"
+-                  max="30"
+-                  value={noticeDays}
+-                  onChange={e => handleUpdateNoticeDays(parseInt(e.target.value) || 3)}
+-                  className="w-12 text-center font-mono font-bold bg-bg border border-glass-border/50 rounded-lg px-1.5 py-0.5 text-text focus:outline-none focus:border-primary/40 text-xs"
+-                />
+-              </div>
+-              <button
+-                onClick={() => queryClient.invalidateQueries({ queryKey: ['automation-refills'] })}
+-                className="p-2.5 rounded-xl bg-bg3 hover:bg-bg2 text-muted hover:text-text border border-glass-border/40 hover:scale-105 active:scale-95 transition-all shadow-sm"
+-                title="Refresh List"
+-              >
+-                <RefreshCw size={14} />
+-              </button>
+-              <button
+-                onClick={() => {
+-                  setEditingRefillId(null);
+-                  setPatientName('');
+-                  setPatientPhone('');
+-                  setRefillInterval(30);
+-                  setMedicineQuery('');
+-                  setSelectedMedicines([]);
+-                  setShowReminderModal(true);
+-                }}
+-                className="premium-btn bg-primary hover:bg-green/90 text-bg shadow-[0_4px_12px_rgba(34,197,94,0.2)] px-4 py-2 text-xs flex items-center gap-1.5 font-bold hover:scale-[1.02] active:scale-[0.98] transition-all rounded-xl"
+-              >
+-                <Plus size={14} />
+-                Create Refill Reminder
+-              </button>
+-            </div>
+-          </div>
+-
+-          <div className="flex-1 overflow-auto bg-bg2/10 custom-scrollbar">
+-            <table className="w-full text-left border-collapse text-xs">
+-              <thead className="sticky top-0 bg-bg3/85 backdrop-blur-md z-10">
+-                <tr>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Patient Info</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Medicine</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Refill Cycle (Days)</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Next Due Date</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Automation Status</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 text-center">Refill Status</th>
+-                  <th className="p-4 text-xs font-black border-b border-glass-border/30 text-right">Actions</th>
+-                </tr>
+-              </thead>
+-              <tbody className="divide-y divide-glass-border/10">
+-                {loadingRefills ? (
+-                  <tr>
+-                    <td colSpan={7} className="p-12 text-center text-muted">
+-                      <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-sky opacity-60" />
+-                      Loading patient refills...
+-                    </td>
+-                  </tr>
+-                ) : filteredRefills.length === 0 ? (
+-                  <tr>
+-                    <td colSpan={7} className="p-16 text-center text-muted font-medium">
+-                      <Clock size={36} className="mx-auto mb-3 text-muted/40 animate-pulse-slow" />
+-                      No active refill reminder schedules found.
+-                    </td>
+-                  </tr>
+-                ) : (
+-                  filteredRefills.map(refill => (
+-                    <tr key={refill.id} className="hover:bg-bg3/40 border-b border-glass-border/10 transition-colors">
+-                      <td className="p-4">
+-                        <div className="font-bold text-text">{refill.patient_name}</div>
+-                        <div className="text-[10px] text-muted font-mono mt-0.5">{refill.patient_phone}</div>
+-                      </td>
+-                      <td className="p-4 font-semibold text-text max-w-[200px] truncate">
+-                        {refill.medicine_name || `Medicine ID: ${refill.medicine_id}`}
+-                      </td>
+-                      <td className="p-4 text-center">
+-                        <input
+-                          type="number"
+-                          min="0"
+-                          max="120"
+-                          defaultValue={refill.refill_interval_days}
+-                          onBlur={e => handleSaveIntervalInline(refill.id, parseInt(e.target.value) || 30)}
+-                          onKeyDown={e => {
+-                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+-                          }}
+-                          className="w-16 text-center font-mono font-bold bg-bg border border-glass-border/40 rounded-lg px-2 py-0.5 text-text focus:outline-none focus:border-primary/50 transition-colors"
+-                        />
+-                      </td>
+-                      <td className="p-4 font-mono font-semibold text-text select-none">
+-                        <span className="bg-sky/10 border border-sky/20 px-2.5 py-0.5 rounded-lg text-sky">
+-                          {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString() : 'N/A'}
+-                        </span>
+-                        <div className="text-[9px] text-muted font-medium mt-1 pl-1">
+-                          {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+-                        </div>
+-                      </td>
+-                      <td className="p-4 text-center">
+-                        <button
+-                          onClick={() => handleToggleActive(refill)}
+-                          className={`px-3 py-1 rounded-xl text-[10px] font-extrabold border flex items-center justify-center gap-1 mx-auto transition-all duration-150 ${
+-                            refill.is_active === 1
+-                              ? 'bg-green/10 border-green/30 text-green hover:bg-green/20'
+-                              : 'bg-zinc-500/10 border-glass-border/30 text-muted hover:bg-bg3/60'
+-                          }`}
+-                        >
+-                          {refill.is_active === 1 ? <Play size={10} className="animate-pulse" /> : <Pause size={10} />}
+-                          {refill.is_active === 1 ? 'Active' : 'Paused'}
+-                        </button>
+-                      </td>
+-                      <td className="p-4 text-center select-none">
+-                        {refill.status === 'pending' && refill.is_ready === 1 ? (
+-                          <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-green/15 text-green border border-green/30 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.1)]">
+-                            Ready (Manual Send)
+-                          </span>
+-                        ) : (
+-                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase border font-mono ${
+-                            refill.status === 'notified'
+-                              ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+-                              : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+-                          }`}>
+-                            {refill.status}
+-                          </span>
+-                        )}
+-                      </td>
+-                      <td className="p-4 text-right">
+-                        <div className="flex justify-end gap-1.5">
+-                          <button
+-                            onClick={() => handleSendNow(refill.id)}
+-                            disabled={refill.is_active !== 1}
+-                            className="p-1.5 rounded-lg bg-sky/10 border border-sky/30 text-sky hover:bg-sky/20 disabled:opacity-40 hover:scale-105 active:scale-95 transition-all flex items-center gap-1 shadow-sm"
+-                            title="Send WhatsApp reminder notification immediately"
+-                          >
+-                            <Send size={12} />
+-                            <span className="text-[10px] font-extrabold uppercase tracking-wider">Send</span>
+-                          </button>
+-                          <button
+-                            onClick={() => handleEditReminderClick(refill)}
+-                            className="p-1.5 rounded-lg bg-bg3 border border-glass-border/40 hover:bg-bg2 text-muted hover:text-text hover:scale-105 active:scale-95 transition-all shadow-sm"
+-                            title="Edit reminder configuration"
+-                          >
+-                            <Settings size={12} />
+-                          </button>
+-                          <button
+-                            onClick={() => handleDeleteReminder(refill.id)}
+-                            className="p-1.5 rounded-lg bg-red/10 border border-red/20 hover:bg-red/20 hover:scale-105 active:scale-95 text-red transition-all shadow-sm"
+-                            title="Cancel schedule"
+-                          >
+-                            <Trash2 size={12} />
+-                          </button>
+-                        </div>
+-                      </td>
+-                    </tr>
+-                  ))
+-                )}
+-              </tbody>
+-            </table>
+-          </div>
+-        </div>
+-      )}
+-      {activeTab === 'logs' && (
+-        <div className="flex-1 flex flex-col min-h-0 bg-bg2/30 border border-glass-border/40 rounded-2xl overflow-hidden shadow-xl">
+-          <div className="p-4 border-b border-glass-border/30 bg-bg3/30 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
+-            <div className="relative w-full md:w-64">
+-              <Search className="absolute left-3 top-3 text-muted" size={14} />
+-              <input
+-                type="text"
+-                value={logsSearch}
+-                onChange={e => setLogsSearch(e.target.value)}
+-                onKeyDown={e => e.key === 'Enter' && setLogsSearchTerm(logsSearch)}
+-                placeholder="Search logs and press Enter..."
+-                className="premium-input pl-9 pr-4 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/10 transition-all"
+-              />
+-            </div>
+-
+-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+-              <div className="flex items-center gap-2">
+-                <span className="text-[10px] text-muted font-black uppercase">Type:</span>
+-                <select
+-                  value={logsTypeFilter}
+-                  onChange={e => setLogsTypeFilter(e.target.value)}
+-                  className="px-3 py-1.5 bg-bg border border-glass-border/60 text-xs text-text rounded-lg focus:outline-none focus:border-primary/45 transition-colors"
+-                >
+-                  <option value="All">All Types</option>
+-                  <option value="refill_reminder">Patient Refills</option>
+-                  <option value="distributor_invoice">Invoice summary</option>
+-                  <option value="delivery_boy">Delivery Alerts</option>
+-                  <option value="quick_order">Order Confirmations</option>
+-                  <option value="order_ready">Ready Notifications</option>
+-                  <option value="uncollected_reminder">Uncollected Reminders</option>
+-                </select>
+-              </div>
+-
+-              <div className="flex items-center gap-2">
+-                <span className="text-[10px] text-muted font-black uppercase">Status:</span>
+-                <select
+-                  value={logsStatusFilter}
+-                  onChange={e => setLogsStatusFilter(e.target.value)}
+-                  className="px-3 py-1.5 bg-bg border border-glass-border/60 text-xs text-text rounded-lg focus:outline-none focus:border-primary/45 transition-colors"
+-                >
+-                  <option value="All">All Statuses</option>
+-                  <option value="sent">Sent Automatically</option>
+-                  <option value="failed">Failed / Queued</option>
+-                  <option value="sent_manually">Sent Manually</option>
+-                </select>
+-              </div>
+-
+-              <button
+-                onClick={() => setLogsSearchTerm(logsSearch)}
+-                className="p-2.5 rounded-xl bg-bg3 border border-glass-border/40 hover:bg-bg2 hover:text-text text-muted hover:scale-105 active:scale-95 shadow-sm transition-all"
+-                title="Refresh Logs"
+-              >
+-                <RefreshCw size={14} />
+-              </button>
+-            </div>
+-          </div>
+-
+-          <div className="flex-1 overflow-auto bg-bg2/10 custom-scrollbar">
+-            <table className="w-full text-left border-collapse text-xs">
+-              <thead className="sticky top-0 bg-bg3/85 backdrop-blur-md z-10">
+-                <tr>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Message Type</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Recipient</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30 max-w-sm">Message Snippet</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Status</th>
+-                  <th className="p-4 text-xs font-black text-muted uppercase border-b border-glass-border/30">Time Dispatched</th>
+-                  <th className="p-4 text-xs font-black border-b border-glass-border/30 text-right">Action</th>
+-                </tr>
+-              </thead>
+-              <tbody className="divide-y divide-glass-border/10">
+-                {loadingLogs ? (
+-                  <tr>
+-                    <td colSpan={6} className="p-12 text-center text-muted">
+-                      <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-sky opacity-60" />
+-                      Loading message history logs...
+-                    </td>
+-                  </tr>
+-                ) : logs.length === 0 ? (
+-                  <tr>
+-                    <td colSpan={6} className="p-16 text-center text-muted font-medium">
+-                      <MessageSquare size={36} className="mx-auto mb-3 text-muted/40 animate-pulse-slow" />
+-                      No matching communication records found.
+-                    </td>
+-                  </tr>
+-                ) : (
+-                  logs.map(log => (
+-                    <tr key={log.id} className="hover:bg-bg3/40 border-b border-glass-border/10 transition-colors">
+-                      <td className="p-4">
+-                        <div className="flex items-center gap-2">
+-                          {getLogTypeIcon(log.type)}
+-                          <span className="font-bold text-text">{getLogTypeLabel(log.type)}</span>
+-                        </div>
+-                        {log.reference_id && (
+-                          <div className="text-[9px] text-muted font-mono mt-0.5 pl-5">Ref ID: #{log.reference_id}</div>
+-                        )}
+-                      </td>
+-                      <td className="p-4">
+-                        <div className="font-bold text-text">{log.recipient_name || 'System Admin'}</div>
+-                        <div className="text-[10px] text-muted font-mono mt-0.5">{log.recipient_phone || 'None'}</div>
+-                      </td>
+-                      <td className="p-4 max-w-xs truncate font-semibold text-text select-text" title={log.message}>
+-                        {log.message}
+-                      </td>
+-                      <td className="p-4">
+-                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase inline-flex items-center gap-1 border ${
+-                          log.status === 'sent'
+-                            ? 'bg-green/10 border-green/30 text-green'
+-                            : log.status === 'sent_manually'
+-                              ? 'bg-sky-500/10 border-sky-500/30 text-sky'
+-                              : log.status === 'pending'
+-                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-550'
+-                                : log.status === 'cancelled'
+-                                  ? 'bg-zinc-500/10 border-glass-border/30 text-muted'
+-                                  : 'bg-red/10 border-red/30 text-red'
+-                        }`}>
+-                          {log.status === 'sent' && <CheckCircle2 size={10} />}
+-                          {log.status === 'failed' && <AlertCircle size={10} />}
+-                          {log.status === 'pending' && <Clock size={10} />}
+-                          {log.status.replace('_', ' ')}
+-                        </span>
+-                        {log.error_message && (
+-                          <div className="text-[9px] text-red mt-1 font-semibold max-w-[150px] truncate" title={log.error_message}>
+-                            Error: {log.error_message}
+-                          </div>
+-                        )}
+-                      </td>
+-                      <td className="p-4 font-mono font-semibold text-text select-none">
+-                        {new Date(log.created_at).toLocaleDateString()}
+-                        <div className="text-[9px] text-muted font-medium">
+-                           {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+-                        </div>
+-                      </td>
+-                      <td className="p-4 text-right">
+-                        <div className="flex justify-end gap-1.5">
+-                          {log.status === 'failed' && (
+-                            <button
+-                              onClick={() => handleRetryDispatch(log.id)}
+-                              className="p-1.5 rounded-lg bg-sky/10 border border-sky/30 hover:bg-sky/20 text-sky hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
+-                              title="Resend this message automatically via WhatsApp queue"
+-                            >
+-                              <Send size={11} />
+-                              Retry
+-                            </button>
+-                          )}
+-                          {(log.status === 'pending' || log.status === 'failed') && (
+-                            <button
+-                              onClick={() => handleCancelDispatch(log.id)}
+-                              className="p-1.5 rounded-lg bg-red/10 border border-red/30 hover:bg-red/20 text-red transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
+-                              title="Cancel this notification"
+-                            >
+-                              <Trash2 size={11} />
+-                              Cancel
+-                            </button>
+-                          )}
+-                          {log.status === 'failed' && (
+-                            <button
+-                              onClick={() => setManualSendNotification(log)}
+-                              className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-500 hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 hover:scale-105 active:scale-95 shadow-sm"
+-                              title="Open manual copyable layout to dispatch to customer manually"
+-                            >
+-                              <ExternalLink size={11} />
+-                              Copy & Send
+-                            </button>
+-                          )}
+-                          {log.status !== 'pending' && log.status !== 'failed' && (
+-                            <span className="text-[10px] text-muted italic select-none pr-2 font-semibold">Processed</span>
+-                          )}
+-                        </div>
+-                      </td>
+-                    </tr>
+-                  ))
+-                )}
+-              </tbody>
+-            </table>
+-          </div>
+-        </div>
+-      )}
+-
+-      {showReminderModal && createPortal(
+-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
+-          <div className="bg-bg2 border border-glass-border w-full max-w-md p-6 rounded-3xl shadow-2xl relative my-8 backdrop-blur-xl animate-zoom-in">
+-            <h3 className="text-base font-extrabold text-text mb-4 border-b border-glass-border/30 pb-3">
+-              {editingRefillId ? 'Modify Refill Reminder Configuration' : 'Register Patient Refill Schedule'}
+-            </h3>
+-            <form onSubmit={handleSaveReminder} className="space-y-4">
+-              <div className="space-y-2">
+-                <label className="text-[10px] font-black text-muted uppercase tracking-wider">Patient Name *</label>
+-                <input
+-                  type="text"
+-                  required
+-                  value={patientName}
+-                  onChange={e => setPatientName(e.target.value)}
+-                  placeholder="Patient Name"
+-                  className="premium-input w-full font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+-                />
+-              </div>
+-              <div className="space-y-2">
+-                <label className="text-[10px] font-black text-muted uppercase tracking-wider">Patient Phone * (WhatsApp Number)</label>
+-                <input
+-                  type="tel"
+-                  required
+-                  value={patientPhone}
+-                  onChange={e => setPatientPhone(e.target.value)}
+-                  placeholder="e.g. 9876543210"
+-                  maxLength={10}
+-                  className="premium-input w-full font-mono font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+-                />
+-              </div>
+-              <div className="space-y-2 relative">
+-                <label className="text-[10px] font-black text-muted uppercase tracking-wider">Select Inventory Medicines * (Multiple)</label>
+-                <input
+-                  type="text"
+-                  value={medicineQuery}
+-                  onChange={e => {
+-                    setMedicineQuery(e.target.value);
+-                  }}
+-                  onFocus={() => { if (medicineSearchResults.length > 0) setShowMedicineDropdown(true); }}
+-                  placeholder="Search inventory medicines..."
+-                  className="premium-input w-full font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+-                />
+-                {loadingMedicineSearch && (
+-                  <div className="absolute right-3 top-8">
+-                    <RefreshCw size={14} className="animate-spin text-sky" />
+-                  </div>
+-                )}
+-                {showMedicineDropdown && medicineSearchResults.length > 0 && (
+-                  <div className="absolute left-0 right-0 mt-1 bg-bg3 border border-glass-border rounded-xl shadow-2xl z-[10000] max-h-48 overflow-y-auto scrollbar-thin">
+-                    {medicineSearchResults.map((med, idx) => (
+-                      <div
+-                        key={idx}
+-                        onClick={() => handleSelectMedicine(med)}
+-                        className="p-2.5 border-b border-glass-border/10 hover:bg-bg2/85 transition-colors cursor-pointer text-xs font-semibold text-text flex justify-between"
+-                      >
+-                        <span>{med.name}</span>
+-                        {med.strength && <span className="text-[10px] text-muted">{med.strength}</span>}
+-                      </div>
+-                    ))}
+-                  </div>
+-                )}
+-                {selectedMedicines.length > 0 && (
+-                  <div className="mt-2 flex flex-wrap gap-2">
+-                    {selectedMedicines.map(med => (
+-                      <div
+-                        key={med.id}
+-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-primary/10 border border-primary/30 rounded-lg text-[11px] font-bold text-primary shadow-sm"
+-                      >
+-                        <span>{med.name}</span>
+-                        <button
+-                          type="button"
+-                          onClick={() => handleRemoveMedicine(med.id)}
+-                          className="hover:text-primary/70 transition-colors"
+-                          title="Remove medicine"
+-                        >
+-                          ×
+-                        </button>
+-                      </div>
+-                    ))}
+-                  </div>
+-                )}
+-              </div>
+-              <div className="space-y-2">
+-                <div className="flex justify-between items-center">
+-                  <label className="text-[10px] font-black text-muted uppercase tracking-wider">Refill Cycle Interval (0 - 120 Days) *</label>
+-                  <span className="text-xs font-bold text-primary font-mono bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">{refillInterval} days</span>
+-                </div>
+-                <div className="flex items-center gap-3">
+-                  <input
+-                    type="range"
+-                    min="0"
+-                    max="120"
+-                    value={refillInterval}
+-                    onChange={e => setRefillInterval(parseInt(e.target.value) || 0)}
+-                    className="flex-1 accent-primary h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
+-                  />
+-                  <input
+-                    type="number"
+-                    required
+-                    value={refillInterval}
+-                    onChange={e => setRefillInterval(Math.max(0, Math.min(120, parseInt(e.target.value) || 0)))}
+-                    min="0"
+-                    max="120"
+-                    className="premium-input w-20 text-center font-mono font-semibold rounded-lg border-glass-border/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+-                  />
+-                </div>
+-              </div>
+-              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border/30">
+-                <button
+-                  type="button"
+-                  onClick={() => setShowReminderModal(false)}
+-                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border/40 text-muted hover:text-text hover:bg-bg3 transition-colors"
+-                >
+-                  Cancel
+-                </button>
+-                <button
+-                  type="submit"
+-                  disabled={modalSubmitting}
+-                  className="premium-btn bg-primary text-bg shadow-[0_4px_12px_rgba(34,197,94,0.2)] hover:scale-[1.02] active:scale-[0.98] transition-all px-5 py-2 text-xs font-bold rounded-xl"
+-                >
+-                  {modalSubmitting ? 'Saving...' : 'Save Schedule'}
+-                </button>
+-              </div>
+-            </form>
+-          </div>
+-        </div>,
+-        document.body
+-      )}
+-
+-      {manualSendNotification && createPortal(
+-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
+-          <div className="bg-bg2 border border-glass-border w-full max-w-lg p-6 rounded-3xl shadow-2xl my-8 animate-zoom-in backdrop-blur-xl">
+-            <h3 className="text-base font-extrabold text-text mb-2 flex items-center gap-2">
+-              <ExternalLink size={18} className="text-amber-500 animate-pulse" />
+-              Manual WhatsApp Send Assistant
+-            </h3>
+-            <p className="text-xs text-muted mb-4 leading-relaxed">
+-              Since automated dispatch failed, you can manually copy this message text and share it via WhatsApp Web.
+-            </p>
+-            <div className="space-y-4">
+-              <div className="p-3.5 bg-bg3/40 border border-glass-border/30 rounded-2xl shadow-inner">
+-                <div className="grid grid-cols-2 gap-2 text-xs">
+-                  <div>
+-                    <span className="text-[10px] text-muted font-black uppercase block tracking-wider">Recipient Name</span>
+-                    <span className="font-bold text-text">{manualSendNotification.recipient_name || 'Customer'}</span>
+-                  </div>
+-                  <div>
+-                    <span className="text-[10px] text-muted font-black uppercase block tracking-wider">WhatsApp Number</span>
+-                    <span className="font-bold font-mono text-text">{manualSendNotification.recipient_phone}</span>
+-                  </div>
+-                </div>
+-              </div>
+-              <div className="space-y-2">
+-                <div className="flex justify-between items-center pr-1">
+-                  <span className="text-[10px] text-muted font-black uppercase tracking-wider">Message Content</span>
+-                  <button
+-                    onClick={() => handleCopyMessage(manualSendNotification.message)}
+-                    className="text-[10px] text-sky hover:underline font-bold flex items-center gap-1 transition-all"
+-                  >
+-                    <Copy size={11} />
+-                    Copy Text
+-                  </button>
+-                </div>
+-                <div className="p-4 bg-bg3/60 border border-glass-border/35 rounded-2xl text-xs font-semibold text-text select-all font-sans whitespace-pre-wrap leading-relaxed shadow-inner">
+-                  {manualSendNotification.message}
+-                </div>
+-              </div>
+-              <div className="flex gap-3 justify-end pt-4 border-t border-glass-border/30">
+-                <button
+-                  type="button"
+-                  onClick={() => setManualSendNotification(null)}
+-                  className="px-4 py-2 text-xs font-bold rounded-xl border border-glass-border/40 text-muted hover:text-text hover:bg-bg3 transition-colors"
+-                >
+-                  Close Assistant
+-                </button>
+-                <button
+-                  type="button"
+-                  onClick={() => handleMarkSentManually(manualSendNotification)}
+-                  className="premium-btn bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 px-5 py-2 text-xs font-bold flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all rounded-xl"
+-                >
+-                  <Send size={13} className="animate-pulse" />
+-                  Open WhatsApp & Mark Sent
+-                </button>
+-              </div>
+-            </div>
+-          </div>
+-        </div>,
+-        document.body
+-      )}
+-
+-    </div>
+-  );
+-};
+-
+-export default AutomationCenter;
+diff --git a/frontend/src/pages/Doctors/index.tsx b/frontend/src/pages/Doctors/index.tsx
+deleted file mode 100644
+index d2c5549..0000000
+--- a/frontend/src/pages/Doctors/index.tsx
++++ /dev/null
+@@ -1,371 +0,0 @@
+-import { useState } from 'react';
+-import { UserPlus, Stethoscope, Trash2, Edit2, Search, X, Phone, Building2, BadgePercent, Hash } from 'lucide-react';
+-import { api } from '../../services/api';
+-import { useApiQuery } from '../../hooks/useApiQuery';
+-import { useQueryClient } from '@tanstack/react-query';
+-
+-interface DoctorForm {
+-  name: string;
+-  specialization: string;
+-  phone: string;
+-  hospital: string;
+-  commission_percent: string;
+-  registration_no: string;
+-}
+-
+-const emptyForm: DoctorForm = {
+-  name: '',
+-  specialization: '',
+-  phone: '',
+-  hospital: '',
+-  commission_percent: '',
+-  registration_no: '',
+-};
+-
+-/* Deterministic hue from a string — used for avatar gradient & badge */
+-const hueFrom = (str: string) => {
+-  let h = 0;
+-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360;
+-  return h;
+-};
+-
+-const initials = (name: string) =>
+-  name
+-    .split(' ')
+-    .slice(0, 2)
+-    .map(w => w[0])
+-    .join('')
+-    .toUpperCase();
+-
+-let cachedDoctorsList: any[] | null = null;
+-
+-const Doctors = () => {
+-  const queryClient = useQueryClient();
+-  const { data: doctors = [], isLoading: loading } = useApiQuery<any[]>('doctors', () => api.getDoctors());
+-  const [saving, setSaving] = useState(false);
+-  const [search, setSearch] = useState('');
+-  const [form, setForm] = useState<DoctorForm>(emptyForm);
+-  const [editingDoctorId, setEditingDoctorId] = useState<number | null>(null);
+-
+-  const handleChange = (field: keyof DoctorForm, value: string) =>
+-    setForm(prev => ({ ...prev, [field]: value }));
+-
+-  const handleEditClick = (d: any) => {
+-    setEditingDoctorId(d.id);
+-    setForm({
+-      name: d.name || '',
+-      specialization: d.speciality || d.specialization || '',
+-      phone: d.phone || '',
+-      hospital: d.hospital || '',
+-      commission_percent: d.commission_percent != null ? String(d.commission_percent) : '',
+-      registration_no: d.reg_no || d.registration_no || '',
+-    });
+-  };
+-
+-  const handleCancelEdit = () => { setEditingDoctorId(null); setForm(emptyForm); };
+-
+-  const handleDelete = (id: number, name: string) => {
+-    if (!window.confirm(`Delete Dr. ${name}?`)) return;
+-    api.deleteDoctor(id)
+-      .then(() => queryClient.invalidateQueries({ queryKey: ['doctors'] }))
+-      .catch(err => {
+-        console.error('Failed to delete doctor:', err);
+-        queryClient.invalidateQueries({ queryKey: ['doctors'] });
+-      });
+-  };
+-
+-  const handleSave = () => {
+-    if (!form.name.trim()) return;
+-    setSaving(true);
+-    const payload = {
+-      name: form.name.trim(),
+-      speciality: form.specialization.trim(),
+-      phone: form.phone.trim(),
+-      hospital: form.hospital.trim(),
+-      reg_no: form.registration_no.trim(),
+-      commission_percent: form.commission_percent ? Number(form.commission_percent) : 0,
+-    };
+-    const apiCall = editingDoctorId ? api.updateDoctor(editingDoctorId, payload) : api.addDoctor(payload);
+-    apiCall
+-      .then(() => { setForm(emptyForm); setEditingDoctorId(null); queryClient.invalidateQueries({ queryKey: ['doctors'] }); })
+-      .catch(() => {})
+-      .finally(() => setSaving(false));
+-  };
+-
+-  const filtered = doctors.filter(d => {
+-    if (!search.trim()) return true;
+-    const q = search.toLowerCase();
+-    const spec = d.speciality || d.specialization || '';
+-    const reg = d.reg_no || d.registration_no || '';
+-    return (
+-      (d.name && d.name.toLowerCase().includes(q)) ||
+-      spec.toLowerCase().includes(q) ||
+-      (d.phone && d.phone.toLowerCase().includes(q)) ||
+-      (d.hospital && d.hospital.toLowerCase().includes(q)) ||
+-      reg.toLowerCase().includes(q)
+-    );
+-  });
+-
+-  /* unique specializations for stats */
+-  const uniqueSpecs = [...new Set(doctors.map(d => d.speciality || d.specialization || '').filter(Boolean))].length;
+-
+-  return (
+-    <div className="h-full flex flex-col gap-6 fade-in">
+-
+-      {/* ── Stat Strip ─────────────────────────────────────────────── */}
+-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+-        {[
+-          { label: 'Total Doctors', value: doctors.length, icon: <Stethoscope size={18} />, color: '#3b82f6' },
+-          { label: 'Specializations', value: uniqueSpecs, icon: <BadgePercent size={18} />, color: '#10b981' },
+-          { label: 'Filtered', value: filtered.length, icon: <Search size={18} />, color: '#0ea5e9' },
+-          { label: 'Registered', value: doctors.filter(d => d.reg_no || d.registration_no).length, icon: <Hash size={18} />, color: '#a78bfa' },
+-        ].map(s => (
+-          <div
+-            key={s.label}
+-            className="glass-panel px-5 py-4 flex items-center gap-4"
+-            style={{ borderColor: `${s.color}22` }}
+-          >
+-            <div className="rounded-2xl p-2.5 flex-shrink-0" style={{ background: `${s.color}18`, color: s.color }}>
+-              {s.icon}
+-            </div>
+-            <div>
+-              <p className="text-2xl font-bold text-text">{s.value}</p>
+-              <p className="text-xs text-muted leading-tight">{s.label}</p>
+-            </div>
+-          </div>
+-        ))}
+-      </div>
+-
+-      {/* ── Main Layout ─────────────────────────────────────────────── */}
+-      <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
+-
+-        {/* ── Left – Form Panel ─────────────────────────────────────── */}
+-        <div className="md:col-span-1">
+-          <div className="glass-panel p-6 h-full flex flex-col">
+-            {/* Header */}
+-            <div className="flex items-center gap-3 mb-6">
+-              <div className="rounded-2xl p-2.5 bg-primary/10 text-primary">
+-                <UserPlus size={18} />
+-              </div>
+-              <div>
+-                <h2 className="font-bold text-text text-base leading-tight">
+-                  {editingDoctorId ? 'Edit Doctor' : 'Register Doctor'}
+-                </h2>
+-                <p className="text-xs text-muted">{editingDoctorId ? 'Update existing record' : 'Add a new doctor'}</p>
+-              </div>
+-              {editingDoctorId && (
+-                <button
+-                  onClick={handleCancelEdit}
+-                  className="ml-auto p-1.5 rounded-xl hover:bg-bg3 text-muted hover:text-text transition-colors"
+-                  title="Cancel edit"
+-                >
+-                  <X size={16} />
+-                </button>
+-              )}
+-            </div>
+-
+-            {/* Fields */}
+-            <div className="flex-1 space-y-4 overflow-y-auto pr-1 scrollbar-thin">
+-              {(
+-                [
+-                  { id: 'doc-name',       field: 'name',               label: 'Full Name *',           placeholder: 'Dr. Full Name',           type: 'text'   },
+-                  { id: 'doc-spec',       field: 'specialization',      label: 'Specialization',         placeholder: 'e.g. Cardiologist, ENT',  type: 'text'   },
+-                  { id: 'doc-phone',      field: 'phone',               label: 'Phone',                  placeholder: '10-digit number',         type: 'text'   },
+-                  { id: 'doc-hospital',   field: 'hospital',            label: 'Hospital / Clinic',      placeholder: 'Hospital or clinic name', type: 'text'   },
+-                  { id: 'doc-commission', field: 'commission_percent',  label: 'Commission %',           placeholder: 'e.g. 10',                 type: 'number' },
+-                  { id: 'doc-reg',        field: 'registration_no',     label: 'Registration No.',       placeholder: 'Medical council reg. no.',type: 'text'   },
+-                ] as const
+-              ).map(({ id, field, label, placeholder, type }) => (
+-                <div key={id} className="space-y-1.5">
+-                  <label htmlFor={id} className="text-xs font-semibold text-muted uppercase tracking-wider block">{label}</label>
+-                  <input
+-                    id={id}
+-                    type={type}
+-                    className="premium-input w-full"
+-                    placeholder={placeholder}
+-                    value={form[field as keyof DoctorForm]}
+-                    onChange={e => handleChange(field as keyof DoctorForm, e.target.value)}
+-                    min={type === 'number' ? 0 : undefined}
+-                    max={type === 'number' ? 100 : undefined}
+-                  />
+-                </div>
+-              ))}
+-            </div>
+-
+-            {/* Actions */}
+-            <div className="mt-6 space-y-2">
+-              <button
+-                id="doc-save-btn"
+-                className="premium-btn w-full text-white"
+-                style={{ background: 'linear-gradient(135deg, #10b981, #059669)', boxShadow: '0 4px 14px rgba(16,185,129,0.35)' }}
+-                onClick={handleSave}
+-                disabled={saving || !form.name.trim()}
+-              >
+-                {saving ? 'Saving…' : editingDoctorId ? 'Update Doctor' : 'Save Doctor'}
+-              </button>
+-              {editingDoctorId && (
+-                <button
+-                  id="doc-cancel-btn"
+-                  className="premium-btn bg-bg3 border border-glass-border hover:bg-bg2 text-muted hover:text-text w-full"
+-                  onClick={handleCancelEdit}
+-                  disabled={saving}
+-                >
+-                  Cancel
+-                </button>
+-              )}
+-            </div>
+-          </div>
+-        </div>
+-
+-        {/* ── Right – Doctor Directory ──────────────────────────────── */}
+-        <div className="md:col-span-2 glass-panel flex flex-col overflow-hidden min-h-0">
+-
+-          {/* Directory Header */}
+-          <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between gap-4 flex-wrap">
+-            <div className="flex items-center gap-3">
+-              <div className="rounded-2xl p-2.5 bg-sky-bg text-sky">
+-                <Stethoscope size={18} />
+-              </div>
+-              <h2 className="font-bold text-text">Doctor Directory</h2>
+-            </div>
+-            <div className="relative">
+-              <input
+-                id="doc-search"
+-                type="text"
+-                className="premium-input w-56"
+-                placeholder="Search doctors…"
+-                aria-label="Search doctors"
+-                value={search}
+-                onChange={e => setSearch(e.target.value)}
+-              />
+-              {search && (
+-                <button
+-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-text transition-colors"
+-                  onClick={() => setSearch('')}
+-                >
+-                  <X size={14} />
+-                </button>
+-              )}
+-            </div>
+-          </div>
+-
+-          {/* Card Grid */}
+-          <div className="flex-1 overflow-auto p-5">
+-            {loading ? (
+-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+-                {Array.from({ length: 4 }).map((_, i) => (
+-                  <div key={i} className="rounded-2xl border border-glass-border bg-bg3/40 animate-pulse h-36" />
+-                ))}
+-              </div>
+-            ) : filtered.length === 0 ? (
+-              <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted">
+-                <Stethoscope size={40} className="opacity-20" />
+-                <p className="text-sm">{search ? 'No matching doctors found.' : 'No doctors registered yet.'}</p>
+-              </div>
+-            ) : (
+-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+-                {filtered.map(d => {
+-                  const spec = d.speciality || d.specialization || '';
+-                  const hue = hueFrom(spec || d.name || '');
+-                  const avatarStyle = {
+-                    background: `linear-gradient(135deg, hsl(${hue},70%,50%), hsl(${(hue + 40) % 360},65%,45%))`,
+-                  };
+-                  const badgeStyle = {
+-                    background: `hsla(${hue},70%,55%,0.15)`,
+-                    color: `hsl(${hue},65%,62%)`,
+-                    border: `1px solid hsla(${hue},60%,55%,0.25)`,
+-                  };
+-
+-                  return (
+-                    <div
+-                      key={d.id}
+-                      className="rounded-2xl border border-glass-border bg-bg3/30 hover:bg-bg3/60 transition-all duration-300 p-4 group hover:-translate-y-0.5 hover:shadow-lg"
+-                    >
+-                      {/* Top row: avatar + name + actions */}
+-                      <div className="flex items-start justify-between gap-3">
+-                        <div className="flex items-center gap-3">
+-                          {/* Avatar */}
+-                          <div
+-                            className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-md"
+-                            style={avatarStyle}
+-                          >
+-                            {initials(d.name || '?')}
+-                          </div>
+-                          <div>
+-                            <p className="font-semibold text-text text-sm leading-tight">{d.name}</p>
+-                            {spec && (
+-                              <span
+-                                className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"
+-                                style={badgeStyle}
+-                              >
+-                                {spec}
+-                              </span>
+-                            )}
+-                          </div>
+-                        </div>
+-                        {/* Action buttons */}
+-                        <div className="flex gap-1 flex-shrink-0">
+-                          <button
+-                            id={`doc-edit-${d.id}`}
+-                            type="button"
+-                            onClick={(e) => {
+-                              e.stopPropagation();
+-                              e.preventDefault();
+-                              handleEditClick(d);
+-                            }}
+-                            className="p-1.5 rounded-xl hover:bg-primary/10 text-muted hover:text-primary transition-colors"
+-                            aria-label={`Edit doctor ${d.name}`}
+-                            title="Edit"
+-                          >
+-                            <Edit2 size={14} />
+-                          </button>
+-                          <button
+-                            id={`doc-delete-${d.id}`}
+-                            type="button"
+-                            onClick={(e) => {
+-                              e.stopPropagation();
+-                              e.preventDefault();
+-                              handleDelete(d.id, d.name);
+-                            }}
+-                            className="p-1.5 rounded-xl hover:bg-red-bg text-muted hover:text-red transition-colors"
+-                            aria-label={`Delete doctor ${d.name}`}
+-                            title="Delete"
+-                          >
+-                            <Trash2 size={14} />
+-                          </button>
+-                        </div>
+-                      </div>
+-
+-                      {/* Info chips */}
+-                      <div className="mt-3 grid grid-cols-2 gap-2">
+-                        {[
+-                          { icon: <Phone size={11} />, value: d.phone || null, label: 'phone' },
+-                          { icon: <Building2 size={11} />, value: d.hospital || null, label: 'hospital' },
+-                          { icon: <BadgePercent size={11} />, value: d.commission_percent != null ? `${d.commission_percent}% commission` : null, label: 'commission' },
+-                          { icon: <Hash size={11} />, value: d.reg_no || d.registration_no || null, label: 'reg' },
+-                        ].filter(c => c.value).map(chip => (
+-                          <div
+-                            key={chip.label}
+-                            className="flex items-center gap-1.5 text-muted text-xs bg-bg3/50 rounded-xl px-2.5 py-1.5 truncate"
+-                          >
+-                            <span className="flex-shrink-0 opacity-60">{chip.icon}</span>
+-                            <span className="truncate">{chip.value}</span>
+-                          </div>
+-                        ))}
+-                      </div>
+-
+-                      {/* Footer: ID */}
+-                      <p className="mt-3 text-[10px] text-muted/50 font-mono">ID #{d.id}</p>
+-                    </div>
+-                  );
+-                })}
+-              </div>
+-            )}
+-          </div>
+-        </div>
+-      </div>
+-    </div>
+-  );
+-};
+-
+-export default Doctors;
+diff --git a/frontend/src/pages/Mail/index.tsx b/frontend/src/pages/Mail/index.tsx
+index 33e638f..16f659f 100644
+--- a/frontend/src/pages/Mail/index.tsx
++++ b/frontend/src/pages/Mail/index.tsx
+@@ -774,7 +774,10 @@ const Mail = () => {
+                 {/* Attachments Section */}
+                 <div className="space-y-2">
+                   <div className="flex items-center justify-between">
+-                    <h4 className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5">
++                    <h4
++                      className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5"
++                      title="Attachments are not auto-processed into purchases. Select the invoice file(s) below and click Process to parse them."
++                    >
+                       <Paperclip size={12} />
+                       Attachments ({attachments.length})
+                     </h4>
+diff --git a/frontend/src/pages/Purchases/index.tsx b/frontend/src/pages/Purchases/index.tsx
+index f890d55..c82a1d6 100644
+--- a/frontend/src/pages/Purchases/index.tsx
++++ b/frontend/src/pages/Purchases/index.tsx
+@@ -799,7 +799,6 @@ const Purchases: React.FC = () => {
+   const [schemeMatchStatus, setSchemeMatchStatus] = useState<{ [key: string]: string }>({});
+   const [showDistributorModal, setShowDistributorModal] = useState(false);
+   const [editDistributorId, setEditDistributorId] = useState<number | null>(null);
+-  const [editingPurchase, setEditingPurchase] = useState<any>(null);
+   const [newDistributor, setNewDistributor] = useState({
+     name: '',
+     phone: '',
+@@ -3029,79 +3028,6 @@ const Purchases: React.FC = () => {
+         document.body
+       )}
+ 
+-      {/* Edit Purchase Modal */}
+-      {editingPurchase && createPortal(
+-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
+-          <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md">
+-            <h3 className="text-lg font-semibold text-white mb-4">Edit Purchase</h3>
+-            
+-            <div className="space-y-4">
+-              <div>
+-                <label className="block text-sm font-medium text-gray-300 mb-2">Invoice Number</label>
+-                <input
+-                  type="text"
+-                  value={editingPurchase.invoice_no || ''}
+-                  onChange={(e) => setEditingPurchase({ ...editingPurchase, invoice_no: e.target.value })}
+-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+-                />
+-              </div>
+-              
+-              <div>
+-                <label className="block text-sm font-medium text-gray-300 mb-2">Date</label>
+-                <input
+-                  type="date"
+-                  value={editingPurchase.date || ''}
+-                  onChange={(e) => setEditingPurchase({ ...editingPurchase, date: e.target.value })}
+-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+-                />
+-              </div>
+-              
+-              <div>
+-                <label className="block text-sm font-medium text-gray-300 mb-2">Total Amount</label>
+-                <input
+-                  type="number"
+-                  value={editingPurchase.total_amount || 0}
+-                  onChange={(e) => setEditingPurchase({ ...editingPurchase, total_amount: parseFloat(e.target.value) || 0 })}
+-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+-                  step="0.01"
+-                />
+-              </div>
+-            </div>
+-
+-            <div className="flex justify-end gap-3 mt-6">
+-              <button
+-                onClick={() => setEditingPurchase(null)}
+-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
+-              >
+-                Cancel
+-              </button>
+-              <button
+-                onClick={async () => {
+-                  try {
+-                    await apiClient.put(`/purchases/${editingPurchase.id}`, {
+-                      invoice_no: editingPurchase.invoice_no,
+-                      date: editingPurchase.date,
+-                      total_amount: editingPurchase.total_amount
+-                    });
+-                    setEditingPurchase(null);
+-                    alert('Purchase updated successfully');
+-                    queryClient.invalidateQueries({ queryKey: ['purchase-history'] });
+-                  } catch (error) {
+-                    alert('Failed to update purchase');
+-                  }
+-                }}
+-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+-              >
+-                Save Changes
+-              </button>
+-            </div>
+-          </div>
+-        </div>,
+-        document.body
+-      )}
+-
+-
+-
+       {/* Barcode Print Prompt Modal */}
+       {showBarcodeModal && createPortal(
+         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md fade-in text-left">
+diff --git a/frontend/src/pages/Refills/index.tsx b/frontend/src/pages/Refills/index.tsx
+deleted file mode 100644
+index 2911eb6..0000000
+--- a/frontend/src/pages/Refills/index.tsx
++++ /dev/null
+@@ -1,341 +0,0 @@
+-import React, { useState, useEffect, useMemo } from 'react';
+-import { api, apiClient } from '../../services/api';
+-import { useApiQuery } from '../../hooks/useApiQuery';
+-import { getLocalDateString, formatDisplayDate } from '../../utils/date';
+-import { 
+-  Users, Phone, Calendar, Clock, CheckCircle2, AlertCircle, ShoppingCart, 
+-  Send, RefreshCw, Check, Search, ArrowRight, ShieldAlert, BadgeCheck
+-} from 'lucide-react';
+-import { toastEvent, liveCartAddEvent, refillEvent } from '../../services/events';
+-import { useQueryClient } from '@tanstack/react-query';
+-import { useNavigate } from 'react-router-dom';
+-
+-interface GroupedRefillMedicine {
+-  id: number;
+-  medicine_id: number;
+-  medicine_name: string;
+-  quantity_needed: number;
+-  in_stock_qty: number;
+-  stock_verified_override: number;
+-  acknowledged: number;
+-  hold_for_stock: number;
+-  is_ready: number;
+-  status: string;
+-  quick_bill_id: number | null;
+-}
+-
+-interface GroupedRefillPatient {
+-  patient_name: string;
+-  patient_phone: string;
+-  next_refill_date: string;
+-  medicines: GroupedRefillMedicine[];
+-}
+-
+-let cachedGroupedRefills: GroupedRefillPatient[] = [];
+-
+-const RefillsPage = () => {
+-  const navigate = useNavigate();
+-  const queryClient = useQueryClient();
+-  const [groupedRefills, setGroupedRefills] = useState<GroupedRefillPatient[]>(cachedGroupedRefills);
+-  const [loading, setLoading] = useState(cachedGroupedRefills.length === 0);
+-  const [searchQuery, setSearchQuery] = useState('');
+-  const [runningCheck, setRunningCheck] = useState(false);
+-  const [noticeDays, setNoticeDays] = useState(3);
+-  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+-  const [sendingReminderPhone, setSendingReminderPhone] = useState<string | null>(null);
+-
+-  const fetchRefillsPanel = async (silent = false) => {
+-    if (!silent && cachedGroupedRefills.length === 0) setLoading(true);
+-    try {
+-      const response = await apiClient.get<GroupedRefillPatient[]>('/refills/panel');
+-      const data = Array.isArray(response.data) ? response.data : [];
+-      cachedGroupedRefills = data;
+-      setGroupedRefills(data);
+-    } catch (err: any) {
+-      console.error('Failed to load refills panel:', err);
+-      if (!silent) toastEvent.trigger('Failed to load refills data.', 'error', '/refills');
+-    } finally {
+-      setLoading(false);
+-    }
+-  };
+-
+-  const fetchNoticeDays = async () => {
+-    try {
+-      const response = await apiClient.get('/settings');
+-      if (response.data && response.data.refill_notice_days) {
+-        setNoticeDays(parseInt(response.data.refill_notice_days, 10) || 3);
+-      }
+-    } catch (err) {
+-      console.error('Failed to load notice days:', err);
+-    }
+-  };
+-
+-  useEffect(() => {
+-    fetchRefillsPanel();
+-    fetchNoticeDays();
+-    const unsub = refillEvent.subscribeRefresh(() => fetchRefillsPanel(true));
+-    return () => unsub();
+-  }, []);
+-
+-  const handleManualCheck = async () => {
+-    setRunningCheck(true);
+-    try {
+-      await apiClient.post('/refills/check');
+-      toastEvent.trigger('Manual refill evaluation triggered successfully.', 'success', '/refills');
+-      refillEvent.triggerRefresh();
+-      await fetchRefillsPanel(true);
+-    } catch (err: any) {
+-      console.error('Failed manual check:', err);
+-      toastEvent.trigger('Manual check failed: ' + (err.response?.data?.error || err.message), 'error', '/refills');
+-    } finally {
+-      setRunningCheck(false);
+-    }
+-  };
+-
+-  const handleToggleOverride = async (refillId: number) => {
+-    setActionLoadingId(refillId);
+-    try {
+-      const res = await apiClient.post(`/refills/${refillId}/toggle-override`);
+-      const overrideVal = res.data?.stock_verified_override;
+-      toastEvent.trigger(
+-        overrideVal === 1 ? 'Physical stock verified.' : 'Physical stock verification removed.',
+-        'success',
+-        '/refills'
+-      );
+-      refillEvent.triggerRefresh();
+-      await fetchRefillsPanel(true);
+-    } catch (err: any) {
+-      console.error('Failed toggle override:', err);
+-      toastEvent.trigger('Failed to update override.', 'error', '/refills');
+-    } finally {
+-      setActionLoadingId(null);
+-    }
+-  };
+-
+-  const handleSendToPOS = (patientName: string, patientPhone: string, med: GroupedRefillMedicine) => {
+-    navigate('/pos', {
+-      state: {
+-        prefill: {
+-          patientName,
+-          patientPhone,
+-          medicineId: med.medicine_id,
+-          quantity: med.quantity_needed || 10,
+-          refillPatient: true,
+-          refillId: med.id
+-        }
+-      }
+-    });
+-  };
+-
+-  const handleAddTomorrowReminder = async (patientPhone: string) => {
+-    setSendingReminderPhone(patientPhone);
+-    try {
+-      await apiClient.post('/refills/send-tomorrow-reminder', { patient_phone: patientPhone });
+-      toastEvent.trigger('WhatsApp reminder queued successfully.', 'success', '/refills');
+-      await fetchRefillsPanel();
+-    } catch (err: any) {
+-      console.error('Failed to send reminder:', err);
+-      toastEvent.trigger(err.response?.data?.error || 'Failed to send WhatsApp reminder.', 'error', '/refills');
+-    } finally {
+-      setSendingReminderPhone(null);
+-    }
+-  };
+-
+-  const filteredPatients = useMemo(() => {
+-    const query = searchQuery.toLowerCase().trim();
+-    if (!query) return groupedRefills;
+-    return groupedRefills.filter(p => 
+-      p.patient_name.toLowerCase().includes(query) ||
+-      p.patient_phone.includes(query) ||
+-      p.medicines.some(m => m.medicine_name.toLowerCase().includes(query))
+-    );
+-  }, [groupedRefills, searchQuery]);
+-
+-  return (
+-    <div className="h-full flex flex-col fade-in gap-4 pb-4 overflow-hidden">
+-      {/* Header Panel */}
+-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 bg-bg2/40 backdrop-blur-md p-5 rounded-2xl border border-glass-border/40 shadow-sm">
+-        <div>
+-          <h2 className="text-lg font-extrabold bg-gradient-to-r from-text to-sky bg-clip-text text-transparent flex items-center gap-2">
+-            <Clock size={20} className="text-sky animate-pulse-slow" />
+-            Patient Refills Panel
+-          </h2>
+-          <p className="text-xs text-muted mt-1 leading-relaxed">
+-            Grouped patient refills view with automated stock checking, live cart fallbacks, and WhatsApp reminders.
+-          </p>
+-        </div>
+-
+-        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+-          <button
+-            onClick={handleManualCheck}
+-            disabled={runningCheck}
+-            className="premium-btn bg-bg3/65 border border-glass-border/40 hover:bg-bg2 text-text px-4 py-2 text-xs flex items-center gap-1.5 font-bold hover:scale-[1.02] active:scale-[0.98] transition-all"
+-          >
+-            <RefreshCw size={13} className={runningCheck ? 'animate-spin' : ''} />
+-            {runningCheck ? 'Evaluating...' : 'Check Refills Engine'}
+-          </button>
+-        </div>
+-      </div>
+-
+-      {/* Main Panel Content */}
+-      <div className="flex-1 flex flex-col min-h-0 bg-bg2/30 border border-glass-border/40 rounded-2xl overflow-hidden shadow-xl">
+-        <div className="p-4 border-b border-glass-border/30 bg-bg3/30 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+-          <div className="relative w-full sm:max-w-xs">
+-            <Search className="absolute left-3 top-3 text-muted" size={14} />
+-            <input
+-              type="text"
+-              value={searchQuery}
+-              onChange={e => setSearchQuery(e.target.value)}
+-              placeholder="Search patient, phone, or medicine..."
+-              className="premium-input pl-9 pr-4 py-2 text-xs w-full rounded-xl border-glass-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/10 transition-all"
+-            />
+-          </div>
+-          <div className="text-xs text-muted font-bold bg-bg3/60 px-4 py-2 rounded-xl border border-glass-border/30 shadow-inner flex items-center gap-2">
+-            Notice Lead-time: <span className="text-sky font-extrabold font-mono">{noticeDays} Days</span>
+-          </div>
+-        </div>
+-
+-        {/* Scrollable list */}
+-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-bg2/10 custom-scrollbar">
+-          {loading ? (
+-            <div className="flex-1 flex flex-col items-center justify-center py-20 text-muted">
+-              <RefreshCw size={28} className="animate-spin text-sky mb-3 opacity-60" />
+-              <span>Loading refills panel...</span>
+-            </div>
+-          ) : filteredPatients.length === 0 ? (
+-            <div className="flex-1 flex flex-col items-center justify-center py-20 text-muted gap-2">
+-              <Users size={36} className="text-muted/40" />
+-              <span className="text-xs font-medium">No pending refills matching search query.</span>
+-            </div>
+-          ) : (
+-            filteredPatients.map((patient) => {
+-              // Check if any refill is due tomorrow
+-              const tomorrow = new Date();
+-              tomorrow.setDate(tomorrow.getDate() + 1);
+-              const tomorrowDateStr = getLocalDateString(tomorrow);
+-
+-              const hasTomorrowRefill = patient.medicines.some(m => {
+-                const due = new Date(patient.next_refill_date);
+-                return getLocalDateString(due) === tomorrowDateStr && (m.is_ready === 1 || m.stock_verified_override === 1);
+-              });
+-
+-              return (
+-                <div key={patient.patient_phone} className="p-5 rounded-2xl bg-bg2/50 border border-glass-border/30 hover:border-glass-border/50 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 transition-all hover:shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:scale-[1.005] duration-200">
+-                  {/* Left Column: Patient Meta */}
+-                  <div className="space-y-2.5 max-w-sm">
+-                    <div className="flex items-center gap-2">
+-                      <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm shrink-0">
+-                        <Users size={15} />
+-                      </div>
+-                      <span className="font-bold text-text text-sm">{patient.patient_name}</span>
+-                    </div>
+-                    <div className="space-y-1.5 pl-1.5">
+-                      <div className="flex items-center gap-2 text-xs text-muted font-mono">
+-                        <Phone size={12} className="text-muted/70" />
+-                        <span>{patient.patient_phone}</span>
+-                      </div>
+-                      <div className="flex items-center gap-2 text-xs text-muted">
+-                        <Calendar size={12} className="text-muted/70" />
+-                        <span>Next Due: <strong className="text-sky font-mono font-bold bg-sky/10 border border-sky/20 px-2 py-0.5 rounded-lg">{formatDisplayDate(patient.next_refill_date)}</strong></span>
+-                      </div>
+-                    </div>
+-                  </div>
+-
+-                  {/* Middle Column: Medicines Sublist */}
+-                  <div className="flex-1 w-full lg:w-auto">
+-                    <div className="text-[10px] font-black text-muted uppercase tracking-wider mb-2.5 pl-1">Refill Medications Check</div>
+-                    <div className="flex flex-col gap-3">
+-                      {patient.medicines.map((med) => {
+-                        const inStock = med.in_stock_qty >= med.quantity_needed;
+-                        const isVerified = med.stock_verified_override === 1;
+-                        const readyToBill = inStock || isVerified;
+-
+-                        return (
+-                          <div key={med.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 p-3.5 rounded-xl bg-bg3/20 border border-glass-border/20 hover:border-glass-border/30 transition-all">
+-                            <div className="flex flex-col">
+-                              <span className="font-bold text-xs text-text">{med.medicine_name}</span>
+-                              <span className="text-[10px] text-muted mt-1 font-semibold">
+-                                Needed: <span className="text-text font-mono">{med.quantity_needed}</span> · Local Stock: <span className="text-text font-mono">{med.in_stock_qty}</span>
+-                              </span>
+-                            </div>
+-
+-                            <div className="flex items-center gap-3 shrink-0 self-stretch sm:self-auto justify-between sm:justify-end">
+-                              {/* Stock status badge */}
+-                              {readyToBill ? (
+-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-green/10 border border-green/20 text-green text-[10px] font-black uppercase font-mono shadow-sm">
+-                                  <BadgeCheck size={12} className="animate-pulse" />
+-                                  {isVerified ? 'Stock Verified' : 'In Stock'}
+-                                </span>
+-                              ) : (
+-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red/10 border border-red/20 text-red text-[10px] font-black uppercase font-mono shadow-sm">
+-                                  <ShieldAlert size={12} className="animate-bounce" />
+-                                  Out of Stock
+-                                </span>
+-                              )}
+-
+-                              {/* Action tools */}
+-                              <div className="flex items-center gap-2">
+-                                {/* Verified override toggle */}
+-                                <label className="inline-flex items-center gap-1.5 bg-bg3 border border-glass-border/40 hover:bg-bg2 px-2.5 py-1 rounded-lg text-[10px] font-bold text-muted hover:text-text cursor-pointer select-none transition-colors">
+-                                  <input
+-                                    type="checkbox"
+-                                    checked={med.stock_verified_override === 1}
+-                                    disabled={actionLoadingId === med.id}
+-                                    onChange={() => handleToggleOverride(med.id)}
+-                                    className="accent-primary h-3.5 w-3.5 rounded border-glass-border bg-bg"
+-                                  />
+-                                  <span>Override</span>
+-                                </label>
+-
+-                                {/* Bill send to POS */}
+-                                {readyToBill ? (
+-                                  <button
+-                                    onClick={() => handleSendToPOS(patient.patient_name, patient.patient_phone, med)}
+-                                    className="py-1 px-3 bg-primary hover:bg-green/90 text-bg font-extrabold text-[10px] rounded-lg flex items-center gap-1.5 shadow-[0_2px_8px_rgba(34,197,94,0.2)] hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
+-                                  >
+-                                    Send to POS
+-                                    <ArrowRight size={11} />
+-                                  </button>
+-                                ) : (
+-                                  <button
+-                                    onClick={() => liveCartAddEvent.triggerOpen(med.medicine_name)}
+-                                    className="py-1 px-3 bg-red/10 hover:bg-red/20 border border-red/30 text-red font-extrabold text-[10px] rounded-lg flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
+-                                  >
+-                                    <ShoppingCart size={11} />
+-                                    Add to Live Cart
+-                                  </button>
+-                                )}
+-                              </div>
+-                            </div>
+-                          </div>
+-                        );
+-                      })}
+-                    </div>
+-                  </div>
+-
+-                  {/* Right Column: Collection reminders */}
+-                  <div className="flex flex-col gap-2 shrink-0 w-full lg:w-auto items-end">
+-                    {hasTomorrowRefill ? (
+-                      <button
+-                        onClick={() => handleAddTomorrowReminder(patient.patient_phone)}
+-                        disabled={sendingReminderPhone === patient.patient_phone}
+-                        className="w-full lg:w-auto py-2.5 px-4.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 shadow-[0_4px_12px_rgba(168,85,247,0.1)]"
+-                      >
+-                        <Send size={12} className={sendingReminderPhone === patient.patient_phone ? 'animate-bounce' : 'animate-pulse'} />
+-                        {sendingReminderPhone === patient.patient_phone ? 'Queuing...' : 'Send WhatsApp Reminder'}
+-                      </button>
+-                    ) : (
+-                      <div className="text-[10px] text-muted italic font-semibold pr-1">No tomorrow reminders eligible</div>
+-                    )}
+-                  </div>
+-                </div>
+-              );
+-            })
+-          )}
+-        </div>
+-      </div>
+-    </div>
+-  );
+-};
+-
+-export default RefillsPage;
+diff --git a/frontend/src/pages/Reports/index.tsx b/frontend/src/pages/Reports/index.tsx
+index 848c6b0..523eb96 100644
+--- a/frontend/src/pages/Reports/index.tsx
++++ b/frontend/src/pages/Reports/index.tsx
+@@ -1011,7 +1011,7 @@ const Reports = () => {
+           {activeTab === 'nonMoving' && (
+             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+               <div className="p-4 border-b border-glass-border/30 flex justify-between items-center bg-bg2/30 flex-shrink-0">
+-                <h3 className="font-bold text-xs uppercase tracking-wider flex items-center gap-2 text-text">
++                <h3 className="font-bold text-xs uppercase tracking-wider flex items-center gap-2 text-text" title="Rows are per inventory batch. If the same medicine name has multiple medicine records (duplicates are not auto-merged), each is listed separately rather than combined into one line.">
+                   <PieChart size={15} className="text-purple-400" />
+                   <span>Dormant / Non-Moving Stock (Inactive for {nonMovingDays} days)</span>
+                 </h3>
+diff --git a/frontend/src/pages/Returns/index.tsx b/frontend/src/pages/Returns/index.tsx
+index 80c2456..e3caa97 100644
+--- a/frontend/src/pages/Returns/index.tsx
++++ b/frontend/src/pages/Returns/index.tsx
+@@ -910,6 +910,26 @@ const Returns: React.FC = () => {
+                   ))}
+                 </select>
+               </div>
++              <div className="flex items-center gap-1">
++                <label className="text-muted w-7">Min ₹</label>
++                <input
++                  type="number"
++                  value={minAmount}
++                  min="0"
++                  placeholder="0"
++                  onChange={e => setMinAmount(e.target.value)}
++                  className="flex-1 px-1.5 py-0.5 bg-bg border border-glass-border rounded text-[10px] text-text focus:outline-none"
++                />
++                <label className="text-muted w-4">Max</label>
++                <input
++                  type="number"
++                  value={maxAmount}
++                  min="0"
++                  placeholder="Any"
++                  onChange={e => setMaxAmount(e.target.value)}
++                  className="flex-1 px-1.5 py-0.5 bg-bg border border-glass-border rounded text-[10px] text-text focus:outline-none"
++                />
++              </div>
+               {(distributorFilter || minAmount || maxAmount) && (
+                 <button
+                   onClick={() => { setDistributorFilter(''); setMinAmount(''); setMaxAmount(''); }}
+diff --git a/src/database/connection.ts b/src/database/connection.ts
+index 6b44412..95b26f9 100644
+--- a/src/database/connection.ts
++++ b/src/database/connection.ts
+@@ -7,7 +7,7 @@ import fs from 'fs';
+ import zlib from 'zlib';
+ import { pipeline } from 'stream/promises';
+ 
+-import { config, getAppDataDir } from '../config/index.js';
++import { config, getAppDataDir, isPackagedApp } from '../config/index.js';
+ 
+ const DB_PATH = config.dbPath;
+ 
+@@ -101,8 +101,8 @@ class DatabaseManager {
+         throw new Error(`Database connection is currently busy or unavailable. Please retry. (${lastError?.message || 'SQLITE_BUSY'})`);
+       }
+ 
+-      // Run background integrity check if production/pkg and not test
+-      const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';
++      // Run background integrity check if production/packaged and not test
++      const isProductionOrPkg = process.env.NODE_ENV === 'production' || isPackagedApp();
+       if (isProductionOrPkg && !isTest) {
+         const activeConn = this.connection;
+         setImmediate(async () => {
+diff --git a/src/process/processGuardian.ts b/src/process/processGuardian.ts
+index 8cab5f3..22a6cc3 100644
+--- a/src/process/processGuardian.ts
++++ b/src/process/processGuardian.ts
+@@ -1,6 +1,6 @@
+ import sqlite3 from 'sqlite3';
+ import { open } from 'sqlite';
+-import { config } from '../config/index.js';
++import { config, isPackagedApp } from '../config/index.js';
+ 
+ const DB_PATH = config.dbPath;
+ 
+@@ -42,7 +42,7 @@ async function writeCrashLog(message: string, stack: string): Promise<void> {
+  * more reliable than limping on in an unknown state.
+  */
+ export function registerProcessGuardian(): void {
+-  const isProductionOrPkg = process.env.NODE_ENV === 'production' || typeof (process as any).pkg !== 'undefined';
++  const isProductionOrPkg = process.env.NODE_ENV === 'production' || isPackagedApp();
+   if (!isProductionOrPkg) {
+     // ponytail: skip registration in dev mode
+     console.log('[ProcessGuardian] Development mode detected: Bypassing registration.');
+diff --git a/src/services/emailService.ts b/src/services/emailService.ts
+index ba68fd3..05fa1dd 100644
+--- a/src/services/emailService.ts
++++ b/src/services/emailService.ts
+@@ -1687,7 +1687,13 @@ export class EmailService {
+   }
+ 
+   /**
+-   * Process a medicine list attachment (CSV/XLS)
++   * Background hook for auto-detected CSV/XLS medicine-list attachments — currently
++   * logs only; no parsing/inventory/purchase-order logic is implemented here.
++   * The supported, working path for turning an email attachment into a purchase is
++   * manual: the Mail page lets a user select attachment(s) and process them via the
++   * OCR purchase-parsing flow (see Mail/index.tsx attachment selection + "process"
++   * action, which posts to the same invoice-parsing endpoints used by Purchases/
++   * Investigation). Do not treat this method as a live automated import feature.
+    */
+   private async processMedicineListAttachment(attachment: {
+     filename: string;
+@@ -1710,13 +1716,7 @@ export class EmailService {
+         ['EMAIL_ATTACHMENT_PROCESSED', `Medicine list attachment processed: ${attachment.filename}`]
+       );
+       
+-      // TODO: Implement actual attachment processing logic here
+-      // This could involve:
+-      // - Parsing CSV files for medicine lists
+-      // - Updating inventory levels
+-      // - Creating purchase orders based on the list
+-      // - Validating medicine IDs and quantities
+-      console.log('Medicine list attachment processed:', attachment.filename);
++      console.log('Medicine list attachment logged (no auto-parsing implemented):', attachment.filename);
+     } catch (error) {
+       console.error('Error processing medicine list attachment:', error);
+ 
+diff --git a/src/services/notificationService.ts b/src/services/notificationService.ts
+index 65ebe46..747a7d4 100644
+--- a/src/services/notificationService.ts
++++ b/src/services/notificationService.ts
+@@ -96,7 +96,14 @@ export class NotificationService {
+   }
+ 
+   /**
+-   * Send a notification via the appropriate channel based on type
++   * Send a notification via the appropriate channel based on type.
++   * Channel status: whatsapp, telegram, and whatsapp_business are live and used
++   * elsewhere in the app (via sendWhatsApp/sendTelegram/sendWhatsAppBusiness, and
++   * the dedicated notifyDistributor... / notifyDeliveryBoys... methods below). `email`
++   * has no sending implementation — outbound mail in this app goes through
++   * emailService.ts directly, not through this notifier. This 'email' branch and
++   * this generic dispatcher are not currently called from anywhere in the app;
++   * treat 'email' as planned-but-not-implemented rather than a live channel.
+    */
+   async sendNotification(data: NotificationData): Promise<NotificationResult> {
+     switch (data.type) {
+@@ -112,8 +119,6 @@ export class NotificationService {
+       case 'whatsapp_business':
+         return await this.sendWhatsAppBusiness(data.recipient, data.message);
+       case 'email':
+-        // Email implementation would go here
+-        // For now, return not implemented
+         return {
+           success: false,
+           error: 'Email notifications not yet implemented'

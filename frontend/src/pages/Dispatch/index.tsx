@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Truck,
@@ -718,9 +718,14 @@ const Dispatch = () => {
             <table className="w-full text-left border-collapse text-xs">
               <thead className="bg-bg2/90 sticky top-0 backdrop-blur z-10 border-b border-glass-border">
                 <tr>
-                  {['Patient Name', 'Phone Number', 'Order Items', 'Delivery Address', 'Assigned Staff', 'Invoice #', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
-                  ))}
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Patient Name</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Phone Number</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Order Items</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Delivery Address</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Assigned Staff</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Invoice #</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Status</th>
+                  <th className="px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border/30">
@@ -784,7 +789,7 @@ const Dispatch = () => {
                           <option value="Delivered">✅ Delivered</option>
                         </select>
                       </td>
-                      <td className="p-3">
+                      <td className="p-3 text-right">
                         <button
                           onClick={() => handleDelete(order.id)}
                           className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 transition-colors"
@@ -960,12 +965,14 @@ const Dispatch = () => {
 
           {/* Table of Today's Distributors */}
           <div className="overflow-x-auto bg-bg/30 rounded-2xl border border-glass-border/80 shadow-lg backdrop-blur-md">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-bg2/90 border-b border-glass-border/80">
+            <table className="w-full text-left border-collapse text-xs table-fixed min-w-[900px]">
+              <thead className="bg-bg2/90 border-b border-glass-border/80 sticky top-0 z-10">
                 <tr>
-                  {['Distributor Name & Tags', 'Contact Phone', 'Assigned Delivery Staff', 'Dispatch / Collection Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3.5 text-[10px] font-black text-muted uppercase tracking-wider border-b border-glass-border">{h}</th>
-                  ))}
+                  <th className="w-[28%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Distributor Name &amp; Tags</th>
+                  <th className="w-[14%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Contact Phone</th>
+                  <th className="w-[22%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Assigned Delivery Staff</th>
+                  <th className="w-[20%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Dispatch / Collection Status</th>
+                  <th className="w-[16%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border/30">
@@ -1011,9 +1018,9 @@ const Dispatch = () => {
                     const boyPhone = item.delivery_boy_phone ? `(${item.delivery_boy_phone})` : '';
 
                     return (
-                      <tbody key={item.id} className="divide-y divide-glass-border/30 group">
+                      <Fragment key={item.id}>
                         <tr className="hover:bg-bg3/30 transition-colors">
-                          <td className="p-3.5">
+                          <td className="p-3.5 align-middle">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-extrabold text-text text-xs tracking-tight">{item.distributor_name}</span>
                               {item.has_pharmarack_order_today === 1 ? (
@@ -1040,12 +1047,12 @@ const Dispatch = () => {
                               ) : null}
                             </div>
                           </td>
-                          <td className="p-3.5 font-mono text-muted text-xs">{item.distributor_phone || 'No phone set'}</td>
-                          <td className="p-3.5">
+                          <td className="p-3.5 font-mono text-muted text-xs align-middle">{item.distributor_phone || 'No phone set'}</td>
+                          <td className="p-3.5 align-middle">
                             <select
                               value={item.delivery_boy_id || ''}
                               onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
-                              className="text-xs px-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border focus:outline-none font-medium transition-all shadow-sm cursor-pointer hover:border-glass-border/80"
+                              className="w-full text-xs px-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border focus:outline-none font-medium transition-all shadow-sm cursor-pointer hover:border-glass-border/80"
                             >
                               <option value="">👤 Unassigned / Admin Fallback</option>
                               {deliveryBoys.map(b => (
@@ -1053,11 +1060,11 @@ const Dispatch = () => {
                               ))}
                             </select>
                           </td>
-                          <td className="p-3.5">
+                          <td className="p-3.5 align-middle">
                             <select
                               value={item.status}
                               onChange={e => handleUpdateDistributorStatus(item.id, e.target.value, item.delivery_boy_id)}
-                              className={`text-[11px] font-extrabold px-3 py-1.5 rounded-xl border cursor-pointer bg-bg transition-all shadow-sm ${
+                              className={`w-full text-[11px] font-extrabold px-3 py-1.5 rounded-xl border cursor-pointer bg-bg transition-all shadow-sm ${
                                 item.status === 'Collected'
                                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10'
                                   : item.status === 'Dispatched'
@@ -1070,13 +1077,13 @@ const Dispatch = () => {
                               <option value="Collected">✅ Collected by Staff</option>
                             </select>
                           </td>
-                          <td className="p-3.5">
-                            <div className="flex items-center gap-2">
+                          <td className="p-3.5 align-middle text-right">
+                            <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => handleSendReminderNow(item.id)}
                                 disabled={sendingReminderId === item.id}
-                                className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 disabled:opacity-50 transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-emerald-500/20"
+                                className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 disabled:opacity-50 transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-emerald-500/20 shrink-0"
                               >
                                 {sendingReminderId === item.id ? (
                                   <RefreshCw size={13} className="animate-spin" />
@@ -1089,7 +1096,7 @@ const Dispatch = () => {
                               <button
                                 type="button"
                                 onClick={() => setExpandedPreviewId(isPreviewOpen ? null : item.id)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1 cursor-pointer active:scale-95 shrink-0 ${
                                   isPreviewOpen
                                     ? 'bg-amber-500/25 text-amber-300 border-amber-500/50 shadow-md font-black'
                                     : 'bg-bg3/60 text-muted hover:text-text border-glass-border hover:bg-bg3'
@@ -1097,7 +1104,7 @@ const Dispatch = () => {
                                 title="Edit Direct Text Message"
                               >
                                 <Edit3 size={13} />
-                                <span>{isPreviewOpen ? 'Close Editor' : 'Edit Text'}</span>
+                                <span>{isPreviewOpen ? 'Close' : 'Edit Text'}</span>
                               </button>
                             </div>
                           </td>
@@ -1178,7 +1185,7 @@ const Dispatch = () => {
                             </td>
                           </tr>
                         )}
-                      </tbody>
+                      </Fragment>
                     );
                   });
                 })()}
@@ -1393,14 +1400,14 @@ const Dispatch = () => {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-glass-border bg-bg/20">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead className="bg-bg2/90 border-b border-glass-border">
+            <table className="w-full text-left border-collapse text-xs table-fixed min-w-[850px]">
+              <thead className="bg-bg2/90 border-b border-glass-border sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Time</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[130px]">Recipient</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[110px]">Phone Number</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider min-w-[90px]">Status</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-muted uppercase tracking-wider">Exact WhatsApp Message Body</th>
+                  <th className="w-[12%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Time</th>
+                  <th className="w-[20%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Recipient</th>
+                  <th className="w-[16%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Phone Number</th>
+                  <th className="w-[14%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Status</th>
+                  <th className="w-[38%] px-4 py-3.5 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border whitespace-nowrap">Exact WhatsApp Message Body</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-glass-border/30">

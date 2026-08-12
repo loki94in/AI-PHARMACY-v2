@@ -26,8 +26,12 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
 
   keys.forEach(key => {
     queryClient.invalidateQueries({ queryKey: [key] });
-    queryClient.resetQueries({ queryKey: [key] });
   });
+
+  // Dispatch custom window event for real-time live update listeners
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('stock-write-completed'));
+  }
 
   // Explicitly remove stale infinite query caches for sells and inventory
   queryClient.removeQueries({ queryKey: ['sells-list'] });

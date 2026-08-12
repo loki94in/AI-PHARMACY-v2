@@ -51,13 +51,43 @@ const Expiry = () => {
   
   const queryClient = useQueryClient();
   const expiryKey = ['expiry', dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to] as const;
-  const { data: items = [], isLoading: loading, isFetching: refreshing } = useApiQuery<ExpiryItem[]>(
+  const { data: items = [], isLoading: loading, isFetching: refreshing, refetch: refetchExpiry } = useApiQuery<ExpiryItem[]>(
     expiryKey,
-    () => api.getExpiryList({
-      date_from: dateRangeHelper.dateRange.from,
-      date_to: dateRangeHelper.dateRange.to,
-    })
+    async () => {
+      const res = await api.getExpiryList({
+        date_from: dateRangeHelper.dateRange.from,
+        date_to: dateRangeHelper.dateRange.to,
+      });
+      const list = Array.isArray(res) ? res : (res?.data || []);
+      cachedExpiryItems = list;
+      return list;
+    },
+    {
+      initialData: cachedExpiryItems || undefined,
+      staleTime: 10000,
+    }
   );
+
+  // Live background update polling & event listener
+  useEffect(() => {
+    const handleStockWrite = () => {
+      refetchExpiry().catch(() => {});
+    };
+
+    window.addEventListener('stock-write-completed', handleStockWrite);
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refetchExpiry().catch(() => {});
+      }
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('stock-write-completed', handleStockWrite);
+      clearInterval(interval);
+    };
+  }, [refetchExpiry]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   

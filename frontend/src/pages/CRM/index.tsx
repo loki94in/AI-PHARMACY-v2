@@ -1478,6 +1478,7 @@ const WhatsAppSection: React.FC = () => {
   const [attachedFile, setAttachedFile] = useState<{ filename: string; mimetype: string; data: string } | null>(null);
 
   const [isReady, setIsReady] = useState(false);
+  const [initializing, setInitializing] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrMessage, setQrMessage] = useState<string>('');
   const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
@@ -1558,13 +1559,15 @@ const WhatsAppSection: React.FC = () => {
   // Load WhatsApp status + QR code
   const checkStatus = useCallback(async () => {
     try {
-      const res = await apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string }>('/messaging/qr');
+      const res = await apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string; initializing?: boolean }>('/messaging/qr');
       setIsReady(res.data.isReady);
       setQrUrl(res.data.qrUrl || null);
       setQrMessage(res.data.message || '');
+      setInitializing(!!res.data.initializing);
     } catch {
       setIsReady(false);
       setQrUrl(null);
+      setInitializing(false);
     }
   }, []);
 
@@ -1950,31 +1953,64 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
           <div className="text-center space-y-1">
             <h2 className="text-sm font-bold text-text flex items-center justify-center gap-2">
               <MessageCircle size={18} className="text-emerald-400" />
-              Connect WhatsApp
+              {initializing ? 'Connecting WhatsApp Session...' : 'Connect WhatsApp'}
             </h2>
             <p className="text-xs text-muted max-w-xs">
-              {qrMessage || 'Scan the QR code below with your phone to connect WhatsApp. The QR refreshes automatically.'}
+              {qrMessage || (initializing
+                ? 'Restoring saved WhatsApp session... Your chats will load automatically in a moment.'
+                : 'Scan the QR code below or click Connect WhatsApp to link your device.')}
             </p>
           </div>
 
-          {/* QR Code */}
+          {/* QR Code or Connecting Spinner */}
           {qrUrl ? (
             <div className="p-4 bg-white rounded-2xl shadow-lg border border-border">
               <img src={qrUrl} alt="WhatsApp QR Code" className="w-56 h-56" />
             </div>
-          ) : (
+          ) : initializing ? (
             <div className="w-64 h-64 bg-bg3 border border-border rounded-2xl flex flex-col items-center justify-center gap-3 text-muted">
               <RefreshCw size={28} className="animate-spin text-emerald-400" />
-              <p className="text-xs">Generating QR code…</p>
+              <p className="text-xs font-semibold text-text">Auto-connecting saved session...</p>
+              <p className="text-[10px] text-muted text-center px-4">Launching background WhatsApp engine with existing session data</p>
+            </div>
+          ) : (
+            <div className="w-64 h-64 bg-bg3 border border-border rounded-2xl flex flex-col items-center justify-center gap-3 text-muted">
+              <MessageCircle size={36} className="text-emerald-400/60" />
+              <p className="text-xs font-medium text-muted">WhatsApp not connected</p>
+              <button
+                onClick={async () => {
+                  try {
+                    setInitializing(true);
+                    toastEvent.trigger('Initializing WhatsApp connection...', 'info');
+                    await apiClient.post('/messaging/connect');
+                    checkStatus();
+                  } catch (err: any) {
+                    setInitializing(false);
+                    toastEvent.trigger(err?.response?.data?.error || 'Failed to connect WhatsApp', 'error');
+                  }
+                }}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 flex items-center gap-2 mt-1"
+              >
+                <MessageCircle size={14} /> Connect WhatsApp
+              </button>
             </div>
           )}
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
             <button
-              onClick={checkStatus}
+              onClick={async () => {
+                try {
+                  setInitializing(true);
+                  await apiClient.post('/messaging/connect');
+                  checkStatus();
+                } catch (err: any) {
+                  setInitializing(false);
+                  toastEvent.trigger(err?.response?.data?.error || 'Failed to connect', 'error');
+                }
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-bg3 border border-border rounded-xl text-xs font-bold text-text hover:bg-bg transition-all active:scale-95"
             >
-              <RefreshCw size={13} /> Refresh QR
+              <RefreshCw size={13} /> {qrUrl ? 'Refresh QR' : 'Connect / Generate QR'}
             </button>
             <button
               onClick={async () => {
@@ -1985,7 +2021,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                   toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
                 }
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
             >
               <ExternalLink size={13} /> Open Live Chrome Window
             </button>
@@ -1995,7 +2031,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                   try {
                     toastEvent.trigger('Clearing stored WhatsApp session data...', 'info');
                     await apiClient.post('/messaging/logout');
-                    toastEvent.trigger('WhatsApp session cleared successfully. Generating fresh QR code...', 'success');
+                    toastEvent.trigger('WhatsApp session cleared successfully.', 'success');
                     checkStatus();
                   } catch (err: any) {
                     toastEvent.trigger(err?.response?.data?.error || 'Failed to clear WhatsApp session', 'error');

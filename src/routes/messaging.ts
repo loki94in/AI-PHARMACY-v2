@@ -1,6 +1,6 @@
 // Messaging Hub API (Agent 2)
 import express from 'express';
-import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError } from '../whatsappClient.js';
+import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus } from '../whatsappClient.js';
 import QRCode from 'qrcode';
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
@@ -41,23 +41,35 @@ function findChromePath() {
 router.get('/qr', async (req, res) => {
   try {
     if (isLoginWindowActive) {
-      return res.json({ isReady: false, qrUrl: null, message: 'Chrome login window is open. Scan the QR code in Chrome.' });
+      return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Chrome login window is open. Scan the QR code in Chrome.' });
     }
 
     const useBusiness = await shouldRouteToBusiness();
     if (useBusiness) {
-      return res.json({ isReady: true, qrUrl: null, message: 'WhatsApp Business API is active.' });
+      return res.json({ isReady: true, qrUrl: null, initializing: false, message: 'WhatsApp Business API is active.' });
     }
 
     if (isReady) {
-      return res.json({ isReady: true, qrUrl: null });
-    }
-    if (currentQr) {
-      const qrUrl = await QRCode.toDataURL(currentQr);
-      return res.json({ isReady: false, qrUrl });
+      return res.json({ isReady: true, qrUrl: null, initializing: false });
     }
 
-    res.json({ isReady: false, qrUrl: null, message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
+    const status = await getWhatsAppStatus();
+    if (status.initializing) {
+      return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'WhatsApp client is initializing...' });
+    }
+
+    if (currentQr) {
+      const qrUrl = await QRCode.toDataURL(currentQr);
+      return res.json({ isReady: false, qrUrl, initializing: false });
+    }
+
+    if (hasSavedSession()) {
+      // Auto-start connection in background if saved session exists on disk
+      initClient({ forceQr: false }).catch(err => console.error('[WhatsApp QR] Auto-init error:', err));
+      return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Auto-connecting saved WhatsApp session...' });
+    }
+
+    res.json({ isReady: false, qrUrl: null, initializing: false, message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
   } catch (err) {
     console.error('QR check error:', err);
     res.status(500).json({ error: 'Failed to check QR status' });

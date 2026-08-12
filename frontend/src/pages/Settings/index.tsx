@@ -1548,12 +1548,12 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
 
       await api.saveSettings(payload);
       refetchSettings();
-      updateSettingsCache(payload);
+      updateSettingsCache(queryClient, payload);
       queryClient.invalidateQueries({ queryKey: ['settings'] });
-      toastEvent.emit('show', { message: 'Automated trigger schedules saved & applied successfully!', type: 'success' });
+      toastEvent.trigger('Automated trigger schedules saved & applied successfully!', 'success');
     } catch (err) {
       console.error('Failed to save trigger schedules:', err);
-      toastEvent.emit('show', { message: 'Failed to save trigger schedules', type: 'error' });
+      toastEvent.trigger('Failed to save trigger schedules', 'error');
     } finally {
       setSaving(false);
     }
