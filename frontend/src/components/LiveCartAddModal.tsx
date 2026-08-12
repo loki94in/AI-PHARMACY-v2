@@ -25,12 +25,29 @@ interface SuggestionMedicine {
   mrp?: number;
 }
 
-// Distributor style — uniform neutral theme palette
-const DISTRIBUTOR_COLORS = [
-  { border: 'border-l-border', badge: 'bg-bg2 text-muted border border-border' },
+// Distributor style — colored left border only, neutral background
+const DISTRIBUTOR_BORDER_COLORS = [
+  'border-l-blue-500',
+  'border-l-purple-500',
+  'border-l-emerald-500',
+  'border-l-amber-500',
+  'border-l-rose-500',
+  'border-l-cyan-500',
+  'border-l-indigo-500',
+  'border-l-teal-500',
+  'border-l-violet-500',
+  'border-l-orange-500',
 ];
 
-const getDistributorColorIndex = (_name: string | undefined): number => 0;
+export const getDistributorColor = (name: string | undefined): string => {
+  if (!name) return 'border-l-primary';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % DISTRIBUTOR_BORDER_COLORS.length;
+  return DISTRIBUTOR_BORDER_COLORS[index];
+};
 
 // Filter out emails, DL numbers, phone numbers, and GSTINs from being parsed as distributor names
 export const isValidDistributorName = (name: string | null | undefined): boolean => {
@@ -1608,8 +1625,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                             onClick={() => !isAdded && !isSkipped && handleTransferToSearch(medName, 1, undefined, undefined)}
                           >
                             <td className="py-2 px-1 align-top">
-                              <span className="text-xs p-1 rounded bg-bg2 text-muted border border-border inline-flex items-center justify-center" title={recon.status === 'Bounced' ? 'Bounced Email Order' : 'Reconciliation Order'}>
-                                <AlertCircle size={13} className="text-muted" />
+                              <span className="text-xs p-1 rounded bg-bg2 border border-border inline-flex items-center justify-center" title={recon.status === 'Bounced' ? 'Bounced Email Order' : 'Reconciliation Order'}>
+                                ⚠️
                               </span>
                             </td>
                             <td className="py-2 px-1 min-w-0 align-top">
@@ -1622,7 +1639,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               
                               <div className="text-[10px] text-muted font-medium truncate mt-0.5 max-w-[240px]">
                                 {recon.extracted_distributor && isValidDistributorName(recon.extracted_distributor) ? (
-                                  <span className="inline-block text-[9px] font-semibold px-1 py-0.25 rounded bg-bg2 text-muted border border-border truncate max-w-[230px]">
+                                  <span className={`inline-block text-[9px] font-semibold px-1.5 py-0.25 rounded bg-bg2 text-muted border border-border border-l-2 ${getDistributorColor(recon.extracted_distributor)} truncate max-w-[230px]`}>
                                     {recon.extracted_distributor}
                                   </span>
                                 ) : (
@@ -2079,7 +2096,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                             {/* Line 2: Exact Raw Distributor Name & Company Name */}
                             {!med.isErrorMessage && (
                               <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs">
-                                <span className="font-medium text-text">
+                                <span className={`font-semibold text-text px-1.5 py-0.5 rounded bg-bg2 border border-border border-l-2 ${getDistributorColor(med.distributor)} inline-block`}>
                                   {med.distributor || 'No Distributor'}
                                 </span>
                                 {med.company && (
@@ -2118,7 +2135,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
                 {/* Selected Pharmarack preview */}
                 {selectedDistributor && (
-                  <div className="p-3 rounded-xl bg-bg3 border border-border text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className={`p-3 rounded-xl bg-bg3 border border-border border-l-4 ${getDistributorColor(selectedDistributor)} text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200`}>
                     <div className="truncate pr-2">
                       <div className="font-bold text-muted text-[9px] uppercase tracking-wider mb-1">Distributor / Supplier</div>
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -2355,7 +2372,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 </div>
               ) : (
                 sortedCartDistributors.map((dist, distIdx) => (
-                  <div key={dist.storeId} className="bg-bg3/40 border border-glass-border/30 hover:border-glass-border/60 rounded-xl overflow-hidden p-2.5 space-y-2 transition-all">
+                  <div key={dist.storeId} className={`bg-bg3/40 border border-glass-border/30 border-l-4 ${getDistributorColor(dist.storeName)} hover:border-glass-border/60 rounded-xl overflow-hidden p-2.5 space-y-2 transition-all`}>
                     {/* Distributor Header */}
                     <div className="flex items-center justify-between border-b border-glass-border/20 pb-1.5">
                       <div className="flex items-center gap-1.5 truncate max-w-[170px]">
