@@ -232,16 +232,15 @@ const Dispatch = () => {
       const res = await api.getDeliveryBoyMessageDates();
       if (res && res.success && Array.isArray(res.dates)) {
         setMessageDates(res.dates);
-        if (res.dates.length > 0 && !selectedDate) {
-          setSelectedDate(res.dates[0]);
-        } else if (!selectedDate) {
-          setSelectedDate(new Date().toISOString().split('T')[0]);
-        }
+        setSelectedDate(prev => {
+          if (prev) return prev;
+          return res.dates.length > 0 ? res.dates[0] : new Date().toISOString().split('T')[0];
+        });
       }
     } catch (err) {
       console.error('Failed to fetch message dates:', err);
     }
-  }, [selectedDate]);
+  }, []);
 
   const fetchMessagesForDate = useCallback(async (dateStr: string) => {
     if (!dateStr) return;
