@@ -509,12 +509,12 @@ const RefillsSection: React.FC = () => {
               setSearch(val.includes('|') ? val.split('|')[0].trim() : val);
             }}
             placeholder="Search patient, phone or barcode..."
-            className="w-full pl-8 pr-3 py-2 bg-bg2 border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
+            className="w-full pl-8 pr-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
           />
         </div>
 
         {/* Refill Status Filter Tabs */}
-        <div className="flex items-center bg-bg2 border border-border rounded-xl p-0.5 shrink-0">
+        <div className="flex items-center bg-bg border border-border rounded-xl p-0.5 shrink-0">
           {(['all', 'active', 'paused', 'canceled'] as const).map(tab => (
             <button
               key={tab}
@@ -584,15 +584,15 @@ const RefillsSection: React.FC = () => {
           return (
             <div
               key={`${patient.patient_phone}-${patient.next_refill_date}`}
-              className={`bg-bg2 border rounded-xl p-4 transition-all ${
+              className={`bg-bg border rounded-xl p-4 transition-all ${
                 isOverdue ? 'border-red-500/30' : 
-                is3DayStockAlert ? 'border-amber-500/50 bg-amber-500/[0.02]' : 
-                isLeadWindowActive ? 'border-primary/40 bg-primary/[0.02]' : 'border-border'
+                is3DayStockAlert ? 'border-amber-500/50' : 
+                isLeadWindowActive ? 'border-primary/40' : 'border-border'
               }`}
             >
               {/* Lead Window Notification Banner */}
               {isLeadWindowActive && (
-                <div className="mb-3 px-3 py-2 bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-between flex-wrap gap-2">
+                <div className="mb-3 px-3 py-2 bg-bg border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-base animate-bounce">🔔</span>
                     <span>Refill On The Way! 5-6 Day Lead Notification Window Active (Due in {diffDays} day{diffDays !== 1 ? 's' : ''})</span>
@@ -603,7 +603,7 @@ const RefillsSection: React.FC = () => {
 
               {/* 3-Day Automated Inventory Stock Check Alert */}
               {is3DayStockAlert && (
-                <div className="mb-3 px-3 py-2 bg-red-500/15 border border-red-500/30 rounded-xl text-xs font-extrabold text-red-400 flex items-center justify-between flex-wrap gap-2 animate-pulse">
+                <div className="mb-3 px-3 py-2 bg-bg border border-red-500/30 rounded-xl text-xs font-extrabold text-red-400 flex items-center justify-between flex-wrap gap-2 animate-pulse">
                   <div className="flex items-center gap-2">
                     <AlertCircle size={14} className="text-red-400 shrink-0" />
                     <span>Automated 3-Day Inventory Stock Check: Shortage detected! Need items pushed to Live Cart.</span>
@@ -1302,13 +1302,13 @@ const DistributorMessagesSection: React.FC = () => {
             value={search}
             onChange={e => handleSearchChange(e.target.value)}
             placeholder="Search recipient or message…"
-            className="w-full pl-8 pr-3 py-2 bg-bg2 border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
+            className="w-full pl-8 pr-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
           />
         </div>
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-2 bg-bg2 border border-border rounded-lg text-sm text-text focus:outline-none"
+          className="px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none"
         >
           <option value="all">All Status</option>
           <option value="sent">Sent</option>
@@ -1318,7 +1318,7 @@ const DistributorMessagesSection: React.FC = () => {
         <select
           value={typeFilter}
           onChange={e => setTypeFilter(e.target.value)}
-          className="px-3 py-2 bg-bg2 border border-border rounded-lg text-sm text-text focus:outline-none"
+          className="px-3 py-2 bg-bg border border-border rounded-lg text-sm text-text focus:outline-none"
         >
           <option value="all">All Types</option>
           <option value="whatsapp">WhatsApp</option>
@@ -3103,7 +3103,7 @@ const SpecialOrdersSection: React.FC = () => {
   return (
     <div className="flex flex-col h-full gap-3 overflow-hidden">
       {/* Top Controls & Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg2 border border-border rounded-xl shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-bg border border-border rounded-xl shrink-0">
         {/* Left: Search & Status Filters */}
         <div className="flex items-center gap-2 flex-1 min-w-[280px]">
           <div className="relative flex-1">
@@ -4005,7 +4005,7 @@ const CustomerCreditSection: React.FC = () => {
     <div className="w-full h-full flex flex-col gap-3 overflow-hidden pr-1">
       {/* Header Cards & Quick Search */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
-        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
             <p className="text-[11px] text-muted font-medium">Total Medical Outstanding Dues</p>
             <h3 className="text-lg font-bold text-amber-400 mt-0.5">₹{totalDues.toFixed(2)}</h3>
@@ -4015,7 +4015,7 @@ const CustomerCreditSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <div>
             <p className="text-[11px] text-muted font-medium">Active Credit Customers</p>
             <h3 className="text-lg font-bold text-text mt-0.5">{customers.length} Customers</h3>
@@ -4025,7 +4025,7 @@ const CustomerCreditSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-3.5 bg-bg2 border border-border rounded-2xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
           <button
             onClick={loadCreditCustomers}
             disabled={loading}
@@ -4040,7 +4040,7 @@ const CustomerCreditSection: React.FC = () => {
       {/* Split-View Container */}
       <div className="flex-1 flex flex-col md:flex-row gap-3 overflow-hidden min-h-0">
         {/* LEFT PANEL: Customer Credit Accounts List */}
-        <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
+        <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
           <div className="p-3 border-b border-border bg-bg3/40 flex items-center justify-between">
             <h3 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
               <Users size={14} className="text-amber-400" />
@@ -4538,7 +4538,7 @@ const CRM: React.FC = () => {
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Compact Unified Top Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
         {/* Title */}
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">

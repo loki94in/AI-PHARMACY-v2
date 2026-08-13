@@ -373,7 +373,7 @@ const PurchaseHistory = () => {
       {activeTab === 'history' ? (
         <div className="glass-panel flex-1 flex flex-col overflow-hidden mt-3">
           {/* Purchase Analytics Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-bg2/40 border-b border-glass-border text-xs shrink-0 select-none">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-bg border-b border-glass-border text-xs shrink-0 select-none">
             <div className="p-4 border-r border-glass-border/30 flex flex-col gap-0.5">
               <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Purchases</span>
               <span className="text-xl font-bold text-text font-mono">{totalPurchases}</span>

@@ -137,7 +137,7 @@ export default function Settings() {
   return (
     <div className="flex flex-col h-full bg-bg text-text p-4 space-y-4 overflow-y-auto">
       {/* Compact Unified Top Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm">
         {/* Title */}
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
@@ -173,7 +173,7 @@ export default function Settings() {
       </div>
 
       {/* Active Tab Workspace Panel */}
-      <div className="flex-1 bg-bg2 border border-border rounded-2xl p-5 shadow-sm">
+      <div className="flex-1 bg-bg border border-border rounded-2xl p-5 shadow-sm">
         {loadingSettings ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw size={24} className="animate-spin text-primary mr-2" />

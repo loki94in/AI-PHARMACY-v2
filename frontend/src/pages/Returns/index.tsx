@@ -1688,8 +1688,8 @@ const Returns: React.FC = () => {
                           id={`dist-card-${group.key}`}
                           className={`flex flex-col rounded-2xl border transition-all duration-300 shadow-sm overflow-hidden ${
                             focusedDistributorKey === group.key
-                              ? 'bg-bg2 border-primary ring-2 ring-primary/40'
-                              : 'bg-bg2/90 border-border/80 hover:border-border'
+                              ? 'bg-bg border-primary ring-2 ring-primary/40'
+                              : 'bg-bg border-border/80 hover:border-border'
                           }`}
                         >
                           {/* Card Top Banner Header */}

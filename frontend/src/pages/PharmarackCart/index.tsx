@@ -2040,7 +2040,7 @@ export default function PharmarackCart() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-3 p-6 pb-4">
       {/* Compact Unified Top Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
         {/* Title */}
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">

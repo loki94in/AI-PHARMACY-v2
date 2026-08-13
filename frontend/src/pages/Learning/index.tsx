@@ -653,7 +653,7 @@ const Learning: React.FC = () => {
       </div>
 
       {/* Navigation Bar Tabs */}
-      <div className="flex items-center gap-2 bg-bg2 border border-border p-1.5 rounded-2xl overflow-x-auto scrollbar-none shadow-sm">
+      <div className="flex items-center gap-2 bg-bg border border-border p-1.5 rounded-2xl overflow-x-auto scrollbar-none shadow-sm">
         {[
           { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain, badge: correctionsArray.length },
           { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope, badge: doctorsListArray.length },

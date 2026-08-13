@@ -476,7 +476,7 @@ const DatabasePage = () => {
   return (
     <div className="h-full flex flex-col fade-in relative gap-3">
       {/* Compact Unified Top Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2 border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
         {/* Title & Quick Actions */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
