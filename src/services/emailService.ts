@@ -3080,10 +3080,14 @@ export class EmailService {
       await connection.openBox('INBOX');
 
       // Build search criteria: if we have stored emails, only fetch UID > lastStoredUid
-      // Otherwise fetch all (first run)
-      const searchCriteria = lastStoredUid > 0
-        ? [['UID', `${lastStoredUid + 1}:*`]]
-        : ['ALL'];
+      // Otherwise fetch emails from last 14 days on initial sync to prevent downloading thousands of old emails
+      let searchCriteria: any[];
+      if (lastStoredUid > 0) {
+        searchCriteria = [['UID', `${lastStoredUid + 1}:*`]];
+      } else {
+        const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+        searchCriteria = [['SINCE', twoWeeksAgo]];
+      }
 
       const uids = await new Promise<number[]>((resolve, reject) => {
         connection.imap.search(searchCriteria, (err: any, results: number[]) => {
@@ -3220,8 +3224,9 @@ export class EmailService {
 
       console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
       try {
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'connected')");
-        await db.run("DELETE FROM app_settings WHERE key = 'gmail_auth_error'");
+        const dbConn = await dbManager.getConnection();
+        await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'connected')");
+        await dbConn.run("DELETE FROM app_settings WHERE key = 'gmail_auth_error'");
       } catch (dbErr) {
         console.error('Failed to save gmail auth success:', dbErr);
       }

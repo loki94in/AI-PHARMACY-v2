@@ -43,6 +43,8 @@ export function scoreProductName(query: string, productName: string): number {
 
 // ponytail: reuse existing fetchPharmarack pattern with automatic retry on token expiration/406
 
+let lastRefreshFailedAt = 0;
+
 async function fetchPharmarackApi(url: string, options: any = {}): Promise<Response> {
   const db = await dbManager.getConnection();
   const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
@@ -69,11 +71,18 @@ async function fetchPharmarackApi(url: string, options: any = {}): Promise<Respo
   let response = await executeFetch(token);
 
   if ((response.status === 401 || response.status === 403 || response.status === 406) && token) {
-    console.log(`[Catalog Cache Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
-    const freshToken = await tokenRefreshScheduler.executeRefresh();
-    if (freshToken) {
-      console.log(`[Catalog Cache Fetch] Retrying API ${url} with fresh token...`);
-      response = await executeFetch(freshToken);
+    const now = Date.now();
+    if (now - lastRefreshFailedAt > 60000) {
+      console.log(`[Catalog Cache Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
+      const freshToken = await tokenRefreshScheduler.executeRefresh();
+      if (freshToken) {
+        console.log(`[Catalog Cache Fetch] Retrying API ${url} with fresh token...`);
+        response = await executeFetch(freshToken);
+      } else {
+        lastRefreshFailedAt = Date.now();
+      }
+    } else {
+      console.warn(`[Catalog Cache Fetch] Skipping repeated token refresh retry for ${url} (cooldown active).`);
     }
   }
 

@@ -15,13 +15,13 @@ export async function startEmailPoller(): Promise<void> {
   // [EMAIL POLLER GATER] Check DB credentials before starting any network connections
   try {
     const db = await dbManager.getConnection();
-    const gmailUser = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_user'");
-    const gmailAuthMethod = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
-    const gmailPass = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_pass'");
+    const userRow = await db.get("SELECT value FROM app_settings WHERE key IN ('gmail_user', 'email_user', 'store_email') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
+    const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
+    const passRow = await db.get("SELECT value FROM app_settings WHERE key IN ('gmail_pass', 'email_pass', 'gmail_password', 'email_password') AND value IS NOT NULL AND trim(value) != '' LIMIT 1");
 
-    const user = gmailUser?.value?.trim();
-    const authMethod = gmailAuthMethod?.value?.trim() || 'password';
-    const pass = gmailPass?.value?.trim();
+    const user = userRow?.value?.trim();
+    const authMethod = authMethodRow?.value?.trim() || 'password';
+    const pass = passRow?.value?.trim();
 
     if (!user || (authMethod === 'password' && !pass)) {
       console.log('[EMAIL POLLER GATER] Email credentials are not configured. Background IMAP poller remains silent.');

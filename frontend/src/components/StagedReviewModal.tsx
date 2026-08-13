@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, User, Calendar, Plus, Pill } from 'lucide-react';
 import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'sales' | 'purchases'>('sales');
   const [sales, setSales] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
@@ -93,7 +95,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     stagedQueueService.startQueue(formattedQueue, index);
     onClose();
     if (window.location.pathname !== '/pos') {
-      window.location.href = '/pos';
+      navigate('/pos');
     }
   };
 

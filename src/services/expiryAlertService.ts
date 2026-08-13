@@ -224,6 +224,10 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
         }
       }
 
+      // Persist initialization manifest marker file
+      const manifestPath = path.join(cacheDir, 'manifest.json');
+      await fs.promises.writeFile(manifestPath, JSON.stringify({ lastRebuilt: Date.now(), totalMonthFiles: written }), 'utf-8');
+
       console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
     } catch (err) {
       console.error('[ExpiryCache] Error rebuilding expiry caches:', err);

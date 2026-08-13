@@ -307,8 +307,8 @@ export class TokenRefreshScheduler {
 
     const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
     if (!fs.existsSync(mainProfilePath)) {
-      console.error('[TokenRefreshScheduler] Main profile folder does not exist.');
-      return null;
+      fs.mkdirSync(mainProfilePath, { recursive: true });
+      console.log('[TokenRefreshScheduler] Initialized missing main profile folder at:', mainProfilePath);
     }
 
     let browser;

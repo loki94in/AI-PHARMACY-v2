@@ -83,12 +83,12 @@ router.get('/', async (req, res) => {
   try {
     const months = getMonthsInRange(date_from, date_to);
 
-    // If the cache directory or files don't exist yet, this is a first-ever run or uninitialized state.
+    // If the cache directory or manifest.json don't exist yet, this is an uninitialized state.
     // Fall back to live SQL and trigger a background rebuild for future requests.
     const cacheDirExists = fs.existsSync(cacheDir);
-    const hasCacheFiles = cacheDirExists && fs.readdirSync(cacheDir).some(f => f.startsWith('expiry_') && f.endsWith('.json'));
-    if (!cacheDirExists || !hasCacheFiles) {
-      console.log('[ExpiryCache] Cache directory or files missing. Using live SQL and triggering rebuild.');
+    const isInitialized = cacheDirExists && fs.existsSync(path.join(cacheDir, 'manifest.json'));
+    if (!isInitialized) {
+      console.log('[ExpiryCache] Cache directory or manifest missing. Using live SQL and triggering initial rebuild.');
       const db = await dbManager.getConnection();
       const rows = await db.all(`
         SELECT im.id, im.medicine_id, m.name as medicine_name, im.batch_no, im.expiry_date, im.quantity, im.mrp, im.rack_location,
@@ -111,7 +111,7 @@ router.get('/', async (req, res) => {
       // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
       // filter in JS with the same helper the cache-backed path below uses.
       const filtered = rows.filter((r: any) => isDateInRange(r.expiry_date, date_from, date_to));
-      // Trigger background rebuild so next request is fast
+      // Trigger background rebuild so manifest and cache files are created
       import('../services/expiryAlertService.js')
         .then(m => m.rebuildAllExpiryCaches())
         .catch(() => {});

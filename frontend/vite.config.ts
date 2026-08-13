@@ -15,12 +15,18 @@ export default defineConfig({
     // binding Vite to [::1] while browser requests race to 127.0.0.1 and
     // hang instead of failing fast — pin to IPv4 loopback to avoid that.
     host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:5174',
         changeOrigin: true,
       },
       '/uploads': {
+        target: 'http://127.0.0.1:5174',
+        changeOrigin: true,
+      },
+      '/data': {
         target: 'http://127.0.0.1:5174',
         changeOrigin: true,
       }

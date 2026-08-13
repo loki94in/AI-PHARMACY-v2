@@ -807,27 +807,33 @@ router.post('/reset-data', async (req, res) => {
       ];
       for (const d of tempDirs) clearDir(d);
 
-      // Delete ALL temp/leftover DB files and runtime state files in data/
-      const runtimeDataFiles = ['audit_queue.json', 'ocr_corrections.json', 'suggested_names.json'];
+      // Stop email poller if running
+      try {
+        const { stopEmailPoller } = await import('../worker/emailPoller.js');
+        stopEmailPoller();
+      } catch (_) {}
+
+      // Delete temp/leftover DB files and runtime state files in data/
       if (fs.existsSync(dataDir)) {
         for (const f of fs.readdirSync(dataDir)) {
           // Skip the freshly-created app.db and its journal files
           if (f === 'app.db' || f === 'app.db-wal' || f === 'app.db-shm') continue;
-          // Skip model files and reference data needed for OCR/search
-          if (f === 'models' || f === 'reference_medicines.csv' || f === 'medicines_list.txt' || f === 'medicine_dict.txt' || f === 'medicine_patterns.txt') continue;
-          // Skip sub-directories already handled above
+          // Skip AI/OCR model files
+          if (f === 'models') continue;
+          // Skip sub-directories already handled separately
           const fullPath = path.join(dataDir, f);
           const stat = fs.statSync(fullPath);
           if (stat.isDirectory()) continue;
-          // Delete everything else: temp DBs, .bak files, test DBs, runtime JSON
+          // Delete everything else (including reference CSVs, master text dicts, and runtime JSONs on factory reset)
           try { fs.unlinkSync(fullPath); } catch (_) {}
         }
       }
 
+      // Wipe entire catalogue directory (master catalog raw/parsed data)
+      const catalogueDir = path.resolve(getAppDataDir(), 'catalogue');
+      clearDir(catalogueDir);
+
       // Destroy the live WhatsApp client FIRST so Chromium releases its file locks.
-      // Without this, unlinkSync on .wwebjs_auth/.wwebjs_cache silently fails on
-      // Windows (files still open by the running browser process) and the old
-      // WhatsApp session/config survives a "wipe everything" reset.
       try {
         const { destroyClient } = await import('../whatsappClient.js');
         await destroyClient();
@@ -857,23 +863,36 @@ router.post('/reset-data', async (req, res) => {
       await removeDirWithRetry(wwwebAuthDir);
       await removeDirWithRetry(wwwebCacheDir);
 
+      // Kill orphan Chrome processes so Pharmarack Chromium user profiles release file locks
+      try {
+        const { killOrphanChromeProcesses } = await import('../services/tokenRefreshScheduler.js');
+        await killOrphanChromeProcesses('pharmarack_profile');
+      } catch (err: any) {
+        console.warn('[Reset] Failed to kill Chrome processes:', err.message);
+      }
+
       // Wipe Pharmarack profile and temp cache directories
       const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
-      if (fs.existsSync(pharmarackProfilePath)) {
-        try {
-          fs.rmSync(pharmarackProfilePath, { recursive: true, force: true });
-        } catch (err) {
-          console.warn('[Reset] Failed to delete pharmarack_profile:', err);
+      await removeDirWithRetry(pharmarackProfilePath);
+
+      // Also wipe any temp profiles (pharmarack_profile_temp_*)
+      if (fs.existsSync(dataDir)) {
+        for (const entry of fs.readdirSync(dataDir)) {
+          if (entry.startsWith('pharmarack_profile_temp_')) {
+            await removeDirWithRetry(path.join(dataDir, entry));
+          }
         }
       }
+
+      // Wipe cache directory
       const cachePath = path.resolve(getAppDataDir(), 'data', 'cache');
-      if (fs.existsSync(cachePath)) {
-        try {
-          fs.rmSync(cachePath, { recursive: true, force: true });
-        } catch (err) {
-          console.warn('[Reset] Failed to delete cache directory:', err);
-        }
-      }
+      await removeDirWithRetry(cachePath);
+
+      // Clear in-memory search and inventory caches
+      try {
+        const { searchCache } = await import('../services/searchCache.js');
+        searchCache.clear();
+      } catch (_) {}
 
       // Wipe accidental space-split directories in the project root
       const accidentalDirs = ['PHARMACY', 'WORKING', 'ON', 'PROJECT'];

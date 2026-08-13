@@ -139,7 +139,19 @@ router.get('/medicines', async (req, res) => {
     const countRow = await db.get(countQuery, ...params);
     const totalItems = countRow ? countRow.total : 0;
     const totalPages = Math.ceil(totalItems / limit);
-    
+
+    if (totalItems === 0) {
+      return res.json({
+        medicines: [],
+        pagination: {
+          totalItems: 0,
+          totalPages: 0,
+          currentPage: page,
+          limit
+        }
+      });
+    }
+
     const querySql = buildQuery(limit, offset);
     console.log('BUILD QUERY:', querySql, 'PARAMS:', params);
     let medicines = await db.all(querySql, ...params);
