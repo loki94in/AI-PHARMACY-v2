@@ -21,6 +21,9 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
     'customer-returns-history-list',
     'database-medicines',
     'pos-special-orders',
+    'special-orders',
+    'refills',
+    'patient-refills',
     'crm-doctors'
   ];
 

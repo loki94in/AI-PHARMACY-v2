@@ -2875,6 +2875,20 @@ router.post('/staged/:id/approve', async (req, res) => {
         }
       }
 
+      // OCR Auto-Learning Feedback Loop: save raw alias/ocr correction rule if raw text was supplied
+      const rawText = item.raw_name || item.original_name || item.raw_text;
+      if (rawText && rawText.trim() !== '' && rawText.trim().toLowerCase() !== item.name.trim().toLowerCase()) {
+        try {
+          await db.run('INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)', [rawText.trim(), medId]);
+          if (finalDistName) {
+            await db.run(
+              `INSERT OR IGNORE INTO ocr_corrections (distributor_name, raw_text, corrected_name, confidence) VALUES (?, ?, ?, ?)`,
+              [finalDistName, rawText.trim(), item.name.trim(), 1.0]
+            );
+          }
+        } catch (_) {}
+      }
+
       const rawBatch = item.batch_no || 'B-OFFLINE';
       const rawExpiry = item.expiry_date || null;
       const qty = Number(item.quantity || item.qty || 0);
