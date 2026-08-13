@@ -885,6 +885,12 @@ export const api = {
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.put<{ success: boolean; minSec: number; maxSec: number; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
 
+  // Upcoming Automations & Triggers API
+  getUpcomingTriggers: (lookahead = 5) => apiClient.get<{ success: boolean; upcoming: Array<{ id: string; name: string; category: string; secondsUntilRun: number; nextRunIso: string; isSnoozed: boolean; description: string }> }>('/triggers/upcoming', { params: { lookahead } }).then(res => res.data),
+  runTriggerNow: (id: string) => apiClient.post<{ success: boolean; message: string }>('/triggers/run-now', { id }).then(res => res.data),
+  snoozeTrigger: (id: string, minutes = 10) => apiClient.post<{ success: boolean; snoozedUntilIso: string }>('/triggers/snooze', { id, minutes }).then(res => res.data),
+
+
   // Unified Contacts Management API
   getContacts: (type?: string, search?: string) => apiClient.get<{ success: boolean; count: number; data: any[] }>('/contacts', { params: { type, search } }).then(res => res.data),
   saveContact: (data: { name: string; type: string; phone?: string; email?: string; address?: string; gstin?: string; notes?: string; alias_names?: string; is_active?: number }) => apiClient.post<{ success: boolean; message: string; data: any }>('/contacts', data).then(res => res.data),

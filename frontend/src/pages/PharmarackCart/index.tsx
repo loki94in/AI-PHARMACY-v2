@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2 } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
-import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent } from '../../services/events';
+import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent, messageSendEvent } from '../../services/events';
 import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -800,7 +800,7 @@ export default function PharmarackCart() {
             const dueDate = new Date(patient.next_refill_date);
             const diffMs = dueDate.getTime() - today.getTime();
             const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-            const reqQty = Number(m.quantity_needed || 10);
+            const reqQty = Number(m.quantity_needed || 1);
             const stockQty = Number(m.in_stock_qty || 0);
 
             // Show in Quick Assist if stock shortage exists, due within 14 days, or hold_for_stock is set
@@ -1452,6 +1452,7 @@ export default function PharmarackCart() {
       }
 
       // ENQUEUE ALL MESSAGES INSTANTLY TO BACKGROUND QUEUE WORKER
+      messageSendEvent.triggerSendProgress('Pharmarack Batch Orders', `Batch dispatch for ${ordersPayload.length} stores...`, 10);
       const res = await api.enqueuePharmarackBatch({
         orders: ordersPayload,
         deliveryBoyPhone,
@@ -2617,7 +2618,7 @@ export default function PharmarackCart() {
                         {displayRefills.map(refill => {
                           const inCart = getRefillItemInCart(refill);
                           const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
-                          const reqQty = Number(refill.quantity_needed || 10);
+                          const reqQty = Number(refill.quantity_needed || 1);
                           const stockQty = Number(refill.in_stock_qty || 0);
                           const shortageQty = Math.max(1, reqQty - stockQty);
 

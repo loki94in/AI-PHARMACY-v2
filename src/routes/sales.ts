@@ -698,7 +698,7 @@ router.post('/', async (req, res) => {
                   if (specPhone.length === 10) {
                     await sendMessage(specPhone, undefined, specMsg);
                     await db.run(
-                      `UPDATE special_orders SET status = 'FULFILLED' WHERE id = ?`,
+                      `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
                       [m.order_id]
                     );
                     console.log(`[Special Order WA] Dispatched fulfillment alert for order #${m.order_id} to ${specPhone}`);

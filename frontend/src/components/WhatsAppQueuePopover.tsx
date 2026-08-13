@@ -5,7 +5,7 @@ import {
   WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
-import { toastEvent, whatsappQueueEvent } from '../services/events';
+import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
 
 interface QueueItem {
   id: number;
@@ -116,6 +116,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     if (isFlushing) return;
     setIsFlushing(true);
     try {
+      messageSendEvent.triggerSendProgress('WhatsApp Queue Batch', 'Flushing pending queue messages...', 10);
       await api.flushWhatsAppQueue();
       toastEvent.trigger('Queue flush triggered', 'info');
       await fetchStatus();

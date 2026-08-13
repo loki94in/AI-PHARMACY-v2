@@ -62,7 +62,7 @@ import {
 } from 'lucide-react';
 
 
-import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
@@ -1067,6 +1067,92 @@ const Topbar = ({
     };
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded, waQueueDetail?.isProcessing, waQueueDetail?.counts?.pending, waQueueDetail?.counts?.sending, onOpenWaQueue]);
 
+  // Active Manual/Automated Message Send 10-second Progress state
+  const [activeMsgProgress, setActiveMsgProgress] = useState<{
+    id: string;
+    recipient: string;
+    progress: number;
+    secondsLeft: number;
+    completed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let timer: any = null;
+    const unsubSend = messageSendEvent.subscribeSendProgress((detail) => {
+      const durationSec = detail.durationSec || 10;
+      const totalSteps = durationSec * 10; // 100ms ticks
+      let currentStep = 0;
+
+      if (timer) clearInterval(timer);
+
+      setActiveMsgProgress({
+        id: detail.id || `msg-${Date.now()}`,
+        recipient: detail.recipient,
+        progress: 0,
+        secondsLeft: durationSec,
+        completed: false,
+      });
+
+      timer = setInterval(() => {
+        currentStep++;
+        const percent = Math.min(100, Math.round((currentStep / totalSteps) * 100));
+        const secsLeft = Math.max(0, Math.ceil(durationSec - (currentStep / 10)));
+
+        if (currentStep >= totalSteps) {
+          clearInterval(timer);
+          setActiveMsgProgress(prev => prev ? { ...prev, progress: 100, secondsLeft: 0, completed: true } : null);
+          setTimeout(() => {
+            setActiveMsgProgress(null);
+          }, 3000);
+        } else {
+          setActiveMsgProgress(prev => prev ? { ...prev, progress: percent, secondsLeft: secsLeft } : null);
+        }
+      }, 100);
+    });
+
+    return () => {
+      if (timer) clearInterval(timer);
+      unsubSend();
+    };
+  }, []);
+
+  // Upcoming Automations (5-Minute Prior Notification) State & Polling
+  const [upcomingTriggers, setUpcomingTriggers] = useState<Array<{
+    id: string;
+    name: string;
+    category: string;
+    secondsUntilRun: number;
+    nextRunIso: string;
+    isSnoozed: boolean;
+    description: string;
+  }>>([]);
+
+  const fetchUpcomingTriggers = useCallback(async () => {
+    try {
+      const res = await api.getUpcomingTriggers(5);
+      if (res?.success && Array.isArray(res.upcoming)) {
+        setUpcomingTriggers(res.upcoming.filter(t => !t.isSnoozed && t.secondsUntilRun > 0));
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    fetchUpcomingTriggers();
+    const interval = setInterval(fetchUpcomingTriggers, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUpcomingTriggers]);
+
+  useEffect(() => {
+    if (upcomingTriggers.length === 0) return;
+    const tick = setInterval(() => {
+      setUpcomingTriggers(prev =>
+        prev.map(t => ({ ...t, secondsUntilRun: Math.max(0, t.secondsUntilRun - 1) }))
+            .filter(t => t.secondsUntilRun > 0)
+      );
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [upcomingTriggers.length]);
+
   const [countdownSec, setCountdownSec] = useState(278); // 4m 38s live ticking countdown
   const [isCountdownPaused, setIsCountdownPaused] = useState(false);
 
@@ -1097,6 +1183,20 @@ const Topbar = ({
       actionLabel?: string;
       icon: React.ReactNode;
     }> = [];
+
+    // 0. Active Manual/Automated Message Send (Highest Priority 10s Animation)
+    if (activeMsgProgress) {
+      items.push({
+        id: activeMsgProgress.id,
+        type: 'whatsapp',
+        title: activeMsgProgress.completed ? `✓ Message Delivered to ${activeMsgProgress.recipient}` : `Sending Message to ${activeMsgProgress.recipient}`,
+        subtitle: activeMsgProgress.completed ? '✓ Delivery confirmed (100% Complete)' : `▶ Dispatching: ${activeMsgProgress.progress}% loaded • ${activeMsgProgress.secondsLeft}s countdown remaining`,
+        progress: activeMsgProgress.progress,
+        badge: activeMsgProgress.completed ? '100% Done' : `${activeMsgProgress.progress}% (${activeMsgProgress.secondsLeft}s)`,
+        color: 'emerald',
+        icon: <SendIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
+      });
+    }
 
     // 1. WhatsApp Queue Progress
     const waTotal = (waQueueDetail?.counts?.sent || 0) + (waQueueDetail?.counts?.pending || 0) + (waQueueDetail?.counts?.sending || 0);
@@ -1159,7 +1259,7 @@ const Topbar = ({
       });
     }
 
-    // 4. Invoice OCR Scanning Progress (Active background scanning process)
+    // 4. Invoice OCR Scanning Progress
     if (ocrStatus.active) {
       items.push({
         id: 'ocr-scan',
@@ -1175,8 +1275,35 @@ const Topbar = ({
       });
     }
 
+    // 5. 5-Minute Prior Upcoming Automations
+    upcomingTriggers.forEach(trig => {
+      const mins = Math.floor(trig.secondsUntilRun / 60);
+      const secs = trig.secondsUntilRun % 60;
+      items.push({
+        id: `upcoming-${trig.id}`,
+        type: 'notification',
+        title: `⏰ Upcoming Automation (in ${mins}m ${secs}s): ${trig.name}`,
+        subtitle: `${trig.description} • Click Run Now or Snooze`,
+        badge: `Upcoming (${mins}m)`,
+        color: 'amber',
+        action: async () => {
+          try {
+            toastEvent.trigger(`▶ Starting ${trig.name}...`, 'info');
+            await api.runTriggerNow(trig.id);
+            toastEvent.trigger(`✓ ${trig.name} completed successfully`, 'success');
+            fetchUpcomingTriggers();
+          } catch (err: any) {
+            toastEvent.trigger(`❌ Trigger failed: ${err?.message || 'Error'}`, 'error');
+          }
+        },
+        actionLabel: '▶ Run Now',
+        icon: <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" />
+      });
+    });
+
     return items;
-  }, [waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, onOpenWaQueue]);
+  }, [activeMsgProgress, waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, onOpenWaQueue, upcomingTriggers, fetchUpcomingTriggers]);
+
 
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [isCarouselHovered, setIsCarouselHovered] = useState(false);
@@ -2023,88 +2150,129 @@ const QuickAssistSidebar = ({
             <p className="text-xs text-muted/50 italic pl-2 py-1">No active special requests</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {activeSpecialOrders.map(order => (
-                <div key={order.id} className="p-3 rounded-xl bg-amber-500/[0.04] border border-amber-500/20 flex flex-col gap-2">
-                  <div className="flex items-start justify-between gap-1">
-                    <span className="font-bold text-xs text-text truncate">{order.product}</span>
-                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
-                      Qty: {order.qty || 1}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-muted flex items-center justify-between">
-                    <span className="truncate">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                    <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                      order.status === 'Ready' 
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                        : order.status === 'Ordered' 
-                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
-                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    }`}>
-                      {order.status || 'Pending'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    {order.status === 'Ready' ? (
+              {activeSpecialOrders.map(order => {
+                const isOrderedOrReady = order.status === 'Ordered' || order.status === 'Ready' || order.status === 'Completed' || order.status === 'Fulfilled';
+                const isCancelled = order.status === 'Cancelled';
+                return (
+                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
+                    isOrderedOrReady 
+                      ? 'bg-emerald-500/[0.04] border-emerald-500/30' 
+                      : isCancelled
+                      ? 'bg-red-500/[0.04] border-red-500/20 opacity-60'
+                      : 'bg-amber-500/[0.04] border-amber-500/20'
+                  }`}>
+                    <div className="flex items-start justify-between gap-1">
+                      <span className={`font-bold text-xs text-text truncate ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
+                        {order.product}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isOrderedOrReady && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[9px] font-black tracking-wider">
+                            ✓ ADDED
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold">
+                          Qty: {order.qty || 1}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-muted flex items-center justify-between">
+                      <span className="truncate">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
+                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        order.status === 'Ready' 
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                          : order.status === 'Ordered' 
+                          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+                          : order.status === 'Cancelled'
+                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      }`}>
+                        {order.status || 'Pending'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {order.status === 'Ready' ? (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Completed' });
+                              toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
+                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
+                              onActionComplete();
+                            } catch (err) {
+                              console.error('Failed to complete order:', err);
+                              toastEvent.trigger('Failed to update status', 'error');
+                            }
+                          }}
+                          className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          title="Mark special request as Completed"
+                        >
+                          <Check size={12} />
+                          Complete
+                        </button>
+                      ) : order.status === 'Ordered' ? (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Ready' });
+                              toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
+                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
+                              onActionComplete();
+                            } catch (err) {
+                              console.error('Failed to mark order as ready:', err);
+                              toastEvent.trigger('Failed to update status', 'error');
+                            }
+                          }}
+                          className="flex-1 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          title="Mark order as Ready for customer"
+                        >
+                          <Check size={12} />
+                          Mark Ready
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleSendSpecialOrder(order)}
+                          className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                          title="Send WhatsApp Order for this Special Request"
+                        >
+                          <SendIcon size={12} />
+                          Send Order
+                        </button>
+                      )}
                       <button
-                        onClick={async () => {
-                          try {
-                            await apiClient.post(`/orders/${order.id}/status`, { status: 'Completed' });
-                            toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
-                            window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-                            window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
-                            onActionComplete();
-                          } catch (err) {
-                            console.error('Failed to complete order:', err);
-                            toastEvent.trigger('Failed to update status', 'error');
-                          }
-                        }}
-                        className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                        title="Mark special request as Completed"
+                        onClick={() => handleAddToCartSpecialOrder(order)}
+                        className="py-1.5 px-2 rounded bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
+                        title="Add item to Pharmarack Cart"
                       >
-                        <Check size={12} />
-                        Complete
+                        <ShoppingCart size={11} />
+                        Cart
                       </button>
-                    ) : order.status === 'Ordered' ? (
-                      <button
-                        onClick={async () => {
-                          try {
-                            await apiClient.post(`/orders/${order.id}/status`, { status: 'Ready' });
-                            toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
-                            window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-                            window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
-                            onActionComplete();
-                          } catch (err) {
-                            console.error('Failed to mark order as ready:', err);
-                            toastEvent.trigger('Failed to update status', 'error');
-                          }
-                        }}
-                        className="flex-1 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                        title="Mark order as Ready for customer"
-                      >
-                        <Check size={12} />
-                        Mark Ready
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleSendSpecialOrder(order)}
-                        className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                        title="Send WhatsApp Order for this Special Request"
-                      >
-                        <SendIcon size={12} />
-                        Send Order
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleAddToCartSpecialOrder(order)}
-                      className="py-1.5 px-2.5 rounded bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
-                      title="Add item to Pharmarack Cart"
-                    >
-                      <ShoppingCart size={11} />
-                      Cart
-                    </button>
+                      {!isCancelled && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Cancelled' });
+                              toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
+                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
+                              onActionComplete();
+                            } catch (err) {
+                              console.error('Failed to cancel order:', err);
+                              toastEvent.trigger('Failed to cancel request', 'error');
+                            }
+                          }}
+                          className="py-1.5 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
+                          title="Cancel/Dash this medicine request"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

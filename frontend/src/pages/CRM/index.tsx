@@ -8,7 +8,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
@@ -228,7 +228,7 @@ const RefillsSection: React.FC = () => {
       searchTerm: m.medicine_name,
       suggestions: [],
       isOpen: false,
-      quantity_needed: m.quantity_needed || 10,
+      quantity_needed: m.quantity_needed || 1,
       inStockQty: m.in_stock_qty || 0
     })));
     toastEvent.trigger(`Pre-filled refill renewal form for ${patient.patient_name}`, 'info', '/crm');
@@ -2762,6 +2762,7 @@ const SpecialOrdersSection: React.FC = () => {
   const handleNotifyArrival = async (order: SpecialOrderItem) => {
     setNotifyingId(order.id);
     try {
+      messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Arrival alert for ${order.product}`, 10);
       await api.notifySpecialOrderArrival(order.id);
       toastEvent.trigger(`Arrival WhatsApp sent to ${order.requester}!`, 'success', '/crm');
       await loadOrders();
@@ -2775,6 +2776,7 @@ const SpecialOrdersSection: React.FC = () => {
   const handleResendBooking = async (order: SpecialOrderItem) => {
     setResendingId(order.id);
     try {
+      messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Booking confirmation for ${order.product}`, 10);
       await api.resendSpecialOrderBooking(order.id);
       toastEvent.trigger(`Booking WhatsApp resent to ${order.requester}!`, 'success', '/crm');
       await loadOrders();

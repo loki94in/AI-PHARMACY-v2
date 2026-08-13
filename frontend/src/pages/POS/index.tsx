@@ -1189,7 +1189,7 @@ const POS = () => {
               patient_phone: match.patient_phone,
               medicine_id: med.medicine_id,
               medicine_name: med.medicine_name,
-              quantity: med.quantity_needed || 10
+              quantity: med.quantity_needed || 1
             });
             return;
           }

@@ -31,6 +31,7 @@ import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { exportToCSV, exportToPDF } from '../../utils/export';
+import { messageSendEvent } from '../../services/events';
 
 // Module-level cache for instant report hydration on tab switches / re-mounts
 const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
@@ -218,6 +219,7 @@ const Reports = () => {
   const handleSendToWhatsapp = async (overrideFormat?: string) => {
     setSendingWhatsapp(true);
     try {
+      messageSendEvent.triggerSendProgress('Store Owner WhatsApp', 'Sending monthly PDF report...', 10);
       const res = await apiClient.post('/reports/send-monthly-scheduled', {
         type: 'custom',
         startDate: fromDate,
@@ -239,6 +241,7 @@ const Reports = () => {
   const handleSendAllTemplateSamples = async () => {
     setSendingSamples(true);
     try {
+      messageSendEvent.triggerSendProgress('Store Owner WhatsApp', 'Sending template samples PDF...', 10);
       const res = await apiClient.post('/reports/send-all-template-samples', {});
       if (res.data?.success) {
         alert('All 3 PDF Template Samples (Classic, Corporate, Executive) queued & sent to WhatsApp!');

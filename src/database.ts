@@ -246,6 +246,54 @@ export async function ensureSchema(dbPath: string) {
   } catch (err) {
     console.warn('Failed removing CHECK constraint from distributor_dispatch_reminders:', err);
   }
+  try {
+    const spTableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='special_orders'");
+    if (spTableSql && spTableSql.sql.includes('CHECK(status IN')) {
+      console.log('Removing strict CHECK constraint from special_orders...');
+      const cols: Array<{ name: string }> = await db.all("PRAGMA table_info(special_orders)");
+      const colNames = cols.map(c => c.name).join(', ');
+      await db.exec(`
+        CREATE TABLE special_orders_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_id INTEGER DEFAULT NULL,
+          product TEXT,
+          requester TEXT,
+          phone TEXT,
+          notes TEXT,
+          medicine_name TEXT,
+          qty INTEGER DEFAULT 1,
+          priority TEXT DEFAULT 'Normal',
+          status TEXT DEFAULT 'Pending',
+          date DATETIME DEFAULT CURRENT_TIMESTAMP,
+          notified INTEGER DEFAULT 0,
+          pharmarack_distributor TEXT,
+          pharmarack_rate REAL,
+          pharmarack_mrp REAL,
+          pharmarack_mapped INTEGER DEFAULT 0,
+          pharmarack_scheme TEXT,
+          advance_payment REAL DEFAULT 0.0,
+          distributor_name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          source TEXT,
+          source_refill_id INTEGER DEFAULT NULL,
+          converted_to_refill_id INTEGER DEFAULT NULL,
+          cart_add_error TEXT DEFAULT NULL
+        );
+      `);
+      if (colNames) {
+        await db.exec(`
+          INSERT INTO special_orders_new (${colNames}) SELECT ${colNames} FROM special_orders;
+        `);
+      }
+      await db.exec(`
+        DROP TABLE special_orders;
+        ALTER TABLE special_orders_new RENAME TO special_orders;
+      `);
+    }
+  } catch (err) {
+    console.warn('Failed removing CHECK constraint from special_orders:', err);
+  }
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS medicines (
@@ -575,7 +623,7 @@ export async function ensureSchema(dbPath: string) {
       product TEXT,
       qty INTEGER DEFAULT 1,
       priority TEXT DEFAULT 'Normal',
-      status TEXT CHECK(status IN ('pending', 'ordered', 'fulfilled', 'cancelled', 'Pending', 'Ordered', 'Fulfilled', 'Cancelled', 'Ready')) DEFAULT 'Pending',
+      status TEXT DEFAULT 'Pending',
       notified INTEGER DEFAULT 0,
       pharmarack_mapped INTEGER DEFAULT 0,
       pharmarack_distributor TEXT,

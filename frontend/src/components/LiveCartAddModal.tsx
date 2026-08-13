@@ -552,7 +552,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const payload = [{
         productId: picked.productId!,
         storeId: picked.storeId!,
-        qty: item.recommended_qty || 10,
+        qty: item.recommended_qty || 1,
         rate: picked.rate || undefined,
         scheme: picked.scheme || undefined,
         productCode: picked.productCode,

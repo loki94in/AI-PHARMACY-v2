@@ -333,6 +333,167 @@ class TriggerSchedulerService {
     console.log('[TriggerScheduler] Dynamic trigger schedule initialization complete.');
   }
 
+  private snoozedUntil: Map<string, number> = new Map();
+
+  /**
+   * Return list of upcoming automations scheduled within lookaheadMinutes (default 5 minutes)
+   */
+  public async getUpcomingTriggers(lookaheadMinutes = 5): Promise<Array<{
+    id: string;
+    name: string;
+    category: string;
+    secondsUntilRun: number;
+    nextRunIso: string;
+    isSnoozed: boolean;
+    description: string;
+  }>> {
+    const database = await dbManager.getConnection();
+    const cfg = await this.getTriggerConfigs(database);
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const maxFutureSec = nowSec + (lookaheadMinutes * 60);
+
+    const upcoming: Array<{
+      id: string;
+      name: string;
+      category: string;
+      secondsUntilRun: number;
+      nextRunIso: string;
+      isSnoozed: boolean;
+      description: string;
+    }> = [];
+
+    // Helper to calculate seconds until a HH:MM target time today or tomorrow
+    const getSecondsUntilTime = (timeStr?: string): { seconds: number; nextDate: Date } => {
+      if (!timeStr || !timeStr.includes(':')) return { seconds: 999999, nextDate: now };
+      const [h, m] = timeStr.split(':').map(s => parseInt(s.trim(), 10));
+      const target = new Date(now);
+      target.setHours(isNaN(h) ? 9 : h, isNaN(m) ? 0 : m, 0, 0);
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1); // target is tomorrow
+      }
+      const seconds = Math.floor((target.getTime() - now.getTime()) / 1000);
+      return { seconds, nextDate: target };
+    };
+
+    // Check Nightly Backup
+    if (cfg.trigger_backup_enabled === 'true') {
+      const { seconds, nextDate } = getSecondsUntilTime(cfg.trigger_backup_time || '21:59');
+      const snoozedExp = this.snoozedUntil.get('backup') || 0;
+      if (seconds <= lookaheadMinutes * 60 && snoozedExp < now.getTime()) {
+        upcoming.push({
+          id: 'backup',
+          name: 'Nightly Database Backup & Chat Sync',
+          category: 'backup',
+          secondsUntilRun: seconds,
+          nextRunIso: nextDate.toISOString(),
+          isSnoozed: snoozedExp > now.getTime(),
+          description: 'Automated database backup & chat state snapshot creation'
+        });
+      }
+    }
+
+    // Check Daily Operational Check
+    if (cfg.trigger_daily_check_enabled === 'true') {
+      const { seconds, nextDate } = getSecondsUntilTime(cfg.trigger_daily_check_time || '09:00');
+      const snoozedExp = this.snoozedUntil.get('daily_check') || 0;
+      if (seconds <= lookaheadMinutes * 60 && snoozedExp < now.getTime()) {
+        upcoming.push({
+          id: 'daily_check',
+          name: 'Daily Operational Scan & Refill Evaluator',
+          category: 'daily',
+          secondsUntilRun: seconds,
+          nextRunIso: nextDate.toISOString(),
+          isSnoozed: snoozedExp > now.getTime(),
+          description: 'Checks patient refills, overdue credit notes & bounced products'
+        });
+      }
+    }
+
+    // Check Expiry Scan
+    if (cfg.trigger_expiry_scan_enabled === 'true') {
+      const { seconds, nextDate } = getSecondsUntilTime(cfg.trigger_expiry_scan_time || '09:00');
+      const snoozedExp = this.snoozedUntil.get('expiry_scan') || 0;
+      if (seconds <= lookaheadMinutes * 60 && snoozedExp < now.getTime()) {
+        upcoming.push({
+          id: 'expiry_scan',
+          name: 'Near-Expiry Stock Scan & WhatsApp Alerts',
+          category: 'expiry',
+          secondsUntilRun: seconds,
+          nextRunIso: nextDate.toISOString(),
+          isSnoozed: snoozedExp > now.getTime(),
+          description: 'Scans inventory batches near expiration date'
+        });
+      }
+    }
+
+    // Check Doctor Summary Report
+    if (cfg.trigger_doctor_report_enabled === 'true') {
+      const { seconds, nextDate } = getSecondsUntilTime(cfg.trigger_doctor_report_time || '20:00');
+      const snoozedExp = this.snoozedUntil.get('doctor_report') || 0;
+      if (seconds <= lookaheadMinutes * 60 && snoozedExp < now.getTime()) {
+        upcoming.push({
+          id: 'doctor_report',
+          name: 'Doctor Daily Summary Report Generation',
+          category: 'doctor',
+          secondsUntilRun: seconds,
+          nextRunIso: nextDate.toISOString(),
+          isSnoozed: snoozedExp > now.getTime(),
+          description: 'Compiles and sends daily prescription reports to doctors'
+        });
+      }
+    }
+
+    return upcoming.sort((a, b) => a.secondsUntilRun - b.secondsUntilRun);
+  }
+
+  /**
+   * Manually trigger an upcoming automation task immediately
+   */
+  public async runTriggerNow(triggerId: string): Promise<{ success: boolean; message: string }> {
+    const database = await dbManager.getConnection();
+    console.log(`[TriggerScheduler] User requested 'Run Now' for trigger '${triggerId}'...`);
+    try {
+      if (triggerId === 'backup') {
+        const { createBackup } = await import('./backupService.js');
+        await createBackup('Manual Run Now');
+        return { success: true, message: 'Database backup executed successfully.' };
+      } else if (triggerId === 'daily_check') {
+        const { checkAllRefills } = await import('./refillService.js');
+        const { checkOverdueCreditNotes } = await import('./creditNoteService.js');
+        await checkAllRefills(database);
+        await checkOverdueCreditNotes(database);
+        return { success: true, message: 'Daily operational scan executed successfully.' };
+      } else if (triggerId === 'expiry_scan') {
+        const { runExpiryScanAndAlert } = await import('./expiryAlertService.js');
+        await runExpiryScanAndAlert(90);
+        return { success: true, message: 'Near-expiry stock scan executed successfully.' };
+      } else if (triggerId === 'doctor_report') {
+        const { sendDailyDoctorReports } = await import('./doctorReportingService.js');
+        await sendDailyDoctorReports();
+        return { success: true, message: 'Doctor summary reports sent successfully.' };
+      } else {
+        return { success: false, message: `Unknown trigger ID: ${triggerId}` };
+      }
+    } catch (err: any) {
+      console.error(`[TriggerScheduler] Error executing trigger '${triggerId}':`, err);
+      return { success: false, message: err?.message || 'Execution failed.' };
+    }
+  }
+
+  /**
+   * Snooze an upcoming trigger for specified minutes (default 10 minutes)
+   */
+  public snoozeTrigger(triggerId: string, minutes = 10): { success: boolean; snoozedUntilIso: string } {
+    const untilMs = Date.now() + (minutes * 60 * 1000);
+    this.snoozedUntil.set(triggerId, untilMs);
+    console.log(`[TriggerScheduler] Trigger '${triggerId}' snoozed for ${minutes} minutes until ${new Date(untilMs).toLocaleTimeString()}`);
+    return {
+      success: true,
+      snoozedUntilIso: new Date(untilMs).toISOString()
+    };
+  }
+
   /**
    * Reload schedules dynamically when user updates settings in the UI
    */
@@ -343,3 +504,4 @@ class TriggerSchedulerService {
 }
 
 export const triggerSchedulerService = new TriggerSchedulerService();
+

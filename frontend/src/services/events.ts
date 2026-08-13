@@ -106,4 +106,30 @@ export const whatsappQueueEvent = {
   },
 };
 
+export interface MessageSendProgressDetail {
+  recipient: string;
+  messagePreview?: string;
+  durationSec?: number;
+  id?: string;
+}
+
+export const messageSendEvent = {
+  triggerSendProgress: (recipient: string, messagePreview?: string, durationSec = 10) => {
+    window.dispatchEvent(
+      new CustomEvent<MessageSendProgressDetail>('app-message-send-progress', {
+        detail: { recipient, messagePreview, durationSec, id: `msg-${Date.now()}` },
+      })
+    );
+  },
+  subscribeSendProgress: (callback: (detail: MessageSendProgressDetail) => void) => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<MessageSendProgressDetail>;
+      callback(customEvent.detail);
+    };
+    window.addEventListener('app-message-send-progress', handler);
+    return () => window.removeEventListener('app-message-send-progress', handler);
+  },
+};
+
+
 

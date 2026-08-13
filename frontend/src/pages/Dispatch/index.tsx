@@ -28,7 +28,7 @@ import {
   Info,
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
-import { whatsappQueueEvent, toastEvent } from '../../services/events';
+import { whatsappQueueEvent, toastEvent, messageSendEvent } from '../../services/events';
 import {
   getDispatchDeliveryBoysCache,
   getDispatchOrdersCache,
@@ -306,9 +306,15 @@ const Dispatch = () => {
   const handleSendReminderNow = async (id: number, customMessageOverride?: string) => {
     setSendingReminderId(id);
     try {
+      const targetItem = distributorReminders.find(r => r.id === id);
+      const distName = targetItem?.distributor_name || 'Distributor';
       const msgToSend = customMessageOverride !== undefined ? customMessageOverride : customMessages[id];
+
+      messageSendEvent.triggerSendProgress(distName, `Sending WhatsApp reminder to ${distName}...`, 10);
+      whatsappQueueEvent.triggerOpen();
+      whatsappQueueEvent.triggerUpdated();
+
       await api.sendDistributorReminderNow(id, msgToSend);
-      showNotif('WhatsApp reminder sent to distributor!');
       await fetchDistributorReminders(true);
     } catch (err: any) {
       showNotif(err.message || 'Failed to send WhatsApp reminder', 'error');
@@ -509,12 +515,12 @@ const Dispatch = () => {
 
     try {
       const orderIds = activeOrders.map(o => o.id);
-      const res = await api.enqueueDistributorCollection({
+      messageSendEvent.triggerSendProgress(targetBoy?.name || targetPhone || 'Delivery Boy', 'Distributor collection batch dispatch...', 10);
+      await api.enqueueDistributorCollection({
         orderIds,
         deliveryBoyPhone: targetPhone,
         deliveryBoyName: targetBoy?.name
       });
-      showNotif(res.message || `Enqueued ${orderIds.length} collection messages for 8s-12s paced sending!`, 'success');
       whatsappQueueEvent.triggerOpen();
       whatsappQueueEvent.triggerUpdated();
       setTimeout(() => fetchMessageDates(), 2000);

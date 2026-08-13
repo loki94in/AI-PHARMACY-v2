@@ -225,6 +225,7 @@ app.use('/api/telegram-prescription', lazyRoute(() => import('./routes/telegramP
 app.use('/api/refills', lazyRoute(() => import('./routes/refills.js')));
 app.use('/api/wa-business', lazyRoute(() => import('./routes/whatsappBusiness.js')));
 app.use('/api/automation', lazyRoute(() => import('./routes/automation.js')));
+app.use('/api/triggers', lazyRoute(() => import('./routes/triggers.js')));
 app.use('/api/system', lazyRoute(() => import('./routes/serviceStatus.js')));
 // Core API routes
 app.use('/api/sales', lazyRoute(() => import('./routes/sales.js')));
