@@ -312,9 +312,11 @@ const Sells = () => {
       refetch();
     };
     window.addEventListener('clear-module-cache', handleClear);
+    window.addEventListener('stock-write-completed', handleClear);
     window.addEventListener('app-show-toast', handleClear);
     return () => {
       window.removeEventListener('clear-module-cache', handleClear);
+      window.removeEventListener('stock-write-completed', handleClear);
       window.removeEventListener('app-show-toast', handleClear);
     };
   }, [refetch]);

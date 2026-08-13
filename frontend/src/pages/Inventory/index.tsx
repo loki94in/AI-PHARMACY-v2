@@ -252,6 +252,18 @@ const Inventory = () => {
     refetch();
   }, [refetch]);
 
+  useEffect(() => {
+    const handleStockUpdate = () => {
+      refetch();
+    };
+    window.addEventListener('stock-write-completed', handleStockUpdate);
+    window.addEventListener('price-updated', handleStockUpdate);
+    return () => {
+      window.removeEventListener('stock-write-completed', handleStockUpdate);
+      window.removeEventListener('price-updated', handleStockUpdate);
+    };
+  }, [refetch]);
+
 
 
   const handleRowClick = (item: InventoryItem) => {

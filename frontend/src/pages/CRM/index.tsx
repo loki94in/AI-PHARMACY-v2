@@ -241,6 +241,20 @@ const RefillsSection: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
+    const handleSync = () => {
+      load(true);
+    };
+    window.addEventListener('phone-numbers-updated', handleSync);
+    window.addEventListener('contacts-updated', handleSync);
+    window.addEventListener('distributors-updated', handleSync);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handleSync);
+      window.removeEventListener('contacts-updated', handleSync);
+      window.removeEventListener('distributors-updated', handleSync);
+    };
+  }, [load]);
+
+  useEffect(() => {
     if (!showAddModal) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

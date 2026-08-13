@@ -350,6 +350,19 @@ const Reports = () => {
     }
   };
 
+  useEffect(() => {
+    const handleReportUpdate = () => {
+      Object.keys(cachedReportsMap).forEach(k => delete cachedReportsMap[k]);
+      refetch();
+    };
+    window.addEventListener('stock-write-completed', handleReportUpdate);
+    window.addEventListener('price-updated', handleReportUpdate);
+    return () => {
+      window.removeEventListener('stock-write-completed', handleReportUpdate);
+      window.removeEventListener('price-updated', handleReportUpdate);
+    };
+  }, [refetch]);
+
   const handleGenerate = (e?: React.SyntheticEvent) => {
     if (e) {
       e.preventDefault();

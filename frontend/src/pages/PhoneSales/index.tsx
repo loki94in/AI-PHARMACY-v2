@@ -130,6 +130,19 @@ export default function PhoneSales() {
     return () => clearInterval(interval);
   }, [fetchStagedSales, fetchDeviceData, pageActive]);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      fetchStagedSales();
+      fetchDeviceData();
+    };
+    window.addEventListener('stock-write-completed', handleUpdate);
+    window.addEventListener('price-updated', handleUpdate);
+    return () => {
+      window.removeEventListener('stock-write-completed', handleUpdate);
+      window.removeEventListener('price-updated', handleUpdate);
+    };
+  }, [fetchStagedSales, fetchDeviceData]);
+
   const handleSelectSale = (sale: StagedSale) => {
     setSelectedSale(sale);
     setPatientName(sale.patient_name || 'Walk-in Customer');

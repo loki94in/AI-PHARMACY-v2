@@ -415,6 +415,21 @@ const DatabasePage = () => {
     queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
   }, [queryClient]);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      cachedMedicines = null;
+      loadDatabase();
+    };
+    window.addEventListener('stock-write-completed', handleUpdate);
+    window.addEventListener('price-updated', handleUpdate);
+    window.addEventListener('compact-inventory-ready', handleUpdate);
+    return () => {
+      window.removeEventListener('stock-write-completed', handleUpdate);
+      window.removeEventListener('price-updated', handleUpdate);
+      window.removeEventListener('compact-inventory-ready', handleUpdate);
+    };
+  }, [loadDatabase]);
+
   // Infinite Scroll Observer
   useEffect(() => {
     const observer = new IntersectionObserver(

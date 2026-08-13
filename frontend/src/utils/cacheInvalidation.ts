@@ -53,3 +53,37 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
       console.warn('[CacheInvalidation] Failed to import api:', err);
     });
 }
+
+/**
+ * Invalidates all price-related query keys and dispatches a price-updated event.
+ */
+export function invalidateAfterPriceWrite(queryClient: QueryClient) {
+  clearInfiniteScrollCache();
+
+  const keys = [
+    'sell-price-config',
+    'inventory-list',
+    'database-medicines',
+    'sells-list',
+    'dashboard'
+  ];
+
+  keys.forEach(key => {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('price-updated'));
+    window.dispatchEvent(new CustomEvent('stock-write-completed'));
+  }
+
+  queryClient.refetchQueries({ type: 'active', stale: true }).catch(() => {});
+
+  import('../services/api.js')
+    .then(({ api }) => {
+      api.getCompactInventory().catch(() => {});
+    })
+    .catch(err => {
+      console.warn('[CacheInvalidation] Failed to import api:', err);
+    });
+}

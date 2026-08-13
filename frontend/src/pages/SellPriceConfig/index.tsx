@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Tag, Save, SkipForward, AlertTriangle, Check, ArrowLeft, Percent, Info, Layers } from 'lucide-react';
 import { api } from '../../services/api';
+import { invalidateAfterPriceWrite } from '../../utils/cacheInvalidation';
 
 interface SellPriceRow {
   medicine_id: number;
@@ -162,6 +164,8 @@ export default function SellPriceConfig() {
     );
   };
 
+  const queryClient = useQueryClient();
+
   const handleSaveAll = async () => {
     setSaving(true);
     setErrorMsg('');
@@ -182,6 +186,7 @@ export default function SellPriceConfig() {
       });
 
       await api.updateBulkSellPrices(payload);
+      invalidateAfterPriceWrite(queryClient);
       setSuccessMsg('Sell prices and stock levels updated successfully!');
       setTimeout(() => {
         navigate('/purchases');

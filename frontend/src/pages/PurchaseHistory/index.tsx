@@ -152,6 +152,19 @@ const PurchaseHistory = () => {
     fetchReconciliation();
   }, []);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      refetch();
+      fetchReconciliation();
+    };
+    window.addEventListener('stock-write-completed', handleUpdate);
+    window.addEventListener('app-purchases-updated', handleUpdate);
+    return () => {
+      window.removeEventListener('stock-write-completed', handleUpdate);
+      window.removeEventListener('app-purchases-updated', handleUpdate);
+    };
+  }, [refetch]);
+
   const fetchReconciliation = async () => {
     try {
       setLoadingRecon(true);

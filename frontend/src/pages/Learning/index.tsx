@@ -45,6 +45,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { isValid10DigitPhone } from '../../utils/phone';
+import { broadcastContactDataChanged } from '../../utils/settingsSync';
 
 interface LearningProfileSummary {
   distributor_id: number;
@@ -210,6 +211,7 @@ const Learning: React.FC = () => {
       toastEvent.trigger('Distributor details & OCR rules updated successfully!', 'success');
       setEditingDistributor(null);
       delete cachedProfileDetailsMap[editingDistributor.id];
+      await broadcastContactDataChanged();
       refetchProfiles();
     } catch (err: any) {
       toastEvent.trigger('Failed to update distributor: ' + (err.message || 'Server error'), 'error');
@@ -228,12 +230,14 @@ const Learning: React.FC = () => {
       if (selectedProfileId === id) setSelectedProfileId(null);
       if (editingDistributor?.id === id) setEditingDistributor(null);
       toastEvent.trigger(`Distributor layout profile "${name}" deleted successfully!`, 'success');
-      window.dispatchEvent(new CustomEvent('distributors-updated'));
+      await broadcastContactDataChanged();
       refetchProfiles();
     } catch (err: any) {
       toastEvent.trigger('Failed to delete distributor layout: ' + (err.message || 'Server error'), 'error');
     }
   };
+
+
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
@@ -318,6 +322,24 @@ const Learning: React.FC = () => {
       refetchOnWindowFocus: false
     }
   );
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      cachedProfiles = [];
+      Object.keys(cachedProfileDetailsMap).forEach((key) => delete cachedProfileDetailsMap[Number(key)]);
+      refetchProfiles();
+    };
+    window.addEventListener('phone-numbers-updated', handleUpdate);
+    window.addEventListener('distributors-updated', handleUpdate);
+    window.addEventListener('settings-updated', handleUpdate);
+    window.addEventListener('contacts-updated', handleUpdate);
+    return () => {
+      window.removeEventListener('phone-numbers-updated', handleUpdate);
+      window.removeEventListener('distributors-updated', handleUpdate);
+      window.removeEventListener('settings-updated', handleUpdate);
+      window.removeEventListener('contacts-updated', handleUpdate);
+    };
+  }, [refetchProfiles]);
 
   // Selected Profile detail query
   const { data: selectedProfileDetail } = useApiQuery<ProfileDetail | null>(

@@ -250,6 +250,8 @@ const Mail = () => {
 
     window.addEventListener('settings-updated', handleSettingsUpdate);
     window.addEventListener('email-config-updated', handleSettingsUpdate);
+    window.addEventListener('contacts-updated', handleSettingsUpdate);
+    window.addEventListener('distributors-updated', handleSettingsUpdate);
     window.addEventListener('focus', handleSettingsUpdate);
 
     const handleVisibilityChange = () => {
@@ -262,6 +264,8 @@ const Mail = () => {
     return () => {
       window.removeEventListener('settings-updated', handleSettingsUpdate);
       window.removeEventListener('email-config-updated', handleSettingsUpdate);
+      window.removeEventListener('contacts-updated', handleSettingsUpdate);
+      window.removeEventListener('distributors-updated', handleSettingsUpdate);
       window.removeEventListener('focus', handleSettingsUpdate);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
