@@ -2151,7 +2151,8 @@ router.get('/sent-orders/dates', async (req, res) => {
 /**
  * GET /api/pharmarack/sent-orders
  * Query param: ?date=YYYY-MM-DD
- * Returns all placed orders for the specified date (or latest date if unspecified).
+ * Returns orders placed on the specified date, or today's if unspecified.
+ * Never silently substitutes a different (older) date — an empty date has zero orders, full stop.
  */
 router.get('/sent-orders', async (req, res) => {
   try {
@@ -2159,14 +2160,7 @@ router.get('/sent-orders', async (req, res) => {
     let targetDate = (req.query.date as string || '').trim();
 
     if (!targetDate) {
-      const latestRow = await db.get(
-        'SELECT order_date FROM pharmarack_placed_orders WHERE order_date IS NOT NULL ORDER BY order_date DESC LIMIT 1'
-      );
-      targetDate = latestRow ? latestRow.order_date : '';
-    }
-
-    if (!targetDate) {
-      return res.json({ success: true, date: '', orders: [] });
+      targetDate = new Date().toISOString().split('T')[0];
     }
 
     const rows = await db.all(
@@ -2193,7 +2187,7 @@ router.get('/sent-orders', async (req, res) => {
       };
     });
 
-    res.json({ success: true, date: targetDate, orders: parsedOrders });
+    res.json({ success: true, date: targetDate, is_recent_fallback: false, orders: parsedOrders });
   } catch (err: any) {
     console.error('Error fetching Pharmarack sent orders:', err);
     res.status(500).json({ error: 'Failed to fetch sent orders: ' + err.message });

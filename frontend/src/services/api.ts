@@ -504,7 +504,7 @@ export const api = {
     apiClient.get(`/crm/doctors/${id}/combinations/${medicineId}`).then(r => r.data),
   
   getEmailStatus: () => apiClient.get('/email/status').then(res => res.data),
-  getEmailInbox: (limit: number = 50) => apiClient.get('/email/inbox', { params: { limit } }).then(res => res.data),
+  getEmailInbox: (limit: number = 50, since?: string) => apiClient.get('/email/inbox', { params: { limit, since } }).then(res => res.data),
   getEmailAttachments: () => apiClient.get('/email/attachments').then(res => res.data),
   getEmailAttachmentsById: (emailId: number) => apiClient.get(`/email/${emailId}/attachments`).then(res => res.data),
   parseAttachment: (filename: string, importData: boolean = true) => apiClient.post('/email/attachments/parse', { filename, importData }).then(res => res.data),
@@ -729,7 +729,7 @@ export const api = {
   deleteDeliveryBoy: (id: number) => apiClient.delete(`/dispatch/delivery-boys/${id}`).then(res => res.data),
   getDeliveryBoyMessageDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/dispatch/messages/dates').then(res => res.data),
   getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: any[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
-  getTodayDistributorReminders: () => apiClient.get<{ success: boolean; window_start?: string; window_end?: string; reminders: any[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
+  getTodayDistributorReminders: () => apiClient.get<{ success: boolean; window_start?: string; window_end?: string; is_recent_fallback?: boolean; recent_date?: string | null; reminders: any[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
   toggleDistributorAutoRemind: (id: number, auto_remind: boolean) => apiClient.post('/dispatch/distributor-reminders/toggle-auto', { id, auto_remind }).then(res => res.data),
   updateDistributorReminderStatus: (id: number, data: { status?: string; delivery_boy_id?: number | null }) => apiClient.put(`/dispatch/distributor-reminders/${id}/status`, data).then(res => res.data),
   sendDistributorReminderNow: (id: number, custom_message?: string) => apiClient.post(`/dispatch/distributor-reminders/${id}/send-now`, { custom_message }).then(res => res.data),
@@ -898,6 +898,7 @@ export const api = {
   // Registered Mobile Devices API
   getRegisteredDevices: () => apiClient.get<{ success: boolean; devices: any[] }>('/settings/registered-devices').then(res => res.data),
   renameDevice: (token: string, deviceName: string) => apiClient.put<{ success: boolean; message: string }>('/settings/registered-devices/rename', { token, device_name: deviceName }).then(res => res.data),
+  revokeDevice: (token: string) => apiClient.delete<{ success: boolean; message: string }>(`/settings/registered-devices/${token}`).then(res => res.data),
   getWhatsAppStatus: () => apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string }>('/messaging/qr').then(res => res.data),
 
   // Sales Reorder Suggestions API
@@ -920,4 +921,12 @@ export const api = {
 
   // Therapeutic Search API
   searchByTherapeutic: (query: string) => apiClient.get<any[]>('/inventory/therapeutic-search', { params: { query } }).then(res => res.data),
+
+  // Smart Reminders & Audit Logs API
+  createManualDistributorOrderReminder: (data: { distributor_name: string; distributor_phone?: string; distributor_id?: number; delivery_boy_id?: number; date?: string }) =>
+    apiClient.post<{ success: boolean; reminder: any }>('/dispatch/distributor-reminders/manual-order', data).then(res => res.data),
+  retryDistributorReminder: (id: number, data?: { updated_phone?: string; custom_message?: string }) =>
+    apiClient.post<{ success: boolean; message: string }>(`/dispatch/distributor-reminders/${id}/retry`, data).then(res => res.data),
+  getCommunicationAuditLogs: (params?: { limit?: number; status?: string }) =>
+    apiClient.get<{ success: boolean; count: number; logs: any[] }>('/dispatch/audit-logs', { params }).then(res => res.data),
 };

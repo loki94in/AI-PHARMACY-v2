@@ -24,6 +24,16 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
   const todayStr = getTodayDateString();
 
   try {
+    // 0. Auto-deduplicate distributor_dispatch_reminders for today to keep single canonical row per distributor
+    await db.run(
+      `DELETE FROM distributor_dispatch_reminders 
+       WHERE id NOT IN (
+         SELECT MAX(id) 
+         FROM distributor_dispatch_reminders 
+         GROUP BY date, LOWER(TRIM(distributor_name))
+       )`
+    );
+
     // 1. Fetch distributors with Pharmarack placed orders today
     const pharmarackDistributors = await db.all(
       `SELECT DISTINCT po.store_name as store_name, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
@@ -42,32 +52,88 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       [todayStr]
     );
 
-    // Merge distinct active distributors with live orders placed today (Pharmarack or Purchases)
-    const distMap = new Map<string, { id: number | null; name: string; phone: string }>();
+    // 3. Fetch distributors with incoming emails/invoices received strictly today
+    const emailDistributors = await db.all(
+      `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
+       FROM distributors d
+       WHERE d.id IN (
+         SELECT distributor_id FROM distributor_historical_files WHERE DATE(created_at, 'localtime') = ?
+         UNION
+         SELECT distributor_id FROM purchases WHERE DATE(date) = ?
+       )
+       OR LOWER(TRIM(d.name)) IN (
+         SELECT LOWER(TRIM(distributor_name)) FROM email_order_reviews WHERE DATE(created_at, 'localtime') = ? OR DATE(email_date) = ?
+       )
+       OR (d.email IS NOT NULL AND d.email != '' AND EXISTS (
+         SELECT 1 FROM action_logs WHERE (LOWER(description) LIKE '%' || LOWER(d.email) || '%' OR LOWER(description) LIKE '%' || LOWER(d.name) || '%') AND DATE(created_at, 'localtime') = ?
+       ))
+       OR EXISTS (
+         SELECT 1 FROM emails e 
+         WHERE (
+           (d.email IS NOT NULL AND d.email != '' AND LOWER(e.from_addr) LIKE '%' || LOWER(d.email) || '%')
+           OR (e.distributor_name IS NOT NULL AND LOWER(TRIM(e.distributor_name)) = LOWER(TRIM(d.name)))
+           OR (e.extracted_distributor IS NOT NULL AND LOWER(TRIM(e.extracted_distributor)) = LOWER(TRIM(d.name)))
+         ) AND (DATE(e.date) = ? OR DATE(e.date, 'localtime') = ?)
+       )`,
+      [todayStr, todayStr, todayStr, todayStr, todayStr, todayStr, todayStr]
+    );
+
+    // Merge distinct active distributors (Pharmarack, Purchases, OR Incoming Emails)
+    const distMap = new Map<string, { id: number | null; name: string; phone: string; hasEmailToday: boolean }>();
     for (const d of [...pharmarackDistributors, ...purchaseDistributors]) {
       const name = d.distributor_name || d.store_name;
       if (name && !distMap.has(name.toLowerCase().trim())) {
         distMap.set(name.toLowerCase().trim(), {
           id: d.distributor_id || null,
           name: name.trim(),
-          phone: d.distributor_phone || ''
+          phone: d.distributor_phone || '',
+          hasEmailToday: false
         });
+      }
+    }
+
+    for (const d of emailDistributors) {
+      const name = d.distributor_name;
+      if (name) {
+        const key = name.toLowerCase().trim();
+        const existing = distMap.get(key);
+        if (existing) {
+          existing.hasEmailToday = true;
+        } else {
+          distMap.set(key, {
+            id: d.distributor_id || null,
+            name: name.trim(),
+            phone: d.distributor_phone || '',
+            hasEmailToday: true
+          });
+        }
       }
     }
 
     // Insert missing active distributors into distributor_dispatch_reminders for today
     for (const dist of distMap.values()) {
       const existing = await db.get(
-        `SELECT id FROM distributor_dispatch_reminders WHERE LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND date = ?`,
+        `SELECT id, status FROM distributor_dispatch_reminders WHERE LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND date = ?`,
         [dist.name, todayStr]
       );
       if (!existing) {
+        const initialStatus = dist.hasEmailToday ? 'Dispatched' : 'Pending';
         await db.run(
-          `INSERT INTO distributor_dispatch_reminders (distributor_id, distributor_name, distributor_phone, date, status, auto_remind)
-           VALUES (?, ?, ?, ?, 'Pending', 1)`,
-          [dist.id, dist.name, dist.phone, todayStr]
+          `INSERT INTO distributor_dispatch_reminders (distributor_id, distributor_name, distributor_phone, date, status, auto_remind, order_source, email_received_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+          [
+            dist.id, dist.name, dist.phone, todayStr, initialStatus,
+            dist.hasEmailToday ? 'email' : 'pharmarack',
+            dist.hasEmailToday ? new Date().toISOString() : null
+          ]
         );
       } else {
+        if (dist.hasEmailToday && existing.status === 'Pending') {
+          await db.run(
+            `UPDATE distributor_dispatch_reminders SET status = 'Dispatched', email_received_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [existing.id]
+          );
+        }
         // Keep distributor_phone and distributor_name in sync with master distributors directory
         if (dist.phone || dist.name) {
           await db.run(
@@ -82,19 +148,70 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       }
     }
 
-    // Purge/Delete any stale records for today that are NOT in today's active Pharmarack orders list
+    // Purge/Delete any stale records for today with no supporting evidence left.
+    // 'phone_call' orders are always manual, so they're never auto-purged.
+    // 'Collected' is a human-confirmed final state, so it's always kept.
+    // A merely 'Dispatched' status reached via automatic email-matching ('email' source) is NOT
+    // human-confirmed — if the email match it was based on no longer holds (e.g. it was a bad
+    // match to begin with), it must be re-validated like everything else instead of being
+    // permanently immune to cleanup, otherwise a single bad auto-match lingers forever.
     const activeNames = Array.from(distMap.values()).map(d => d.name.toLowerCase().trim());
     if (activeNames.length > 0) {
       const placeholders = activeNames.map(() => '?').join(',');
       await db.run(
-        `DELETE FROM distributor_dispatch_reminders WHERE date = ? AND LOWER(TRIM(distributor_name)) NOT IN (${placeholders})`,
+        `DELETE FROM distributor_dispatch_reminders
+         WHERE date = ? AND order_source != 'phone_call' AND status != 'Collected'
+           AND NOT (status = 'Dispatched' AND order_source != 'email')
+           AND LOWER(TRIM(distributor_name)) NOT IN (${placeholders})`,
         [todayStr, ...activeNames]
       );
     } else {
       await db.run(
-        `DELETE FROM distributor_dispatch_reminders WHERE date = ?`,
+        `DELETE FROM distributor_dispatch_reminders
+         WHERE date = ? AND order_source != 'phone_call' AND status != 'Collected'
+           AND NOT (status = 'Dispatched' AND order_source != 'email')`,
         [todayStr]
       );
+    }
+
+    // Email Auto-Match Check: Check email_order_reviews, distributor_historical_files, purchases, action_logs, and processed_files for today's received emails
+    const todayEmailDistributors = await db.all(
+      `SELECT DISTINCT d.id as dist_id, LOWER(TRIM(d.name)) as dist_name
+       FROM distributors d
+       WHERE d.id IN (
+         SELECT distributor_id FROM distributor_historical_files WHERE DATE(created_at, 'localtime') = ?
+         UNION
+         SELECT distributor_id FROM purchases WHERE DATE(date) = ?
+       )
+       OR LOWER(TRIM(d.name)) IN (
+         SELECT LOWER(TRIM(distributor_name)) FROM email_order_reviews WHERE DATE(created_at, 'localtime') = ? OR DATE(email_date) = ?
+       )
+       OR (d.email IS NOT NULL AND d.email != '' AND EXISTS (
+         SELECT 1 FROM action_logs WHERE (LOWER(description) LIKE '%' || LOWER(d.email) || '%' OR LOWER(description) LIKE '%' || LOWER(d.name) || '%') AND DATE(created_at, 'localtime') = ?
+       ))
+       OR EXISTS (
+         SELECT 1 FROM processed_files pf WHERE (LOWER(pf.file_path) LIKE '%' || LOWER(d.name) || '%' OR (d.email IS NOT NULL AND d.email != '' AND LOWER(pf.file_path) LIKE '%' || LOWER(d.email) || '%')) AND DATE(pf.last_processed, 'localtime') = ?
+       )
+       OR EXISTS (
+         SELECT 1 FROM emails e 
+         WHERE (
+           (d.email IS NOT NULL AND d.email != '' AND LOWER(e.from_addr) LIKE '%' || LOWER(d.email) || '%')
+           OR (e.distributor_name IS NOT NULL AND LOWER(TRIM(e.distributor_name)) = LOWER(TRIM(d.name)))
+           OR (e.extracted_distributor IS NOT NULL AND LOWER(TRIM(e.extracted_distributor)) = LOWER(TRIM(d.name)))
+         ) AND (DATE(e.date) = ? OR DATE(e.date, 'localtime') = ?)
+       )`,
+      [todayStr, todayStr, todayStr, todayStr, todayStr, todayStr, todayStr, todayStr]
+    );
+
+    for (const match of todayEmailDistributors) {
+      if (match.dist_name || match.dist_id) {
+        await db.run(
+          `UPDATE distributor_dispatch_reminders
+           SET status = 'Dispatched', email_received_at = CURRENT_TIMESTAMP
+           WHERE date = ? AND (distributor_id = ? OR LOWER(TRIM(distributor_name)) = ?) AND status = 'Pending'`,
+          [todayStr, match.dist_id || null, match.dist_name || '']
+        );
+      }
     }
 
     // Fetch and return full list of today's reminders with delivery boy name joined.
@@ -183,19 +300,65 @@ export async function checkAndSendAutoReminders() {
 }
 
 /**
+ * Automatically expire past-due reminders if the PC was offline during the reminder window.
+ * Ensures zero stale messages are ever sent for past dates.
+ */
+export async function purgeStaleOfflineReminders(): Promise<number> {
+  const db = await dbManager.getConnection();
+  const todayStr = getTodayDateString();
+
+  try {
+    const staleRecords = await db.all(
+      `SELECT id, distributor_name, distributor_phone, date
+       FROM distributor_dispatch_reminders
+       WHERE date < ? AND status = 'Pending'`,
+      [todayStr]
+    );
+
+    if (staleRecords.length > 0) {
+      console.log(`[DistributorReminderWorker] Purging/expiring ${staleRecords.length} past-due reminders from PC offline period.`);
+      for (const item of staleRecords) {
+        await db.run(
+          `UPDATE distributor_dispatch_reminders SET status = 'Skipped (PC Offline)' WHERE id = ?`,
+          [item.id]
+        );
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            'distributor_dispatch_reminder',
+            item.distributor_name,
+            item.distributor_phone || '',
+            `Skipped automatically because PC was offline on ${item.date}`,
+            'skipped_offline',
+            `reminder_stale_${item.id}_${item.date}`
+          ]
+        );
+      }
+    }
+    return staleRecords.length;
+  } catch (err: any) {
+    console.error('[DistributorReminderWorker] Error purging stale offline reminders:', err.message);
+    return 0;
+  }
+}
+
+/**
  * Start the periodic background checker (runs every 5 minutes)
  */
 export function startDistributorDispatchReminderWorker() {
   if (checkIntervalTimer) return;
 
-  // Run initial sync & check
+  // Run initial stale purge, sync & check
+  purgeStaleOfflineReminders().catch(() => {});
   syncTodayActiveDistributors().catch(() => {});
   checkAndSendAutoReminders().catch(() => {});
 
   // Check every 5 minutes (300,000 ms)
   checkIntervalTimer = setInterval(() => {
+    purgeStaleOfflineReminders().catch(() => {});
     checkAndSendAutoReminders().catch(() => {});
   }, 5 * 60 * 1000);
 
-  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized.');
+  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with PC offline protection.');
 }

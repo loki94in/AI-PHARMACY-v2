@@ -1,8 +1,10 @@
 import express from 'express';
+import fs from 'fs';
 import { dbManager } from '../database/connection.js';
 import { reconcileCreditNote } from '../services/creditNoteService.js';
 import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
 import { eventService } from '../services/eventService.js';
+import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
 
 const router = express.Router();
 
@@ -94,6 +96,8 @@ const putDistributorHandler = async (req: express.Request, res: express.Response
       preferred_file_format
     });
 
+    syncTodayActiveDistributors().catch(() => {});
+
     res.json({
       success: true,
       message: 'Distributor details updated successfully',
@@ -115,10 +119,29 @@ const deleteDistributorHandler = async (req: express.Request, res: express.Respo
   const { id } = req.params;
   try {
     const db = await dbManager.getConnection();
-    await db.run('DELETE FROM distributors WHERE id = ?', [id]);
+
+    // Remove learned OCR files from disk before dropping their DB rows so nothing orphaned is left behind
+    try {
+      const files = await db.all('SELECT file_path FROM distributor_historical_files WHERE distributor_id = ?', [id]);
+      for (const f of files) {
+        if (f.file_path && fs.existsSync(f.file_path)) {
+          try { fs.unlinkSync(f.file_path); } catch (e) { console.warn('Failed to delete distributor file:', f.file_path, e); }
+        }
+      }
+      await db.run('DELETE FROM distributor_historical_files WHERE distributor_id = ?', [id]);
+    } catch (_) {}
+
+    // Deleted distributors must stop appearing on the Dispatch page immediately
+    try {
+      await db.run('DELETE FROM distributor_dispatch_reminders WHERE distributor_id = ?', [id]);
+    } catch (_) {}
+
     try {
       await db.run('DELETE FROM distributor_learning_profiles WHERE distributor_id = ?', [id]);
     } catch (_) {}
+
+    await db.run('DELETE FROM distributors WHERE id = ?', [id]);
+
     eventService.broadcast('distributors_updated', { action: 'delete', id: Number(id) });
     res.json({ success: true, message: 'Distributor deleted successfully' });
   } catch (error) {

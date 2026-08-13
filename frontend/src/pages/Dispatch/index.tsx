@@ -21,6 +21,7 @@ import {
   Filter,
   Calendar,
   Phone,
+  PhoneCall,
   Copy,
   Zap,
   ShoppingCart,
@@ -37,6 +38,7 @@ import {
   type CachedDeliveryBoy,
 } from '../../utils/pageModuleCaches';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { toDateInputValue } from '../../utils/date';
 
@@ -120,6 +122,40 @@ const Dispatch = () => {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [windowSchedule, setWindowSchedule] = useState({ start: '12:30', end: '13:00' });
   const [nowTime, setNowTime] = useState<Date>(new Date());
+
+  // Manual Phone Call Order states
+  const [showManualOrderModal, setShowManualOrderModal] = useState(false);
+  const [manualDistributorName, setManualDistributorName] = useState('');
+  const [manualDistributorPhone, setManualDistributorPhone] = useState('');
+  const [manualDeliveryBoyId, setManualDeliveryBoyId] = useState<number | null>(null);
+  const [savingManualOrder, setSavingManualOrder] = useState(false);
+
+  const handleCreateManualOrder = async () => {
+    if (!manualDistributorName.trim()) {
+      showNotif('Please enter distributor name', 'error');
+      return;
+    }
+    setSavingManualOrder(true);
+    try {
+      const res = await api.createManualDistributorOrderReminder({
+        distributor_name: manualDistributorName.trim(),
+        distributor_phone: manualDistributorPhone.trim(),
+        delivery_boy_id: manualDeliveryBoyId || undefined
+      });
+      if (res && res.success) {
+        showNotif('Manual phone call order reminder added!');
+        setShowManualOrderModal(false);
+        setManualDistributorName('');
+        setManualDistributorPhone('');
+        setManualDeliveryBoyId(null);
+        fetchDistributorReminders();
+      }
+    } catch (err: any) {
+      showNotif(err?.message || 'Failed to add manual phone call order', 'error');
+    } finally {
+      setSavingManualOrder(false);
+    }
+  };
 
   // 1-second interval live clock for auto-reminder countdown
   useEffect(() => {
@@ -222,12 +258,18 @@ const Dispatch = () => {
     }
   }, []);
 
+  // Recent Fallback State
+  const [isRecentFallback, setIsRecentFallback] = useState(false);
+  const [recentDate, setRecentDate] = useState<string | null>(null);
+
   const fetchDistributorReminders = useCallback(async (silent = false) => {
     if (!silent) setLoadingDistributorReminders(true);
     try {
       const res = await api.getTodayDistributorReminders();
       if (res && res.success && Array.isArray(res.reminders)) {
         setDistributorReminders(res.reminders);
+        setIsRecentFallback(!!res.is_recent_fallback);
+        setRecentDate(res.recent_date || null);
         if (res.window_start && res.window_end) {
           setWindowSchedule({ start: res.window_start, end: res.window_end });
         }
@@ -315,18 +357,34 @@ const Dispatch = () => {
       fetchDistributorReminders();
       fetchMessageDates();
     };
+    const handleDistributorsUpdate = () => {
+      fetchDistributorReminders();
+    };
     const unsubWs = whatsappQueueEvent.subscribeUpdated(() => {
       fetchDistributorReminders();
       fetchAll();
     });
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
     window.addEventListener('settings-updated', handlePhoneUpdate);
+    window.addEventListener('distributors-updated', handleDistributorsUpdate);
     return () => {
       unsubWs();
       window.removeEventListener('phone-numbers-updated', handlePhoneUpdate);
       window.removeEventListener('settings-updated', handlePhoneUpdate);
+      window.removeEventListener('distributors-updated', handleDistributorsUpdate);
     };
   }, [fetchAll, fetchDistributorReminders, fetchMessageDates]);
+
+  // Poll for new incoming distributor emails / order status changes so the dispatch
+  // & collection reminder list stays live without requiring a manual refresh.
+  const pageActive = usePageActive();
+  useEffect(() => {
+    if (!pageActive) return;
+    const interval = setInterval(() => {
+      fetchDistributorReminders(true);
+    }, 45000);
+    return () => clearInterval(interval);
+  }, [pageActive, fetchDistributorReminders]);
 
   useEffect(() => {
     if (!showMessageData) return;
@@ -826,6 +884,16 @@ const Dispatch = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
+                onClick={() => setShowManualOrderModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors border border-emerald-500/30 font-semibold text-xs flex items-center gap-2 cursor-pointer active:scale-95 shadow-sm"
+                title="Record an order placed via phone call"
+              >
+                <Plus size={14} />
+                <span>Record Phone Order</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   fetchGlobalTemplate();
                   setShowTemplateModal(true);
@@ -1033,7 +1101,14 @@ const Dispatch = () => {
                                 </span>
                               ) : null}
 
-                              {item.latest_notif_status === 'failed' || item.latest_notif_error ? (
+                              {item.latest_notif_status === 'skipped_offline' || item.status === 'Skipped (PC Offline)' ? (
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0 cursor-help"
+                                  title="Skipped automatically because PC was offline during dispatch window"
+                                >
+                                  ⚡ Skipped (PC Offline)
+                                </span>
+                              ) : item.latest_notif_status === 'failed' || item.latest_notif_error ? (
                                 <span
                                   className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1 shrink-0 cursor-help"
                                   title={item.latest_notif_error || 'WhatsApp message failed to deliver'}
@@ -1069,12 +1144,15 @@ const Dispatch = () => {
                                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10'
                                   : item.status === 'Dispatched'
                                   ? 'bg-sky/20 text-sky border-sky/40 shadow-sky/10'
+                                  : item.status === 'Skipped (PC Offline)'
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                                   : 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-amber-500/10'
                               }`}
                             >
                               <option value="Pending">⏳ Pending Handover</option>
-                              <option value="Dispatched">📦 Dispatched by Warehouse</option>
+                              <option value="Dispatched">📦 Dispatched / Email Received</option>
                               <option value="Collected">✅ Collected by Staff</option>
+                              <option value="Skipped (PC Offline)">⚡ Skipped (PC Offline)</option>
                             </select>
                           </td>
                           <td className="p-3.5 align-middle text-right">
@@ -1779,6 +1857,83 @@ const Dispatch = () => {
               >
                 {savingTemplate ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={13} />}
                 Save Template
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showManualOrderModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass-panel p-6 rounded-2xl max-w-md w-full bg-bg2 border border-glass-border shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-glass-border pb-3">
+              <h3 className="text-base font-bold text-text flex items-center gap-2">
+                <PhoneCall className="text-emerald-400" size={18} /> Record Phone Call Order Reminder
+              </h3>
+              <button type="button" onClick={() => setShowManualOrderModal(false)} className="text-muted hover:text-text p-1 cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted">
+              Add a distributor order placed via personal phone call. The system will track and trigger dispatch reminders automatically if no stock email or invoice is received.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-text block mb-1">Distributor Name *</label>
+                <input
+                  type="text"
+                  value={manualDistributorName}
+                  onChange={e => setManualDistributorName(e.target.value)}
+                  placeholder="e.g. Mahavir Pharma"
+                  className="w-full px-3 py-2 rounded-xl bg-bg text-text text-xs border border-glass-border focus:outline-none focus:border-emerald-400/60 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-text block mb-1">Distributor Phone (WhatsApp)</label>
+                <input
+                  type="text"
+                  value={manualDistributorPhone}
+                  onChange={e => setManualDistributorPhone(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                  className="w-full px-3 py-2 rounded-xl bg-bg text-text text-xs border border-glass-border focus:outline-none focus:border-emerald-400/60 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-text block mb-1">Assigned Delivery Staff</label>
+                <select
+                  value={manualDeliveryBoyId || ''}
+                  onChange={e => setManualDeliveryBoyId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-3 py-2 rounded-xl bg-bg text-text text-xs border border-glass-border focus:outline-none font-medium cursor-pointer"
+                >
+                  <option value="">👤 Unassigned / Store Admin</option>
+                  {deliveryBoys.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-glass-border">
+              <button
+                type="button"
+                onClick={() => setShowManualOrderModal(false)}
+                className="px-4 py-2 rounded-xl bg-bg3 hover:bg-bg3/80 text-muted font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateManualOrder}
+                disabled={savingManualOrder}
+                className="px-4 py-2 rounded-xl bg-emerald-500 text-white font-bold text-xs hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-md"
+              >
+                {savingManualOrder ? <RefreshCw size={13} className="animate-spin" /> : <Plus size={13} />}
+                Add Phone Order
               </button>
             </div>
           </div>

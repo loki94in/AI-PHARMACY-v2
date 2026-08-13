@@ -23,6 +23,9 @@ import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useFetchMode } from '../../hooks/useFetchMode';
 
+// Local midnight, as a UTC ISO string — the mailbox strictly shows today's/present-date emails only.
+const getTodayStartIso = () => new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+
 interface EmailRecord {
   id?: number;
   uid?: number;
@@ -343,7 +346,7 @@ const Mail = () => {
       setLoading(true);
     }
     api
-      .getEmailInbox(50)
+      .getEmailInbox(50, getTodayStartIso())
       .then((data: any) => {
         if (Array.isArray(data)) {
           setEmails(data);
@@ -372,7 +375,7 @@ const Mail = () => {
       const res = await api.triggerEmailSync();
       if (res && res.synced > 0) {
         // New emails downloaded — refresh the inbox view from local DB
-        const data = await api.getEmailInbox(50);
+        const data = await api.getEmailInbox(50, getTodayStartIso());
         if (Array.isArray(data)) setEmails(data);
         toastEvent.trigger(`Received ${res.synced} new distributor email(s).`, 'mail', '/mail');
       }
@@ -388,7 +391,7 @@ const Mail = () => {
   // Silent background refresh from local DB (no loading indicator)
   const silentRefreshLocal = useCallback(() => {
     api
-      .getEmailInbox(50)
+      .getEmailInbox(50, getTodayStartIso())
       .then((data: any) => {
         if (Array.isArray(data)) setEmails(data);
       })

@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 34;
+const CURRENT_SCHEMA_VERSION = 35;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -204,7 +204,7 @@ export async function ensureSchema(dbPath: string) {
 
   console.log(`[Boot] Applying schema v${CURRENT_SCHEMA_VERSION}...`);
 
-  // We have removed the strict CHECK constraint on catalog_jobs table.
+  // We have removed the strict CHECK constraint on catalog_jobs and distributor_dispatch_reminders tables.
   // We'll rely on TypeScript for enum enforcement to prevent future SQLite crashes when new statuses are introduced.
   try {
     const tableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='catalog_jobs'");
@@ -214,6 +214,37 @@ export async function ensureSchema(dbPath: string) {
     }
   } catch (err) {
     console.warn('Failed removing CHECK constraint:', err);
+  }
+
+  try {
+    const remTableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='distributor_dispatch_reminders'");
+    if (remTableSql && remTableSql.sql.includes('CHECK(status IN')) {
+      console.log('Removing strict CHECK constraint from distributor_dispatch_reminders...');
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS distributor_dispatch_reminders_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          distributor_id INTEGER,
+          distributor_name TEXT NOT NULL,
+          distributor_phone TEXT,
+          delivery_boy_id INTEGER,
+          status TEXT DEFAULT 'Pending',
+          auto_remind INTEGER DEFAULT 1,
+          last_reminded_at DATETIME,
+          date TEXT NOT NULL,
+          order_source TEXT DEFAULT 'pharmarack',
+          email_received_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO distributor_dispatch_reminders_new (id, distributor_id, distributor_name, distributor_phone, delivery_boy_id, status, auto_remind, last_reminded_at, date, created_at)
+        SELECT id, distributor_id, distributor_name, distributor_phone, delivery_boy_id, status, auto_remind, last_reminded_at, date, created_at FROM distributor_dispatch_reminders;
+        DROP TABLE distributor_dispatch_reminders;
+        ALTER TABLE distributor_dispatch_reminders_new RENAME TO distributor_dispatch_reminders;
+        CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_date ON distributor_dispatch_reminders (date);
+        CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_distributor ON distributor_dispatch_reminders (distributor_id);
+      `);
+    }
+  } catch (err) {
+    console.warn('Failed removing CHECK constraint from distributor_dispatch_reminders:', err);
   }
 
   await db.exec(`
@@ -472,14 +503,22 @@ export async function ensureSchema(dbPath: string) {
       distributor_name TEXT NOT NULL,
       distributor_phone TEXT,
       delivery_boy_id INTEGER,
-      status TEXT CHECK(status IN ('Pending', 'Dispatched', 'Collected')) DEFAULT 'Pending',
+      status TEXT DEFAULT 'Pending',
       auto_remind INTEGER DEFAULT 1,
       last_reminded_at DATETIME,
       date TEXT NOT NULL,
+      order_source TEXT DEFAULT 'pharmarack',
+      email_received_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_date ON distributor_dispatch_reminders (date);
     CREATE INDEX IF NOT EXISTS idx_distributor_dispatch_reminders_distributor ON distributor_dispatch_reminders (distributor_id);
+    DELETE FROM distributor_dispatch_reminders 
+    WHERE id NOT IN (
+      SELECT MAX(id) 
+      FROM distributor_dispatch_reminders 
+      GROUP BY date, LOWER(TRIM(distributor_name))
+    );
 
     -- Core Operational Tables
     CREATE TABLE IF NOT EXISTS purchase_items (
@@ -898,6 +937,8 @@ export async function ensureSchema(dbPath: string) {
     ['stock_ledger', 'loose_quantity', 'ALTER TABLE stock_ledger ADD COLUMN loose_quantity INTEGER DEFAULT 0'],
     ['stock_ledger', 'transaction_id', 'ALTER TABLE stock_ledger ADD COLUMN transaction_id TEXT'],
     ['stock_ledger', 'business_date', 'ALTER TABLE stock_ledger ADD COLUMN business_date DATETIME'],
+    ['distributor_dispatch_reminders', 'order_source', "ALTER TABLE distributor_dispatch_reminders ADD COLUMN order_source TEXT DEFAULT 'pharmarack'"],
+    ['distributor_dispatch_reminders', 'email_received_at', 'ALTER TABLE distributor_dispatch_reminders ADD COLUMN email_received_at DATETIME'],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs

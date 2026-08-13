@@ -1573,6 +1573,17 @@ export class EmailService {
               email.date ? new Date(email.date).toISOString() : null
             ]
           );
+
+          // Auto-update today's distributor dispatch reminder status to 'Dispatched'
+          if (orderInfo.distributorName) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            await db.run(
+              `UPDATE distributor_dispatch_reminders
+               SET status = 'Dispatched', email_received_at = CURRENT_TIMESTAMP
+               WHERE date = ? AND LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND status = 'Pending'`,
+              [todayStr, orderInfo.distributorName.trim()]
+            );
+          }
         } catch (queueError) {
           console.error('Failed to queue email order for review:', queueError);
         }

@@ -218,6 +218,23 @@ const Learning: React.FC = () => {
     }
   };
 
+  const handleDeleteDistributorProfile = async (id: number, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete the distributor layout profile for "${name}"?\n\nThis will permanently remove the learned OCR mapping rules and distributor record.`)) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/distributors/${id}`);
+      delete cachedProfileDetailsMap[id];
+      if (selectedProfileId === id) setSelectedProfileId(null);
+      if (editingDistributor?.id === id) setEditingDistributor(null);
+      toastEvent.trigger(`Distributor layout profile "${name}" deleted successfully!`, 'success');
+      window.dispatchEvent(new CustomEvent('distributors-updated'));
+      refetchProfiles();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to delete distributor layout: ' + (err.message || 'Server error'), 'error');
+    }
+  };
+
   useEffect(() => {
     const tabParam = searchParams.get('tab');
     if (tabParam) {
@@ -1135,9 +1152,19 @@ const Learning: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-sm text-text">
                 <Truck size={16} className="text-emerald-400" />
-                <span>Today's Pharmarack Cart Sent Orders</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold border border-emerald-500/30">
-                  {todaySentOrdersList.length} Orders Placed Today
+                <span>
+                  {todaySentOrdersData?.is_recent_fallback
+                    ? `Recent Sent Orders (${todaySentOrdersData.date})`
+                    : "Today's Pharmarack Cart Sent Orders"}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                  todaySentOrdersData?.is_recent_fallback
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                }`}>
+                  {todaySentOrdersData?.is_recent_fallback
+                    ? `📅 Recent Orders (${todaySentOrdersList.length})`
+                    : `${todaySentOrdersList.length} Orders Placed Today`}
                 </span>
               </div>
             </div>
@@ -1210,16 +1237,28 @@ const Learning: React.FC = () => {
                               <div className="text-[10px] text-muted">ID #{p.distributor_id}</div>
                             </div>
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenEditDistributor(p);
-                            }}
-                            className="p-1 rounded-lg bg-bg2 text-muted hover:text-text border border-border"
-                            title="Edit Layout & Rules"
-                          >
-                            <Edit size={13} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEditDistributor(p);
+                              }}
+                              className="p-1 rounded-lg bg-bg2 text-muted hover:text-text border border-border"
+                              title="Edit Layout & Rules"
+                            >
+                              <Edit size={13} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteDistributorProfile(p.distributor_id, p.distributor_name);
+                              }}
+                              className="p-1 rounded-lg bg-red/10 text-red hover:bg-red/20 border border-red/20 cursor-pointer"
+                              title="Delete Layout & Distributor"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
                         <div className="text-[11px] text-muted flex items-center justify-between border-t border-border/40 pt-2">
                           <span>{p.distributor_phone || 'No phone'}</span>
@@ -1243,12 +1282,22 @@ const Learning: React.FC = () => {
                       <Building2 size={18} className="text-primary" />
                       <span>{selectedProfileDetail.distributor?.name || `Distributor #${selectedProfileId}`}</span>
                     </div>
-                    <button
-                      onClick={() => setSelectedProfileId(null)}
-                      className="text-muted hover:text-text cursor-pointer"
-                    >
-                      <X size={16} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleDeleteDistributorProfile(selectedProfileId, selectedProfileDetail.distributor?.name || `Distributor #${selectedProfileId}`)}
+                        className="px-2.5 py-1 rounded-lg bg-red/10 text-red hover:bg-red/20 border border-red/20 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+                        title="Delete Distributor Layout Profile"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Layout</span>
+                      </button>
+                      <button
+                        onClick={() => setSelectedProfileId(null)}
+                        className="text-muted hover:text-text cursor-pointer p-1"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-4 text-xs text-muted">
@@ -1776,21 +1825,31 @@ const Learning: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex items-center justify-between pt-2 border-t border-border">
               <button
-                onClick={() => setEditingDistributor(null)}
-                className="px-4 py-2 rounded-xl bg-bg2 border border-border text-text font-bold text-xs cursor-pointer hover:bg-bg3"
+                onClick={() => handleDeleteDistributorProfile(editingDistributor.id, editingDistributor.name)}
+                className="px-3.5 py-2 rounded-xl bg-red/10 border border-red/20 text-red font-bold text-xs cursor-pointer hover:bg-red/20 flex items-center gap-1.5 transition-all"
+                title="Delete Distributor Layout Profile"
               >
-                Cancel
+                <Trash2 size={14} />
+                <span>Delete Layout</span>
               </button>
-              <button
-                onClick={handleSaveDistributorDetails}
-                disabled={isSavingDistributor || !editingDistributor.name.trim()}
-                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isSavingDistributor ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                Save Changes
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setEditingDistributor(null)}
+                  className="px-4 py-2 rounded-xl bg-bg2 border border-border text-text font-bold text-xs cursor-pointer hover:bg-bg3"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveDistributorDetails}
+                  disabled={isSavingDistributor || !editingDistributor.name.trim()}
+                  className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isSavingDistributor ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                  Save Changes
+                </button>
+              </div>
             </div>
           </div>
         </div>,

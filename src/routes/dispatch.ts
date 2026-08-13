@@ -286,7 +286,7 @@ router.get('/messages', async (req, res) => {
 
 // ─── DISTRIBUTOR DISPATCH REMINDERS ──────────────────────────────────────────
 
-// GET today's distributor reminders (with auto-sync)
+// GET today's distributor reminders (strictly today's orders & emails only)
 router.get('/distributor-reminders/today', async (_req, res) => {
   try {
     const reminders = await syncTodayActiveDistributors();
@@ -294,7 +294,9 @@ router.get('/distributor-reminders/today', async (_req, res) => {
       success: true,
       window_start: '12:30',
       window_end: '13:00',
-      reminders
+      is_recent_fallback: false,
+      recent_date: null,
+      reminders: reminders || []
     });
   } catch (error: any) {
     console.error('Fetch distributor reminders error:', error);
@@ -394,6 +396,122 @@ router.post('/distributor-reminders/:id/send-now', async (req, res) => {
   } catch (error: any) {
     console.error('Send now distributor reminder error:', error);
     res.status(500).json({ error: error.message || 'Failed to send reminder' });
+  }
+});
+
+// POST add manual phone call order reminder
+router.post('/distributor-reminders/manual-order', async (req, res) => {
+  const { distributor_name, distributor_phone, distributor_id, delivery_boy_id, date } = req.body;
+  if (!distributor_name) return res.status(400).json({ error: 'distributor_name is required' });
+
+  const targetDate = date || new Date().toISOString().split('T')[0];
+
+  try {
+    const db = await dbManager.getConnection();
+    const cleanName = String(distributor_name).trim();
+
+    // Check if entry already exists for targetDate and distributor_name
+    const existing = await db.get(
+      `SELECT id FROM distributor_dispatch_reminders WHERE date = ? AND LOWER(TRIM(distributor_name)) = LOWER(TRIM(?))`,
+      [targetDate, cleanName]
+    );
+
+    let reminderId = existing?.id;
+
+    if (existing) {
+      await db.run(
+        `UPDATE distributor_dispatch_reminders 
+         SET distributor_id = COALESCE(?, distributor_id),
+             distributor_phone = CASE WHEN ? != '' THEN ? ELSE distributor_phone END,
+             delivery_boy_id = COALESCE(?, delivery_boy_id),
+             order_source = 'phone_call'
+         WHERE id = ?`,
+        [distributor_id || null, distributor_phone || '', distributor_phone || '', delivery_boy_id || null, existing.id]
+      );
+    } else {
+      const result = await db.run(
+        `INSERT INTO distributor_dispatch_reminders
+         (distributor_id, distributor_name, distributor_phone, delivery_boy_id, date, status, auto_remind, order_source)
+         VALUES (?, ?, ?, ?, ?, 'Pending', 1, 'phone_call')`,
+        [distributor_id || null, cleanName, distributor_phone || '', delivery_boy_id || null, targetDate]
+      );
+      reminderId = result.lastID;
+    }
+
+    const newReminder = await db.get(
+      `SELECT r.*, db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone
+       FROM distributor_dispatch_reminders r
+       LEFT JOIN delivery_boys db ON r.delivery_boy_id = db.id
+       WHERE r.id = ?`,
+      [reminderId]
+    );
+
+    res.status(201).json({ success: true, reminder: newReminder });
+  } catch (error: any) {
+    console.error('Manual order creation error:', error);
+    res.status(500).json({ error: 'Failed to create manual phone call order reminder' });
+  }
+});
+
+// POST 1-Click retry failed or skipped reminder (with optional updated phone)
+router.post('/distributor-reminders/:id/retry', async (req, res) => {
+  const { id } = req.params;
+  const { updated_phone, custom_message } = req.body || {};
+
+  try {
+    const db = await dbManager.getConnection();
+    const reminder = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [id]);
+    if (!reminder) return res.status(404).json({ error: 'Reminder not found' });
+
+    if (updated_phone && String(updated_phone).trim()) {
+      const cleanPhone = String(updated_phone).replace(/[^0-9]/g, '');
+      await db.run('UPDATE distributor_dispatch_reminders SET distributor_phone = ? WHERE id = ?', [cleanPhone, id]);
+      if (reminder.distributor_id) {
+        await db.run('UPDATE distributors SET phone = ? WHERE id = ?', [cleanPhone, reminder.distributor_id]);
+      }
+    }
+
+    // Reset status back to Pending for resend attempt
+    await db.run("UPDATE distributor_dispatch_reminders SET status = 'Pending' WHERE id = ?", [id]);
+
+    const ok = await notificationService.sendDistributorDispatchReminder(Number(id), custom_message);
+    if (ok) {
+      res.json({ success: true, message: 'WhatsApp reminder resent successfully' });
+    } else {
+      res.status(500).json({ error: 'Failed to resend WhatsApp reminder. Check phone number or connection.' });
+    }
+  } catch (error: any) {
+    console.error('Retry distributor reminder error:', error);
+    res.status(500).json({ error: error?.message || 'Failed to retry reminder' });
+  }
+});
+
+// GET central communication audit log (all reminder/whatsapp notifications)
+router.get('/audit-logs', async (req, res) => {
+  const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : 100;
+  const statusFilter = req.query.status ? String(req.query.status) : null;
+
+  try {
+    const db = await dbManager.getConnection();
+    let query = `
+      SELECT id, type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at
+      FROM automation_notifications
+    `;
+    const params: any[] = [];
+
+    if (statusFilter) {
+      query += ` WHERE status = ?`;
+      params.push(statusFilter);
+    }
+
+    query += ` ORDER BY id DESC LIMIT ?`;
+    params.push(limit);
+
+    const logs = await db.all(query, params);
+    res.json({ success: true, count: logs.length, logs });
+  } catch (error: any) {
+    console.error('Fetch communication audit logs error:', error);
+    res.status(500).json({ error: 'Failed to fetch communication audit logs' });
   }
 });
 
