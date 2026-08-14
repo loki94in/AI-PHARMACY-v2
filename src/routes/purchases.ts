@@ -1462,7 +1462,15 @@ router.delete('/:id', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
-        res.json({ success: true, message: 'Purchase deleted, stock reversed' });
+
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('purchases_sync', { success: true, action: 'delete', id: Number(id) });
+    } catch (sseErr) {
+      console.warn('Could not broadcast purchase delete update:', sseErr);
+    }
+
+    res.json({ success: true, message: 'Purchase deleted, stock reversed' });
   } catch (error) {
     if (db) {
       try { await db.run('ROLLBACK'); } catch (e) {}

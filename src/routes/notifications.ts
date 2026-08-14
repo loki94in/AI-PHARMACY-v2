@@ -207,23 +207,6 @@ router.patch('/notifications/devices/:token/rename', async (req, res) => {
   }
 });
 
-// Manual refill reminder endpoint
-router.post('/patients/send-refill', async (req, res) => {
-  const { whatsapp_number, name } = req.body;
-  if (!whatsapp_number) {
-    return res.status(400).json({ error: 'WhatsApp number required' });
-  }
-  try {
-    // Simple reminder text – can be templated later
-    const message = `Hello ${name || ''}, your medication refill is due soon. Please visit the pharmacy.`;
-    // This would use a notification/WhatsApp service
-    res.json({ success: true, message: 'Reminder sent (placeholder)' });
-  } catch (err) {
-    console.error('WhatsApp send error:', err);
-    res.status(500).json({ error: 'Failed to send reminder' });
-  }
-});
-
 // Get device activity logs
 router.get('/notifications/devices/logs', async (req, res) => {
   try {

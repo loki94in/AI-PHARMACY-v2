@@ -5,11 +5,13 @@ import { rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '..
 
 const router = express.Router();
 
-// Helper to log changes to action_logs
-async function logAction(db: any, actionType: string, description: string) {
+// Helper to log changes to action_logs. `metadata` is stored as structured JSON
+// alongside the human-readable description so forensics/compliance reads (see
+// /timeline below) don't depend on regex-parsing the description text.
+async function logAction(db: any, actionType: string, description: string, metadata?: Record<string, any>) {
   await db.run(
-    'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-    [actionType, description]
+    'INSERT INTO action_logs (action_type, description, metadata) VALUES (?, ?, ?)',
+    [actionType, description, metadata ? JSON.stringify(metadata) : null]
   );
 }
 
@@ -122,7 +124,8 @@ router.get('/timeline', async (req, res) => {
         al.id AS log_id,
         al.action_type AS reference,
         al.created_at AS date,
-        al.description AS detail
+        al.description AS detail,
+        al.metadata AS metadata
       FROM action_logs al
       WHERE al.action_type IN ('INVENTORY_CORRECTION', 'SALES_BILL_CORRECTION', 'PURCHASE_BILL_CORRECTION')
     `;
@@ -238,15 +241,23 @@ router.get('/timeline', async (req, res) => {
     // Map logs to timeline items
     const adjustments: any[] = [];
     for (const log of logs) {
-      const medMatch = log.detail.match(/Inventory correction for "([^"]+)"/i);
-      const batchMatch = log.detail.match(/Batch:\s*"([^"]+)"/i);
-      const idMatch = log.detail.match(/ID\s+(\d+)/i);
+      // Prefer the structured metadata column; only fall back to regex-parsing
+      // the human-readable description for rows logged before it existed.
+      let meta: any = null;
+      if (log.metadata) {
+        try { meta = JSON.parse(log.metadata); } catch (_e) { meta = null; }
+      }
 
-      const parsedMedName = medMatch ? medMatch[1].toLowerCase().trim() : '';
-      const parsedBatch = batchMatch ? batchMatch[1] : '';
-      const parsedInvId = idMatch ? parseInt(idMatch[1], 10) : null;
+      const parsedMedName = meta?.medicineName
+        ? meta.medicineName.toLowerCase().trim()
+        : (log.detail.match(/Inventory correction for "([^"]+)"/i)?.[1]?.toLowerCase().trim() || '');
+      const parsedBatch = meta?.batchNo?.to ?? (log.detail.match(/Batch:\s*"([^"]+)"/i)?.[1] || '');
+      const parsedInvId = meta?.inventoryId ?? (() => {
+        const m = log.detail.match(/ID\s+(\d+)/i);
+        return m ? parseInt(m[1], 10) : null;
+      })();
 
-      let medicine_id = parsedMedName ? medMapByName.get(parsedMedName) : null;
+      let medicine_id = meta?.medicineId ?? (parsedMedName ? medMapByName.get(parsedMedName) : null);
       let batch_no = parsedBatch;
       let expiry_date = null;
       let mrp = 0;
@@ -282,7 +293,8 @@ router.get('/timeline', async (req, res) => {
         inventory_id,
         expiry_date,
         mrp,
-        detail: log.detail
+        detail: log.detail,
+        metadata: meta
       });
     }
 
@@ -337,25 +349,41 @@ router.get('/timeline', async (req, res) => {
 
     // Format adjustments
     for (const adj of adjustments) {
-      // Parse quantities from detail log if possible
+      // Prefer structured metadata; fall back to parsing the detail text for
+      // rows logged before the metadata column existed.
       let adj_qty = 0;
       let adj_loose = 0;
-      const qtyMatch = adj.detail.match(/Quantity:\s*(\d+)\s*->\s*(\d+)/i);
-      const looseMatch = adj.detail.match(/Loose(?:_quantity)?:\s*(\d+)\s*->\s*(\d+)/i);
-      
       let target_qty = null;
       let target_loose = null;
-      if (qtyMatch) {
-        const oldVal = parseInt(qtyMatch[1], 10);
-        const newVal = parseInt(qtyMatch[2], 10);
+
+      if (adj.metadata?.quantity) {
+        const oldVal = Number(adj.metadata.quantity.from);
+        const newVal = Number(adj.metadata.quantity.to);
         adj_qty = newVal - oldVal;
         target_qty = newVal;
+      } else {
+        const qtyMatch = adj.detail.match(/Quantity:\s*(\d+)\s*->\s*(\d+)/i);
+        if (qtyMatch) {
+          const oldVal = parseInt(qtyMatch[1], 10);
+          const newVal = parseInt(qtyMatch[2], 10);
+          adj_qty = newVal - oldVal;
+          target_qty = newVal;
+        }
       }
-      if (looseMatch) {
-        const oldVal = parseInt(looseMatch[1], 10);
-        const newVal = parseInt(looseMatch[2], 10);
+
+      if (adj.metadata?.looseQuantity) {
+        const oldVal = Number(adj.metadata.looseQuantity.from);
+        const newVal = Number(adj.metadata.looseQuantity.to);
         adj_loose = newVal - oldVal;
         target_loose = newVal;
+      } else {
+        const looseMatch = adj.detail.match(/Loose(?:_quantity)?:\s*(\d+)\s*->\s*(\d+)/i);
+        if (looseMatch) {
+          const oldVal = parseInt(looseMatch[1], 10);
+          const newVal = parseInt(looseMatch[2], 10);
+          adj_loose = newVal - oldVal;
+          target_loose = newVal;
+        }
       }
 
       allTransactions.push({
@@ -777,7 +805,15 @@ router.put('/inventory/:inventoryId', async (req, res) => {
 
     // Audit trace logging
     const desc = `Inventory correction for "${oldRecord.name}" (ID ${inventoryId}). Quantity: ${oldRecord.quantity} -> ${quantity}, Loose: ${oldRecord.loose_quantity} -> ${loose_quantity}, Batch: "${oldRecord.batch_no}" -> "${batch_no}", Expiry: "${oldRecord.expiry_date}" -> "${expiry_date}".`;
-    await logAction(db, 'INVENTORY_CORRECTION', desc);
+    await logAction(db, 'INVENTORY_CORRECTION', desc, {
+      inventoryId: Number(inventoryId),
+      medicineId: oldRecord.medicine_id,
+      medicineName: oldRecord.name,
+      quantity: { from: oldRecord.quantity, to: quantity },
+      looseQuantity: { from: oldRecord.loose_quantity, to: loose_quantity },
+      batchNo: { from: oldRecord.batch_no, to: batch_no },
+      expiryDate: { from: oldRecord.expiry_date, to: expiry_date }
+    });
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
@@ -942,7 +978,13 @@ router.put('/sales/:invoiceId', async (req, res) => {
 
     // Audit logging
     const desc = `Corrected Sales Invoice #${existingBill.invoice_no}. Subtotal: ₹${existingBill.subtotal} -> ₹${subtotal}, Discount: ₹${existingBill.discount} -> ₹${discount}, Total: ₹${existingBill.total_amount} -> ₹${total}.`;
-    await logAction(db, 'SALES_BILL_CORRECTION', desc);
+    await logAction(db, 'SALES_BILL_CORRECTION', desc, {
+      invoiceId,
+      invoiceNo: existingBill.invoice_no,
+      subtotal: { from: existingBill.subtotal, to: subtotal },
+      discount: { from: existingBill.discount, to: discount },
+      total: { from: existingBill.total_amount, to: total }
+    });
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
@@ -1105,7 +1147,11 @@ router.put('/purchases/:purchaseId', async (req, res) => {
 
     // Audit logging
     const desc = `Corrected Purchase Bill #${existingPurchase.invoice_no || purchaseId}. Total Amount: ₹${existingPurchase.total_amount} -> ₹${totalAmount}.`;
-    await logAction(db, 'PURCHASE_BILL_CORRECTION', desc);
+    await logAction(db, 'PURCHASE_BILL_CORRECTION', desc, {
+      purchaseId,
+      invoiceNo: existingPurchase.invoice_no || null,
+      totalAmount: { from: existingPurchase.total_amount, to: totalAmount }
+    });
 
     await db.run('COMMIT');
     inventoryCache.invalidate();

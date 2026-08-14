@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 35;
+const CURRENT_SCHEMA_VERSION = 36;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -462,6 +462,7 @@ export async function ensureSchema(dbPath: string) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action_type TEXT,
       description TEXT,
+      metadata TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS settings (
@@ -841,6 +842,7 @@ export async function ensureSchema(dbPath: string) {
   // Safely add new columns to existing tables (SQLite throws if column exists — we catch and ignore)
   // Safely add new columns to existing tables after pre-checking PRAGMA table_info
   const alterStatements: Array<[string, string, string]> = [
+    ['action_logs', 'metadata', 'ALTER TABLE action_logs ADD COLUMN metadata TEXT'],
     ['inventory_master', 'unit_price', 'ALTER TABLE inventory_master ADD COLUMN unit_price REAL DEFAULT 0'],
     ['inventory_master', 'cost_price', 'ALTER TABLE inventory_master ADD COLUMN cost_price REAL DEFAULT 0'],
     ['inventory_master', 'reorder_level', 'ALTER TABLE inventory_master ADD COLUMN reorder_level INTEGER DEFAULT 10'],

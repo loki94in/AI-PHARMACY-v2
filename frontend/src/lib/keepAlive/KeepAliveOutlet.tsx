@@ -1,4 +1,4 @@
-import { useEffect, useState, Suspense, type ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { PageActiveProvider } from './PageActiveContext';
 import { PageErrorBoundary } from './PageErrorBoundary';
@@ -23,38 +23,20 @@ interface Props {
 export function KeepAliveOutlet({ routes, notFoundElement, fallback }: Props) {
   const location = useLocation();
   const matched = routes.find(r => r.path === location.pathname);
-  const currentPath = matched ? matched.path : null;
-
-  const [visited, setVisited] = useState<string[]>(() => (currentPath ? [currentPath] : []));
-
-  useEffect(() => {
-    if (currentPath && !visited.includes(currentPath)) {
-      setVisited(prev => [...prev, currentPath]);
-    }
-  }, [currentPath, visited]);
 
   if (!matched) {
     return <>{notFoundElement}</>;
   }
 
   return (
-    <>
-      {visited.map(path => {
-        const route = routes.find(r => r.path === path);
-        if (!route) return null;
-        const isActive = path === currentPath;
-        return (
-          <div key={path} style={{ display: isActive ? 'flex' : 'none' }} className="h-full w-full flex-1 flex flex-col min-h-0">
-            <PageActiveProvider value={isActive}>
-              <PageErrorBoundary pagePath={path}>
-                <Suspense fallback={fallback || null}>
-                  {route.element}
-                </Suspense>
-              </PageErrorBoundary>
-            </PageActiveProvider>
-          </div>
-        );
-      })}
-    </>
+    <div key={matched.path} className="h-full w-full flex-1 flex flex-col min-h-0">
+      <PageActiveProvider value={true}>
+        <PageErrorBoundary pagePath={matched.path}>
+          <Suspense fallback={fallback || null}>
+            {matched.element}
+          </Suspense>
+        </PageErrorBoundary>
+      </PageActiveProvider>
+    </div>
   );
 }

@@ -9,7 +9,7 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 
 const router = express.Router();
 
-// Compliance check placeholder – returns basic info
+// Compliance summary: counts inventory items past their expiry date
 router.get('/', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();

@@ -2232,6 +2232,14 @@ router.delete('/:id', async (req, res) => {
     }
 
     inventoryCache.invalidate();
+
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('sales_sync', { success: true, action: 'delete', id: Number(id) });
+    } catch (sseErr) {
+      console.warn('Could not broadcast sale delete update:', sseErr);
+    }
+
     res.json({ success: true, message: 'Invoice deleted, stock restored, credit balance updated' });
   } catch (error) {
     const err = error as Error;

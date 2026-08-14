@@ -16,6 +16,7 @@ import { stagedQueueService, type StagedItem } from '../../services/stagedQueueS
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { isExpiredDate, toDateInputValue } from '../../utils/date';
+import { useDraftStore } from '../../lib/cache/useDraftStore';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -253,7 +254,7 @@ const POS = () => {
   const [initialActiveTabId] = useState(() => getInitialPOSActiveTabId(initialTabs));
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
 
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useDraftStore('pos_search_term', '');
   const [showCamera, setShowCamera] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [patientName, setPatientName] = useState(initialActiveTab.patientName || '');
