@@ -127,6 +127,36 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const [isFlushingNext, setIsFlushingNext] = useState(false);
+
+  const handleFlushNext = async () => {
+    if (isFlushingNext) return;
+    setIsFlushingNext(true);
+    try {
+      const res = await api.flushNextWhatsAppQueueItem();
+      if (res?.forced) {
+        toastEvent.trigger('Dispatched next queue message immediately!', 'success');
+      } else {
+        toastEvent.trigger('No pending items in queue', 'info');
+      }
+      await fetchStatus();
+    } catch (err) {
+      toastEvent.trigger('Failed to dispatch next message', 'error');
+    } finally {
+      setTimeout(() => setIsFlushingNext(false), 1000);
+    }
+  };
+
+  const handleSetPacingPreset = async (preset: 'fast' | 'safe') => {
+    try {
+      const res = await api.setWhatsAppQueuePacingPreset(preset);
+      toastEvent.trigger(preset === 'fast' ? '⚡ Turbo Pacing enabled (3-5s)' : '🛡️ Safe Pacing enabled (8-12s)', 'success');
+      await fetchStatus();
+    } catch (err) {
+      toastEvent.trigger('Failed to update pacing preset', 'error');
+    }
+  };
+
   const handleTogglePause = async () => {
     try {
       await apiClient.post('/whatsapp/queue/toggle-pause');
@@ -290,11 +320,40 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               )}
             </div>
 
-            {/* Quick Actions */}
-            <div className="flex items-center gap-2">
+            {/* Speed Pacing Toggle & Quick Actions */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Pacing Preset Pills */}
+              <div className="flex items-center bg-bg/60 p-0.5 rounded-xl border border-glass-border/40 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => handleSetPacingPreset('fast')}
+                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                    queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 3000
+                      ? 'bg-amber-500 text-black font-extrabold shadow-sm'
+                      : 'text-muted hover:text-text'
+                  }`}
+                  title="Turbo Pacing: 3-5 seconds between messages for rapid sending"
+                >
+                  <Zap size={10} className="fill-current" />
+                  <span>Turbo (3-5s)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetPacingPreset('safe')}
+                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                    queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 8000 && queueState?.pacingPreset !== 'fast')
+                      ? 'bg-emerald-500 text-black font-extrabold shadow-sm'
+                      : 'text-muted hover:text-text'
+                  }`}
+                  title="Safe Pacing: 8-12 seconds anti-detection pacing"
+                >
+                  <span>Safe (8-12s)</span>
+                </button>
+              </div>
+
               <button
                 onClick={handleTogglePause}
-                className={`px-3 py-1.5 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                className={`px-2.5 py-1.5 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
                   queueState?.isPaused
                     ? 'bg-amber-500 hover:bg-amber-600 text-white'
                     : 'bg-white/10 hover:bg-white/20 text-text border border-glass-border'
@@ -302,16 +361,28 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                 title={queueState?.isPaused ? 'Resume WhatsApp Queue' : 'Pause WhatsApp Queue'}
               >
                 {queueState?.isPaused ? <Play size={12} className="fill-current" /> : <Pause size={12} className="fill-current" />}
-                <span>{queueState?.isPaused ? 'Resume Queue' : 'Pause Queue'}</span>
+                <span>{queueState?.isPaused ? 'Resume' : 'Pause'}</span>
+              </button>
+
+              <button
+                onClick={handleFlushNext}
+                disabled={pendingTotal === 0 || isFlushingNext}
+                className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 disabled:opacity-40 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                title="Send the very next pending message immediately without waiting for delay countdown"
+              >
+                <Zap size={12} className="text-amber-400 fill-amber-400" />
+                <span>{isFlushingNext ? 'Sending...' : 'Send Next Now'}</span>
               </button>
 
               <button
                 onClick={handleFlushNow}
-                disabled={pendingTotal === 0}
+                disabled={pendingTotal === 0 || isFlushing}
                 className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-40 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="Flush and process all pending queue messages"
               >
-                <Play size={12} /> Flush Now
+                <Play size={12} /> Flush All
               </button>
+
               {failedTotal > 0 && (
                 <button
                   onClick={handleRetryFailed}

@@ -5,6 +5,7 @@ import {
   Package,
   Clock,
   CheckCircle,
+  Check,
   XCircle,
   MapPin,
   Plus,
@@ -13,6 +14,7 @@ import {
   Trash2,
   RefreshCw,
   Send,
+  Edit2,
   Edit3,
   Bell,
   MessageSquare,
@@ -344,6 +346,46 @@ const Dispatch = () => {
       showNotif('Failed to save template', 'error');
     } finally {
       setSavingTemplate(false);
+    }
+  };
+
+  // Inline Distributor Phone Edit state on Dispatch table
+  const [editingDistPhoneId, setEditingDistPhoneId] = useState<number | null>(null);
+  const [distPhoneInput, setDistPhoneInput] = useState<string>('');
+  const [isSavingDistPhone, setIsSavingDistPhone] = useState<boolean>(false);
+
+  const handleStartEditDistPhone = (item: any) => {
+    setEditingDistPhoneId(item.id);
+    setDistPhoneInput(item.distributor_phone || '');
+  };
+
+  const handleSaveDistributorPhone = async (item: any) => {
+    const cleanPhone = distPhoneInput.replace(/\D/g, '');
+    if (cleanPhone && cleanPhone.length !== 10 && !(cleanPhone.length === 12 && cleanPhone.startsWith('91'))) {
+      showNotif('Please enter a valid 10-digit phone number', 'error');
+      return;
+    }
+    setIsSavingDistPhone(true);
+    try {
+      const finalPhone = cleanPhone.length === 12 && cleanPhone.startsWith('91') ? cleanPhone.slice(2) : cleanPhone;
+      // Persist across tables
+      await apiClient.post('/pharmarack/distributor-mappings', {
+        store_name: item.distributor_name,
+        distributor_id: item.distributor_id || null,
+        phone: finalPhone
+      });
+      await apiClient.post('/distributors', {
+        name: item.distributor_name,
+        phone: finalPhone
+      });
+      setDistributorReminders(prev => prev.map(r => r.id === item.id ? { ...r, distributor_phone: finalPhone } : r));
+      showNotif(`Phone number updated for ${item.distributor_name}`);
+      setEditingDistPhoneId(null);
+      await fetchDistributorReminders(true);
+    } catch (err: any) {
+      showNotif(err?.message || 'Failed to save distributor phone', 'error');
+    } finally {
+      setIsSavingDistPhone(false);
     }
   };
 
@@ -1127,7 +1169,55 @@ const Dispatch = () => {
                               ) : null}
                             </div>
                           </td>
-                          <td className="p-3.5 font-mono text-muted text-xs align-middle">{item.distributor_phone || 'No phone set'}</td>
+                          <td className="p-3.5 font-mono text-xs align-middle">
+                            {editingDistPhoneId === item.id ? (
+                              <div className="flex items-center gap-1.5 min-w-[170px]">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={distPhoneInput}
+                                  onChange={e => setDistPhoneInput(e.target.value)}
+                                  placeholder="10-digit number"
+                                  className="w-28 text-xs font-mono px-2 py-1 rounded-lg bg-bg border border-glass-border focus:outline-none focus:border-emerald-500 text-text font-bold"
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSaveDistributorPhone(item);
+                                    if (e.key === 'Escape') setEditingDistPhoneId(null);
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDistributorPhone(item)}
+                                  disabled={isSavingDistPhone}
+                                  className="p-1 rounded-md bg-emerald-500 text-black hover:bg-emerald-400 cursor-pointer shadow-sm disabled:opacity-50"
+                                  title="Save phone number"
+                                >
+                                  <Check size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingDistPhoneId(null)}
+                                  className="p-1 rounded-md bg-bg3 text-muted hover:text-text cursor-pointer"
+                                  title="Cancel"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 group">
+                                <span className={item.distributor_phone ? 'text-text font-semibold' : 'text-muted italic'}>
+                                  {item.distributor_phone || 'No phone set'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditDistPhone(item)}
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-bg3 text-muted hover:text-sky transition-all cursor-pointer"
+                                  title={item.distributor_phone ? "Edit phone number" : "Add phone number"}
+                                >
+                                  <Edit2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
                           <td className="p-3.5 align-middle">
                             <select
                               value={item.delivery_boy_id || ''}

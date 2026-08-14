@@ -10,6 +10,7 @@
 import { dbManager } from '../database/connection.js';
 import { sendMessage } from '../whatsappClient.js';
 import { formatDisplayPhone } from './notificationService.js';
+import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 
 const CYCLE_DAYS = 45;
 const BAND_START_HOUR = 11;
@@ -123,17 +124,14 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
     } catch { /* skip malformed */ }
   }
 
-  // Fetch distributor phone numbers and per-distributor preferred file format from DB
+  // Fetch distributor phone numbers and per-distributor preferred file format using universal resolver
   const distPhonesMap: Record<string, string> = {};
   const distFormatsMap: Record<string, string> = {};
   for (const distName of Object.keys(grouped)) {
-    const dRow = await db.get(
-      `SELECT phone, preferred_file_format FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
-      [distName, `%${distName}%`]
-    );
-    distPhonesMap[distName] = dRow?.phone || 'No phone set';
-    if (dRow?.preferred_file_format) {
-      distFormatsMap[distName] = dRow.preferred_file_format;
+    const contact = await resolveDistributorContact(db, distName);
+    distPhonesMap[distName] = contact.distributor_phone || 'No phone set';
+    if (contact.preferred_file_format) {
+      distFormatsMap[distName] = contact.preferred_file_format;
     }
   }
 

@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
 import { notificationService } from './notificationService.js';
+import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 
 let isWorkerRunning = false;
 let checkIntervalTimer: NodeJS.Timeout | null = null;
@@ -35,26 +36,44 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
     );
 
     // 1. Fetch distributors with Pharmarack placed orders today
-    const pharmarackDistributors = await db.all(
-      `SELECT DISTINCT po.store_name as store_name, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
+    const pharmarackOrders = await db.all(
+      `SELECT DISTINCT po.store_name as store_name
        FROM pharmarack_placed_orders po
-       LEFT JOIN distributors d ON LOWER(TRIM(po.store_name)) = LOWER(TRIM(d.name))
        WHERE po.order_date = ? OR DATE(po.placed_at / 1000, 'unixepoch') = ?`,
       [todayStr, todayStr]
     );
 
+    const pharmarackDistributors: Array<{ store_name: string; distributor_id: number | null; distributor_name: string; distributor_phone: string }> = [];
+    for (const po of pharmarackOrders) {
+      const storeName = (po.store_name || '').trim();
+      if (!storeName) continue;
+      const contact = await resolveDistributorContact(db, storeName);
+      pharmarackDistributors.push({
+        store_name: storeName,
+        distributor_id: contact.distributor_id,
+        distributor_name: storeName,
+        distributor_phone: contact.distributor_phone || ''
+      });
+    }
+
     // 2. Fetch distributors with purchase bills created today
-    const purchaseDistributors = await db.all(
-      `SELECT DISTINCT d.name as store_name, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
+    const purchases = await db.all(
+      `SELECT DISTINCT d.name as store_name, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone, d.contact as distributor_contact
        FROM purchases p
        JOIN distributors d ON p.distributor_id = d.id
        WHERE p.date IS NOT NULL AND DATE(p.date) = ?`,
       [todayStr]
     );
+    const purchaseDistributors = purchases.map(d => ({
+      store_name: d.store_name,
+      distributor_id: d.distributor_id,
+      distributor_name: d.distributor_name,
+      distributor_phone: (d.distributor_phone || d.distributor_contact || '').replace(/\D/g, '').slice(-10)
+    }));
 
     // 3. Fetch distributors with incoming emails/invoices received strictly today
     const emailDistributors = await db.all(
-      `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
+      `SELECT DISTINCT d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone, d.contact as distributor_contact
        FROM distributors d
        WHERE d.id IN (
          SELECT distributor_id FROM distributor_historical_files WHERE DATE(created_at, 'localtime') = ?
@@ -97,13 +116,15 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       if (name) {
         const key = name.toLowerCase().trim();
         const existing = distMap.get(key);
+        const p = (d.distributor_phone || d.distributor_contact || '').replace(/\D/g, '').slice(-10);
         if (existing) {
           existing.hasEmailToday = true;
+          if (!existing.phone && p) existing.phone = p;
         } else {
           distMap.set(key, {
             id: d.distributor_id || null,
             name: name.trim(),
-            phone: d.distributor_phone || '',
+            phone: p || '',
             hasEmailToday: true
           });
         }
@@ -112,8 +133,18 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
 
     // Insert missing active distributors into distributor_dispatch_reminders for today
     for (const dist of distMap.values()) {
+      let activePhone = dist.phone;
+      let activeId = dist.id;
+      if (!activePhone) {
+        const resolved = await resolveDistributorContact(db, dist.name);
+        if (resolved.distributor_phone) {
+          activePhone = resolved.distributor_phone;
+          activeId = activeId || resolved.distributor_id;
+        }
+      }
+
       const existing = await db.get(
-        `SELECT id, status FROM distributor_dispatch_reminders WHERE LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND date = ?`,
+        `SELECT id, status, distributor_phone, distributor_id FROM distributor_dispatch_reminders WHERE LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND date = ?`,
         [dist.name, todayStr]
       );
       if (!existing) {
@@ -122,7 +153,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
           `INSERT INTO distributor_dispatch_reminders (distributor_id, distributor_name, distributor_phone, date, status, auto_remind, order_source, email_received_at)
            VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
           [
-            dist.id, dist.name, dist.phone, todayStr, initialStatus,
+            activeId, dist.name, activePhone || '', todayStr, initialStatus,
             dist.hasEmailToday ? 'email' : 'pharmarack',
             dist.hasEmailToday ? new Date().toISOString() : null
           ]
@@ -135,16 +166,16 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
           );
         }
         // Keep distributor_phone and distributor_name in sync with master distributors directory
-        if (dist.phone || dist.name) {
-          await db.run(
-            `UPDATE distributor_dispatch_reminders 
-             SET distributor_id = COALESCE(distributor_id, ?),
-                 distributor_phone = CASE WHEN ? != '' THEN ? ELSE distributor_phone END,
-                 distributor_name = CASE WHEN ? != '' THEN ? ELSE distributor_name END
-             WHERE id = ?`,
-            [dist.id, dist.phone || '', dist.phone || '', dist.name || '', dist.name || '', existing.id]
-          );
-        }
+        const phoneToUpdate = activePhone || existing.distributor_phone || '';
+        const idToUpdate = activeId || existing.distributor_id || null;
+        await db.run(
+          `UPDATE distributor_dispatch_reminders 
+           SET distributor_id = COALESCE(distributor_id, ?),
+               distributor_phone = CASE WHEN ? != '' THEN ? ELSE distributor_phone END,
+               distributor_name = CASE WHEN ? != '' THEN ? ELSE distributor_name END
+           WHERE id = ?`,
+          [idToUpdate, phoneToUpdate, phoneToUpdate, dist.name, dist.name, existing.id]
+        );
       }
     }
 
@@ -242,6 +273,24 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
        ORDER BY r.status DESC, r.created_at DESC`,
       [todayStr, todayStr, todayStr]
     );
+
+    for (const r of todayReminders) {
+      if (!r.distributor_phone || r.distributor_phone.trim() === '') {
+        const resolved = await resolveDistributorContact(db, r.distributor_name);
+        if (resolved.distributor_phone) {
+          r.distributor_phone = resolved.distributor_phone;
+          r.distributor_id = r.distributor_id || resolved.distributor_id;
+          try {
+            await db.run(
+              `UPDATE distributor_dispatch_reminders 
+               SET distributor_phone = ?, distributor_id = COALESCE(distributor_id, ?) 
+               WHERE id = ?`,
+              [resolved.distributor_phone, resolved.distributor_id, r.id]
+            );
+          } catch (_) {}
+        }
+      }
+    }
 
     return todayReminders || [];
   } catch (err: any) {

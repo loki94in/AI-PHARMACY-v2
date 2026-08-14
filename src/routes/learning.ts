@@ -217,7 +217,16 @@ router.get('/profiles', async (req, res) => {
              d.phone as distributor_phone,
              lp.last_updated,
              COALESCE(dhf_agg.files_count, 0) as files_count,
-             dhf.status as last_status
+             dhf.status as last_status,
+             (
+               SELECT GROUP_CONCAT(DISTINCT store_name)
+               FROM (
+                 SELECT store_name, distributor_id FROM pharmarack_distributor_mappings
+                 UNION
+                 SELECT store_name, NULL as distributor_id FROM pharmarack_placed_orders
+               )
+               WHERE distributor_id = d.id OR LOWER(TRIM(store_name)) = LOWER(TRIM(d.name))
+             ) as mapped_store_names
       FROM distributors d
       LEFT JOIN distributor_learning_profiles lp ON d.id = lp.distributor_id
       LEFT JOIN (

@@ -5,6 +5,7 @@ import { emailService } from './emailService.js';
 import { config } from '../config/index.js';
 import { dbManager } from '../database/connection.js';
 import { recordPlacedOrder } from './pharmarackDailyDispatchService.js';
+import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 
 export interface NotificationData {
   type: 'whatsapp' | 'whatsapp_business' | 'telegram' | 'email';
@@ -699,17 +700,14 @@ export class NotificationService {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const dateLabel = `${parseInt(dd)} ${months[parseInt(mm) - 1]}`;
 
-      // 2. Fetch distributor contact phones for summary & order headers
+      // 2. Fetch distributor contact phones using universal resolver
       const distPhonesMap: Record<string, string> = {};
       for (const order of orders) {
         if (order.phone) {
           distPhonesMap[order.storeName] = order.phone;
         } else {
-          const dRow = await db.get(
-            `SELECT phone FROM distributors WHERE LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?)`,
-            [order.storeName, `%${order.storeName}%`]
-          );
-          distPhonesMap[order.storeName] = dRow?.phone || 'No phone set';
+          const contact = await resolveDistributorContact(db, order.storeName);
+          distPhonesMap[order.storeName] = contact.distributor_phone || 'No phone set';
         }
       }
 

@@ -10,7 +10,8 @@ import { tokenRefreshScheduler, cleanProfileLockFiles, killOrphanChromeProcesses
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getAppDataDir } from '../config/index.js';
-import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
+import { syncDistributorPhoneAcrossTables, resolveDistributorContact } from '../utils/distributorSyncHelper.js';
+import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
 import { pharmarackCatalogCache } from '../services/pharmarackCatalogCache.js';
 
 const execAsync = promisify(exec);
@@ -2305,6 +2306,12 @@ router.post('/log-placed-order', async (req, res) => {
         console.warn('Error auto-updating special orders status on placed order:', orderErr);
       }
     }
+
+    // Auto-sync distributor contact and reminders immediately
+    try {
+      await resolveDistributorContact(db, store_name);
+      syncTodayActiveDistributors().catch(err => console.warn('Background sync reminders error on placed order:', err));
+    } catch (_) {}
 
     res.json({ success: true });
   } catch (err: any) {

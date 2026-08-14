@@ -277,15 +277,32 @@ router.post('/retry-failed', async (_req, res) => {
   }
 });
 
-// PUT update pacing configuration (min/max seconds)
-router.put('/pacing', async (req, res) => {
-  const { minSec, maxSec } = req.body;
-  if (typeof minSec !== 'number' || typeof maxSec !== 'number') {
-    return res.status(400).json({ error: 'minSec and maxSec numbers required' });
-  }
+// POST flush next queue item immediately
+router.post('/flush-next', async (_req, res) => {
   try {
-    await whatsappQueueWorker.setPacingConfig(minSec, maxSec);
-    res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${minSec}s - ${maxSec}s` });
+    const forced = await whatsappQueueWorker.forceNext();
+    const state = await whatsappQueueWorker.getWorkerState();
+    res.json({ success: true, forced, message: forced ? 'Dispatched next queue item immediately' : 'No pending items in queue', state });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to dispatch next item' });
+  }
+});
+
+// POST or PUT update pacing configuration (min/max seconds or preset)
+router.all('/pacing', async (req, res) => {
+  const { minSec, maxSec, preset } = req.body || {};
+  try {
+    if (preset === 'fast' || preset === 'safe') {
+      const result = await whatsappQueueWorker.setPacingPreset(preset);
+      const state = await whatsappQueueWorker.getWorkerState();
+      return res.json({ success: true, ...result, message: `Pacing set to ${preset} mode (${result.minMs/1000}s-${result.maxMs/1000}s)`, state });
+    }
+    if (typeof minSec === 'number' && typeof maxSec === 'number') {
+      await whatsappQueueWorker.setPacingConfig(minSec, maxSec);
+      const state = await whatsappQueueWorker.getWorkerState();
+      return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${minSec}s - ${maxSec}s`, state });
+    }
+    return res.status(400).json({ error: 'Either preset ("fast"|"safe") or minSec & maxSec required' });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to update pacing' });
   }

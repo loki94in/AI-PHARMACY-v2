@@ -23,6 +23,7 @@ export interface QueueWorkerState {
   nextDispatchTimestamp: number | null;
   currentPacingMinMs: number;
   currentPacingMaxMs: number;
+  pacingPreset: 'fast' | 'safe' | 'custom';
   currentSendingItemId: number | null;
   activeTargetName?: string | null;
   counts: {
@@ -93,6 +94,35 @@ class WhatsAppQueueWorker {
 
     this.pacingMinMs = minMs;
     this.pacingMaxMs = maxMs;
+  }
+
+  /** Set pacing preset: 'fast' (3-5s) vs 'safe' (8-12s) */
+  public async setPacingPreset(preset: 'fast' | 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
+    if (preset === 'fast') {
+      await this.setPacingConfig(3, 5);
+    } else {
+      await this.setPacingConfig(8, 12);
+    }
+    return { minMs: this.pacingMinMs, maxMs: this.pacingMaxMs, preset };
+  }
+
+  /** Immediately process the next pending queue item without waiting for the delay countdown */
+  public async forceNext(): Promise<boolean> {
+    const db = await dbManager.getConnection();
+    const now = Date.now();
+    // Update any future scheduled_at on the oldest pending item to now
+    const oldestPending = await db.get(
+      `SELECT id FROM whatsapp_send_queue 
+       WHERE status IN ('pending', 'failed_offline') 
+       ORDER BY created_at ASC LIMIT 1`
+    );
+    if (oldestPending) {
+      await db.run("UPDATE whatsapp_send_queue SET scheduled_at = ? WHERE id = ?", [now, oldestPending.id]);
+    }
+    this.nextDispatchTimestamp = null;
+    this.isPaused = false;
+    this.triggerProcessing();
+    return Boolean(oldestPending);
   }
 
   /** Check outbox for a recent matching outbound message (phone + body hash within 60s) */
@@ -561,6 +591,13 @@ class WhatsAppQueueWorker {
     const now = Date.now();
     const countdown = this.nextDispatchTimestamp ? Math.max(0, Math.ceil((this.nextDispatchTimestamp - now) / 1000)) : 0;
 
+    let preset: 'fast' | 'safe' | 'custom' = 'custom';
+    if (this.pacingMinMs === 3000 && this.pacingMaxMs === 5000) {
+      preset = 'fast';
+    } else if (this.pacingMinMs === 8000 && this.pacingMaxMs === 12000) {
+      preset = 'safe';
+    }
+
     return {
       isProcessing: this.isProcessing,
       isPaused: this.isPaused,
@@ -569,6 +606,7 @@ class WhatsAppQueueWorker {
       nextDispatchTimestamp: this.nextDispatchTimestamp,
       currentPacingMinMs: this.pacingMinMs,
       currentPacingMaxMs: this.pacingMaxMs,
+      pacingPreset: preset,
       currentSendingItemId: this.currentSendingItemId,
       activeTargetName,
       counts: {

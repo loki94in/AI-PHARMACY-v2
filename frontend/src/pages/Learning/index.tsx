@@ -605,14 +605,22 @@ const Learning: React.FC = () => {
     );
   });
 
-  // Filtered Profiles
+  // Filtered Profiles (supports name, phone, email, mapped Pharmarack store names & normalized matching)
   const filteredProfiles = profilesList.filter(p => {
     const q = (profileSearchQuery || globalSearch).toLowerCase().trim();
     if (!q) return true;
+    const cleanQNorm = q.replace(/[^a-z0-9]/g, '');
+    const cleanDistNorm = (p.distributor_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normQ = q.replace(/\(.*?\)/g, '').replace(/pvt|ltd|limited|private|distributors|distributor|pharma|pharmaceuticals|agency|agencies|medicals|medical|co|and|llp|delivery|surgical|surgicals|generic|cosmetics|cosmatics/gi, '').replace(/[^a-z0-9]/g, '');
+    const normDist = (p.distributor_name || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/pvt|ltd|limited|private|distributors|distributor|pharma|pharmaceuticals|agency|agencies|medicals|medical|co|and|llp|delivery|surgical|surgicals|generic|cosmetics|cosmatics/gi, '').replace(/[^a-z0-9]/g, '');
+
     return (
       (p.distributor_name && p.distributor_name.toLowerCase().includes(q)) ||
       (p.distributor_email && p.distributor_email.toLowerCase().includes(q)) ||
-      (p.distributor_phone && p.distributor_phone.toLowerCase().includes(q))
+      (p.distributor_phone && p.distributor_phone.toLowerCase().includes(q)) ||
+      (p.mapped_store_names && p.mapped_store_names.toLowerCase().includes(q)) ||
+      (cleanQNorm && cleanDistNorm && (cleanDistNorm.includes(cleanQNorm) || cleanQNorm.includes(cleanDistNorm))) ||
+      (normQ && normDist && (normDist.includes(normQ) || normQ.includes(normDist)))
     );
   });
 
@@ -1256,7 +1264,14 @@ const Learning: React.FC = () => {
                               <div className="font-bold text-text text-xs truncate max-w-[150px]">
                                 {p.distributor_name}
                               </div>
-                              <div className="text-[10px] text-muted">ID #{p.distributor_id}</div>
+                              <div className="text-[10px] text-muted flex items-center gap-1.5 flex-wrap">
+                                <span>ID #{p.distributor_id}</span>
+                                {p.mapped_store_names && (
+                                  <span className="text-[9px] font-semibold text-sky bg-sky/10 border border-sky/20 px-1.5 rounded truncate max-w-[140px]" title={`Mapped stores: ${p.mapped_store_names}`}>
+                                    🔗 {p.mapped_store_names}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
