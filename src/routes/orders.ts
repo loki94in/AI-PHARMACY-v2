@@ -240,7 +240,7 @@ router.post('/batch', async (req, res) => {
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['quick_order_batch', cleanReqName, formattedPhone, msg, 'pending', String(insertedOrders[0].id)]
+          ['quick_order_batch', cleanReqName, formattedPhone, msg, 'queued', String(insertedOrders[0].id)]
         );
       } catch (wsError: any) {
         console.error(`Failed to enqueue consolidated special order WhatsApp for ${cleanReqName}:`, wsError);
@@ -352,7 +352,7 @@ router.post('/', async (req, res) => {
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['quick_order', requester.trim(), formattedPhone, msg, 'pending', String(result.lastID)]
+          ['quick_order', requester.trim(), formattedPhone, msg, 'queued', String(result.lastID)]
         );
       } catch (wsError: any) {
         console.error(`Failed to enqueue special order confirmation WhatsApp for ${requester}:`, wsError);
@@ -412,7 +412,7 @@ router.post('/:id/notify-arrival', async (req, res) => {
     await db.run(
       `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      ['special_order_arrived', order.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+      ['special_order_arrived', order.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
     );
 
     res.json({ success: true, message: 'Arrival notification queued successfully via WhatsApp' });
@@ -450,7 +450,7 @@ router.post('/:id/resend-booking', async (req, res) => {
     await db.run(
       `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      ['quick_order_resend', order.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+      ['quick_order_resend', order.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
     );
 
     res.json({ success: true, message: 'Booking confirmation WhatsApp queued successfully' });
@@ -562,8 +562,8 @@ router.put('/:id', async (req, res) => {
       [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, newCartAddError, id]
     );
 
-    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller
-    if (newStatus === 'Ready' && newPhone) {
+    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller (if not already notified)
+    if (newStatus === 'Ready' && existing.status !== 'Ready' && Number(existing.notified) !== 1 && newPhone) {
       try {
         const cleanPhone = String(newPhone).replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
@@ -577,7 +577,7 @@ router.put('/:id', async (req, res) => {
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['special_order_arrived', newRequester || existing.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+            ['special_order_arrived', newRequester || existing.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
           );
         }
       } catch (err) {
@@ -611,8 +611,8 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
 
     await db.run('UPDATE special_orders SET status = ? WHERE id = ?', [status, id]);
 
-    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller
-    if (status === 'Ready' && existing.phone) {
+    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller (if not already notified)
+    if (status === 'Ready' && existing.status !== 'Ready' && Number(existing.notified) !== 1 && existing.phone) {
       try {
         const cleanPhone = String(existing.phone).replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
@@ -626,7 +626,7 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['special_order_arrived', existing.requester || 'Customer', formattedPhone, msg, 'pending', String(id)]
+            ['special_order_arrived', existing.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
           );
         }
       } catch (err) {

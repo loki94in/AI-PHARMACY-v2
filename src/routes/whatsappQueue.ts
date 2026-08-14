@@ -292,7 +292,7 @@ router.post('/flush-next', async (_req, res) => {
 router.all('/pacing', async (req, res) => {
   const { minSec, maxSec, preset } = req.body || {};
   try {
-    if (preset === 'fast' || preset === 'safe') {
+    if (preset === 'turbo' || preset === 'fast' || preset === 'safe') {
       const result = await whatsappQueueWorker.setPacingPreset(preset);
       const state = await whatsappQueueWorker.getWorkerState();
       return res.json({ success: true, ...result, message: `Pacing set to ${preset} mode (${result.minMs/1000}s-${result.maxMs/1000}s)`, state });
@@ -302,7 +302,7 @@ router.all('/pacing', async (req, res) => {
       const state = await whatsappQueueWorker.getWorkerState();
       return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${minSec}s - ${maxSec}s`, state });
     }
-    return res.status(400).json({ error: 'Either preset ("fast"|"safe") or minSec & maxSec required' });
+    return res.status(400).json({ error: 'Either preset ("turbo"|"fast"|"safe") or minSec & maxSec required' });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to update pacing' });
   }

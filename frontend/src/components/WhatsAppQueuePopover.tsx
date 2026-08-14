@@ -26,19 +26,25 @@ interface WhatsAppQueuePopoverProps {
 
 type TabType = 'all' | 'special' | 'distributor' | 'delivery' | 'pending' | 'sent' | 'failed';
 
+// Module-level persistent cache for zero-latency instant rendering (<1ms)
+let cachedQueueState: any | null = null;
+let cachedDelayCreditBill = 0;
+let cachedDelayDistributor = 0;
+let cachedDelayDeliveryBoy = 0;
+
 export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onClose }) => {
-  const [queueState, setQueueState] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [queueState, setQueueState] = useState<any | null>(() => cachedQueueState);
+  const [loading, setLoading] = useState(() => !cachedQueueState);
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [expandedIds, setExpandedIds] = useState<Record<number, boolean>>({});
 
   // Pacing Slider state
-  const [pacingSec, setPacingSec] = useState<number>(10);
+  const [pacingSec, setPacingSec] = useState<number>(() => cachedQueueState?.currentPacingMinMs ? Math.round(cachedQueueState.currentPacingMinMs / 1000) : 10);
 
   // Delay Timers state
-  const [delayCreditBill, setDelayCreditBill] = useState<number>(0);
-  const [delayDistributor, setDelayDistributor] = useState<number>(0);
-  const [delayDeliveryBoy, setDelayDeliveryBoy] = useState<number>(0);
+  const [delayCreditBill, setDelayCreditBill] = useState<number>(() => cachedDelayCreditBill);
+  const [delayDistributor, setDelayDistributor] = useState<number>(() => cachedDelayDistributor);
+  const [delayDeliveryBoy, setDelayDeliveryBoy] = useState<number>(() => cachedDelayDeliveryBoy);
   const [showDelayConfig, setShowDelayConfig] = useState(false);
   const [savingDelay, setSavingDelay] = useState(false);
 
@@ -48,12 +54,25 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const [editMessage, setEditMessage] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  const toggleExpand = (id: number) => {
+    setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const fetchStatus = async () => {
     try {
       const data = await api.getWhatsAppQueueStatus();
+      cachedQueueState = data;
       setQueueState(data);
       if (data && data.currentPacingMinMs) {
         setPacingSec(Math.round(data.currentPacingMinMs / 1000));
+      }
+      if (data && data.delaySettings) {
+        cachedDelayCreditBill = Number(data.delaySettings.whatsapp_delay_credit_bill) || 0;
+        cachedDelayDistributor = Number(data.delaySettings.whatsapp_delay_distributor) || 0;
+        cachedDelayDeliveryBoy = Number(data.delaySettings.whatsapp_delay_delivery_boy) || 0;
+        setDelayCreditBill(cachedDelayCreditBill);
+        setDelayDistributor(cachedDelayDistributor);
+        setDelayDeliveryBoy(cachedDelayDeliveryBoy);
       }
     } catch (err) {
       console.error('Failed to fetch WhatsApp queue status:', err);
@@ -62,23 +81,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
-  const fetchDelaySettings = async () => {
-    try {
-      const { data } = await apiClient.get('/settings');
-      if (data) {
-        setDelayCreditBill(Number(data.whatsapp_delay_credit_bill) || 0);
-        setDelayDistributor(Number(data.whatsapp_delay_distributor) || 0);
-        setDelayDeliveryBoy(Number(data.whatsapp_delay_delivery_boy) || 0);
-      }
-    } catch (err) {
-      console.warn('Failed to load WhatsApp delay settings:', err);
-    }
-  };
-
   useEffect(() => {
     fetchStatus();
-    fetchDelaySettings();
-    const interval = setInterval(fetchStatus, 3000);
+    const interval = setInterval(fetchStatus, 300);
     const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
     return () => {
       clearInterval(interval);
@@ -147,10 +152,15 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
-  const handleSetPacingPreset = async (preset: 'fast' | 'safe') => {
+  const handleSetPacingPreset = async (preset: 'turbo' | 'fast' | 'safe') => {
     try {
       const res = await api.setWhatsAppQueuePacingPreset(preset);
-      toastEvent.trigger(preset === 'fast' ? '⚡ Turbo Pacing enabled (3-5s)' : '🛡️ Safe Pacing enabled (8-12s)', 'success');
+      const msg = preset === 'turbo' 
+        ? '🚀 Ultra-Fast Turbo Pacing enabled (100ms speed)' 
+        : preset === 'fast' 
+          ? '⚡ Fast Pacing enabled (1-3s)' 
+          : '🛡️ Safe Pacing enabled (8-12s)';
+      toastEvent.trigger(msg, 'success');
       await fetchStatus();
     } catch (err) {
       toastEvent.trigger('Failed to update pacing preset', 'error');
@@ -194,10 +204,6 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     } finally {
       setSavingEdit(false);
     }
-  };
-
-  const toggleExpand = (id: number) => {
-    setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const items: QueueItem[] = queueState?.recentItems || [];
@@ -326,22 +332,34 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <div className="flex items-center bg-bg/60 p-0.5 rounded-xl border border-glass-border/40 text-[10px] font-bold">
                 <button
                   type="button"
+                  onClick={() => handleSetPacingPreset('turbo')}
+                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                    queueState?.pacingPreset === 'turbo' || queueState?.currentPacingMinMs === 100
+                      ? 'bg-rose-500 text-white font-extrabold shadow-sm animate-pulse'
+                      : 'text-muted hover:text-text'
+                  }`}
+                  title="Ultra-Fast Speed: 100ms (0.1s) instant queue dispatch"
+                >
+                  <Zap size={10} className="fill-current text-amber-300" />
+                  <span>Turbo (100ms)</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleSetPacingPreset('fast')}
                   className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                    queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 3000
+                    queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 1000
                       ? 'bg-amber-500 text-black font-extrabold shadow-sm'
                       : 'text-muted hover:text-text'
                   }`}
-                  title="Turbo Pacing: 3-5 seconds between messages for rapid sending"
+                  title="Fast Pacing: 1-3 seconds between messages"
                 >
-                  <Zap size={10} className="fill-current" />
-                  <span>Turbo (3-5s)</span>
+                  <span>Fast (1-3s)</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSetPacingPreset('safe')}
                   className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                    queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 8000 && queueState?.pacingPreset !== 'fast')
+                    queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 8000 && queueState?.pacingPreset !== 'fast' && queueState?.pacingPreset !== 'turbo')
                       ? 'bg-emerald-500 text-black font-extrabold shadow-sm'
                       : 'text-muted hover:text-text'
                   }`}
@@ -495,7 +513,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               return (
                 <div 
                   key={item.id}
-                  onMouseEnter={() => setExpandedIds(prev => ({ ...prev, [item.id]: true }))}
+                  onClick={() => toggleExpand(item.id)}
                   className={`rounded-xl border transition-all overflow-hidden cursor-pointer ${
                     item.status === 'sending'
                       ? 'bg-sky-500/10 border-sky-500/30 ring-1 ring-sky-500/20'

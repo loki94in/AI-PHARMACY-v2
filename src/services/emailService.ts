@@ -15,7 +15,7 @@ import * as XLSX from 'xlsx';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
-import { getEmailRetentionLimit } from './storeSettingsService.js';
+import { getEmailRetentionLimit, getStorePhone } from './storeSettingsService.js';
 import { config, getAppDataDir } from '../config/index.js';
 import { medicineService } from './medicineService.js';
 
@@ -1257,7 +1257,7 @@ export class EmailService {
     
     if (hasOrderKeyword && hasDistributorKeyword) return true;
     
-    if (/(?:tax\s*invoice|invoice|inv[_\-\s]?\d+|bill[_\-\s]?\d+|order\s*ack)/i.test(email.subject)) return true;
+    if (/(?:tax\s*invoice|invoice|inv[_\-\s]?\d+|bill[_\-\s]?\d+|order\s*ack|purchase\s*order|stock\s*order|order\s*confirm|supply\s*order|stock\s*alert|po[_\-\s]?\d+)/i.test(email.subject)) return true;
     
     if (email.attachments && email.attachments.length > 0) {
       const invoiceExts = ['.pdf', '.csv', '.xlsx', '.xls', '.dbf', '.xml', '.txt'];
@@ -1408,6 +1408,114 @@ export class EmailService {
   }
 
   /**
+   * Notifies the store owner and system channels (WhatsApp, Telegram, Push, SSE) when mail arrives.
+   */
+  public async notifyMailArrival(data: {
+    uid?: number;
+    processedEmail: ProcessedEmail;
+    orderInfo: any;
+    isOrder: boolean;
+    parsedDate?: Date;
+  }): Promise<void> {
+    const { uid, processedEmail, orderInfo, isOrder, parsedDate } = data;
+    let db = null;
+    try {
+      db = await dbManager.getConnection();
+      const refId = uid ? `email_uid_${uid}` : `email_subj_${(processedEmail.subject || '').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+      // 1. WhatsApp Notification to Store Owner (with deduplication log check)
+      const ownerPhone = await getStorePhone(db);
+      if (ownerPhone) {
+        const existingNotif = await db.get(
+          `SELECT id FROM automation_notifications 
+           WHERE recipient_phone = ? 
+             AND status = 'sent' 
+             AND (reference_id = ? OR reference_id LIKE ?)
+           LIMIT 1`,
+          [ownerPhone, refId, `${refId}%`]
+        );
+
+        if (existingNotif) {
+          console.log(`[MailArrival] Owner WhatsApp notification already logged for ${refId}. Skipping duplicate WhatsApp.`);
+        } else {
+          if (isOrder) {
+            // Send detailed invoice stock alert
+            await this.sendDistributorWhatsAppAlert(orderInfo, refId);
+          } else {
+            // Send general mail arrival alert to Store Owner
+            const timeStr = (parsedDate ? new Date(parsedDate) : new Date()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+            const hasAtt = (processedEmail.attachments || []).length > 0;
+            const message = `📧 *New Email Received in Pharmacy Mailbox*\n\n*From:* ${processedEmail.from}\n*Subject:* ${processedEmail.subject}\n*Time:* ${timeStr}\n${hasAtt ? '📎 *Attachments:* Included\n' : ''}\n— AI Pharmacy OS`;
+            
+            try {
+              await sendMessage(ownerPhone, undefined, message);
+              console.log(`[MailArrival] WhatsApp alert sent to Store Owner (${ownerPhone}) for ${refId}`);
+              await db.run(
+                `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                ['email_arrival', 'Admin / Store Owner', ownerPhone, message, 'sent', refId]
+              );
+            } catch (wsErr: any) {
+              console.error('[MailArrival] Failed to send Store Owner WhatsApp mail alert:', wsErr);
+            }
+          }
+        }
+      } else {
+        console.warn('[MailArrival] Store Owner phone not configured in app_settings. Skipping WhatsApp alert.');
+      }
+
+      // 2. Telegram Alert to Store Owner / Default Chat
+      try {
+        const previewText = (processedEmail.body || '').substring(0, 150);
+        await telegramBotService.sendEmailAlertToTelegram(
+          processedEmail.subject || 'No Subject',
+          processedEmail.from || 'Unknown Sender',
+          previewText
+        );
+      } catch (tgErr) {
+        console.error('[MailArrival] Failed to send Telegram mail alert:', tgErr);
+      }
+
+      // 3. Remote Push Notification to Registered Devices (Mobile/Desktop)
+      try {
+        eventService.broadcast('server_event', {
+          type: 'email_update',
+          payload: {
+            success: true,
+            title: isOrder ? '📦 New Distributor Invoice Email' : '📧 New Mail Received',
+            message: `New mail from ${processedEmail.from}: ${processedEmail.subject}`
+          }
+        });
+      } catch (evtErr) {
+        console.error('[MailArrival] Failed to broadcast server event for email update:', evtErr);
+      }
+
+      // 4. Real-Time In-App SSE Toast Notification
+      try {
+        const timeStr = (parsedDate ? new Date(parsedDate) : new Date()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        notificationManager.broadcast({
+          type: 'new_email',
+          title: isOrder ? 'New Distributor Email' : 'New Mail Received',
+          message: `New mail received from ${processedEmail.from}: ${processedEmail.subject}`,
+          distributorName: orderInfo?.distributorName !== 'Unknown Distributor' ? orderInfo?.distributorName : processedEmail.from,
+          invoiceNo: orderInfo?.invoiceNumber !== 'N/A' ? orderInfo?.invoiceNumber : undefined,
+          timestamp: timeStr,
+          whatsappSent: !!ownerPhone
+        });
+      } catch (sseErr) {
+        console.error('[MailArrival] Failed to send SSE in-app email notification:', sseErr);
+      }
+
+      // 5. If it's an order-related email, notify active delivery boys
+      if (isOrder) {
+        await this.notifyDeliveryBoys(orderInfo);
+      }
+    } catch (err) {
+      console.error('[MailArrival] Error in notifyMailArrival:', err);
+    }
+  }
+
+  /**
    * Notifies active delivery boys via WhatsApp and Telegram
    */
   private async notifyDeliveryBoys(orderInfo: any): Promise<void> {
@@ -1416,13 +1524,37 @@ export class EmailService {
       db = await dbManager.getConnection();
       const activeBoys = await db.all('SELECT * FROM delivery_boys WHERE is_active = 1');
       
+      const message = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
+
       if (activeBoys.length === 0) {
-        console.log('No active delivery boys found to notify.');
+        console.log('No active delivery boys found to notify. Falling back to Store Owner WhatsApp.');
+        const ownerPhone = await getStorePhone(db);
+        if (ownerPhone) {
+          try {
+            await sendMessage(ownerPhone, undefined, message);
+            console.log(`WhatsApp notification sent to Store Owner (no active delivery boys): ${ownerPhone}`);
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              ['delivery_boy', 'Admin / Store Owner', ownerPhone, message, 'sent', orderInfo.invoiceNumber]
+            );
+            notificationManager.broadcast({
+              type: 'new_email',
+              title: 'New Distributor Email',
+              message: `New mail received from ${orderInfo.distributorName} (Invoice: ${orderInfo.invoiceNumber}).`,
+              distributorName: orderInfo.distributorName,
+              invoiceNo: orderInfo.invoiceNumber,
+              timestamp: orderInfo.timeStr,
+              whatsappSent: true,
+              whatsappNumber: ownerPhone
+            });
+          } catch (wsErr: any) {
+            console.error('Failed to send Store Owner fallback WhatsApp notification:', wsErr);
+          }
+        }
         return;
       }
 
-      // Format notification to the requested simple format
-      const message = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
       const sentBoys: string[] = [];
 
       for (const boy of activeBoys) {
@@ -1490,17 +1622,18 @@ export class EmailService {
   /**
    * Send distributor invoice details via WhatsApp to the owner's phone
    */
-  public async sendDistributorWhatsAppAlert(orderInfo: any): Promise<void> {
+  public async sendDistributorWhatsAppAlert(orderInfo: any, customRefId?: string): Promise<void> {
     let db = null;
     try {
       db = await dbManager.getConnection();
-      const phoneRow = await db.get("SELECT value FROM app_settings WHERE key = 'shop_phone'");
-      const shopPhone = phoneRow?.value;
+      const shopPhone = await getStorePhone(db);
 
       if (!shopPhone) {
-        console.warn('Shop phone not configured in settings. Skipping distributor invoice alert.');
+        console.warn('Store / Owner phone not configured in settings. Skipping distributor invoice alert.');
         return;
       }
+
+      const logRefId = customRefId || orderInfo.invoiceNumber || 'distributor_invoice';
 
       // If there are no medicines extracted, just send a basic invoice alert
       let itemsText = 'No items could be extracted from the email text body.';
@@ -1514,19 +1647,19 @@ export class EmailService {
 
       try {
         await sendMessage(shopPhone, undefined, message);
-        console.log(`Distributor WhatsApp alert sent to ${shopPhone}`);
+        console.log(`Distributor WhatsApp alert sent to owner/store phone: ${shopPhone}`);
         
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'sent', orderInfo.invoiceNumber]
+          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'sent', logRefId]
         );
       } catch (wsError: any) {
         console.error(`Failed to send distributor alert to ${shopPhone}:`, wsError);
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'failed', wsError.message || 'Unknown error', orderInfo.invoiceNumber]
+          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'failed', wsError.message || 'Unknown error', logRefId]
         );
       }
     } catch (err) {
@@ -1537,10 +1670,17 @@ export class EmailService {
   public async processEmail(email: ProcessedEmail): Promise<void> {
     try {
       const isOrderRelated = this.isOrderRelatedEmail(email);
+      const orderInfo = await this.extractOrderInfo(email);
+
+      // Notify owner & system channels for all mail arrivals
+      await this.notifyMailArrival({
+        processedEmail: email,
+        orderInfo,
+        isOrder: !!isOrderRelated,
+        parsedDate: email.date
+      });
 
       if (isOrderRelated) {
-        // Extract order info
-        const orderInfo = await this.extractOrderInfo(email);
         const logMsg = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
 
         // Log as potential order for follow-up
@@ -1549,10 +1689,6 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_ORDER_DETECTED', logMsg]
         );
-                
-        // Notify delivery boys & send distributor alert
-        await this.notifyDeliveryBoys(orderInfo);
-        await this.sendDistributorWhatsAppAlert(orderInfo);
 
         // No automatic background import of purchase bills (should be manually processed by user on frontend).
         // Instead, queue the detected order into a review table so it can be surfaced to the user
@@ -2899,22 +3035,37 @@ export class EmailService {
   /**
    * Reads the local `emails` table and returns the latest N emails (offline-capable).
    */
-  public async getLocalInbox(limit: number = 50, since?: string): Promise<Array<any>> {
+  public async getLocalInbox(limit: number = 30, since?: string): Promise<Array<any>> {
     try {
       await ensureSchema(getDbPath());
       const db = await dbManager.getConnection();
-      // Default: only return emails from the last 7 days
-      const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const rows = await db.all(
-        `SELECT e.*, GROUP_CONCAT(ea.filename) as attachment_filenames
-         FROM emails e
-         LEFT JOIN email_attachments ea ON ea.uid = e.uid
-         WHERE e.date >= ?
-         GROUP BY e.uid
-         ORDER BY e.date DESC, e.uid DESC
-         LIMIT ?`,
-        [sinceDate, limit]
-      );
+      
+      let rows: any[] = [];
+      if (since && since !== 'all') {
+        rows = await db.all(
+          `SELECT e.*, GROUP_CONCAT(ea.filename) as attachment_filenames
+           FROM emails e
+           LEFT JOIN email_attachments ea ON ea.uid = e.uid
+           WHERE e.date >= ?
+           GROUP BY e.uid
+           ORDER BY e.date DESC, e.uid DESC
+           LIMIT ?`,
+          [since, limit]
+        );
+      }
+
+      // If since is omitted/all OR if since filter returned fewer than limit emails, fetch the latest limit emails to guarantee full 30 mails
+      if (!rows || rows.length < limit) {
+        rows = await db.all(
+          `SELECT e.*, GROUP_CONCAT(ea.filename) as attachment_filenames
+           FROM emails e
+           LEFT JOIN email_attachments ea ON ea.uid = e.uid
+           GROUP BY e.uid
+           ORDER BY e.date DESC, e.uid DESC
+           LIMIT ?`,
+          [limit]
+        );
+      }
       
       return rows.map((row: any) => ({
         id: row.uid,
@@ -3141,7 +3292,7 @@ export class EmailService {
           const hasAttachments = processedEmail.attachments.length > 0 ? 1 : 0;
 
           // Upsert email record into local DB
-          await db.run(
+          const insertResult = await db.run(
             `INSERT OR IGNORE INTO emails
              (uid, from_addr, subject, body, date, is_seen, is_order, is_saved, distributor_name, has_attachments, extracted_invoice_no, extracted_distributor)
              VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
@@ -3159,6 +3310,8 @@ export class EmailService {
               orderInfo.distributorName !== 'Unknown Distributor' ? orderInfo.distributorName : null
             ]
           );
+
+          const isNewEmail = (insertResult?.changes || 0) > 0;
 
           // Save attachments to disk + DB
           if (processedEmail.attachments.length > 0) {
@@ -3196,14 +3349,16 @@ export class EmailService {
           // Also mark as processed
           await db.run('INSERT OR IGNORE INTO processed_emails (uid) VALUES (?)', [uid]);
 
-          // Notify delivery boys & send distributor alert if order-related AND it's a recent email (received within the last 15 minutes)
-          const isRecent = parsed.date && parsed.date instanceof Date && (Date.now() - parsed.date.getTime()) < 15 * 60 * 1000;
-          if (isOrder && isRecent) {
-            this.notifyDeliveryBoys(orderInfo).catch(err => {
-              console.error('[Sync] Error notifying delivery boys:', err);
-            });
-            this.sendDistributorWhatsAppAlert(orderInfo).catch(err => {
-              console.error('[Sync] Error sending distributor WhatsApp alert:', err);
+          // Notify user (owner) & delivery boys when new email arrives in mailbox
+          if (isNewEmail) {
+            this.notifyMailArrival({
+              uid,
+              processedEmail,
+              orderInfo,
+              isOrder: !!isOrder,
+              parsedDate: parsed.date
+            }).catch(err => {
+              console.error('[Sync] Error notifying mail arrival:', err);
             });
           }
 
@@ -3211,6 +3366,48 @@ export class EmailService {
         } catch (emailError) {
           console.error(`[Sync] Error processing UID ${uid}:`, emailError);
         }
+      }
+
+      // Scan recent emails (up to 30) for any email missing a sent owner notification
+      try {
+        const ownerPhone = await getStorePhone(db);
+        if (ownerPhone) {
+          const unnotifiedEmails = await db.all(
+            `SELECT e.* FROM emails e
+             LEFT JOIN automation_notifications n 
+               ON n.recipient_phone = ? 
+              AND n.status = 'sent'
+              AND (n.reference_id = 'email_uid_' || e.uid OR n.reference_id LIKE 'email_uid_' || e.uid || '%')
+             WHERE n.id IS NULL
+             ORDER BY e.uid DESC
+             LIMIT 30`,
+            [ownerPhone]
+          );
+
+          if (unnotifiedEmails && unnotifiedEmails.length > 0) {
+            console.log(`[Sync] Found ${unnotifiedEmails.length} recent un-notified email(s). Catching up owner notifications...`);
+            for (const rawEmail of unnotifiedEmails) {
+              const processedEmail: ProcessedEmail = {
+                from: rawEmail.from_addr || '',
+                subject: rawEmail.subject || '',
+                body: rawEmail.body || '',
+                attachments: []
+              };
+              const orderInfo = await this.extractOrderInfo(processedEmail);
+              const isOrder = rawEmail.is_order === 1 || this.isOrderRelatedEmail(processedEmail);
+
+              await this.notifyMailArrival({
+                uid: rawEmail.uid,
+                processedEmail,
+                orderInfo,
+                isOrder,
+                parsedDate: rawEmail.date ? new Date(rawEmail.date) : undefined
+              });
+            }
+          }
+        }
+      } catch (scanErr) {
+        console.error('[Sync] Error scanning un-notified emails:', scanErr);
       }
 
       // Trigger background auto-delete cleanups for database and files.

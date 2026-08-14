@@ -67,10 +67,8 @@ router.post('/', async (req, res) => {
 // GET /api/email/inbox — serves from local SQLite DB (offline-capable)
 // Also triggers a background IMAP delta sync for new emails
 router.get('/inbox', async (req, res) => {
-  const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-  // Default: last 7 days. Mobile can override with ?since=ISO_DATE
-  const since = req.query.since as string | undefined
-    || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const limit = req.query.limit ? parseInt(req.query.limit as string) : 30;
+  const since = req.query.since as string | undefined;
   try {
     const inbox = await emailService.fetchInbox(limit, since);
     res.json(inbox);

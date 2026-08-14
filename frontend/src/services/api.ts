@@ -876,6 +876,7 @@ export const api = {
     currentSendingItemId: number | null;
     activeTargetName?: string | null;
     counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
+    delaySettings?: { whatsapp_delay_credit_bill: number; whatsapp_delay_distributor: number; whatsapp_delay_delivery_boy: number };
     recentItems: any[];
   }>('/whatsapp/queue/status').then(res => res.data),
   enqueueDistributorCollection: (data: { orderIds: number[]; deliveryBoyPhone: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-distributor-collection', data).then(res => res.data),
@@ -884,7 +885,7 @@ export const api = {
   flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: any }>('/whatsapp/queue/flush-next').then(res => res.data),
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
-  setWhatsAppQueuePacingPreset: (preset: 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: any }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
+  setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: any }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
 
   // Upcoming Automations & Triggers API

@@ -344,13 +344,13 @@ const Mail = () => {
     };
   }, []);
 
-  // Load inbox from local DB (instant, works offline)
+  // Load inbox from local DB (instant, works offline, fetches last 30 emails)
   const loadLocalInbox = useCallback(() => {
     if (cachedEmails.length === 0) {
       setLoading(true);
     }
     api
-      .getEmailInbox(50, getTodayStartIso())
+      .getEmailInbox(30)
       .then((data: any) => {
         if (Array.isArray(data)) {
           setEmails(data);
@@ -379,7 +379,7 @@ const Mail = () => {
       const res = await api.triggerEmailSync();
       if (res && res.synced > 0) {
         // New emails downloaded — refresh the inbox view from local DB
-        const data = await api.getEmailInbox(50, getTodayStartIso());
+        const data = await api.getEmailInbox(30);
         if (Array.isArray(data)) setEmails(data);
         toastEvent.trigger(`Received ${res.synced} new distributor email(s).`, 'mail', '/mail');
       }
@@ -392,10 +392,10 @@ const Mail = () => {
     }
   }, [isOffline]);
 
-  // Silent background refresh from local DB (no loading indicator)
+  // Silent live background refresh from local DB (re-reads last 30 emails every 15s)
   const silentRefreshLocal = useCallback(() => {
     api
-      .getEmailInbox(50, getTodayStartIso())
+      .getEmailInbox(30)
       .then((data: any) => {
         if (Array.isArray(data)) setEmails(data);
       })
@@ -403,8 +403,6 @@ const Mail = () => {
   }, []);
 
   // On mount: load local DB instantly.
-  // Only trigger IMAP sync if cache is cold (first visit or no cached data).
-  // After first visit the 2-minute periodic sync keeps data fresh in the background.
   useEffect(() => {
     loadLocalInbox();
   }, [loadLocalInbox]);
@@ -412,24 +410,22 @@ const Mail = () => {
   const pageActive = usePageActive();
 
   useDeferredEffect(() => {
-    // Only do an immediate IMAP sync on first visit (cold cache).
-    // On subsequent visits the page shows cached data instantly with no flicker.
     let syncDelay: ReturnType<typeof setTimeout> | undefined;
     if (cachedEmails.length === 0 && imapSyncControl.shouldFetch) {
       syncDelay = setTimeout(() => triggerSync(), 1500);
     }
 
-    // Periodic background refresh: re-read local DB every 360s (silent, no loading indicator).
+    // Live background refresh: re-read local DB every 15s (silent, no loading indicator).
     // Paused while this page isn't the one visible.
     let refreshInterval: ReturnType<typeof setInterval> | undefined;
     if (inboxRefreshControl.shouldFetch && pageActive) {
-      refreshInterval = setInterval(() => silentRefreshLocal(), 360000);
+      refreshInterval = setInterval(() => silentRefreshLocal(), 15000);
     }
 
-    // Periodic IMAP sync every 720s (12 minutes). Paused while this page isn't the one visible.
+    // Periodic IMAP sync every 300s (5 minutes). Paused while this page isn't the one visible.
     let syncInterval: ReturnType<typeof setInterval> | undefined;
     if (imapSyncControl.shouldFetch && pageActive) {
-      syncInterval = setInterval(() => triggerSync(), 720000);
+      syncInterval = setInterval(() => triggerSync(), 300000);
     }
 
     return () => {
@@ -489,7 +485,14 @@ const Mail = () => {
       .finally(() => setLoadingAttachments(false));
   };
 
+  const [statusTabFilter, setStatusTabFilter] = useState<'all' | 'new' | 'opened' | 'saved'>('all');
+
   const filteredEmails = emails.filter(email => {
+    const status = getEmailStatus(email);
+    if (statusTabFilter === 'new' && status !== 'new') return false;
+    if (statusTabFilter === 'opened' && status !== 'opened') return false;
+    if (statusTabFilter === 'saved' && status !== 'saved') return false;
+
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     return (
@@ -649,8 +652,9 @@ const Mail = () => {
             {isImapConfigured ? 'Gmail Scanner: Connected ⚡' : 'Gmail Scanner: Not Configured'}
           </span>
         </div>
-        <div className="ml-auto text-muted font-mono">
-          {emails.length} email{emails.length !== 1 ? 's' : ''} stored locally
+        <div className="ml-auto text-muted font-mono flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Last {emails.length} emails stored locally (Live)</span>
         </div>
       </div>
 
@@ -734,6 +738,63 @@ const Mail = () => {
                 Clear Filters
               </button>
             )}
+          </div>
+
+          {/* Status Category Filter Pills */}
+          <div className="px-3 py-2 border-b border-glass-border bg-black/15 flex items-center gap-1.5 overflow-x-auto shrink-0 custom-scrollbar text-[11px] font-bold">
+            <button
+              onClick={() => setStatusTabFilter('all')}
+              className={`px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                statusTabFilter === 'all'
+                  ? 'bg-bg2 border-glass-border text-text shadow-sm font-extrabold'
+                  : 'bg-transparent border-transparent text-muted hover:text-text'
+              }`}
+            >
+              <span>All Mails</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 text-muted font-bold">{emails.length}</span>
+            </button>
+            <button
+              onClick={() => setStatusTabFilter('new')}
+              className={`px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                statusTabFilter === 'new'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-extrabold shadow-sm'
+                  : 'bg-transparent border-transparent text-muted hover:text-text'
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>New (Unopened)</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
+                {emails.filter(e => !e.isSaved && !e.isSeen).length}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTabFilter('opened')}
+              className={`px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                statusTabFilter === 'opened'
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-extrabold shadow-sm'
+                  : 'bg-transparent border-transparent text-muted hover:text-text'
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              <span>Opened</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-bold">
+                {emails.filter(e => !e.isSaved && e.isSeen).length}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTabFilter('saved')}
+              className={`px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                statusTabFilter === 'saved'
+                  ? 'bg-sky/20 border-sky/40 text-sky font-extrabold shadow-sm'
+                  : 'bg-transparent border-transparent text-muted hover:text-text'
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-sky" />
+              <span>Saved &amp; Processed</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-sky/20 text-sky font-bold">
+                {emails.filter(e => e.isSaved).length}
+              </span>
+            </button>
           </div>
 
           {/* Search/Filter input field */}

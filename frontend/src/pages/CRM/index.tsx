@@ -2760,6 +2760,7 @@ const SpecialOrdersSection: React.FC = () => {
   }, [loadOrders]);
 
   const handleNotifyArrival = async (order: SpecialOrderItem) => {
+    if (notifyingId === order.id) return;
     setNotifyingId(order.id);
     try {
       messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Arrival alert for ${order.product}`, 10);
@@ -2774,6 +2775,7 @@ const SpecialOrdersSection: React.FC = () => {
   };
 
   const handleResendBooking = async (order: SpecialOrderItem) => {
+    if (resendingId === order.id) return;
     setResendingId(order.id);
     try {
       messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Booking confirmation for ${order.product}`, 10);
@@ -2788,6 +2790,7 @@ const SpecialOrdersSection: React.FC = () => {
   };
 
   const handleUpdateStatus = async (id: number, newStatus: string) => {
+    if (updatingId === id) return;
     setUpdatingId(id);
     try {
       await api.updateOrder(id, { status: newStatus });

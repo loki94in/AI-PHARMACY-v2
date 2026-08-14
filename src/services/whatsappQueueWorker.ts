@@ -23,7 +23,7 @@ export interface QueueWorkerState {
   nextDispatchTimestamp: number | null;
   currentPacingMinMs: number;
   currentPacingMaxMs: number;
-  pacingPreset: 'fast' | 'safe' | 'custom';
+  pacingPreset: 'turbo' | 'fast' | 'safe' | 'custom';
   currentSendingItemId: number | null;
   activeTargetName?: string | null;
   counts: {
@@ -32,6 +32,11 @@ export interface QueueWorkerState {
     sent: number;
     failed_offline: number;
     failed_perm: number;
+  };
+  delaySettings?: {
+    whatsapp_delay_credit_bill: number;
+    whatsapp_delay_distributor: number;
+    whatsapp_delay_delivery_boy: number;
   };
   recentItems: QueueItem[];
 }
@@ -75,7 +80,7 @@ class WhatsAppQueueWorker {
       const min = minRow ? parseInt(minRow.value, 10) : 8000;
       const max = maxRow ? parseInt(maxRow.value, 10) : 12000;
 
-      this.pacingMinMs = isNaN(min) ? 8000 : Math.max(3000, min);
+      this.pacingMinMs = isNaN(min) ? 8000 : Math.max(100, min);
       this.pacingMaxMs = isNaN(max) ? 12000 : Math.max(this.pacingMinMs, max);
     } catch (err) {
       // Use defaults
@@ -85,8 +90,8 @@ class WhatsAppQueueWorker {
 
   /** Update pacing config in database */
   public async setPacingConfig(minSec: number, maxSec: number): Promise<void> {
-    const minMs = Math.max(3, minSec) * 1000;
-    const maxMs = Math.max(minSec, maxSec) * 1000;
+    const minMs = Math.max(100, Math.round(minSec * 1000));
+    const maxMs = Math.max(minMs, Math.round(maxSec * 1000));
 
     const db = await dbManager.getConnection();
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_min', ?)", [String(minMs)]);
@@ -96,10 +101,12 @@ class WhatsAppQueueWorker {
     this.pacingMaxMs = maxMs;
   }
 
-  /** Set pacing preset: 'fast' (3-5s) vs 'safe' (8-12s) */
-  public async setPacingPreset(preset: 'fast' | 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
-    if (preset === 'fast') {
-      await this.setPacingConfig(3, 5);
+  /** Set pacing preset: 'turbo' (100ms), 'fast' (1-3s) vs 'safe' (8-12s) */
+  public async setPacingPreset(preset: 'turbo' | 'fast' | 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
+    if (preset === 'turbo') {
+      await this.setPacingConfig(0.1, 0.3);
+    } else if (preset === 'fast') {
+      await this.setPacingConfig(1, 3);
     } else {
       await this.setPacingConfig(8, 12);
     }
@@ -547,9 +554,6 @@ class WhatsAppQueueWorker {
     const waStatus = await getWhatsAppStatus();
     const db = await dbManager.getConnection();
 
-    // Clean up old sent items
-    await this.cleanupOldSentItems();
-
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const startOfTodayMs = startOfToday.getTime();
@@ -591,8 +595,14 @@ class WhatsAppQueueWorker {
     const now = Date.now();
     const countdown = this.nextDispatchTimestamp ? Math.max(0, Math.ceil((this.nextDispatchTimestamp - now) / 1000)) : 0;
 
-    let preset: 'fast' | 'safe' | 'custom' = 'custom';
-    if (this.pacingMinMs === 3000 && this.pacingMaxMs === 5000) {
+    const delayCreditRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_credit_bill'");
+    const delayDistRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_distributor'");
+    const delayDelivRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_delivery_boy'");
+
+    let preset: 'turbo' | 'fast' | 'safe' | 'custom' = 'custom';
+    if (this.pacingMinMs === 100 && this.pacingMaxMs === 300) {
+      preset = 'turbo';
+    } else if (this.pacingMinMs === 1000 && this.pacingMaxMs === 3000) {
       preset = 'fast';
     } else if (this.pacingMinMs === 8000 && this.pacingMaxMs === 12000) {
       preset = 'safe';
@@ -615,6 +625,11 @@ class WhatsAppQueueWorker {
         sent: countsRow?.sent || 0,
         failed_offline: countsRow?.failed_offline || 0,
         failed_perm: countsRow?.failed_perm || 0
+      },
+      delaySettings: {
+        whatsapp_delay_credit_bill: Number(delayCreditRow?.value || 0),
+        whatsapp_delay_distributor: Number(delayDistRow?.value || 0),
+        whatsapp_delay_delivery_boy: Number(delayDelivRow?.value || 0),
       },
       recentItems
     };

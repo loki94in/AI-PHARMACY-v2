@@ -119,6 +119,7 @@ export class OverlapDetectionService {
 
           try {
             await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrival', order.requester || 'Customer');
+            await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [order.id]);
           } catch (waErr) {
             console.warn('[OverlapDetectionService] WhatsApp queue warning:', waErr);
           }

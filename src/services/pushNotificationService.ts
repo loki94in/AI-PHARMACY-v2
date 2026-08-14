@@ -117,7 +117,7 @@ eventService.on('server_event', async (eventData: any) => {
       break;
     case 'email_update':
       if (payload.success) {
-        title = '📧 New Billing Attachment';
+        title = payload.title || '📧 New Mail Received';
         body = payload.message || 'Distributor invoice received and parsed successfully.';
       } else {
         title = '❌ Attachment Parse Failed';
