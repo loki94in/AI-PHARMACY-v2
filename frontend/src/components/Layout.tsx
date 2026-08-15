@@ -2468,7 +2468,7 @@ export const Layout = ({
     let mounted = true;
     const checkReadiness = async () => {
       try {
-        const res = await apiClient.get('/api/health/ready');
+        const res = await apiClient.get('/health/ready');
         if (mounted) {
           setIsSystemReady(res.data?.ready !== false);
         }

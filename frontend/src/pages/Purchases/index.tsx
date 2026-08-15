@@ -43,9 +43,11 @@ interface Medicine {
   generic_name: string;
   manufacturer: string;
   pack_unit: string;
+  pack_size?: string | number;
   strength: string;
   mrp: number;
   rate: number;
+  sell_price?: number | null;
   scheme_paid: number;
   scheme_free: number;
   cgst_per: number;
@@ -53,6 +55,8 @@ interface Medicine {
   hsn_code: string;
   stock_qty?: number;
   loose_qty?: number;
+  pharmarack_rate?: number;
+  pharmarack_distributor?: string;
 }
 
 interface BillItem {
@@ -992,15 +996,51 @@ const Purchases: React.FC = () => {
     pack_unit: 'Tablet',
     strength: '',
     pack_size: '',
-    cgst_per: 5,
-    sgst_per: 5,
+    cgst_per: 6,
+    sgst_per: 6,
     hsn_code: '',
+    mrp: '' as string | number,
+    rate: '' as string | number,
+    sell_price: '' as string | number,
   });
   const [savingMedicine, setSavingMedicine] = useState(false);
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
   const [generatingProductBarcode, setGeneratingProductBarcode] = useState(false);
+
+  const openAddMedicineModal = (index: number) => {
+    setActiveMedicineIndex(index);
+    const it = items[index];
+    const extracted = (it as any)?._extracted_data || {};
+    const medMfg = it?.manufacturer || extracted.manufacturer || '';
+    const medHsn = (it as any)?.hsn_code || extracted.hsn_code || '';
+    const medMrp = it?.mrp || extracted.mrp || '';
+    const medRate = it?.rate || extracted.rate || '';
+    const medSellPrice = it?.sell_price || (medMrp ? medMrp : '');
+    const medCgst = (it?.cgst_per !== undefined && it?.cgst_per !== '') ? it.cgst_per : (extracted.cgst_per !== undefined ? extracted.cgst_per : 6);
+    const medSgst = (it?.sgst_per !== undefined && it?.sgst_per !== '') ? it.sgst_per : (extracted.sgst_per !== undefined ? extracted.sgst_per : 6);
+    const medName = it?.medicine_name || it?.original_name || extracted.name || '';
+
+    setNewMedicine({
+      name: medName,
+      generic_name: (it as any)?.generic_name || '',
+      manufacturer: medMfg,
+      marketed_by: (it as any)?.marketed_by || medMfg,
+      pack_unit: (it as any)?.pack_unit || 'Tablet',
+      strength: (it as any)?.strength || '',
+      pack_size: (it as any)?.pack_size || '',
+      cgst_per: Number(medCgst) || 6,
+      sgst_per: Number(medSgst) || 6,
+      hsn_code: medHsn,
+      mrp: medMrp,
+      rate: medRate,
+      sell_price: medSellPrice,
+    });
+    setShowMedicineModal(true);
+    setSearchResults([]);
+    setActiveSearchIndex(null);
+  };
 
   const handlePrintProductBarcodes = async (itemsToGenerate: Array<{ name?: string; medicine_name?: string; batch_no?: string; batch_number?: string; batch?: string }>) => {
     const payload = itemsToGenerate
@@ -1082,10 +1122,6 @@ const Purchases: React.FC = () => {
       });
   };
 
-
-
-
-
   // ponytail: React Query manages distributors, purchaseHistory, and pendingReturns automatically.
 
   const saveDistributor = async () => {
@@ -1141,42 +1177,77 @@ const Purchases: React.FC = () => {
   };
 
   const saveMedicine = async () => {
-    if (!newMedicine.name) {
+    if (!newMedicine.name || !newMedicine.name.trim()) {
       alert('Medicine name is required');
       return;
     }
 
     setSavingMedicine(true);
     try {
-      const response = await apiClient.post('/medicines', newMedicine);
+      const parsedMrp = parseFloat(String(newMedicine.mrp || 0)) || 0;
+      const parsedRate = parseFloat(String(newMedicine.rate || 0)) || 0;
+      const parsedSellPrice = (newMedicine.sell_price !== undefined && newMedicine.sell_price !== '' && !isNaN(Number(newMedicine.sell_price))) ? parseFloat(String(newMedicine.sell_price)) : (parsedMrp > 0 ? parsedMrp : null);
+
+      const response = await apiClient.post('/medicines', {
+        ...newMedicine,
+        mrp: parsedMrp,
+        rate: parsedRate,
+        sell_price: parsedSellPrice,
+        cgst_per: parseFloat(String(newMedicine.cgst_per || 0)) || 0,
+        sgst_per: parseFloat(String(newMedicine.sgst_per || 0)) || 0,
+      });
       const saved = response.data.data;
       
       // Auto-select in the current row
-      if (activeMedicineIndex !== null) {
+      if (activeMedicineIndex !== null && items[activeMedicineIndex]) {
         const newItems = [...items];
         const item = newItems[activeMedicineIndex];
         item.medicine_id = saved.id;
         item.medicine_name = saved.name;
-        item.mrp = saved.mrp;
-        item.rate = saved.rate;
-        item.cgst_per = saved.cgst_per;
-        item.sgst_per = saved.sgst_per;
-        item.scheme_paid = saved.scheme_paid;
-        item.scheme_free = saved.scheme_free;
+        item.manufacturer = saved.manufacturer || newMedicine.manufacturer;
+        (item as any).hsn_code = saved.hsn_code || newMedicine.hsn_code;
+        item.mrp = saved.mrp || parsedMrp || item.mrp || 0;
+        item.rate = saved.rate || parsedRate || item.rate || 0;
+        item.sell_price = saved.sell_price || parsedSellPrice || null;
+        item.cgst_per = (saved.cgst_per !== undefined && saved.cgst_per !== null) ? saved.cgst_per : newMedicine.cgst_per;
+        item.sgst_per = (saved.sgst_per !== undefined && saved.sgst_per !== null) ? saved.sgst_per : newMedicine.sgst_per;
         item.amount = calculateItemAmount(item);
         setItems(newItems);
+      }
+
+      // Add to catalog cache for instant search availability across POS and Purchases
+      if (saved && saved.id) {
+        cachedMasterCatalog.unshift({
+          id: saved.id,
+          name: saved.name,
+          generic_name: saved.generic_name,
+          manufacturer: saved.manufacturer,
+          pack_unit: saved.pack_unit,
+          pack_size: saved.pack_size,
+          mrp: saved.mrp || parsedMrp,
+          rate: saved.rate || parsedRate,
+          cgst_per: saved.cgst_per || 0,
+          sgst_per: saved.sgst_per || 0,
+          hsn_code: saved.hsn_code || '',
+          strength: saved.strength || '',
+          scheme_paid: 0,
+          scheme_free: 0
+        });
       }
       
       setNewMedicine({
         name: '', generic_name: '', manufacturer: '', marketed_by: '',
         pack_unit: 'Tablet', strength: '', pack_size: '',
-        cgst_per: 5, sgst_per: 5, hsn_code: '',
+        cgst_per: 6, sgst_per: 6, hsn_code: '',
+        mrp: '', rate: '', sell_price: ''
       });
       setShowMedicineModal(false);
       setActiveMedicineIndex(null);
-    } catch (error) {
+      toastEvent.trigger(`Medicine "${saved.name}" registered to Master Database with rates preserved!`, 'success', '/purchases');
+    } catch (error: any) {
       console.error('Error saving medicine:', error);
-      alert('Failed to save medicine');
+      const msg = error?.response?.data?.error || 'Failed to save medicine';
+      alert(msg);
     } finally {
       setSavingMedicine(false);
     }
@@ -1808,9 +1879,7 @@ const Purchases: React.FC = () => {
     }
 
     if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
-      toastEvent.trigger('Please select or type a valid distributor.', 'error', '/purchases');
-      alert('Please select or type a valid distributor.');
-      return;
+      distNameToSave = 'Default Distributor';
     }
 
     let finalInvoiceNo = (invoiceNo || '').trim();
@@ -1859,12 +1928,15 @@ const Purchases: React.FC = () => {
             medicine: medName,
             medicine_name: medName,
             original_name: item.original_name || medName,
+            manufacturer: item.manufacturer || (item as any)._extracted_data?.manufacturer || '',
+            hsn_code: (item as any).hsn_code || (item as any)._extracted_data?.hsn_code || '',
             batch_no: item.batch_no || item.batch || '',
             expiry_date: item.expiry_date || item.expiry || '',
             qty: parseFloat(String(item.qty !== undefined ? item.qty : item.quantity || 0)) || 0,
             free_qty: parseFloat(String(item.free_qty !== undefined ? item.free_qty : item.free_quantity || 0)) || 0,
             rate: parseFloat(String(item.rate !== undefined ? item.rate : item.price || 0)) || 0,
             mrp: parseFloat(String(item.mrp || 0)) || 0,
+            sell_price: item.sell_price || null,
             cgst_per: parseFloat(String(item.cgst_per !== undefined ? item.cgst_per : item.cgst || 0)) || 0,
             sgst_per: parseFloat(String(item.sgst_per !== undefined ? item.sgst_per : item.sgst || 0)) || 0,
             cd_rs: parseFloat(String(item.cd_rs || 0)) || 0,
@@ -2634,12 +2706,32 @@ const Purchases: React.FC = () => {
                       </td>
                       {hasOriginalName && (
                         <td className="py-2.5 pr-2">
-                          <span 
-                            className="text-xs font-mono text-muted select-all block max-w-[200px] truncate h-8 flex items-center" 
-                            title={item.original_name || 'No original name'}
-                          >
-                            {item.original_name || '-'}
-                          </span>
+                          <div className="flex flex-col gap-0.5 justify-center min-h-[32px]">
+                            <span 
+                              className="text-xs font-mono text-muted select-all block max-w-[200px] truncate" 
+                              title={item.original_name || 'No original name'}
+                            >
+                              {item.original_name || '-'}
+                            </span>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {item.manufacturer && (
+                                <span 
+                                  className="text-[9px] bg-blue-500/10 border border-blue-500/20 text-blue-400 px-1 py-0.2 rounded font-medium truncate max-w-[110px]"
+                                  title={`Manufacturer: ${item.manufacturer}`}
+                                >
+                                  Mfg: {item.manufacturer}
+                                </span>
+                              )}
+                              {(item as any).hsn_code && (
+                                <span 
+                                  className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1 py-0.2 rounded font-mono font-medium"
+                                  title={`HSN: ${(item as any).hsn_code}`}
+                                >
+                                  HSN: {(item as any).hsn_code}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </td>
                       )}
                       <td className="py-2.5">
@@ -2675,14 +2767,7 @@ const Purchases: React.FC = () => {
                                       return;
                                     } else if (searchHighlightIndex === searchResults.length || searchResults.length === 0) {
                                       e.preventDefault();
-                                      setActiveMedicineIndex(index);
-                                      setNewMedicine(prev => ({
-                                        ...prev,
-                                        name: item.medicine_name || item.original_name || ''
-                                      }));
-                                      setShowMedicineModal(true);
-                                      setSearchResults([]);
-                                      setActiveSearchIndex(null);
+                                      openAddMedicineModal(index);
                                       return;
                                     }
                                   } else if (e.key === 'Escape') {
@@ -2698,6 +2783,15 @@ const Purchases: React.FC = () => {
                               placeholder="Search medicine..."
                             />
                             <button
+                              type="button"
+                              onClick={() => openAddMedicineModal(index)}
+                              className="w-8 h-8 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
+                              title="Quick-Edit / Register Medicine with Master Database"
+                            >
+                              <Plus size={14} />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleOpenEnrichment(item)}
                               disabled={!item.medicine_id}
                               className={`w-8 h-8 rounded text-sm flex-shrink-0 flex items-center justify-center border transition-all ${
@@ -2710,37 +2804,54 @@ const Purchases: React.FC = () => {
                               <BookOpen size={14} />
                             </button>
                           </div>
-                          {(() => {
-                            const live = getLiveStockForItem(item);
-                            if (live && live.found) {
-                              const stockVal = live.stock_qty || 0;
-                              const looseVal = live.loose_qty || 0;
-                              const isZero = stockVal <= 0 && looseVal <= 0;
-                              const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
-                              return (
-                                <div className={`text-[11px] font-semibold block mt-0.5 ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
-                                  {digitText}
-                                </div>
-                              );
-                            } else if (item.medicine_id) {
-                              const stockVal = Number(item.stock_qty) || 0;
-                              const looseVal = Number(item.loose_qty) || 0;
-                              const isZero = stockVal <= 0 && looseVal <= 0;
-                              const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
-                              return (
-                                <div className={`text-[11px] font-semibold block mt-0.5 ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
-                                  {digitText}
-                                </div>
-                              );
-                            } else if (item.medicine_name && item.medicine_name.trim().length > 0) {
-                              return (
-                                <div className="text-[10px] text-yellow-400 font-medium block mt-0.5">
-                                  ✨ New Medicine
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {(() => {
+                              const live = getLiveStockForItem(item);
+                              if (live && live.found) {
+                                const stockVal = live.stock_qty || 0;
+                                const looseVal = live.loose_qty || 0;
+                                const isZero = stockVal <= 0 && looseVal <= 0;
+                                const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
+                                return (
+                                  <span className={`text-[11px] font-semibold ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                    Stock: {digitText}
+                                  </span>
+                                );
+                              } else if (item.medicine_id) {
+                                const stockVal = Number(item.stock_qty) || 0;
+                                const looseVal = Number(item.loose_qty) || 0;
+                                const isZero = stockVal <= 0 && looseVal <= 0;
+                                const digitText = isZero ? '- 0' : (looseVal > 0 ? `${stockVal} + ${looseVal}` : `${stockVal}`);
+                                return (
+                                  <span className={`text-[11px] font-semibold ${isZero ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                    Stock: {digitText}
+                                  </span>
+                                );
+                              } else if (item.medicine_name && item.medicine_name.trim().length > 0) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddMedicineModal(index)}
+                                    className="text-[10px] text-yellow-400 font-medium hover:underline flex items-center gap-0.5"
+                                    title="Click to register this new medicine with full rates"
+                                  >
+                                    ✨ New Medicine (Click to Register)
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
+                            {!hasOriginalName && item.manufacturer && (
+                              <span className="text-[9px] bg-blue-500/10 border border-blue-500/20 text-blue-400 px-1 py-0.2 rounded font-medium truncate max-w-[110px]" title={`Manufacturer: ${item.manufacturer}`}>
+                                Mfg: {item.manufacturer}
+                              </span>
+                            )}
+                            {!hasOriginalName && (item as any).hsn_code && (
+                              <span className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1 py-0.2 rounded font-mono font-medium" title={`HSN: ${(item as any).hsn_code}`}>
+                                HSN: {(item as any).hsn_code}
+                              </span>
+                            )}
+                          </div>
                           {activeSearchIndex === index && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
                             <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl">
                               <div className="px-3 py-1.5 text-xs text-muted font-medium border-b border-glass-border/30 flex items-center justify-between">
@@ -2749,16 +2860,7 @@ const Purchases: React.FC = () => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setActiveMedicineIndex(index);
-                                  setNewMedicine(prev => ({
-                                    ...prev,
-                                    name: item.medicine_name || item.original_name || ''
-                                  }));
-                                  setShowMedicineModal(true);
-                                  setSearchResults([]);
-                                  setActiveSearchIndex(null);
-                                }}
+                                onClick={() => openAddMedicineModal(index)}
                                 className="w-full text-left p-3 mt-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 transition-all flex items-center gap-3 group"
                               >
                                 <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -2769,7 +2871,7 @@ const Purchases: React.FC = () => {
                                     Add "{item.medicine_name}" to Master Database
                                   </div>
                                   <div className="text-[11px] text-muted truncate mt-0.5">
-                                    Directly register new medicine into store master database
+                                    Directly register new medicine with full rates into store master database
                                   </div>
                                 </div>
                                 <span className="text-[10px] px-2 py-0.5 rounded bg-bg3 text-muted font-mono border border-glass-border flex-shrink-0">
@@ -2829,16 +2931,7 @@ const Purchases: React.FC = () => {
                               <button
                                 type="button"
                                 data-highlighted={searchHighlightIndex === searchResults.length ? "true" : "false"}
-                                onClick={() => {
-                                  setActiveMedicineIndex(index);
-                                  setNewMedicine(prev => ({
-                                    ...prev,
-                                    name: item.medicine_name || item.original_name || ''
-                                  }));
-                                  setShowMedicineModal(true);
-                                  setSearchResults([]);
-                                  setActiveSearchIndex(null);
-                                }}
+                                onClick={() => openAddMedicineModal(index)}
                                 className={`w-full text-left px-4 py-2.5 hover:bg-emerald-500/15 text-emerald-400 font-semibold border-t border-glass-border/30 flex items-center justify-between transition-all ${
                                   searchHighlightIndex === searchResults.length ? 'bg-emerald-500/20 border-l-2 border-emerald-400' : ''
                                 }`}
@@ -2918,6 +3011,14 @@ const Purchases: React.FC = () => {
                         className="w-full bg-transparent border-0 outline-none text-white text-sm text-right p-0 focus:ring-0 focus:outline-none"
                       />
                     </div>
+                    {parseFloat(String(item.free_qty || 0)) > 0 && qtyVal > 0 && (
+                      <div 
+                        className="text-[9px] font-mono text-emerald-400 font-bold block mt-0.5 truncate cursor-help text-right"
+                        title={`Effective Scheme Rate: ₹${((qtyVal * rateVal) / (qtyVal + parseFloat(String(item.free_qty || 0)))).toFixed(2)}/unit factoring in ${item.free_qty} free item(s)`}
+                      >
+                        Eff: ₹{((qtyVal * rateVal) / (qtyVal + parseFloat(String(item.free_qty || 0)))).toFixed(2)}/u
+                      </div>
+                    )}
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
                         <div className="bg-gray-900 border border-blue-500 rounded-lg p-2 shadow-xl">
@@ -3137,7 +3238,7 @@ const Purchases: React.FC = () => {
               </button>
             )}
             <button
-              onClick={handleSave}
+              onClick={savePurchase}
               className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
               title={saving ? 'Click again to retry if stuck' : 'Save Purchase Bill (Ctrl+S)'}
             >
@@ -3306,42 +3407,57 @@ const Purchases: React.FC = () => {
         document.body
       )}
 
-      {/* Add Medicine Modal */}
+      {/* Add / Quick-Edit Medicine Modal */}
       {showMedicineModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
-          <div className="bg-gray-800 rounded-xl p-6 w-full max-w-lg">
-            <h3 className="text-lg font-semibold text-white mb-4">Add New Medicine</h3>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-modal p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl p-6 w-full max-w-xl shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-glass-border/40 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-text flex items-center gap-2">
+                  <span className="p-1 rounded bg-primary/20 text-primary text-sm">💊</span>
+                  {activeMedicineIndex !== null && items[activeMedicineIndex]?.medicine_id ? 'Quick-Edit Master Medicine' : 'Register New Medicine to Master Database'}
+                </h3>
+                <p className="text-xs text-muted mt-0.5">Save medicine metadata and rates directly into store master database & inventory</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowMedicineModal(false); setActiveMedicineIndex(null); }}
+                className="text-muted hover:text-text p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
             
             {activeMedicineIndex !== null && items[activeMedicineIndex]?.original_name && (
-              <div className="mb-4 p-3 bg-blue-500/10 border border-glass-border/30 rounded-lg flex items-start gap-2 text-xs text-blue-300 font-mono">
+              <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2 text-xs text-blue-300 font-mono">
                 <span className="text-base select-none">📄</span>
-                <div>
-                  <span className="font-bold text-gray-300 block mb-0.5 font-sans">Reference Name from Bill:</span>
-                  <span className="text-white font-semibold">{items[activeMedicineIndex].original_name}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-bold text-muted block mb-0.5 font-sans">Parsed Bill / File Reference:</span>
+                  <span className="text-text font-semibold break-all">{items[activeMedicineIndex].original_name}</span>
                 </div>
               </div>
             )}
             
-            <div className="grid grid-cols-2 gap-4">
-              {/* Row 1 - Full width */}
+            <div className="grid grid-cols-2 gap-3.5">
+              {/* Medicine Name */}
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-300 mb-1">Medicine Name *</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Medicine Name *</label>
                 <input
                   type="text"
                   value={newMedicine.name}
                   onChange={(e) => setNewMedicine({ ...newMedicine, name: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Medicine name"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-medium"
+                  placeholder="e.g. Dolo 650 Tablet"
                 />
               </div>
 
-              {/* Row 2 - Type & Generic */}
+              {/* Type & Generic */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Type *</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Type / Dosage *</label>
                 <select
                   value={newMedicine.pack_unit}
                   onChange={(e) => setNewMedicine({ ...newMedicine, pack_unit: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                 >
                   <option value="Tablet">Tablet (Tab)</option>
                   <option value="Capsule">Capsule (Cap)</option>
@@ -3360,54 +3476,54 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Generic Name</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Generic / Composition</label>
                 <input
                   type="text"
                   value={newMedicine.generic_name}
                   onChange={(e) => setNewMedicine({ ...newMedicine, generic_name: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                   placeholder="e.g. Paracetamol"
                 />
               </div>
 
-              {/* Row 3 - Strength & Pack */}
+              {/* Strength & Pack */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Strength</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Strength</label>
                 <input
                   type="text"
                   value={newMedicine.strength}
                   onChange={(e) => setNewMedicine({ ...newMedicine, strength: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. 500mg, 10ml"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="e.g. 650mg, 100ml"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Pack</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Pack Size</label>
                 <input
                   type="text"
                   value={newMedicine.pack_size}
                   onChange={(e) => setNewMedicine({ ...newMedicine, pack_size: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. 1x10 Tab, 1x30 Cap"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="e.g. 1x15 Tab, 1x10 Cap"
                 />
               </div>
 
-              {/* Row 4 - Mfg & Mkdt */}
+              {/* Manufacturer & Marketed By */}
               <div className="relative">
-                <label className="block text-sm font-medium text-gray-300 mb-1">Mfg (Manufacturer)</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Manufacturer (Mfg)</label>
                 <input
                   type="text"
                   value={newMedicine.manufacturer}
                   onChange={(e) => handleMfgChange(e.target.value)}
                   onFocus={(e) => handleMfgFocus(e.target.value)}
                   onBlur={() => setTimeout(() => setShowMfgSuggestions(false), 200)}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. Cipla Ltd"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-medium"
+                  placeholder="e.g. Micro Labs Ltd"
                 />
                 {showMfgSuggestions && (() => {
                   const billMfgs = items.map(item => item.manufacturer || '').filter(Boolean);
-                  const query = newMedicine.manufacturer.toLowerCase();
+                  const query = (newMedicine.manufacturer || '').toLowerCase();
                   const uniqueBillMfgs = Array.from(new Set(billMfgs)).filter(m => m.toLowerCase().includes(query));
                   
                   const combinedMfgs = [...uniqueBillMfgs];
@@ -3420,7 +3536,7 @@ const Purchases: React.FC = () => {
                   if (combinedMfgs.length === 0) return null;
 
                   return (
-                    <div className="absolute top-full left-0 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-40 overflow-y-auto z-dropdown">
+                    <div className="absolute top-full left-0 w-full mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl max-h-40 overflow-y-auto z-dropdown">
                       {combinedMfgs.slice(0, 15).map((mfgName, idx) => {
                         const isInBill = billMfgs.some(m => m.toLowerCase() === mfgName.toLowerCase());
                         const isInDb = mfgSuggestions.some(m => m.toLowerCase() === mfgName.toLowerCase());
@@ -3443,7 +3559,7 @@ const Purchases: React.FC = () => {
                               )}
                               {isInDb && (
                                 <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-1 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
-                                  In Database
+                                  In Master
                                 </span>
                               )}
                             </div>
@@ -3456,63 +3572,132 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Mkdt (Marketed By)</label>
+                <label className="block text-xs font-semibold text-muted mb-1">Marketed By</label>
                 <input
                   type="text"
                   value={newMedicine.marketed_by}
                   onChange={(e) => setNewMedicine({ ...newMedicine, marketed_by: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. Cipla Pvt Ltd"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="e.g. Micro Labs"
                 />
               </div>
 
-              {/* Row 5 - Tax */}
+              {/* Rates Section */}
+              <div className="col-span-2 p-3 bg-bg3/60 rounded-xl border border-glass-border/60">
+                <div className="text-[11px] font-bold text-primary uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>💰 Rates & Pricing (Auto-Synced with Bill & Master DB)</span>
+                  {(() => {
+                    const m = parseFloat(String(newMedicine.mrp || 0));
+                    const r = parseFloat(String(newMedicine.rate || 0));
+                    if (m > 0 && r > 0) {
+                      const margin = ((m - r) / m) * 100;
+                      return (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          margin > 20 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                          margin > 0 ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                          'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                        }`}>
+                          Margin: {margin.toFixed(1)}%
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-muted mb-1">MRP (₹) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newMedicine.mrp}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewMedicine(prev => ({
+                          ...prev,
+                          mrp: val,
+                          sell_price: prev.sell_price === '' || prev.sell_price === prev.mrp ? val : prev.sell_price
+                        }));
+                      }}
+                      className="w-full bg-bg2 border border-glass-border rounded-lg px-3 py-1.5 text-text font-bold text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-muted mb-1">Purchase Rate (₹) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newMedicine.rate}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, rate: e.target.value })}
+                      className="w-full bg-bg2 border border-glass-border rounded-lg px-3 py-1.5 text-text font-bold text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-muted mb-1">Selling Price (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newMedicine.sell_price}
+                      onChange={(e) => setNewMedicine({ ...newMedicine, sell_price: e.target.value })}
+                      className="w-full bg-bg2 border border-glass-border rounded-lg px-3 py-1.5 text-emerald-400 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                      placeholder="Default = MRP"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Taxes & HSN */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">CGST %</label>
+                <label className="block text-xs font-semibold text-muted mb-1">CGST %</label>
                 <input
                   type="number"
+                  step="0.1"
                   value={newMedicine.cgst_per}
                   onChange={(e) => setNewMedicine({ ...newMedicine, cgst_per: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">SGST %</label>
+                <label className="block text-xs font-semibold text-muted mb-1">SGST %</label>
                 <input
                   type="number"
+                  step="0.1"
                   value={newMedicine.sgst_per}
                   onChange={(e) => setNewMedicine({ ...newMedicine, sgst_per: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                 />
               </div>
 
-              {/* Row 6 - HSN */}
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-300 mb-1">HSN Code</label>
+                <label className="block text-xs font-semibold text-muted mb-1">HSN Code</label>
                 <input
                   type="text"
                   value={newMedicine.hsn_code}
                   onChange={(e) => setNewMedicine({ ...newMedicine, hsn_code: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. 3004"
+                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
+                  placeholder="e.g. 300490"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
+            <div className="flex justify-end gap-3 mt-6 pt-3 border-t border-glass-border/40">
               <button
+                type="button"
                 onClick={() => { setShowMedicineModal(false); setActiveMedicineIndex(null); }}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
+                className="bg-bg3 hover:bg-white/10 text-muted hover:text-text px-4 py-2 rounded-xl text-xs font-bold transition-all border border-glass-border"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={saveMedicine}
-                disabled={savingMedicine || !newMedicine.name}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+                disabled={savingMedicine || !newMedicine.name?.trim()}
+                className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-6 py-2 rounded-xl font-bold text-xs shadow-lg shadow-emerald-900/30 transition-all disabled:opacity-50 flex items-center gap-2"
               >
-                {savingMedicine ? 'Saving...' : 'Add Medicine'}
+                {savingMedicine ? 'Saving...' : '💾 Save & Register to Master Database'}
               </button>
             </div>
           </div>

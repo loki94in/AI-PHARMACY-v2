@@ -208,16 +208,19 @@ router.get('/medicines', async (req, res) => {
 });
 
 router.post('/medicines', async (req, res) => {
-  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging } = req.body;
+  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging, mrp, rate, sell_price } = req.body;
   if (!name) return res.status(400).json({ error: 'Medicine name is required' });
   try {
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
     const adjustedName = normalizeMedicineName(name, manufacturer || '');
     const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();
+    const rawRate = parseFloat(rate) || 0;
+    const rawMrp = parseFloat(mrp) || (rawRate > 0 ? rawRate : 0);
+    const rawSellPrice = (sell_price !== undefined && sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : (rawMrp > 0 ? rawMrp : null);
     const result = await db.run(
-      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging, mrp, rate, sell_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         adjustedName, 
         generic_name || '', 
@@ -229,7 +232,10 @@ router.post('/medicines', async (req, res) => {
         parseFloat(sgst_per) || 0, 
         hsn_code || '', 
         category || '',
-        packaging || ''
+        packaging || '',
+        rawMrp,
+        rawRate,
+        rawSellPrice
       ]
     );
     const id = result.lastID;
@@ -617,7 +623,7 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     item_type, therapeutic, sub_therapeutic, schedule_type,
     short_code, ucode, cgst_per, sgst_per, igst_per,
     reorder_level, max_stock_level, rack, disable_auto_barcode, tb_medicine,
-    sell_price, metadata, allow_loose_sale
+    sell_price, mrp, rate, metadata, allow_loose_sale
   } = req.body;
 
   try {
@@ -662,6 +668,16 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
     if (rack !== undefined) { updates.push('rack = ?'); params.push(rack); }
     if (disable_auto_barcode !== undefined) { updates.push('disable_auto_barcode = ?'); params.push(disable_auto_barcode ? 1 : 0); }
     if (tb_medicine !== undefined) { updates.push('tb_medicine = ?'); params.push(tb_medicine ? 1 : 0); }
+    if (mrp !== undefined) {
+      const parsedMrp = parseFloat(mrp) || 0;
+      updates.push('mrp = ?');
+      params.push(parsedMrp);
+    }
+    if (rate !== undefined) {
+      const parsedRate = parseFloat(rate) || 0;
+      updates.push('rate = ?');
+      params.push(parsedRate);
+    }
     if (sell_price !== undefined) {
       const parsedPrice = (sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : null;
       updates.push('sell_price = ?');
@@ -683,6 +699,8 @@ router.put('/medicines/:id/quick-edit', async (req, res) => {
         invParams.push(rack_location !== undefined ? rack_location : rack);
       }
       if (reorder_level !== undefined) { invUpdates.push('reorder_level = ?'); invParams.push(parseInt(reorder_level, 10) || 10); }
+      if (rate !== undefined) { invUpdates.push('cost_price = ?'); invParams.push(parseFloat(rate) || 0); }
+      if (mrp !== undefined) { invUpdates.push('mrp = ?'); invParams.push(parseFloat(mrp) || 0); }
 
       if (invUpdates.length > 0) {
         invParams.push(inventory_id);

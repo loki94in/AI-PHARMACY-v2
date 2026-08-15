@@ -427,7 +427,7 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       total_amount = parseFloat(headerRow[19]) || parseFloat(headerRow[8]) || 0;
     } else {
       distributor_name = headerRow[19] ? headerRow[19].trim() : '';
-      invoice_no = headerRow[2] ? headerRow[2].trim() : '';
+      invoice_no = (headerRow[18] && headerRow[18].trim().length > 0) ? headerRow[18].trim() : (headerRow[2] ? headerRow[2].trim() : '');
       const rawDate = headerRow[3] ? headerRow[3].trim() : '';
       invoice_date = normalizeDateToYYYYMMDD(rawDate);
       total_amount = parseFloat(headerRow[16]) || 0;
@@ -454,6 +454,8 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       const batch = row[10] ? row[10].trim() : '';
       const expiry = formatExpiryDate(row[11]);
       const gst = parseFloat(row[16]) || 0;
+      const mfgB = (row[1] && isNaN(Number(row[1])) && row[1].trim().length >= 2) ? row[1].trim() : '';
+      const hsnB = (row[26] || row[25] || '').trim();
       
       if (name) {
         items.push({
@@ -468,7 +470,23 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
           sgst_per: gst / 2,
           cd_per: 0,
           cd_rs: 0,
-          hsn_code: ''
+          manufacturer: mfgB,
+          hsn_code: hsnB,
+          _extracted_data: {
+            name,
+            manufacturer: mfgB,
+            hsn_code: hsnB,
+            rate,
+            mrp,
+            qty,
+            free_qty,
+            batch_no: batch,
+            expiry_date: expiry,
+            cgst_per: gst / 2,
+            sgst_per: gst / 2,
+            cd_per: 0,
+            cd_rs: 0
+          }
         });
       }
     } else {
@@ -486,7 +504,9 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       const batch = row[7 + offset] ? row[7 + offset].trim() : (row[8] ? row[8].trim() : '');
       const expiry = formatExpiryDate(row[8 + offset] || row[9]);
       const gst = parseFloat(row[11 + offset]) || parseFloat(row[12]) || 0;
-      const hsn = row[25 + offset] || row[37] || '';
+      const cd_rs = parseFloat(row[25]) || 0;
+      const hsn = (row[26] || row[25 + offset] || row[37] || '').trim();
+      const mfg = (row[2] && isNaN(Number(row[2])) && row[2].trim().length >= 2) ? row[2].trim() : (row[1] ? row[1].trim() : '');
       
       if (name) {
         items.push({
@@ -500,8 +520,24 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
           cgst_per: gst / 2,
           sgst_per: gst / 2,
           cd_per: 0,
-          cd_rs: 0,
-          hsn_code: hsn.trim()
+          cd_rs: cd_rs,
+          manufacturer: mfg,
+          hsn_code: hsn,
+          _extracted_data: {
+            name,
+            manufacturer: mfg,
+            hsn_code: hsn,
+            rate,
+            mrp,
+            qty,
+            free_qty,
+            batch_no: batch,
+            expiry_date: expiry,
+            cgst_per: gst / 2,
+            sgst_per: gst / 2,
+            cd_per: 0,
+            cd_rs: cd_rs
+          }
         });
       }
     }
@@ -2155,19 +2191,44 @@ export class EmailService {
             const rowCdPer = parseFloat(r[headerMap.cd_per] || r['discount'] || r['disc_per'] || r['cd_per'] || '0') || 0;
             const rowCdRs = parseFloat(r[headerMap.cd_rs] || r['disc_amt'] || r['cd_amt'] || r['cd_value'] || '0') || 0;
             const free_qty = parseInt(r[headerMap.free_qty] || r['free'] || r['free_qty'] || r['Free'] || '0', 10) || 0;
+            const name = (r[headerMap.name] || r['prod_name'] || r['product_name'] || r['medicine_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown CSV Item').toString().trim();
+            const quantity = parseInt(r[headerMap.quantity] || r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10) || 0;
+            const rate = parseFloat(r[headerMap.rate] || r['Rate'] || r['Price'] || r['rate'] || r['price'] || '0') || 0;
+            const mrp = parseFloat(r[headerMap.mrp] || r['MRP'] || r['mrp'] || '0') || 0;
+            const batch_no = (r[headerMap.batch_no] || r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
+            const expiry_date = formatExpiryDate(r[headerMap.expiry_date] || r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12');
+            const manufacturer = (r[headerMap.manufacturer] || r['mfg'] || r['company'] || r['manufacturer'] || r['mfg_name'] || r['mfg_by'] || r['mfg_code'] || r['Company'] || r['Mfg'] || r['MANUFACTURER'] || r['MFG'] || '').toString().trim();
+            const hsn_code = (r[headerMap.hsn_code] || r['hsn'] || r['hsn_code'] || r['hsncode'] || r['sac'] || r['HSN'] || r['HSN Code'] || r['HSNCODE'] || '').toString().trim();
 
             return {
-              name: r[headerMap.name] || r['prod_name'] || r['product_name'] || r['medicine_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown CSV Item',
-              quantity: parseInt(r[headerMap.quantity] || r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10) || 0,
-              rate: parseFloat(r[headerMap.rate] || r['Rate'] || r['Price'] || r['rate'] || r['price'] || '0') || 0,
-              mrp: parseFloat(r[headerMap.mrp] || r['MRP'] || r['mrp'] || '0') || 0,
-              batch_no: r[headerMap.batch_no] || r['pr_batchno'] || r['batch_no'] || r['Batch'] || '',
-              expiry_date: formatExpiryDate(r[headerMap.expiry_date] || r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12'),
+              name,
+              quantity,
+              rate,
+              mrp,
+              batch_no,
+              expiry_date,
               free_qty,
+              manufacturer,
+              hsn_code,
               cgst_per,
               sgst_per,
               cd_per: rowCdPer,
-              cd_rs: rowCdRs
+              cd_rs: rowCdRs,
+              _extracted_data: {
+                name,
+                manufacturer,
+                hsn_code,
+                rate,
+                mrp,
+                qty: quantity,
+                free_qty,
+                batch_no,
+                expiry_date,
+                cgst_per,
+                sgst_per,
+                cd_per: rowCdPer,
+                cd_rs: rowCdRs
+              }
             };
           }).filter((item: any) => item.name !== 'Unknown CSV Item' && item.name !== distributor_name);
         }
@@ -2180,7 +2241,11 @@ export class EmailService {
         if (headerLine) {
           const parts = headerLine.split(',');
           if (parts[19]) distributor_name = parts[19].trim();
-          if (parts[18]) invoice_no = parts[18].trim();
+          if (parts[18] && parts[18].trim().length > 0) {
+            invoice_no = parts[18].trim();
+          } else if (parts[2]) {
+            invoice_no = parts[2].trim();
+          }
           if (parts[16]) total_amount = parseFloat(parts[16]) || 0;
           
           const rawDate = parts[3];
@@ -2205,15 +2270,18 @@ export class EmailService {
           }
           
           if (name && name.trim()) {
-            const qty = parseInt(parts[19 + offset], 10) || 0;
-            const free_qty = parseInt(parts[14 + offset], 10) || 0;
-            const rate = parseFloat(parts[13 + offset]) || 0;
-            const mrp = parseFloat(parts[15 + offset]) || 0;
-            const batch = parts[7 + offset] || '';
-            const rawExp = parts[8 + offset] || '';
+            const qty = parseInt(parts[19 + offset] || parts[20], 10) || 0;
+            const free_qty = parseInt(parts[14 + offset] || parts[15], 10) || 0;
+            const rate = parseFloat(parts[13 + offset] || parts[13]) || 0;
+            const mrp = parseFloat(parts[15 + offset] || parts[16]) || 0;
+            const batch = (parts[7 + offset] || parts[8] || '').trim();
+            const rawExp = (parts[8 + offset] || parts[9] || '').trim();
             let expiry = formatExpiryDate(rawExp);
             
-            const gst = parseFloat(parts[11 + offset]) || 0;
+            const mfg = (parts[2] && isNaN(Number(parts[2])) && parts[2].trim().length >= 2) ? parts[2].trim() : (parts[1] ? parts[1].trim() : '');
+            const hsn = (parts[26] || parts[25 + offset] || parts[25] || '').trim();
+            const gst = parseFloat(parts[11 + offset] || parts[12]) || 0;
+            const cd_rs = parseFloat(parts[25]) || 0;
             
             items.push({
               name: name.trim(),
@@ -2223,10 +2291,27 @@ export class EmailService {
               mrp: mrp,
               batch_no: batch,
               expiry_date: expiry,
+              manufacturer: mfg,
+              hsn_code: hsn,
               cgst_per: gst / 2,
               sgst_per: gst / 2,
               cd_per: 0,
-              cd_rs: 0
+              cd_rs: cd_rs,
+              _extracted_data: {
+                name: name.trim(),
+                manufacturer: mfg,
+                hsn_code: hsn,
+                rate: rate,
+                mrp: mrp,
+                qty,
+                free_qty,
+                batch_no: batch,
+                expiry_date: expiry,
+                cgst_per: gst / 2,
+                sgst_per: gst / 2,
+                cd_per: 0,
+                cd_rs
+              }
             });
           }
         }

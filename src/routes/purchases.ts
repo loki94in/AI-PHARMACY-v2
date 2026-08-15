@@ -366,7 +366,10 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
     throw new Error('No valid invoice file found inside ZIP archive');
   }
 
-  if (nameLower.endsWith('.dav') || nameLower.endsWith('.dac')) {
+  const isMargFormat = (nameLower.endsWith('.dav') || nameLower.endsWith('.dac') || nameLower.endsWith('.csv')) &&
+    fileBuffer.toString('utf8').split('\n').some(l => l.startsWith('H,') || l.startsWith('T,') || l.startsWith('I,'));
+
+  if (isMargFormat) {
     const text = fileBuffer.toString('utf8');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     
@@ -380,8 +383,12 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
     if (headerLine) {
       const parts = headerLine.split(',');
       if (parts[19]) distributorName = parts[19].trim();
-      if (parts[18]) invoiceNo = parts[18].trim();
-      if (parts[16]) total_amount = parseFloat(parts[16]);
+      if (parts[18] && parts[18].trim().length > 0) {
+        invoiceNo = parts[18].trim();
+      } else if (parts[2]) {
+        invoiceNo = parts[2].trim();
+      }
+      if (parts[16]) total_amount = parseFloat(parts[16]) || 0;
       
       const rawDate = parts[3];
       if (rawDate && rawDate.length === 8) {
@@ -407,12 +414,12 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
       }
       
       if (name && name.trim()) {
-        const qty = parseInt(parts[19 + offset], 10) || 0;
-        const free_qty = parseInt(parts[14 + offset], 10) || 0;
-        const rate = parseFloat(parts[13 + offset]) || 0;
-        const mrp = parseFloat(parts[15 + offset]) || 0;
-        const batch = parts[7 + offset] || '';
-        const rawExp = parts[8 + offset] || '';
+        const qty = parseInt(parts[19 + offset] || parts[20], 10) || 0;
+        const free_qty = parseInt(parts[14 + offset] || parts[15], 10) || 0;
+        const rate = parseFloat(parts[13 + offset] || parts[13]) || 0;
+        const mrp = parseFloat(parts[15 + offset] || parts[16]) || 0;
+        const batch = (parts[7 + offset] || parts[8] || '').trim();
+        const rawExp = (parts[8 + offset] || parts[9] || '').trim();
         let expiry = '01/12';
         
         if (rawExp && rawExp.length >= 6) {
@@ -429,22 +436,41 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
           }
         }
         
-        const hsn = parts[25 + offset] || '';
-        const gst = parseFloat(parts[11 + offset]) || 0;
+        const mfg = (parts[2] && isNaN(Number(parts[2])) && parts[2].trim().length >= 2) ? parts[2].trim() : (parts[1] ? parts[1].trim() : '');
+        const hsn = (parts[26] || parts[25 + offset] || parts[25] || '').trim();
+        const gst = parseFloat(parts[11 + offset] || parts[12]) || 0;
+        const cd_rs = parseFloat(parts[25]) || 0;
         
         extractedItems.push({
           name: name.trim(),
           quantity: qty,
           free_qty: free_qty,
           price: rate,
+          rate: rate,
           mrp: mrp,
           batch_no: batch,
           expiry_date: expiry,
+          manufacturer: mfg,
           hsn_code: hsn,
           cgst_per: gst / 2,
           sgst_per: gst / 2,
           cd_per: 0,
-          cd_rs: 0
+          cd_rs: cd_rs,
+          _extracted_data: {
+            name: name.trim(),
+            manufacturer: mfg,
+            hsn_code: hsn,
+            rate: rate,
+            mrp: mrp,
+            qty: qty,
+            free_qty: free_qty,
+            batch_no: batch,
+            expiry_date: expiry,
+            cgst_per: gst / 2,
+            sgst_per: gst / 2,
+            cd_per: 0,
+            cd_rs: cd_rs
+          }
         });
       }
     }
@@ -477,26 +503,53 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
     }
     
     let extractedItems = records.map((r: any) => {
-      const cgst = parseFloat(r['sgst'] || '0'); // Note: CSV files can sometimes invert or group. Use SGST/CGST as available
+      const cgst = parseFloat(r['sgst'] || '0');
       const sgst = parseFloat(r['cgst'] || '0');
       const igst = parseFloat(r['igst'] || '0');
       const cgst_per = cgst || (igst / 2);
       const sgst_per = sgst || (igst / 2);
       const rowCdPer = parseFloat(r['discount'] || r['disc_per'] || r['cd_per'] || '0');
       const rowCdRs = parseFloat(r['disc_amt'] || r['cd_amt'] || r['cd_value'] || '0');
-      
+      const rateVal = parseFloat(r['Rate'] || r['Price'] || r['rate'] || '0');
+      const mrpVal = parseFloat(r['MRP'] || r['mrp'] || '0');
+      const qtyVal = parseInt(r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10);
+      const freeQtyVal = parseInt(r['Free'] || r['free_qty'] || r['free'] || '0', 10);
+      const mfgVal = (r['mfg'] || r['manufacturer'] || r['company'] || r['Mfg'] || '').toString().trim();
+      const hsnVal = (r['hsncode'] || r['hsn_code'] || r['hsn'] || r['HSN'] || '').toString().trim();
+      const nameVal = (r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown CSV Item').toString().trim();
+      const batchVal = (r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
+      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12').toString().trim();
+
       return {
-        name: r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown CSV Item',
-        quantity: parseInt(r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10),
-        price: parseFloat(r['Rate'] || r['Price'] || r['rate'] || '0'),
-        mrp: parseFloat(r['MRP'] || r['mrp'] || '0'),
-        batch_no: r['pr_batchno'] || r['batch_no'] || r['Batch'] || '',
-        expiry_date: r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12',
-        hsn_code: r['hsncode'] || r['hsn_code'] || r['hsn'] || '',
+        name: nameVal,
+        quantity: qtyVal,
+        price: rateVal,
+        rate: rateVal,
+        mrp: mrpVal,
+        free_qty: freeQtyVal,
+        batch_no: batchVal,
+        expiry_date: expVal,
+        manufacturer: mfgVal,
+        hsn_code: hsnVal,
         cgst_per: cgst_per,
         sgst_per: sgst_per,
         cd_per: rowCdPer,
-        cd_rs: rowCdRs
+        cd_rs: rowCdRs,
+        _extracted_data: {
+          name: nameVal,
+          manufacturer: mfgVal,
+          hsn_code: hsnVal,
+          rate: rateVal,
+          mrp: mrpVal,
+          qty: qtyVal,
+          free_qty: freeQtyVal,
+          batch_no: batchVal,
+          expiry_date: expVal,
+          cgst_per: cgst_per,
+          sgst_per: sgst_per,
+          cd_per: rowCdPer,
+          cd_rs: rowCdRs
+        }
       };
     }).filter((item: any) => item.name !== 'Unknown CSV Item' && item.name !== distributorName);
     
@@ -532,19 +585,46 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
       const sgst_per = sgst || (igst / 2);
       const rowCdPer = parseFloat(r['discount'] || r['disc_per'] || r['cd_per'] || '0');
       const rowCdRs = parseFloat(r['disc_amt'] || r['cd_amt'] || r['cd_value'] || '0');
+      const rateVal = parseFloat(r['Rate'] || r['Price'] || r['rate'] || '0');
+      const mrpVal = parseFloat(r['MRP'] || r['mrp'] || '0');
+      const qtyVal = parseInt(r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10);
+      const freeQtyVal = parseInt(r['Free'] || r['free_qty'] || r['free'] || '0', 10);
+      const mfgVal = (r['mfg'] || r['manufacturer'] || r['company'] || r['Mfg'] || '').toString().trim();
+      const hsnVal = (r['hsncode'] || r['hsn_code'] || r['hsn'] || r['HSN'] || '').toString().trim();
+      const nameVal = (r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown Excel Item').toString().trim();
+      const batchVal = (r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
+      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12').toString().trim();
       
       return {
-        name: r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown Excel Item',
-        quantity: parseInt(r['Qty'] || r['Quantity'] || r['Pack'] || r['qty'] || '0', 10),
-        price: parseFloat(r['Rate'] || r['Price'] || r['rate'] || '0'),
-        mrp: parseFloat(r['MRP'] || r['mrp'] || '0'),
-        batch_no: r['pr_batchno'] || r['batch_no'] || r['Batch'] || '',
-        expiry_date: r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12',
-        hsn_code: r['hsncode'] || r['hsn_code'] || r['hsn'] || '',
+        name: nameVal,
+        quantity: qtyVal,
+        price: rateVal,
+        rate: rateVal,
+        mrp: mrpVal,
+        free_qty: freeQtyVal,
+        batch_no: batchVal,
+        expiry_date: expVal,
+        manufacturer: mfgVal,
+        hsn_code: hsnVal,
         cgst_per: cgst_per,
         sgst_per: sgst_per,
         cd_per: rowCdPer,
-        cd_rs: rowCdRs
+        cd_rs: rowCdRs,
+        _extracted_data: {
+          name: nameVal,
+          manufacturer: mfgVal,
+          hsn_code: hsnVal,
+          rate: rateVal,
+          mrp: mrpVal,
+          qty: qtyVal,
+          free_qty: freeQtyVal,
+          batch_no: batchVal,
+          expiry_date: expVal,
+          cgst_per: cgst_per,
+          sgst_per: sgst_per,
+          cd_per: rowCdPer,
+          cd_rs: rowCdRs
+        }
       };
     }).filter((item: any) => item.name !== 'Unknown Excel Item' && item.name !== distributorName);
 
@@ -880,6 +960,8 @@ router.post('/manual', async (req, res) => {
       const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       const rawFreeQty = parseFloat(free_qty !== undefined ? free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
       const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price) || 0;
+      const rawMrp = parseFloat(item.mrp !== undefined ? item.mrp : item.price) || (rawRate > 0 ? rawRate : 0);
+      const rawSellPrice = (item.sell_price !== undefined && item.sell_price !== null && item.sell_price !== '' && !isNaN(Number(item.sell_price))) ? parseFloat(item.sell_price) : (rawMrp > 0 ? rawMrp : null);
       const rawCgst = parseFloat(item.cgst !== undefined ? item.cgst : (item.cgst_per !== undefined ? item.cgst_per : 0)) || 0;
       const rawSgst = parseFloat(item.sgst !== undefined ? item.sgst : (item.sgst_per !== undefined ? item.sgst_per : 0)) || 0;
       const rawDiscPer = parseFloat(item.discPer !== undefined ? item.discPer : (item.cd_per !== undefined ? item.cd_per : 0)) || 0;
@@ -902,7 +984,7 @@ router.post('/manual', async (req, res) => {
         masterMedItems.push({
           name: medName,
           manufacturer: item.manufacturer || undefined,
-          mrp: mrp || undefined,
+          mrp: rawMrp || undefined,
           rate: rawRate || undefined,
           cgst_per: rawCgst || undefined,
           sgst_per: rawSgst || undefined,
@@ -910,7 +992,7 @@ router.post('/manual', async (req, res) => {
         });
 
         const cleanName = medName.trim();
-        const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distributor_id);
+        const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distId);
         if (resObj?.medicineId) {
           medId = resObj.medicineId;
         } else {
@@ -923,9 +1005,9 @@ router.post('/manual', async (req, res) => {
           // Auto-create new medicine if no existing match exists
           if (!medId) {
             const insMed = await db.run(
-              'INSERT INTO medicines (name, manufacturer, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name, packaging, category, marketed_by, schedule_type, pack_unit, pack_size, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              'INSERT INTO medicines (name, manufacturer, mrp, rate, sell_price, cgst_per, sgst_per, hsn_code, generic_name, packaging, category, marketed_by, schedule_type, pack_unit, pack_size, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
               [
-                cleanName, item.manufacturer || '', mrp || 0, rawRate || 0, rawCgst || 0, rawSgst || 0, item.hsn_code || '',
+                cleanName, item.manufacturer || '', rawMrp || 0, rawRate || 0, rawSellPrice || null, rawCgst || 0, rawSgst || 0, item.hsn_code || '',
                 item.generic_name || null, item.packaging || null, item.category || null, item.marketed_by || null,
                 item.schedule_type || null, item.pack_unit || null, item.pack_size || null, item.item_type || null
               ]
@@ -936,7 +1018,7 @@ router.post('/manual', async (req, res) => {
 
         // Register distributor alias; reconcile deferred to background (ponytail: non-critical before response)
         if (medId) {
-          await medicineService.registerDistributorAlias(db, distributor_id, cleanName, medId);
+          await medicineService.registerDistributorAlias(db, distId, cleanName, medId);
           reconcileNames.push(cleanName);
         }
       }
@@ -959,7 +1041,7 @@ router.post('/manual', async (req, res) => {
         INSERT INTO purchase_items 
         (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+      `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
       // sell_price filled in batch SELECT after loop (ponytail: replaces N per-item round-trips)
       savedItems.push({
@@ -967,8 +1049,8 @@ router.post('/manual', async (req, res) => {
         name: medName,
         medicine_name: medName,
         rate: rawRate,
-        mrp: mrp || 0,
-        sell_price: null
+        mrp: rawMrp || 0,
+        sell_price: rawSellPrice || null
       });
 
       // Update inventory_master (unified storage)
@@ -976,13 +1058,13 @@ router.post('/manual', async (req, res) => {
       const invRow = await db.get('SELECT id, quantity FROM inventory_master WHERE medicine_id = ? AND (batch_no = ? OR (batch_no IS NULL AND ? IS NULL))', [medId, rawBatch, rawBatch]);
       if (invRow) {
         await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?',
-          [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
+          [totalQty, rawRate, rawMrp || 0, rawExpiry || null, invRow.id]);
         await refreshInventoryActiveStatus(db, invRow.id);
       } else {
         await db.run(`
           INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp, is_active)
           VALUES (?, ?, ?, ?, ?, ?, 1)
-        `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+        `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, rawMrp || 0]);
         await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
       await recordStockLedger(db, {
@@ -992,10 +1074,10 @@ router.post('/manual', async (req, res) => {
       });
 
       // Keep medicines.mrp, rate, and GST in sync for future purchases
-      if (mrp && mrp > 0) {
-        await db.run('UPDATE medicines SET mrp = ?, rate = ?, cgst_per = COALESCE(NULLIF(?, 0), cgst_per), sgst_per = COALESCE(NULLIF(?, 0), sgst_per) WHERE id = ?', [mrp, rawRate, rawCgst, rawSgst, medId]);
+      if (rawMrp && rawMrp > 0) {
+        await db.run('UPDATE medicines SET mrp = ?, rate = ?, sell_price = COALESCE(?, sell_price), cgst_per = COALESCE(NULLIF(?, 0), cgst_per), sgst_per = COALESCE(NULLIF(?, 0), sgst_per), manufacturer = CASE WHEN (? IS NOT NULL AND ? != \'\') THEN ? ELSE manufacturer END, hsn_code = CASE WHEN (? IS NOT NULL AND ? != \'\') THEN ? ELSE hsn_code END WHERE id = ?', [rawMrp, rawRate, rawSellPrice || null, rawCgst, rawSgst, item.manufacturer || '', item.manufacturer || '', item.manufacturer || '', item.hsn_code || '', item.hsn_code || '', item.hsn_code || '', medId]);
       } else {
-        await db.run('UPDATE medicines SET rate = ?, cgst_per = COALESCE(NULLIF(?, 0), cgst_per), sgst_per = COALESCE(NULLIF(?, 0), sgst_per) WHERE id = ?', [rawRate, rawCgst, rawSgst, medId]);
+        await db.run('UPDATE medicines SET rate = ?, sell_price = COALESCE(?, sell_price), cgst_per = COALESCE(NULLIF(?, 0), cgst_per), sgst_per = COALESCE(NULLIF(?, 0), sgst_per), manufacturer = CASE WHEN (? IS NOT NULL AND ? != \'\') THEN ? ELSE manufacturer END, hsn_code = CASE WHEN (? IS NOT NULL AND ? != \'\') THEN ? ELSE hsn_code END WHERE id = ?', [rawRate, rawSellPrice || null, rawCgst, rawSgst, item.manufacturer || '', item.manufacturer || '', item.manufacturer || '', item.hsn_code || '', item.hsn_code || '', item.hsn_code || '', medId]);
       }
 
       // Learn mapping from user corrections/associations
