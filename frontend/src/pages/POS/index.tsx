@@ -359,8 +359,9 @@ const POS = () => {
       if (editSale.discount !== undefined) setDiscount(Number(editSale.discount));
       if (editSale.payment_medium) setPaymentMedium(editSale.payment_medium);
 
-      if (Array.isArray(editSale.items) && editSale.items.length > 0) {
-        const cartItems = editSale.items.map((it: any, idx: number) => {
+      const itemsList = Array.isArray(editSale.items) ? editSale.items : (Array.isArray(editSale.sale_items) ? editSale.sale_items : []);
+      if (itemsList.length > 0) {
+        const cartItems = itemsList.map((it: any, idx: number) => {
           // Use the bill's actual stored quantity (strips) and loose_qty.
           // Fallback to 0, never to 1, so edit mode always shows the exact sold qty.
           const itemQty = it.quantity !== undefined && it.quantity !== null 
@@ -370,15 +371,16 @@ const POS = () => {
             ? Number(it.loose_qty)
             : (it.looseQty !== undefined && it.looseQty !== null ? Number(it.looseQty) : 0);
           const packSize = Number(it.pack_size || it.packSize || 10);
-          const unitPrice = Number(it.unit_price || it.rate || it.mrp || 100);
+          const unitPrice = Number(it.unit_price !== undefined && it.unit_price !== null ? it.unit_price : (it.rate || it.sell_price || it.mrp || 100));
           return {
             id: it.inventory_id || it.id || `edit_item_${idx}_${Date.now()}`,
             inventory_id: it.inventory_id,
             medicine_id: it.medicine_id,
-            name: it.medicine_name || it.name || 'Medicine',
+            name: it.medicine_name || it.name || it.product_name || 'Medicine',
             batch: it.batch_number || it.batch_no || 'AUTO',
             expiry: it.expiry_date || '12/28',
-            mrp: it.item_mrp || it.mrp || 100,
+            mrp: Number(it.item_mrp ?? it.mrp ?? unitPrice ?? 100),
+            sell_price: unitPrice,
             qty: itemQty,
             quantity: itemQty,
             unitPrice: unitPrice,
@@ -394,6 +396,20 @@ const POS = () => {
         // a previous addToCart (which captured an old medicine_id) will be skipped.
         cartGenerationRef.current += 1;
         setCart(cartItems);
+        setTabs(prev => prev.map(t => {
+          if (t.id === activeTabId) {
+            return {
+              ...t,
+              items: cartItems,
+              patientName: editSale.customer_name || '',
+              patientPhone: editSale.customer_phone || '',
+              doctor: editSale.doctor_name || '',
+              discount: Number(editSale.discount || 0),
+              paymentMedium: editSale.payment_medium || 'CASH'
+            };
+          }
+          return t;
+        }));
       }
       toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS for Editing`, 'info');
       navigate(location.pathname, { replace: true, state: {} });
@@ -1601,6 +1617,10 @@ const POS = () => {
         rowDiscount = parseFloat((((rowMrp - Number(rowSellPrice)) / rowMrp) * 100).toFixed(2));
       }
 
+      const rowUnitPrice = (firstMedItem.unitPrice !== undefined && firstMedItem.unitPrice !== null && firstMedItem.unitPrice > 0)
+        ? firstMedItem.unitPrice
+        : (alloc.batch.unit_price || rowMrp);
+
       return {
         ...firstMedItem,
         id: alloc.batch.inventory_id,
@@ -1613,7 +1633,7 @@ const POS = () => {
         sell_price: rowSellPrice,
         discount: rowDiscount || 0,
         costPrice: alloc.batch.cost_price || (rowMrp * 0.7),
-        unitPrice: alloc.batch.unit_price || rowMrp,
+        unitPrice: rowUnitPrice,
         availableStock: alloc.batch.stock_qty,
         availableLooseStock: alloc.batch.loose_quantity,
         alternative_batches: activeBatches.filter(b => b.inventory_id !== alloc.batch.inventory_id)
@@ -2187,11 +2207,12 @@ const POS = () => {
     let cost = 0;
     for (const item of cart) {
       if (item.isEmptyRow) continue;
-      const unitRate = item.packSize > 0 ? item.mrp / item.packSize : item.mrp;
-      const itemTotalBeforeDiscount = (item.mrp * item.qty) + (unitRate * (item.looseQty || 0));
+      const stripPrice = Number(item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || 0)));
+      const unitRate = item.packSize > 0 ? stripPrice / item.packSize : stripPrice;
+      const itemTotalBeforeDiscount = (stripPrice * item.qty) + (unitRate * (item.looseQty || 0));
       sub += itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
 
-      const itemCost = item.costPrice != null ? item.costPrice : (item.mrp * 0.7);
+      const itemCost = item.costPrice != null ? item.costPrice : (stripPrice * 0.7);
       const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
       cost += (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
     }
@@ -3449,6 +3470,7 @@ const POS = () => {
                     <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
                     <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
                     <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
+                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Rate</th>
                     <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
                     <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
                     <th className="py-2 px-2.5 text-xs font-bold text-muted tracking-wider border-b-2 border-border"></th>
@@ -3456,8 +3478,9 @@ const POS = () => {
                 </thead>
                 <tbody>
                   {cart.map(item => {
-                    const unitRate = item.packSize > 0 ? item.mrp / item.packSize : item.mrp;
-                    const itemTotal = ((item.mrp * item.qty) + (unitRate * (item.looseQty || 0))) * (1 - (item.discount || 0) / 100);
+                    const stripPrice = Number(item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || 0)));
+                    const unitRate = item.packSize > 0 ? stripPrice / item.packSize : stripPrice;
+                    const itemTotal = ((stripPrice * item.qty) + (unitRate * (item.looseQty || 0))) * (1 - (item.discount || 0) / 100);
                     
                     // Near expiry highlight
                     let expBadgeClass = "bg-bg3 border border-border text-text";
@@ -3920,6 +3943,42 @@ const POS = () => {
                                 e.preventDefault();
                                 const mrpIn = document.getElementById(`row-mrp-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
                                 if (mrpIn) {
+                                  const rateIn = document.getElementById(`row-rate-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
+                                  if (rateIn) {
+                                    rateIn.focus();
+                                    rateIn.select?.();
+                                  } else {
+                                    focusMedicineSearch();
+                                  }
+                                }
+                              }
+                            }}
+                          />
+                        </td>
+
+                        {/* Rate / Sale Price */}
+                        <td className="py-1 px-2.5 text-right">
+                          <input 
+                            id={`row-rate-input-${cart.indexOf(item)}`}
+                            data-pos-row-index={cart.indexOf(item)}
+                            data-pos-field="unitPrice"
+                            type="number" 
+                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg font-bold text-emerald-400 ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            value={item.isEmptyRow ? '' : (item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || '')))}
+                            placeholder="0.00"
+                            onChange={e => {
+                              const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value));
+                              updateCartItem(item.id, 'unitPrice', val);
+                              updateCartItem(item.id, 'sell_price', val);
+                            }}
+                            disabled={item.isEmptyRow}
+                            onKeyDown={e => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                handlePosRowInputKeyDown(e, cart.indexOf(item), 'unitPrice');
+                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault();
+                                const mrpIn = document.getElementById(`row-mrp-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
+                                if (mrpIn) {
                                   mrpIn.focus();
                                   mrpIn.select?.();
                                 } else {
@@ -3927,6 +3986,7 @@ const POS = () => {
                                 }
                               }
                             }}
+                            title="Set Sale Price (Rate per Strip)"
                           />
                         </td>
 

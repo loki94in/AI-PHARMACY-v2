@@ -1983,11 +1983,11 @@ router.get('/:id', async (req, res) => {
 
     invoice.items = await queryAllWithRetry(
       db,
-      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, im.mrp as item_mrp, COALESCE(m.pack_size, 10) as pack_size,
-              m.name as medicine_name, m.mrp as medicine_mrp, m.id as medicine_id
+      `SELECT si.*, COALESCE(im.batch_no, 'AUTO') as batch_number, im.expiry_date, COALESCE(im.mrp, m.mrp, 100) as item_mrp, COALESCE(m.pack_size, 10) as pack_size,
+              COALESCE(m.name, 'Medicine') as medicine_name, COALESCE(m.mrp, 100) as medicine_mrp, COALESCE(m.id, 0) as medicine_id
        FROM sale_items si
-       JOIN inventory_master im ON si.inventory_id = im.id
-       JOIN medicines m ON im.medicine_id = m.id
+       LEFT JOIN inventory_master im ON si.inventory_id = im.id
+       LEFT JOIN medicines m ON im.medicine_id = m.id
        WHERE si.invoice_id = ?`,
       [id]
     );

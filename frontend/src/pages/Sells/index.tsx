@@ -328,8 +328,18 @@ const Sells = () => {
   const openView = async (invoice: SaleInvoice) => {
     try {
       const full = await api.getSale(invoice.id);
+      setBarcodeModalInvoice(null);
       setViewInvoice(full);
-      handleOpenBarcode(full.invoice_no, full.id, full.items);
+      setBarcodeData(null);
+      setLoadingBarcode(true);
+      try {
+        const res = await api.generateSaleInvoiceBarcode(full.invoice_no);
+        setBarcodeData(res as any);
+      } catch (e) {
+        // non-blocking barcode preview fetch
+      } finally {
+        setLoadingBarcode(false);
+      }
     } catch (err) {
       toastEvent.trigger('Failed to load invoice details', 'error');
     }
@@ -340,6 +350,8 @@ const Sells = () => {
       const full = await api.getSale(invoice.id);
       setViewInvoice(null);
       setEditInvoice(null);
+      setBarcodeModalInvoice(null);
+      setBarcodeData(null);
       navigate('/pos', { state: { editSale: full } });
     } catch (err) {
       toastEvent.trigger('Failed to load invoice for editing in POS', 'error');
@@ -1092,7 +1104,7 @@ const Sells = () => {
                 <p className="text-xs text-muted mt-1">Read-only view of the invoice</p>
               </div>
               <button
-                onClick={() => setViewInvoice(null)}
+                onClick={() => { setViewInvoice(null); setBarcodeModalInvoice(null); }}
                 className="p-2 rounded-lg hover:bg-white/10 text-muted hover:text-text transition-all"
               >
                 <X size={18} />
@@ -1278,7 +1290,7 @@ const Sells = () => {
             {/* Modal Footer */}
             <div className="p-5 border-t border-glass-border flex justify-between items-center bg-bg2/80 shrink-0">
               <button
-                onClick={() => setViewInvoice(null)}
+                onClick={() => { setViewInvoice(null); setBarcodeModalInvoice(null); }}
                 className="px-4 py-2 bg-bg3 hover:bg-glass-border text-muted hover:text-text border border-glass-border rounded-lg text-sm font-semibold transition-all cursor-pointer"
               >
                 Close Preview
