@@ -292,6 +292,80 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       }
     }
 
+    // Merge all saved distributors from master directory tables who don't have an active order today
+    const existingNamesSet = new Set<string>();
+    for (const tr of todayReminders) {
+      if (tr.distributor_name) existingNamesSet.add(tr.distributor_name.toLowerCase().trim());
+    }
+
+    try {
+      const allMasterDistributors = await db.all(
+        `SELECT d.id, d.name, d.phone, d.contact 
+         FROM distributors d 
+         WHERE d.name IS NOT NULL AND d.name != ''
+         ORDER BY d.name ASC`
+      );
+
+      let syntheticCounter = 800000;
+      for (const md of allMasterDistributors) {
+        const normName = md.name.toLowerCase().trim();
+        if (!existingNamesSet.has(normName)) {
+          existingNamesSet.add(normName);
+          const phone = (md.phone || md.contact || '').replace(/\D/g, '').slice(-10);
+          todayReminders.push({
+            id: md.id ? 800000 + md.id : ++syntheticCounter,
+            distributor_id: md.id || null,
+            distributor_name: md.name.trim(),
+            distributor_phone: phone,
+            date: todayStr,
+            status: 'No Order Today',
+            auto_remind: 0,
+            delivery_boy_id: null,
+            last_reminded_at: null,
+            created_at: new Date().toISOString(),
+            delivery_boy_name: null,
+            delivery_boy_phone: null,
+            has_pharmarack_order_today: 0,
+            has_order_today: 0,
+            latest_notif_status: null,
+            latest_notif_error: null
+          });
+        }
+      }
+
+      // Also merge any extra saved names from pharmarack_distributor_mappings
+      const pharmarackMappings = await db.all(
+        `SELECT distributor_id, store_name, phone FROM pharmarack_distributor_mappings WHERE store_name IS NOT NULL AND store_name != ''`
+      );
+      for (const pm of pharmarackMappings) {
+        const normName = pm.store_name.toLowerCase().trim();
+        if (!existingNamesSet.has(normName)) {
+          existingNamesSet.add(normName);
+          const phone = (pm.phone || '').replace(/\D/g, '').slice(-10);
+          todayReminders.push({
+            id: ++syntheticCounter,
+            distributor_id: pm.distributor_id || null,
+            distributor_name: pm.store_name.trim(),
+            distributor_phone: phone,
+            date: todayStr,
+            status: 'No Order Today',
+            auto_remind: 0,
+            delivery_boy_id: null,
+            last_reminded_at: null,
+            created_at: new Date().toISOString(),
+            delivery_boy_name: null,
+            delivery_boy_phone: null,
+            has_pharmarack_order_today: 0,
+            has_order_today: 0,
+            latest_notif_status: null,
+            latest_notif_error: null
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn('[DistributorReminderWorker] Error merging master saved distributors:', err.message);
+    }
+
     return todayReminders || [];
   } catch (err: any) {
     console.error('[DistributorReminderWorker] Error syncing today active distributors:', err.message);

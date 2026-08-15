@@ -293,11 +293,17 @@ const Dispatch = () => {
     }
   };
 
-  const handleUpdateDistributorStatus = async (id: number, status: string, deliveryBoyId?: number | null) => {
+  const handleUpdateDistributorStatus = async (id: number, status: string, deliveryBoyId?: number | null, itemMeta?: any) => {
     try {
-      const res = await api.updateDistributorReminderStatus(id, { status, delivery_boy_id: deliveryBoyId });
+      const targetItem = itemMeta || distributorReminders.find(r => r.id === id);
+      const res = await api.updateDistributorReminderStatus(id, {
+        status,
+        delivery_boy_id: deliveryBoyId,
+        distributor_name: targetItem?.distributor_name,
+        distributor_phone: targetItem?.distributor_phone
+      });
       if (res && res.success && res.reminder) {
-        setDistributorReminders(prev => prev.map(r => r.id === id ? res.reminder : r));
+        setDistributorReminders(prev => prev.map(r => (r.id === id || (targetItem && r.distributor_name === targetItem.distributor_name)) ? res.reminder : r));
         showNotif(`Status updated to ${status}`);
       }
     } catch (err) {
@@ -312,11 +318,23 @@ const Dispatch = () => {
       const distName = targetItem?.distributor_name || 'Distributor';
       const msgToSend = customMessageOverride !== undefined ? customMessageOverride : customMessages[id];
 
+      let targetId = id;
+      if (id >= 800000 && targetItem) {
+        const createRes = await api.createManualDistributorOrderReminder({
+          distributor_name: targetItem.distributor_name,
+          distributor_phone: targetItem.distributor_phone,
+          delivery_boy_id: targetItem.delivery_boy_id || undefined
+        });
+        if (createRes && createRes.reminder && createRes.reminder.id) {
+          targetId = createRes.reminder.id;
+        }
+      }
+
       messageSendEvent.triggerSendProgress(distName, `Sending WhatsApp reminder to ${distName}...`, 10);
       whatsappQueueEvent.triggerOpen();
       whatsappQueueEvent.triggerUpdated();
 
-      await api.sendDistributorReminderNow(id, msgToSend);
+      await api.sendDistributorReminderNow(targetId, msgToSend);
       await fetchDistributorReminders(true);
     } catch (err: any) {
       showNotif(err.message || 'Failed to send WhatsApp reminder', 'error');
@@ -1181,7 +1199,7 @@ const Dispatch = () => {
                           <td className="p-3.5 align-middle">
                             <select
                               value={item.delivery_boy_id || ''}
-                              onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null)}
+                              onChange={e => handleUpdateDistributorStatus(item.id, item.status, e.target.value ? Number(e.target.value) : null, item)}
                               className="w-full text-xs px-3 py-1.5 rounded-xl bg-bg text-text border border-glass-border focus:outline-none font-medium transition-all shadow-sm cursor-pointer hover:border-glass-border/80"
                             >
                               <option value="">👤 Unassigned / Admin Fallback</option>
@@ -1193,7 +1211,7 @@ const Dispatch = () => {
                           <td className="p-3.5 align-middle">
                             <select
                               value={item.status}
-                              onChange={e => handleUpdateDistributorStatus(item.id, e.target.value, item.delivery_boy_id)}
+                              onChange={e => handleUpdateDistributorStatus(item.id, e.target.value, item.delivery_boy_id, item)}
                               className={`w-full text-[11px] font-extrabold px-3 py-1.5 rounded-xl border cursor-pointer bg-bg transition-all shadow-sm ${
                                 item.status === 'Collected'
                                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10'
@@ -1201,9 +1219,12 @@ const Dispatch = () => {
                                   ? 'bg-sky/20 text-sky border-sky/40 shadow-sky/10'
                                   : item.status === 'Skipped (PC Offline)'
                                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  : item.status === 'No Order Today'
+                                  ? 'bg-bg3/60 text-muted border-glass-border'
                                   : 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-amber-500/10'
                               }`}
                             >
+                              <option value="No Order Today">⚪ No Order Today</option>
                               <option value="Pending">⏳ Pending Handover</option>
                               <option value="Dispatched">📦 Dispatched / Email Received</option>
                               <option value="Collected">✅ Collected by Staff</option>

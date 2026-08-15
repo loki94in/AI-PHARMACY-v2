@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspens
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { 
-  LayoutDashboard, 
-  PackageSearch, 
-  ShoppingCart, 
-  Receipt, 
-  Users, 
-  UserPlus, 
-  Settings as SettingsIcon, 
+import {
+  LayoutDashboard,
+  PackageSearch,
+  ShoppingCart,
+  Receipt,
+  Users,
+  UserPlus,
+  Settings as SettingsIcon,
   Activity,
   Brain,
   LogOut,
@@ -47,15 +47,15 @@ import {
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import { usePWAInstall } from '../hooks/usePWAInstall';
-import { 
-  ChevronLeft as ChevronLeftIcon, 
-  ChevronRight as ChevronRightIcon, 
-  Activity as ActivityIcon, 
-  ShieldCheck as ShieldCheckIcon, 
-  CheckSquare as CheckSquareIcon, 
-  ShoppingCart as CartIcon, 
-  Clock as ClockIcon, 
-  AlertTriangle as AlertIcon, 
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  Activity as ActivityIcon,
+  ShieldCheck as ShieldCheckIcon,
+  CheckSquare as CheckSquareIcon,
+  ShoppingCart as CartIcon,
+  Clock as ClockIcon,
+  AlertTriangle as AlertIcon,
   MessageSquare as MessageSquareIcon,
   Play as PlayIcon,
   Pause as PauseIcon,
@@ -175,164 +175,164 @@ const Sidebar = ({
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
         `}
       >
-      <div className="p-5 border-b border-glass-border flex flex-col gap-1 bg-white/[0.02] shrink-0">
-        <div className="flex items-center gap-3 w-full relative">
-          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-sky/20 to-sky/5 border border-sky/30 shadow-[0_0_15px_rgba(14,165,233,0.2)] shrink-0 transition-all duration-300">
-            <svg className="w-6 h-6 text-sky drop-shadow-[0_0_6px_rgba(14,165,233,0.6)]" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
-              <path d="M12 8.5V15.5M8.5 12H15.5" stroke="#fafafa" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <div className="flex-1">
-            <h1 className="text-base font-black tracking-wider bg-gradient-to-r from-text to-sky bg-clip-text text-transparent leading-none">
-              AI PHARMACY
-            </h1>
-            <p className="text-[9px] text-muted tracking-widest uppercase font-bold mt-1.5 leading-none">OS Version 2.0</p>
-          </div>
-          <div className="shrink-0 pl-2 flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green"></span>
-            </span>
-            <button
-              onClick={onClose}
-              aria-label="Close navigation menu"
-              className="lg:hidden p-1.5 -mr-1.5 rounded-lg text-muted hover:text-text hover:bg-white/10 transition-colors cursor-pointer"
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Sync Review Indicator */}
-      {(stagedSalesCount > 0 || stagedPurchasesCount > 0) && (
-        <button
-          onClick={onOpenReview}
-          className="mx-4 my-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-left hover:bg-amber-500/20 transition-all duration-300 animate-pulse cursor-pointer shrink-0"
-        >
-          <div className="flex-1 min-w-0 pr-1">
-            <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Sync Reviews Pending</div>
-            <div className="text-[9px] text-muted truncate mt-0.5">
-              {stagedSalesCount > 0 ? `${stagedSalesCount} sales ` : ''}
-              {stagedSalesCount > 0 && stagedPurchasesCount > 0 ? '& ' : ''}
-              {stagedPurchasesCount > 0 ? `${stagedPurchasesCount} purchases` : ''}
+        <div className="p-5 border-b border-glass-border flex flex-col gap-1 bg-white/[0.02] shrink-0">
+          <div className="flex items-center gap-3 w-full relative">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-sky/20 to-sky/5 border border-sky/30 shadow-[0_0_15px_rgba(14,165,233,0.2)] shrink-0 transition-all duration-300">
+              <svg className="w-6 h-6 text-sky drop-shadow-[0_0_6px_rgba(14,165,233,0.6)]" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                <path d="M12 8.5V15.5M8.5 12H15.5" stroke="#fafafa" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h1 className="text-base font-black tracking-wider bg-gradient-to-r from-text to-sky bg-clip-text text-transparent leading-none">
+                AI PHARMACY
+              </h1>
+              <p className="text-[9px] text-muted tracking-widest uppercase font-bold mt-1.5 leading-none">OS Version 2.0</p>
+            </div>
+            <div className="shrink-0 pl-2 flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green"></span>
+              </span>
+              <button
+                onClick={onClose}
+                aria-label="Close navigation menu"
+                className="lg:hidden p-1.5 -mr-1.5 rounded-lg text-muted hover:text-text hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
             </div>
           </div>
-          <ChevronRight size={14} className="text-amber-500 shrink-0" />
-        </button>
-      )}
-      
-      <div className="py-4 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
-        <div className="px-5 mb-2 text-[10px] font-bold tracking-[0.15em] uppercase text-muted/70">Main Menu</div>
-        <nav className="flex flex-col gap-1">
-          {menuItems.map((item) => {
-            const isActive = (() => {
-              const [basePath, queryStr] = item.path.split('?');
-              if (location.pathname !== basePath) return false;
-              const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
-              const currentTab = new URLSearchParams(location.search).get('tab');
-              if (targetTab) {
-                return currentTab === targetTab;
-              } else {
-                if (basePath === '/reports') return true;
-                if (basePath === '/database') return !currentTab || currentTab === 'products';
-                if (basePath === '/learning') return !currentTab || currentTab === 'clinical';
-                if (basePath === '/returns') return !currentTab || currentTab === 'returns';
-                if (basePath === '/pharmarack-cart') return !currentTab || currentTab === 'cart';
-                return true;
+        </div>
+
+        {/* Sync Review Indicator */}
+        {(stagedSalesCount > 0 || stagedPurchasesCount > 0) && (
+          <button
+            onClick={onOpenReview}
+            className="mx-4 my-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-left hover:bg-amber-500/20 transition-all duration-300 animate-pulse cursor-pointer shrink-0"
+          >
+            <div className="flex-1 min-w-0 pr-1">
+              <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Sync Reviews Pending</div>
+              <div className="text-[9px] text-muted truncate mt-0.5">
+                {stagedSalesCount > 0 ? `${stagedSalesCount} sales ` : ''}
+                {stagedSalesCount > 0 && stagedPurchasesCount > 0 ? '& ' : ''}
+                {stagedPurchasesCount > 0 ? `${stagedPurchasesCount} purchases` : ''}
+              </div>
+            </div>
+            <ChevronRight size={14} className="text-amber-500 shrink-0" />
+          </button>
+        )}
+
+        <div className="py-4 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+          <div className="px-5 mb-2 text-[10px] font-bold tracking-[0.15em] uppercase text-muted/70">Main Menu</div>
+          <nav className="flex flex-col gap-1">
+            {menuItems.map((item) => {
+              const isActive = (() => {
+                const [basePath, queryStr] = item.path.split('?');
+                if (location.pathname !== basePath) return false;
+                const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
+                const currentTab = new URLSearchParams(location.search).get('tab');
+                if (targetTab) {
+                  return currentTab === targetTab;
+                } else {
+                  if (basePath === '/reports') return true;
+                  if (basePath === '/database') return !currentTab || currentTab === 'products';
+                  if (basePath === '/learning') return !currentTab || currentTab === 'clinical';
+                  if (basePath === '/returns') return !currentTab || currentTab === 'returns';
+                  if (basePath === '/pharmarack-cart') return !currentTab || currentTab === 'cart';
+                  return true;
+                }
+              })();
+
+              // Staged sync count badges
+              let badge = null;
+              if (item.path.startsWith('/sells') && stagedSalesCount > 0) {
+                badge = (
+                  <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[9px] font-black text-white px-1 border border-black/40 animate-pulse">
+                    {stagedSalesCount}
+                  </span>
+                );
+              } else if (item.path.startsWith('/purchases') && stagedPurchasesCount > 0) {
+                badge = (
+                  <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-[9px] font-black text-black px-1 border border-black/40 animate-pulse">
+                    {stagedPurchasesCount}
+                  </span>
+                );
               }
-            })();
-            
-            // Staged sync count badges
-            let badge = null;
-            if (item.path.startsWith('/sells') && stagedSalesCount > 0) {
-              badge = (
-                <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[9px] font-black text-white px-1 border border-black/40 animate-pulse">
-                  {stagedSalesCount}
-                </span>
-              );
-            } else if (item.path.startsWith('/purchases') && stagedPurchasesCount > 0) {
-              badge = (
-                <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-[9px] font-black text-black px-1 border border-black/40 animate-pulse">
-                  {stagedPurchasesCount}
-                </span>
-              );
-            }
 
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onMouseEnter={() => {
-                  const basePath = item.path.split('?')[0];
-                  pageImports[basePath]?.();
-                  
-                  if (!hoverPrefetchControl.shouldFetch) return;
-                  
-                  // Prefetch API data for primary queries on hover (improved page switch response time)
-                  try {
-                    if (basePath === '/dashboard') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['dashboard'],
-                        queryFn: () => api.getDashboard(),
-                        staleTime: 5 * 60_000,
-                      });
-                    } else if (basePath === '/pos') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['pos-common-combinations'],
-                        queryFn: () => api.getDoctors(),
-                        staleTime: 5 * 60_000,
-                      });
-                    } else if (basePath === '/mail') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['email-inbox'],
-                        queryFn: () => api.getEmailInbox(50),
-                        staleTime: 5 * 60_000,
-                      });
-                    } else if (basePath === '/pharmarack-cart') {
-                      queryClient.prefetchQuery({
-                        queryKey: ['pharmarack-cart'],
-                        queryFn: () => api.getPharmarackCart(),
-                        staleTime: 5 * 60_000,
-                      });
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onMouseEnter={() => {
+                    const basePath = item.path.split('?')[0];
+                    pageImports[basePath]?.();
+
+                    if (!hoverPrefetchControl.shouldFetch) return;
+
+                    // Prefetch API data for primary queries on hover (improved page switch response time)
+                    try {
+                      if (basePath === '/dashboard') {
+                        queryClient.prefetchQuery({
+                          queryKey: ['dashboard'],
+                          queryFn: () => api.getDashboard(),
+                          staleTime: 5 * 60_000,
+                        });
+                      } else if (basePath === '/pos') {
+                        queryClient.prefetchQuery({
+                          queryKey: ['pos-common-combinations'],
+                          queryFn: () => api.getDoctors(),
+                          staleTime: 5 * 60_000,
+                        });
+                      } else if (basePath === '/mail') {
+                        queryClient.prefetchQuery({
+                          queryKey: ['email-inbox'],
+                          queryFn: () => api.getEmailInbox(50),
+                          staleTime: 5 * 60_000,
+                        });
+                      } else if (basePath === '/pharmarack-cart') {
+                        queryClient.prefetchQuery({
+                          queryKey: ['pharmarack-cart'],
+                          queryFn: () => api.getPharmarackCart(),
+                          staleTime: 5 * 60_000,
+                        });
+                      }
+                    } catch (err) {
+                      console.warn('Prefetch error:', err);
                     }
-                  } catch (err) {
-                    console.warn('Prefetch error:', err);
-                  }
-                }}
-                onClick={onClose}
-                className={`
+                  }}
+                  onClick={onClose}
+                  className={`
                   flex items-center gap-3 px-5 py-2.5 mx-2 rounded-lg text-sm font-medium uppercase transition-all duration-200
-                  ${isActive 
-                    ? 'text-white bg-gradient-to-r from-primary/20 to-transparent border-l-2 border-primary shadow-[inset_0_0_20px_rgba(59,130,246,0.1)]' 
-                    : 'text-muted hover:text-white hover:bg-white/5 hover:translate-x-1 border-l-2 border-transparent'}
+                  ${isActive
+                      ? 'text-white bg-gradient-to-r from-primary/20 to-transparent border-l-2 border-primary shadow-[inset_0_0_20px_rgba(59,130,246,0.1)]'
+                      : 'text-muted hover:text-white hover:bg-white/5 hover:translate-x-1 border-l-2 border-transparent'}
                 `}
-              >
-                <span className={`${isActive ? 'text-primary drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]' : ''}`}>
-                  {item.icon}
-                </span>
-                <span className="flex-1 truncate">{item.label}</span>
-                {badge}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+                >
+                  <span className={`${isActive ? 'text-primary drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]' : ''}`}>
+                    {item.icon}
+                  </span>
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {badge}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
 
-      {/* Sidebar Bottom Footer: Log Out */}
-      <div className="p-3 mx-2 border-t border-glass-border/60 shrink-0">
-        <button
-          onClick={() => {
-            toastEvent.trigger('Logged out of AI PHARMACY OS', 'info');
-          }}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-semibold text-muted hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
-          title="Log Out of System"
-        >
-          <LogOut size={16} />
-          <span>Log Out</span>
-        </button>
-      </div>
+        {/* Sidebar Bottom Footer: Log Out */}
+        <div className="p-3 mx-2 border-t border-glass-border/60 shrink-0">
+          <button
+            onClick={() => {
+              toastEvent.trigger('Logged out of AI PHARMACY OS', 'info');
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-semibold text-muted hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+            title="Log Out of System"
+          >
+            <LogOut size={16} />
+            <span>Log Out</span>
+          </button>
+        </div>
 
       </div>
     </>
@@ -355,11 +355,11 @@ const FlashToast = ({
 
   const cfg = {
     success: { bg: 'bg-bg2 border-emerald-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Check size={15} className="shrink-0 text-emerald-400" /> },
-    error:   { bg: 'bg-bg2 border-red-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',     icon: <AlertTriangle size={15} className="shrink-0 text-red-400" /> },
-    info:    { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',         icon: <Info size={15} className="shrink-0 text-muted" /> },
-    mail:    { bg: 'bg-bg2 border-indigo-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',  icon: <MailIcon size={15} className="shrink-0 text-indigo-400" /> },
+    error: { bg: 'bg-bg2 border-red-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <AlertTriangle size={15} className="shrink-0 text-red-400" /> },
+    info: { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Info size={15} className="shrink-0 text-muted" /> },
+    mail: { bg: 'bg-bg2 border-indigo-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <MailIcon size={15} className="shrink-0 text-indigo-400" /> },
     automation: { bg: 'bg-bg2 border-purple-500/50 text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Activity size={15} className="shrink-0 text-purple-400" /> },
-  }[toast.type] || { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]',         icon: <Info size={15} className="shrink-0 text-muted" /> };
+  }[toast.type] || { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Info size={15} className="shrink-0 text-muted" /> };
 
   const isStagedSync = toast.message.toLowerCase().includes('sync') || toast.message.toLowerCase().includes('staged');
 
@@ -433,16 +433,16 @@ const NotificationPanel = ({
 
   const typeConfig = (type: string) => {
     if (type === 'success') return { badgeBg: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400', icon: <Check size={13} />, label: 'Success' };
-    if (type === 'error')   return { badgeBg: 'bg-rose-500/10 border-rose-500/20 text-rose-400',     icon: <AlertTriangle size={13} />, label: 'Error' };
-    if (type === 'mail')    return { badgeBg: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',  icon: <MailIcon size={13} />,      label: 'Mail' };
+    if (type === 'error') return { badgeBg: 'bg-rose-500/10 border-rose-500/20 text-rose-400', icon: <AlertTriangle size={13} />, label: 'Error' };
+    if (type === 'mail') return { badgeBg: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400', icon: <MailIcon size={13} />, label: 'Mail' };
     if (type === 'automation') return { badgeBg: 'bg-purple-500/10 border-purple-500/20 text-purple-400', icon: <Activity size={13} />, label: 'Automation' };
-    return                         { badgeBg: 'bg-sky-500/10 border-sky-500/20 text-sky-400',         icon: <Info size={13} />,          label: 'Info' };
+    return { badgeBg: 'bg-sky-500/10 border-sky-500/20 text-sky-400', icon: <Info size={13} />, label: 'Info' };
   };
 
   const formatTime = (date: Date) => {
     const now = new Date();
     const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-    if (diff < 60)   return `${diff}s ago`;
+    if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
@@ -453,7 +453,7 @@ const NotificationPanel = ({
       if (res.data?.success && Array.isArray(res.data?.logs)) {
         setActionLogs(res.data.logs);
       }
-    } catch (_) {}
+    } catch (_) { }
   }, []);
 
   useEffect(() => {
@@ -592,22 +592,20 @@ const NotificationPanel = ({
             <button
               type="button"
               onClick={() => setActiveFilter('all')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeFilter === 'all'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeFilter === 'all'
                   ? 'bg-bg text-text shadow-sm border border-border'
                   : 'text-muted hover:text-text hover:bg-bg3'
-              }`}
+                }`}
             >
               All ({notifications.length})
             </button>
             <button
               type="button"
               onClick={() => setActiveFilter('unread')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'unread'
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeFilter === 'unread'
                   ? 'bg-bg text-sky-400 shadow-sm border border-border'
                   : 'text-muted hover:text-text hover:bg-bg3'
-              }`}
+                }`}
             >
               Unread
               {unreadCount > 0 && (
@@ -620,11 +618,10 @@ const NotificationPanel = ({
               <button
                 type="button"
                 onClick={() => setActiveFilter('alerts')}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeFilter === 'alerts'
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeFilter === 'alerts'
                     ? 'bg-bg text-purple-400 shadow-sm border border-border'
                     : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
+                  }`}
               >
                 Alerts ({alertCount})
               </button>
@@ -670,8 +667,8 @@ const NotificationPanel = ({
                 onClick={() => { if (!notif.read) onMarkRead(notif.id); }}
                 className={`
                   group rounded-2xl p-3.5 border transition-all duration-200 cursor-pointer relative overflow-hidden flex flex-col gap-2
-                  ${!notif.read 
-                    ? 'bg-sky-500/[0.04] border-sky-500/30 shadow-sm hover:border-sky-500/50' 
+                  ${!notif.read
+                    ? 'bg-sky-500/[0.04] border-sky-500/30 shadow-sm hover:border-sky-500/50'
                     : 'bg-bg/40 border-border/60 hover:bg-bg3/60 hover:border-border'}
                 `}
               >
@@ -700,11 +697,10 @@ const NotificationPanel = ({
                         e.stopPropagation();
                         onMarkRead(notif.id);
                       }}
-                      className={`p-1 rounded-lg transition-all ${
-                        notif.read
+                      className={`p-1 rounded-lg transition-all ${notif.read
                           ? 'text-muted/40 hover:text-sky-400 hover:bg-sky-500/10'
                           : 'text-sky-400 hover:bg-sky-500/20'
-                      }`}
+                        }`}
                       title={notif.read ? "Mark as unread" : "Mark as read"}
                     >
                       <Check size={13} />
@@ -757,11 +753,10 @@ const NotificationPanel = ({
                         }
                         onClose();
                       }}
-                      className={`inline-flex items-center gap-1 text-[11px] font-bold transition-all px-2.5 py-1 rounded-xl cursor-pointer ${
-                        notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation'
+                      className={`inline-flex items-center gap-1 text-[11px] font-bold transition-all px-2.5 py-1 rounded-xl cursor-pointer ${notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation'
                           ? 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25'
                           : 'text-sky-400 hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/25'
-                      }`}
+                        }`}
                     >
                       {notif.message.toLowerCase().includes('whatsapp') || notif.type === 'automation' ? (
                         <>
@@ -800,14 +795,14 @@ const DeviceIcon = ({ os, size = 16, className = "" }: { os: string; size?: numb
   if (normalizedOs.includes('ios') || normalizedOs.includes('apple') || normalizedOs.includes('mac') || normalizedOs.includes('iphone') || normalizedOs.includes('ipad')) {
     return (
       <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" className={className}>
-        <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.56 2.95-1.39z"/>
+        <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.56 2.95-1.39z" />
       </svg>
     );
   }
-  
+
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" className={className}>
-      <path d="M17.5 8c.46 0 .89.11 1.28.31l1.58-1.58c.2-.2.51-.2.71 0s.2.51 0 .71l-1.63 1.63C19.78 9.77 20 10.86 20 12v3H4v-3c0-1.14.22-2.23.63-3.12L3 7.25c-.2-.2-.2-.51 0-.71s.51-.2.71 0l1.58 1.58C5.68 8.11 6.11 8 6.5 8h11M7 11.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1m10 0c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1M16 16v4.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5V16H11v4.5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5V16H4.5C3.67 16 3 15.33 3 14.5V14h18v.5c0 .83-.67 1.5-1.5 1.5H16z"/>
+      <path d="M17.5 8c.46 0 .89.11 1.28.31l1.58-1.58c.2-.2.51-.2.71 0s.2.51 0 .71l-1.63 1.63C19.78 9.77 20 10.86 20 12v3H4v-3c0-1.14.22-2.23.63-3.12L3 7.25c-.2-.2-.2-.51 0-.71s.51-.2.71 0l1.58 1.58C5.68 8.11 6.11 8 6.5 8h11M7 11.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1m10 0c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1M16 16v4.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5V16H11v4.5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5V16H4.5C3.67 16 3 15.33 3 14.5V14h18v.5c0 .83-.67 1.5-1.5 1.5H16z" />
     </svg>
   );
 };
@@ -827,7 +822,7 @@ const LiveHeaderClock = () => {
   const dateStr = now.toLocaleDateString([], { weekday: 'short', day: '2-digit', month: 'short' });
 
   return (
-    <div 
+    <div
       className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-glass-border bg-glass-bg text-text shadow-sm hover:border-primary/30 transition-all cursor-default select-none shrink-0"
       title={`Live System Clock (${now.toLocaleString()})`}
     >
@@ -1183,7 +1178,7 @@ const Topbar = ({
       if (res?.success && Array.isArray(res.upcoming)) {
         setUpcomingTriggers(res.upcoming.filter(t => !t.isSnoozed && t.secondsUntilRun > 0));
       }
-    } catch (_) {}
+    } catch (_) { }
   }, []);
 
   useEffect(() => {
@@ -1197,7 +1192,7 @@ const Topbar = ({
     const tick = setInterval(() => {
       setUpcomingTriggers(prev =>
         prev.map(t => ({ ...t, secondsUntilRun: Math.max(0, t.secondsUntilRun - 1) }))
-            .filter(t => t.secondsUntilRun > 0)
+          .filter(t => t.secondsUntilRun > 0)
       );
     }, 1000);
     return () => clearInterval(tick);
@@ -1257,8 +1252,8 @@ const Topbar = ({
       items.push({
         id: 'wa-queue',
         type: 'whatsapp',
-        title: waQueueDetail?.isPaused 
-          ? `⏰ Scheduled: WhatsApp ${waQueueDetail?.counts?.pending || waTotal} Messages Ready` 
+        title: waQueueDetail?.isPaused
+          ? `⏰ Scheduled: WhatsApp ${waQueueDetail?.counts?.pending || waTotal} Messages Ready`
           : isWaRecentlyDone ? 'WhatsApp: All Sent' : `WhatsApp: ${waSent}/${waTotal} Sent (${waPercent}%)`,
         subtitle: waQueueDetail?.isPaused
           ? '⏸ Waiting for Play button to send'
@@ -1266,15 +1261,15 @@ const Topbar = ({
         progress: waPercent,
         badge: isWaRecentlyDone ? 'Done' : waQueueDetail?.isPaused ? 'Waiting Play' : 'Sending',
         color: waQueueDetail?.isPaused ? 'amber' : 'emerald',
-        action: waQueueDetail?.isPaused 
+        action: waQueueDetail?.isPaused
           ? async () => {
-              try {
-                await apiClient.post('/whatsapp/queue/toggle-pause');
-                window.dispatchEvent(new CustomEvent('cache-invalidate'));
-              } catch (err) {
-                console.error('Failed to unpause queue:', err);
-              }
+            try {
+              await apiClient.post('/whatsapp/queue/toggle-pause');
+              window.dispatchEvent(new CustomEvent('cache-invalidate'));
+            } catch (err) {
+              console.error('Failed to unpause queue:', err);
             }
+          }
           : onOpenWaQueue,
         actionLabel: waQueueDetail?.isPaused ? '▶ SEND NOW' : 'View Queue',
         icon: waQueueDetail?.isPaused ? <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" /> : <MessageSquareIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
@@ -1464,7 +1459,7 @@ const Topbar = ({
   return (
     <>
       <FlashToast toast={flashToast} onDismiss={() => setFlashToast(null)} onOpenReview={onOpenStagedReview} />
-      
+
       <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 relative z-sticky-header shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
@@ -1492,7 +1487,7 @@ const Topbar = ({
         </div>
 
         {/* CENTER SECTION: Auto-Hides in Idle state */}
-        <div 
+        <div
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
           onMouseEnter={activeHeaderItems.length > 0 ? handleHubMouseEnter : undefined}
           onMouseLeave={activeHeaderItems.length > 0 ? handleHubMouseLeave : undefined}
@@ -1517,11 +1512,10 @@ const Topbar = ({
                         e.stopPropagation();
                         setIsCountdownPaused(prev => !prev);
                       }}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 border ${
-                        isCountdownPaused
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 border ${isCountdownPaused
                           ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'
                           : 'bg-sky-500/15 border-sky-500/30 text-sky-400 hover:bg-sky-500/25'
-                      }`}
+                        }`}
                       title={isCountdownPaused ? "Click Time to Resume Live Countdown" : "Click Time to Pause Countdown"}
                     >
                       {isCountdownPaused ? <PauseIcon size={9} className="fill-current text-amber-300" /> : <ClockIcon size={9} className="animate-spin text-sky-400" />}
@@ -1545,15 +1539,14 @@ const Topbar = ({
               {currentHeaderItem && currentHeaderItem.progress !== undefined && (
                 <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${
-                      currentHeaderItem.color === 'purple'
+                    className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${currentHeaderItem.color === 'purple'
                         ? 'from-purple-500 via-indigo-500 to-sky-400'
                         : currentHeaderItem.color === 'sky'
-                        ? 'from-sky-500 via-blue-500 to-cyan-400'
-                        : currentHeaderItem.color === 'amber'
-                        ? 'from-amber-500 to-orange-400'
-                        : 'from-emerald-500 via-teal-400 to-emerald-400'
-                    }`}
+                          ? 'from-sky-500 via-blue-500 to-cyan-400'
+                          : currentHeaderItem.color === 'amber'
+                            ? 'from-amber-500 to-orange-400'
+                            : 'from-emerald-500 via-teal-400 to-emerald-400'
+                      }`}
                     style={{ width: `${Math.min(100, Math.max(0, currentHeaderItem.progress))}%` }}
                   >
                     <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/80 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
@@ -1563,7 +1556,7 @@ const Topbar = ({
 
               {/* Day/Night Theme-Adapted Operations Command Center Popover (Solid Opaque Background) */}
               {activeHeaderItems.length > 0 && isHoverExpanded && (
-                <div 
+                <div
                   onClick={(e) => e.stopPropagation()}
                   onMouseEnter={handleHubMouseEnter}
                   onMouseLeave={handleHubMouseLeave}
@@ -1588,11 +1581,10 @@ const Topbar = ({
                           e.stopPropagation();
                           setIsManualCarouselPaused(prev => !prev);
                         }}
-                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                          isManualCarouselPaused
+                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${isManualCarouselPaused
                             ? 'bg-amber-500/20 border-amber-500/30 text-amber-300'
                             : 'bg-bg3 border-border text-muted hover:text-text'
-                        }`}
+                          }`}
                       >
                         {isManualCarouselPaused ? '⏸ Paused' : '▶ Auto-Ticker'}
                       </button>
@@ -1618,13 +1610,12 @@ const Topbar = ({
                   {/* All Active Automation Triggers & Next-in-Line Queue */}
                   <div className="flex flex-col gap-2.5">
                     {activeHeaderItems.map((item, index) => (
-                      <div 
+                      <div
                         key={item.id}
-                        className={`p-3 rounded-2xl border transition-all ${
-                          index === activeIndex 
-                            ? 'bg-primary/10 border-primary/40 shadow-md' 
+                        className={`p-3 rounded-2xl border transition-all ${index === activeIndex
+                            ? 'bg-primary/10 border-primary/40 shadow-md'
                             : 'bg-bg border border-border hover:bg-bg3'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -1658,15 +1649,14 @@ const Topbar = ({
                         {item.progress !== undefined && (
                           <div className="w-full h-1.5 bg-bg border border-glass-border rounded-full overflow-hidden relative mt-2.5">
                             <div
-                              className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${
-                                item.color === 'purple'
+                              className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${item.color === 'purple'
                                   ? 'from-purple-500 via-indigo-500 to-sky-400'
                                   : item.color === 'sky'
-                                  ? 'from-sky-500 via-blue-500 to-cyan-400'
-                                  : item.color === 'amber'
-                                  ? 'from-amber-500 to-orange-400'
-                                  : 'from-emerald-500 via-teal-400 to-emerald-400'
-                              }`}
+                                    ? 'from-sky-500 via-blue-500 to-cyan-400'
+                                    : item.color === 'amber'
+                                      ? 'from-amber-500 to-orange-400'
+                                      : 'from-emerald-500 via-teal-400 to-emerald-400'
+                                }`}
                               style={{ width: `${Math.min(100, Math.max(0, item.progress))}%` }}
                             >
                               <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/90 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
@@ -1690,8 +1680,8 @@ const Topbar = ({
                 onClick={() => setShowDevicesPopover(prev => !prev)}
                 className={`
                   flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
-                  ${onlineDevicesCount > 0 
-                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' 
+                  ${onlineDevicesCount > 0
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
                     : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-white/5'}
                 `}
                 title="Connected Mobile Devices"
@@ -1704,7 +1694,7 @@ const Topbar = ({
                 <div className="absolute right-0 top-full mt-2 w-80 bg-glass-bg border border-glass-border backdrop-blur-2xl rounded-2xl shadow-2xl p-4 z-dropdown">
                   <div className="flex items-center justify-between pb-3 border-b border-glass-border mb-3">
                     <span className="text-xs font-bold uppercase text-text/80 tracking-wide">Sync Devices</span>
-                    <button 
+                    <button
                       onClick={() => { setShowDevicesPopover(false); onOpenConnectModal(); }}
                       className="flex items-center gap-1 text-[10px] font-black uppercase text-sky-400 hover:text-sky-300 transition-colors"
                     >
@@ -1712,7 +1702,7 @@ const Topbar = ({
                       Add Device
                     </button>
                   </div>
-                  
+
                   {connectedDevices.length === 0 ? (
                     <div className="py-6 text-center text-xs text-muted/60">
                       No devices registered. Click "Add Device" to pair a mobile phone.
@@ -1749,8 +1739,8 @@ const Topbar = ({
                               ) : (
                                 <div className="flex items-center gap-1 group/name">
                                   <span className="text-xs font-semibold text-text truncate max-w-[120px]">{device.device_name}</span>
-                                  <button 
-                                    onClick={() => { setRenamingToken(device.token); setRenameValue(device.device_name); }} 
+                                  <button
+                                    onClick={() => { setRenamingToken(device.token); setRenameValue(device.device_name); }}
                                     className="opacity-0 group-hover/name:opacity-100 text-[10px] text-muted hover:text-text transition-opacity"
                                   >
                                     <Edit size={10} />
@@ -1783,8 +1773,8 @@ const Topbar = ({
               ${servicesStatus?.pharmarack?.isRefreshing
                 ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
                 : servicesStatus?.pharmarack?.connected
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}
             `}
             title={servicesStatus?.pharmarack?.connected ? "Pharmarack Live Cart Online" : "Pharmarack Session Expired - Click to Re-authenticate"}
           >
@@ -1793,8 +1783,8 @@ const Topbar = ({
               {servicesStatus?.pharmarack?.isRefreshing
                 ? 'Refreshing'
                 : servicesStatus?.pharmarack?.connected
-                ? 'Live Cart'
-                : 'Re-auth'}
+                  ? 'Live Cart'
+                  : 'Re-auth'}
             </span>
           </Link>
 
@@ -1823,13 +1813,12 @@ const Topbar = ({
           <div className="relative">
             <button
               onClick={() => setShowPanel(prev => !prev)}
-              className={`relative p-2 rounded-xl transition-all duration-200 flex items-center justify-center border cursor-pointer group ${
-                showPanel
+              className={`relative p-2 rounded-xl transition-all duration-200 flex items-center justify-center border cursor-pointer group ${showPanel
                   ? 'bg-sky-500/15 border-sky-500/40 text-sky-400 shadow-sm'
                   : hasUnread
-                  ? 'bg-glass-bg border-sky-500/30 text-sky-400 hover:bg-sky-500/10 hover:border-sky-500/50'
-                  : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-bg3/60'
-              }`}
+                    ? 'bg-glass-bg border-sky-500/30 text-sky-400 hover:bg-sky-500/10 hover:border-sky-500/50'
+                    : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-bg3/60'
+                }`}
               aria-label="Notifications"
               title="Notifications"
             >
@@ -1875,10 +1864,10 @@ const Topbar = ({
           </button>
 
           {/* Settings Page Button */}
-          <button 
+          <button
             onClick={() => navigate('/settings')}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer" 
-            aria-label="Settings" 
+            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
+            aria-label="Settings"
             title="Settings & Configuration"
           >
             <SettingsIcon size={18} />
@@ -2005,7 +1994,7 @@ const QuickAssistSidebar = ({
     setProcessingOrderIds(prev => new Set(prev).add(order.id));
     try {
       const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
-      
+
       if (order.phone) {
         const cleanPhone = order.phone.replace(/\D/g, '');
         const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
@@ -2033,8 +2022,8 @@ const QuickAssistSidebar = ({
 
   if (!expanded) {
     const activeRefillsCount = Array.isArray(refills) ? refills.filter(r => r.is_active === 1).length : 0;
-    const activeSpecialOrdersCount = Array.isArray(specialOrders) 
-      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)).length 
+    const activeSpecialOrdersCount = Array.isArray(specialOrders)
+      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)).length
       : 0;
     const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
 
@@ -2045,12 +2034,12 @@ const QuickAssistSidebar = ({
         title="Expand Quick Assist"
       >
         <ChevronLeftIcon size={16} className="text-muted mt-1" />
-        
+
         {/* 3 Distinct Category Count Badges at TOP */}
         <div className="flex flex-col gap-1.5 items-center mt-1">
           {/* 1. Automations / Refills (Purple) */}
           {activeRefillsCount > 0 && (
-            <div 
+            <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/20 text-purple-400 text-[9px] font-black border border-purple-500/40 shadow-sm"
               title={`Automations / Refills: ${activeRefillsCount}`}
             >
@@ -2060,7 +2049,7 @@ const QuickAssistSidebar = ({
 
           {/* 2. Quick Special Requests (Amber) */}
           {activeSpecialOrdersCount > 0 && (
-            <div 
+            <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-black border border-amber-500/40 shadow-sm animate-pulse"
               title={`Quick Special Requests: ${activeSpecialOrdersCount}`}
             >
@@ -2070,7 +2059,7 @@ const QuickAssistSidebar = ({
 
           {/* 3. Staged Messages / Notifications (Emerald) */}
           {stagedNotificationsCount > 0 && (
-            <div 
+            <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black border border-emerald-500/40 shadow-sm"
               title={`Staged Messages: ${stagedNotificationsCount}`}
             >
@@ -2079,7 +2068,7 @@ const QuickAssistSidebar = ({
           )}
         </div>
 
-        <div 
+        <div
           style={{ writingMode: 'vertical-rl' }}
           className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest my-auto"
         >
@@ -2092,8 +2081,8 @@ const QuickAssistSidebar = ({
 
   const activeRefills = refills.filter(r => r.is_active === 1);
   const inactiveRefills = refills.filter(r => r.is_active === 0);
-  const activeSpecialOrders = Array.isArray(specialOrders) 
-    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)) 
+  const activeSpecialOrders = Array.isArray(specialOrders)
+    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id))
     : [];
 
   return (
@@ -2247,13 +2236,12 @@ const QuickAssistSidebar = ({
                 const isProcessing = processingOrderIds.has(order.id);
 
                 return (
-                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${
-                    isOrderedOrReady 
-                      ? 'bg-emerald-500/[0.04] border-emerald-500/30' 
+                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${isOrderedOrReady
+                      ? 'bg-emerald-500/[0.04] border-emerald-500/30'
                       : isCancelled
-                      ? 'bg-red-500/[0.04] border-red-500/20 opacity-60'
-                      : 'bg-amber-500/[0.04] border-amber-500/20'
-                  }`}>
+                        ? 'bg-red-500/[0.04] border-red-500/20 opacity-60'
+                        : 'bg-amber-500/[0.04] border-amber-500/20'
+                    }`}>
                     <div className="flex items-start justify-between gap-1 min-w-0">
                       <span className={`font-bold text-xs text-text truncate flex-1 min-w-0 ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
                         {order.product}
@@ -2271,15 +2259,14 @@ const QuickAssistSidebar = ({
                     </div>
                     <div className="text-[10px] text-muted flex items-center justify-between gap-2 min-w-0">
                       <span className="truncate flex-1 min-w-0">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
-                        order.status === 'Ready' 
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                          : order.status === 'Ordered' 
-                          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
-                          : order.status === 'Cancelled'
-                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                      }`}>
+                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${order.status === 'Ready'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : order.status === 'Ordered'
+                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            : order.status === 'Cancelled'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        }`}>
                         {order.status || 'Pending'}
                       </span>
                     </div>
@@ -2448,7 +2435,7 @@ export const Layout = ({
         const parsed = JSON.parse(stored);
         return parsed.some((n: any) => !n.read);
       }
-    } catch {}
+    } catch { }
     return false;
   });
 
@@ -2572,7 +2559,7 @@ export const Layout = ({
   useEffect(() => {
     try {
       localStorage.setItem('quick_assist_sidebar_expanded', String(isSidebarExpanded));
-    } catch {}
+    } catch { }
   }, [isSidebarExpanded]);
 
   const fetchStagedNotifications = useCallback(async () => {
@@ -2692,7 +2679,7 @@ export const Layout = ({
   // Listen to global keyboard shortcuts for modals (G2)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isQuickOrderKey = 
+      const isQuickOrderKey =
         (e.altKey && (e.key === 'o' || e.key === 'O')) ||
         (e.altKey && (e.key === 'n' || e.key === 'N')) ||
         (e.ctrlKey && e.shiftKey && (e.key === 'o' || e.key === 'O'));
@@ -2702,7 +2689,7 @@ export const Layout = ({
         setShowQuickOrder(prev => !prev);
       }
 
-      const isLiveCartKey = 
+      const isLiveCartKey =
         (e.altKey && (e.key === 'l' || e.key === 'L')) ||
         (e.ctrlKey && e.shiftKey && (e.key === 'l' || e.key === 'L'));
 
@@ -2736,7 +2723,7 @@ export const Layout = ({
 
       if (index > -1) {
         e.preventDefault();
-        
+
         let nextEl: HTMLElement | undefined;
         if (e.key === 'ArrowDown') {
           nextEl = elements[index + 1];
@@ -2844,7 +2831,7 @@ export const Layout = ({
           <main className={`flex-1 flex flex-col min-h-0 ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative transition-all duration-200`}>
             {children}
           </main>
-          
+
           <QuickAssistSidebar
             expanded={isSidebarExpanded}
             setExpanded={setIsSidebarExpanded}
@@ -2858,18 +2845,18 @@ export const Layout = ({
             }}
           />
         </div>
-        
+
         {/* Real-Time Connected Mobile Devices Status Footer Bar */}
         <ConnectedDevicesFooterBar
           onOpenConnectModal={() => setShowConnectModal(true)}
         />
-        
+
         {/* Global Modals */}
         {showQuickOrder && (
           <QuickOrderModal onClose={() => setShowQuickOrder(false)} />
         )}
         {showLiveCartAdd && (
-          <LiveCartAddModal 
+          <LiveCartAddModal
             initialSearch={liveCartAddSearch}
             initialQty={liveCartAddQty}
             sourceOrderId={liveCartAddSourceOrderId}
@@ -2880,7 +2867,7 @@ export const Layout = ({
               setLiveCartAddQty(undefined);
               setLiveCartAddSourceOrderId(undefined);
               setLiveCartAddSourceRefillId(undefined);
-            }} 
+            }}
           />
         )}
 
@@ -2963,11 +2950,10 @@ const KeyboardShortcutsModal = ({
             <button
               key={cat}
               onClick={() => setFilterCategory(cat)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterCategory === cat
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${filterCategory === cat
                   ? 'bg-sky-500/20 text-sky border border-sky-500/30'
                   : 'text-muted hover:text-text hover:bg-bg3/60'
-              }`}
+                }`}
             >
               {cat}
             </button>

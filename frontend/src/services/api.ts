@@ -731,7 +731,7 @@ export const api = {
   getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: any[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
   getTodayDistributorReminders: () => apiClient.get<{ success: boolean; window_start?: string; window_end?: string; is_recent_fallback?: boolean; recent_date?: string | null; reminders: any[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
   toggleDistributorAutoRemind: (id: number, auto_remind: boolean) => apiClient.post('/dispatch/distributor-reminders/toggle-auto', { id, auto_remind }).then(res => res.data),
-  updateDistributorReminderStatus: (id: number, data: { status?: string; delivery_boy_id?: number | null }) => apiClient.put(`/dispatch/distributor-reminders/${id}/status`, data).then(res => res.data),
+  updateDistributorReminderStatus: (id: number, data: { status?: string; delivery_boy_id?: number | null; distributor_name?: string; distributor_phone?: string }) => apiClient.put(`/dispatch/distributor-reminders/${id}/status`, data).then(res => res.data),
   sendDistributorReminderNow: (id: number, custom_message?: string) => apiClient.post(`/dispatch/distributor-reminders/${id}/send-now`, { custom_message }).then(res => res.data),
   getDistributorReminderTemplate: () => apiClient.get<{ success: boolean; template: string }>('/dispatch/distributor-reminders/template').then(res => res.data),
   saveDistributorReminderTemplate: (template: string) => apiClient.post<{ success: boolean; message: string; template: string }>('/dispatch/distributor-reminders/template', { template }).then(res => res.data),

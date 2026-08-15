@@ -324,11 +324,29 @@ router.post('/distributor-reminders/toggle-auto', async (req, res) => {
 // PUT update reminder status (Pending, Dispatched, Collected) & delivery_boy_id
 router.put('/distributor-reminders/:id/status', async (req, res) => {
   const { id } = req.params;
-  const { status, delivery_boy_id } = req.body;
+  const { status, delivery_boy_id, distributor_name, distributor_phone } = req.body;
 
   try {
     const db = await dbManager.getConnection();
-    const existing = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [id]);
+    let existing = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [id]);
+
+    if (!existing && distributor_name) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      existing = await db.get(
+        'SELECT * FROM distributor_dispatch_reminders WHERE date = ? AND LOWER(TRIM(distributor_name)) = LOWER(TRIM(?))',
+        [todayStr, distributor_name]
+      );
+
+      if (!existing) {
+        const ins = await db.run(
+          `INSERT INTO distributor_dispatch_reminders (distributor_name, distributor_phone, date, status, auto_remind, delivery_boy_id, order_source)
+           VALUES (?, ?, ?, ?, 1, ?, 'manual')`,
+          [distributor_name, distributor_phone || '', todayStr, status || 'Pending', delivery_boy_id || null]
+        );
+        existing = await db.get('SELECT * FROM distributor_dispatch_reminders WHERE id = ?', [ins.lastID]);
+      }
+    }
+
     if (!existing) return res.status(404).json({ error: 'Reminder not found' });
 
     const newStatus = status || existing.status;
@@ -336,7 +354,7 @@ router.put('/distributor-reminders/:id/status', async (req, res) => {
 
     await db.run(
       'UPDATE distributor_dispatch_reminders SET status = ?, delivery_boy_id = ? WHERE id = ?',
-      [newStatus, newBoy, id]
+      [newStatus, newBoy, existing.id]
     );
 
     const updated = await db.get(
@@ -344,7 +362,7 @@ router.put('/distributor-reminders/:id/status', async (req, res) => {
        FROM distributor_dispatch_reminders r
        LEFT JOIN delivery_boys db ON r.delivery_boy_id = db.id
        WHERE r.id = ?`,
-      [id]
+      [existing.id]
     );
 
     res.json({ success: true, reminder: updated });
