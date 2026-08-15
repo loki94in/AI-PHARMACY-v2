@@ -1282,32 +1282,53 @@ export class EmailService {
 
     // Detect distributor name
     let distributorName = 'Unknown Distributor';
-    const mfgMatch = body.match(/(Nitin Agency|Nitin Agencies|Cipla|Alkem|Abbott|Cadila|Zydus|Intas|Lupin)/i);
-    if (mfgMatch) {
-      distributorName = mfgMatch[1].toUpperCase();
-    } else {
-      const fromMatch = (email.from || '').match(/([^<]+)/);
-      if (fromMatch && fromMatch[1].trim()) {
-        distributorName = fromMatch[1].trim().replace(/['"]/g, '');
+
+    // 1. First priority: Check database (Distributors table & AI Learning Mappings) by clean email
+    const cleanFromEmail = extractCleanEmail(email.from || '');
+    if (cleanFromEmail) {
+      try {
+        const db = await dbManager.getConnection();
+        const dbDist = await db.get(
+          `SELECT name FROM distributors WHERE email IS NOT NULL AND email != '' AND LOWER(TRIM(email)) = ? AND name IS NOT NULL AND TRIM(name) != '' LIMIT 1`,
+          [cleanFromEmail.toLowerCase()]
+        );
+        if (dbDist?.name && dbDist.name.trim()) {
+          distributorName = dbDist.name.trim();
+        }
+      } catch (dbErr) {
+        console.warn('[EmailService] Distributor lookup by email failed:', dbErr);
       }
     }
 
-    // Clean up distributorName based on typical distributors in the inbox
-    const lowerFrom = (email.from || '').toLowerCase();
-    if (lowerFrom.includes('senior')) {
-      distributorName = 'Senior Agency';
-    } else if (lowerFrom.includes('mahalaxmi')) {
-      distributorName = 'New Mahalaxmi Cosmetics';
-    } else if (lowerFrom.includes('bajaj')) {
-      distributorName = 'Bajaj Pharma';
-    } else if (lowerFrom.includes('tapadiya')) {
-      distributorName = 'Tapadiya Distributors';
-    } else if (lowerFrom.includes('nitin')) {
-      distributorName = 'Nitin Agency';
-    } else if (lowerFrom.includes('prime')) {
-      distributorName = 'Prime Distributors';
-    } else if (lowerFrom.includes('success')) {
-      distributorName = 'Pro Success Pharma';
+    // 2. Second priority: If not resolved from DB, check email text body for known manufacturer keywords
+    if (distributorName === 'Unknown Distributor') {
+      const mfgMatch = body.match(/(Nitin Agency|Nitin Agencies|Cipla|Alkem|Abbott|Cadila|Zydus|Intas|Lupin)/i);
+      if (mfgMatch) {
+        distributorName = mfgMatch[1].toUpperCase();
+      } else {
+        const fromMatch = (email.from || '').match(/([^<]+)/);
+        if (fromMatch && fromMatch[1].trim()) {
+          distributorName = fromMatch[1].trim().replace(/['"]/g, '');
+        }
+      }
+
+      // Clean up distributorName based on typical distributors in the inbox
+      const lowerFrom = (email.from || '').toLowerCase();
+      if (lowerFrom.includes('senior')) {
+        distributorName = 'Senior Agency';
+      } else if (lowerFrom.includes('mahalaxmi')) {
+        distributorName = 'New Mahalaxmi Cosmetics';
+      } else if (lowerFrom.includes('bajaj')) {
+        distributorName = 'Bajaj Pharma';
+      } else if (lowerFrom.includes('tapadiya')) {
+        distributorName = 'Tapadiya Distributors';
+      } else if (lowerFrom.includes('nitin')) {
+        distributorName = 'Nitin Agency';
+      } else if (lowerFrom.includes('prime')) {
+        distributorName = 'Prime Distributors';
+      } else if (lowerFrom.includes('success')) {
+        distributorName = 'Pro Success Pharma';
+      }
     }
 
     // Detect invoice number (bill number)
@@ -1423,9 +1444,16 @@ export class EmailService {
       db = await dbManager.getConnection();
       const refId = uid ? `email_uid_${uid}` : `email_subj_${(processedEmail.subject || '').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
-      // 1. WhatsApp Notification to Store Owner (with deduplication log check)
+      // Check ON/OFF setting for Store Owner WhatsApp email alerts
+      const toggleRow = await db.get("SELECT value FROM app_settings WHERE key = 'notify_owner_on_email_whatsapp'");
+      const notifyOwnerEnabled = toggleRow ? toggleRow.value === '1' : true; // Default enabled
+
+      let whatsappSentToOwner = false;
       const ownerPhone = await getStorePhone(db);
-      if (ownerPhone) {
+
+      if (!notifyOwnerEnabled) {
+        console.log(`[MailArrival] Store Owner email WhatsApp notification is disabled in settings. Skipping WhatsApp alert for ${refId}.`);
+      } else if (ownerPhone) {
         const existingNotif = await db.get(
           `SELECT id FROM automation_notifications 
            WHERE recipient_phone = ? 
@@ -1437,15 +1465,23 @@ export class EmailService {
 
         if (existingNotif) {
           console.log(`[MailArrival] Owner WhatsApp notification already logged for ${refId}. Skipping duplicate WhatsApp.`);
+          whatsappSentToOwner = true;
         } else {
+          // Attach sender email to orderInfo if not present
+          const enrichedOrderInfo = {
+            ...orderInfo,
+            senderEmail: orderInfo?.senderEmail || processedEmail.from
+          };
+
           if (isOrder) {
-            // Send detailed invoice stock alert
-            await this.sendDistributorWhatsAppAlert(orderInfo, refId);
+            // Send detailed invoice stock alert to Store Owner
+            await this.sendDistributorWhatsAppAlert(enrichedOrderInfo, refId);
+            whatsappSentToOwner = true;
           } else {
             // Send general mail arrival alert to Store Owner
             const timeStr = (parsedDate ? new Date(parsedDate) : new Date()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
             const hasAtt = (processedEmail.attachments || []).length > 0;
-            const message = `📧 *New Email Received in Pharmacy Mailbox*\n\n*From:* ${processedEmail.from}\n*Subject:* ${processedEmail.subject}\n*Time:* ${timeStr}\n${hasAtt ? '📎 *Attachments:* Included\n' : ''}\n— AI Pharmacy OS`;
+            const message = `📧 *New Email Received in Pharmacy Mailbox*\n\n*Mail ID / From:* ${processedEmail.from}\n*Subject:* ${processedEmail.subject}\n*Time:* ${timeStr}\n${hasAtt ? '📎 *Attachments:* Included\n' : ''}\n— AI Pharmacy OS`;
             
             try {
               await sendMessage(ownerPhone, undefined, message);
@@ -1455,6 +1491,7 @@ export class EmailService {
                  VALUES (?, ?, ?, ?, ?, ?)`,
                 ['email_arrival', 'Admin / Store Owner', ownerPhone, message, 'sent', refId]
               );
+              whatsappSentToOwner = true;
             } catch (wsErr: any) {
               console.error('[MailArrival] Failed to send Store Owner WhatsApp mail alert:', wsErr);
             }
@@ -1500,123 +1537,24 @@ export class EmailService {
           distributorName: orderInfo?.distributorName !== 'Unknown Distributor' ? orderInfo?.distributorName : processedEmail.from,
           invoiceNo: orderInfo?.invoiceNumber !== 'N/A' ? orderInfo?.invoiceNumber : undefined,
           timestamp: timeStr,
-          whatsappSent: !!ownerPhone
+          whatsappSent: whatsappSentToOwner,
+          whatsappNumber: ownerPhone || undefined
         });
       } catch (sseErr) {
         console.error('[MailArrival] Failed to send SSE in-app email notification:', sseErr);
       }
-
-      // 5. If it's an order-related email, notify active delivery boys
-      if (isOrder) {
-        await this.notifyDeliveryBoys(orderInfo);
-      }
+      // Note: Incoming email notifications go ONLY to Store Owner. Delivery boys are NOT notified.
     } catch (err) {
       console.error('[MailArrival] Error in notifyMailArrival:', err);
     }
   }
 
   /**
-   * Notifies active delivery boys via WhatsApp and Telegram
+   * Deprecated delivery boy email notification method.
+   * Incoming distributor email notifications now strictly go to Store Owner only.
    */
   private async notifyDeliveryBoys(orderInfo: any): Promise<void> {
-    let db = null;
-    try {
-      db = await dbManager.getConnection();
-      const activeBoys = await db.all('SELECT * FROM delivery_boys WHERE is_active = 1');
-      
-      const message = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
-
-      if (activeBoys.length === 0) {
-        console.log('No active delivery boys found to notify. Falling back to Store Owner WhatsApp.');
-        const ownerPhone = await getStorePhone(db);
-        if (ownerPhone) {
-          try {
-            await sendMessage(ownerPhone, undefined, message);
-            console.log(`WhatsApp notification sent to Store Owner (no active delivery boys): ${ownerPhone}`);
-            await db.run(
-              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy', 'Admin / Store Owner', ownerPhone, message, 'sent', orderInfo.invoiceNumber]
-            );
-            notificationManager.broadcast({
-              type: 'new_email',
-              title: 'New Distributor Email',
-              message: `New mail received from ${orderInfo.distributorName} (Invoice: ${orderInfo.invoiceNumber}).`,
-              distributorName: orderInfo.distributorName,
-              invoiceNo: orderInfo.invoiceNumber,
-              timestamp: orderInfo.timeStr,
-              whatsappSent: true,
-              whatsappNumber: ownerPhone
-            });
-          } catch (wsErr: any) {
-            console.error('Failed to send Store Owner fallback WhatsApp notification:', wsErr);
-          }
-        }
-        return;
-      }
-
-      const sentBoys: string[] = [];
-
-      for (const boy of activeBoys) {
-        // Send WhatsApp
-        if (boy.whatsapp_number) {
-          try {
-            await sendMessage(boy.whatsapp_number, undefined, message);
-            console.log(`WhatsApp notification sent to delivery boy: ${boy.name}`);
-            sentBoys.push(`${boy.name} (${boy.whatsapp_number})`);
-
-            // Log success to automation_notifications
-            await db.run(
-              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy', boy.name, boy.whatsapp_number, message, 'sent', orderInfo.invoiceNumber]
-            );
-          } catch (wsError: any) {
-            console.error(`Failed to send WhatsApp to ${boy.name}:`, wsError);
-            
-            // Log failure to automation_notifications
-            await db.run(
-              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy', boy.name, boy.whatsapp_number, message, 'failed', wsError.message || 'Unknown error', orderInfo.invoiceNumber]
-            );
-          }
-        }
-
-        // Send Telegram
-        if (boy.telegram_chat_id) {
-          try {
-            await telegramBotService.sendNotification(boy.telegram_chat_id, message);
-            console.log(`Telegram notification sent to delivery boy: ${boy.name}`);
-          } catch (tgError) {
-            console.error(`Failed to send Telegram to ${boy.name}:`, tgError);
-          }
-        }
-      }
-
-      notificationManager.broadcast({
-        type: 'new_email',
-        title: 'New Distributor Email',
-        message: `New mail received from ${orderInfo.distributorName} (Invoice: ${orderInfo.invoiceNumber}).`,
-        distributorName: orderInfo.distributorName,
-        invoiceNo: orderInfo.invoiceNumber,
-        timestamp: orderInfo.timeStr,
-        whatsappSent: sentBoys.length > 0,
-        whatsappNumber: sentBoys.join(', ')
-      });
-    } catch (err) {
-      console.error('Error sending delivery boy notifications:', err);
-      // Still broadcast even on error
-      notificationManager.broadcast({
-        type: 'new_email',
-        title: 'New Distributor Email',
-        message: `New mail received from ${orderInfo.distributorName} (Invoice: ${orderInfo.invoiceNumber}).`,
-        distributorName: orderInfo.distributorName,
-        invoiceNo: orderInfo.invoiceNumber,
-        timestamp: orderInfo.timeStr,
-        whatsappSent: false
-      });
-    }
+    console.log('[EmailService] Delivery boys are excluded from email arrival notifications. Email alerts are routed exclusively to Store Owner.');
   }
 
   /**
@@ -1643,7 +1581,9 @@ export class EmailService {
           .join('\n');
       }
 
-      const message = `📦 *Distributor Invoice Stock Alert*\n\nDistributor: ${orderInfo.distributorName}\nInvoice No: ${orderInfo.invoiceNumber}\nTime Received: ${orderInfo.timeStr}\n\n*Items Extracted:*\n${itemsText}\n\n— AI Pharmacy OS`;
+      const senderEmailStr = orderInfo.senderEmail || orderInfo.from || '';
+      const senderLine = senderEmailStr ? `Mail ID / Sender: ${senderEmailStr}\n` : '';
+      const message = `📦 *Distributor Invoice Stock Alert*\n\nDistributor: ${orderInfo.distributorName}\n${senderLine}Invoice No: ${orderInfo.invoiceNumber}\nTime Received: ${orderInfo.timeStr}\n\n*Items Extracted:*\n${itemsText}\n\n— AI Pharmacy OS`;
 
       try {
         await sendMessage(shopPhone, undefined, message);

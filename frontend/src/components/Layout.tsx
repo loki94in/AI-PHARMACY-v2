@@ -775,15 +775,12 @@ const LiveHeaderClock = () => {
 
   return (
     <div 
-      className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-glass-border bg-glass-bg text-text shadow-sm hover:border-primary/30 transition-all cursor-default select-none shrink-0"
+      className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-glass-border bg-glass-bg text-text shadow-sm hover:border-primary/30 transition-all cursor-default select-none shrink-0"
       title={`Live System Clock (${now.toLocaleString()})`}
     >
       <Clock size={13} className="text-sky-400 animate-pulse shrink-0" />
       <div className="flex items-center gap-1.5 font-mono text-xs">
         <span className="font-bold text-text tracking-wide">{timeStr}</span>
-        <span className="text-[10px] text-muted/80 font-sans uppercase tracking-wider font-semibold border-l border-glass-border pl-1.5">
-          {dateStr}
-        </span>
       </div>
     </div>
   );
@@ -1424,9 +1421,6 @@ const Topbar = ({
           >
             <Menu size={20} />
           </button>
-          <span className="text-sm font-bold uppercase tracking-wider text-text/90 truncate">
-            {location.pathname === '/' ? 'POS' : location.pathname.substring(1).replace('-', ' ')}
-          </span>
           <LiveHeaderClock />
           {catalogJob && (
             <div className="flex items-center gap-2.5 px-3 py-1 bg-primary/10 border border-primary/20 rounded-xl text-primary animate-pulse">
@@ -1444,26 +1438,21 @@ const Topbar = ({
           )}
         </div>
 
-        {/* CENTER SECTION: Auto-Hides in Idle state; Smooth Center-Outward Expansion Reveal Animation on Active Task or Hover */}
+        {/* CENTER SECTION: Auto-Hides in Idle state */}
         <div 
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
-          onMouseEnter={handleHubMouseEnter}
-          onMouseLeave={handleHubMouseLeave}
+          onMouseEnter={activeHeaderItems.length > 0 ? handleHubMouseEnter : undefined}
+          onMouseLeave={activeHeaderItems.length > 0 ? handleHubMouseLeave : undefined}
         >
-          {(activeHeaderItems.length > 0 || isHoverExpanded) && (
+          {activeHeaderItems.length > 0 && currentHeaderItem && (
             <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95">
               {/* Default Minimized Sleek Inline Header Row */}
               <div className="flex items-center justify-between gap-2 text-xs font-semibold">
                 <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  {currentHeaderItem ? currentHeaderItem.icon : <ActivityIcon size={12} className="text-emerald-400 shrink-0" />}
+                  {currentHeaderItem.icon}
                   <span className="truncate text-text font-bold text-xs tracking-tight">
-                    {currentHeaderItem ? currentHeaderItem.title : 'AI PHARMACY OS: Operational'}
+                    {currentHeaderItem.title}
                   </span>
-                  {(currentHeaderItem?.subtitle || !currentHeaderItem) && (
-                    <span className="text-[10px] text-muted truncate max-w-[140px] hidden md:inline">
-                      {currentHeaderItem ? currentHeaderItem.subtitle : 'System Ready'}
-                    </span>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -1520,7 +1509,7 @@ const Topbar = ({
               )}
 
               {/* Day/Night Theme-Adapted Operations Command Center Popover (Solid Opaque Background) */}
-              {isHoverExpanded && (
+              {activeHeaderItems.length > 0 && isHoverExpanded && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
                   onMouseEnter={handleHubMouseEnter}

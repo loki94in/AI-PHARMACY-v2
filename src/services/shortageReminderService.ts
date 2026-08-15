@@ -171,12 +171,10 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
       `👉 *Action Required:* Please add this item to today's order for ${distName}.`;
 
     // Send WhatsApp notification to Admin number or active delivery boys
-    const adminPhoneRow = await connection.get("SELECT value FROM app_settings WHERE key = 'admin_whatsapp_number'");
-    const shopPhoneRow = await connection.get("SELECT value FROM app_settings WHERE key = 'shop_phone'");
-    const dineshBoy = await connection.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 LIMIT 1");
+    const { resolveActiveDeliveryBoy } = await import('../utils/whatsappTemplateBuilder.js');
+    const deliveryBoy = await resolveActiveDeliveryBoy(connection);
     
-    const rawAdminPhone = adminPhoneRow?.value || shopPhoneRow?.value || dineshBoy?.whatsapp_number || '';
-    const adminPhone = rawAdminPhone.replace(/\D/g, '');
+    const adminPhone = deliveryBoy.rawPhone;
 
     if (adminPhone && adminPhone.length >= 10) {
       const formattedPhone = adminPhone.length === 10 ? `91${adminPhone}` : adminPhone;
@@ -188,7 +186,7 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
           `INSERT INTO automation_notifications 
            (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['admin_shortage_reminder', 'Admin', formattedPhone, adminMessage, 'sent', `shortage_${item.id}`]
+          ['admin_shortage_reminder', deliveryBoy.name, formattedPhone, adminMessage, 'sent', `shortage_${item.id}`]
         );
       } catch (err: any) {
         console.error(`[ShortageReminder] Failed to send WhatsApp to admin at ${formattedPhone}:`, err);
@@ -196,7 +194,7 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
           `INSERT INTO automation_notifications 
            (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          ['admin_shortage_reminder', 'Admin', formattedPhone, adminMessage, 'failed', err?.message || 'Send failed', `shortage_${item.id}`]
+          ['admin_shortage_reminder', deliveryBoy.name, formattedPhone, adminMessage, 'failed', err?.message || 'Send failed', `shortage_${item.id}`]
         );
       }
     } else {
@@ -216,3 +214,4 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
 
   return { scanned: pendingRequests.length, notified: notifiedCount };
 }
+

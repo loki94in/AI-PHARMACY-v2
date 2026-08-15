@@ -154,16 +154,31 @@ export class WorkerSupervisor {
   }
 
   private startHealthCheckLoop(): void {
-    // Perform initial health check heartbeat scan on BOOT
-    const now = Date.now();
-    for (const [key, config] of Object.entries(this.workers)) {
-      if (!config.instance) continue;
-      try {
-        config.instance.send({ type: 'PING' });
-      } catch (err) {
-        console.error(`[WorkerSupervisor] Failed to send PING to ${config.name}:`, err);
+    if (this.healthCheckInterval) return;
+
+    this.healthCheckInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, config] of Object.entries(this.workers)) {
+        if (!config.instance) continue;
+
+        // If worker has not responded to PING in 60s, restart it
+        if (config.lastPongTime && (now - config.lastPongTime > 60000)) {
+          console.warn(`[WorkerSupervisor] ${config.name} is unresponsive (no PONG for >60s). Restarting...`);
+          try {
+            config.instance.kill('SIGTERM');
+          } catch (_) {}
+          config.instance = undefined;
+          this.spawnWorker(key);
+          continue;
+        }
+
+        try {
+          config.instance.send({ type: 'PING' });
+        } catch (err) {
+          console.error(`[WorkerSupervisor] Failed to send PING to ${config.name}:`, err);
+        }
       }
-    }
+    }, 30000);
   }
 }
 

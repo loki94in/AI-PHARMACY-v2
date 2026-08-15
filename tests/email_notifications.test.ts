@@ -126,4 +126,43 @@ describe('Email Mail Arrival Notifications', () => {
     expect(notif).toBeDefined();
     expect(notif.status).toBe('sent');
   });
+
+  test('notifyMailArrival respects notify_owner_on_email_whatsapp toggle setting when set to 0', async () => {
+    const db = await dbManager.getConnection();
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('notify_owner_on_email_whatsapp', '0')");
+
+    const testEmail = {
+      from: 'disabled_toggle@pharmacy.com',
+      subject: 'Disabled Test Subject',
+      body: 'Should not send WhatsApp.',
+      attachments: []
+    };
+
+    const orderInfo = {
+      distributorName: 'Test Vendor',
+      invoiceNumber: 'INV-TOGGLE-OFF',
+      timeStr: '04:00 PM',
+      medicines: [],
+      totalItems: 0,
+      urgencyLevel: 'normal'
+    };
+
+    const emailUid = 99999;
+
+    await emailService.notifyMailArrival({
+      uid: emailUid,
+      processedEmail: testEmail,
+      orderInfo,
+      isOrder: true,
+      parsedDate: new Date()
+    });
+
+    const notif = await db.get(
+      "SELECT * FROM automation_notifications WHERE reference_id = 'email_uid_99999'"
+    );
+    expect(notif).toBeUndefined();
+
+    // Re-enable setting for subsequent tests
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('notify_owner_on_email_whatsapp', '1')");
+  });
 });

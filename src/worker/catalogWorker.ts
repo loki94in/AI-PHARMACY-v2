@@ -824,6 +824,7 @@ export async function runCatalogImport(jobId: number) {
         }
       }
       await db.run('COMMIT');
+      await new Promise(resolve => setImmediate(resolve));
     };
 
     const processRowObject = (row: any) => {

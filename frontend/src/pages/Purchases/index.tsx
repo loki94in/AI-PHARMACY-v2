@@ -475,7 +475,7 @@ const Purchases: React.FC = () => {
 
   const { data: purchaseHistory = [] } = useApiQuery<PurchaseHistory[]>(
     'purchase-history',
-    () => api.getPurchases({ limit: 5000 }).then(res => Array.isArray(res) ? res : []),
+    () => api.getPurchases({ limit: 100 }).then(res => Array.isArray(res) ? res : []),
     { enabled: deferredFetchesReady }
   );
 

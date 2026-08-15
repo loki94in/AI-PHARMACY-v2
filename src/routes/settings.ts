@@ -557,14 +557,21 @@ router.delete('/distributors/:id', async (req, res) => {
 
 // Merge duplicate distributors into a single master distributor
 router.post('/distributors/merge', async (req, res) => {
-  const { primaryId, secondaryIds } = req.body;
+  const { primaryId, secondaryIds, newName } = req.body;
   if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
     return res.status(400).json({ error: 'primaryId and secondaryIds array are required' });
   }
   try {
     const db = await dbManager.getConnection();
-    const primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    let primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
     if (!primary) return res.status(404).json({ error: 'Primary distributor not found' });
+
+    // Optionally rename primary distributor to Pharmarack/custom name during merge
+    if (newName && typeof newName === 'string' && newName.trim() && newName.trim() !== primary.name) {
+      const cleanNewName = newName.trim();
+      await db.run('UPDATE distributors SET name = ? WHERE id = ?', [cleanNewName, primaryId]);
+      primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    }
 
     const placeholders = secondaryIds.map(() => '?').join(',');
     const params = [primaryId, ...secondaryIds];
@@ -576,6 +583,9 @@ router.post('/distributors/merge', async (req, res) => {
     await db.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
     await db.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
     await db.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    try {
+      await db.run(`UPDATE pharmarack_distributor_mappings SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+    } catch (_) {}
 
     // Remove secondary learning profiles and ensure primary profile exists
     await db.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);

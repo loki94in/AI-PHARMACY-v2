@@ -145,59 +145,7 @@ class DatabaseManager {
         throw new Error(`Database connection is currently busy or unavailable. Please retry. (${lastError?.message || 'SQLITE_BUSY'})`);
       }
 
-      // Run background integrity check if production/packaged and not test
-      const isProductionOrPkg = process.env.NODE_ENV === 'production' || isPackagedApp();
-      if (isProductionOrPkg && !isTest) {
-        const activeConn = this.connection;
-        setImmediate(async () => {
-          try {
-            const integrityResult = await activeConn.get('PRAGMA quick_check');
-            if (integrityResult?.quick_check !== 'ok') {
-              console.error('[DB] Quick check failed, attempting WAL checkpoint recovery...');
-              await activeConn.run('PRAGMA wal_checkpoint(TRUNCATE)');
-              const recheck = await activeConn.get('PRAGMA quick_check');
-              if (recheck?.quick_check !== 'ok') {
-                console.error('[DB] Background quick check failed after WAL checkpoint. Starting silent background restoration...');
-                const healedDb = await this.runSelfHealing(dbPath, busyTimeout, 'Quick check failed after WAL checkpoint', activeConn);
-                this.setupWriteInterceptor(healedDb);
-                this.connection = healedDb;
-              } else {
-                console.log('[DB] WAL checkpoint recovery succeeded in background.');
-              }
-            }
-          } catch (err: any) {
-            const isBusy = err?.message?.includes('SQLITE_BUSY') || err?.message?.includes('locked');
-            if (isBusy) {
-              console.warn('[DB] Quick check hit transient busy lock. Skipping self-healing.');
-              return;
-            }
 
-            if (err?.message?.includes('vtable constructor failed')) {
-              console.warn('[DB] Quick check blocked by an unusable virtual table — rebuilding the search index.');
-              try {
-                const { ensureMedicinesFts } = await import('../database.js');
-                await ensureMedicinesFts(activeConn);
-                const recheck = await activeConn.get('PRAGMA quick_check');
-                if (recheck?.quick_check === 'ok') {
-                  console.log('[DB] Search index rebuilt; database is healthy, no restore needed.');
-                  return;
-                }
-              } catch (ftsErr: any) {
-                console.error('[DB] Search index rebuild failed:', ftsErr.message);
-              }
-            }
-
-            console.error('[DB] Background quick check error:', err);
-            try {
-              const healedDb = await this.runSelfHealing(dbPath, busyTimeout, err.message || 'Background check error', activeConn);
-              this.setupWriteInterceptor(healedDb);
-              this.connection = healedDb;
-            } catch (healErr) {
-              console.error('[DB] Background healing failed:', healErr);
-            }
-          }
-        });
-      }
     }
     return this.connection;
   }
@@ -229,12 +177,6 @@ class DatabaseManager {
       const isWrite = sqlLower.includes('insert') || sqlLower.includes('update') || sqlLower.includes('delete');
       const isInternal = sqlLower.includes('action_logs') || sqlLower.includes('app_settings') || sqlLower.includes('processed_emails') || sqlLower.includes('processed_files') || sqlLower.includes('push_tokens');
       if (isWrite && !isInternal && process.env.NODE_ENV !== 'test') {
-        import('../services/backupRecoveryService.js')
-          .then(({ backupRecoveryService }) => {
-            backupRecoveryService.triggerSnapshot();
-          })
-          .catch(err => console.error('Failed to import backupRecoveryService:', err));
-
         const isInventoryWrite = sqlLower.includes('inventory_master') || 
                                  sqlLower.includes('sale_items') || 
                                  sqlLower.includes('sales_invoices') || 

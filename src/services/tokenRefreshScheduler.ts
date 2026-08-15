@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 import { getAppDataDir } from '../config/index.js';
+import { activityTracker } from '../utils/activityTracker.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -78,8 +79,14 @@ export async function killOrphanChromeProcesses(keyword: string = 'pharmarack_pr
       : path.join(getAppDataDir(), 'data', keyword);
     const filterPattern = resolvedPath.replace(/\\/g, '%').replace(/\//g, '%');
 
-    const execResult = await execAsync(`wmic process where "name='chrome.exe' and CommandLine like '%${filterPattern}%'" get ProcessId`).catch(async () => {
-      return await execAsync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name='chrome.exe' and commandline like '%${filterPattern}%'\\" | Select-Object -ExpandProperty ProcessId"`).catch(() => ({ stdout: '' }));
+    const execResult = await execAsync(
+      `wmic process where "name='chrome.exe' and CommandLine like '%${filterPattern}%'" get ProcessId`,
+      { timeout: 3000 }
+    ).catch(async () => {
+      return await execAsync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"name='chrome.exe' and commandline like '%${filterPattern}%'\\" | Select-Object -ExpandProperty ProcessId"`,
+        { timeout: 4000 }
+      ).catch(() => ({ stdout: '' }));
     });
 
     const stdout = execResult.stdout || '';
@@ -299,6 +306,11 @@ export class TokenRefreshScheduler {
   }
 
   public async executeRefresh(): Promise<string | null> {
+    if (activityTracker.isIdle()) {
+      console.log('[TokenRefreshScheduler] User is idle (>30m). Skipping background Pharmarack session refresh.');
+      return null;
+    }
+
     const chromePath = findChromePath();
     if (!chromePath) {
       console.error('[TokenRefreshScheduler] Chrome path not found.');
@@ -329,6 +341,8 @@ export class TokenRefreshScheduler {
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
+            '--single-process',
+            '--renderer-process-limit=1',
             '--disable-gpu',
             '--disable-software-rasterizer',
             '--disable-dev-shm-usage',
@@ -336,7 +350,6 @@ export class TokenRefreshScheduler {
             '--disable-default-apps',
             '--no-first-run',
             '--mute-audio',
-            '--single-process',
             '--no-zygote',
             '--js-flags=--max-old-space-size=128',
             '--window-position=-10000,-10000'
@@ -355,6 +368,8 @@ export class TokenRefreshScheduler {
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
+            '--single-process',
+            '--renderer-process-limit=1',
             '--disable-gpu',
             '--disable-software-rasterizer',
             '--disable-dev-shm-usage',
@@ -362,7 +377,6 @@ export class TokenRefreshScheduler {
             '--disable-default-apps',
             '--no-first-run',
             '--mute-audio',
-            '--single-process',
             '--no-zygote',
             '--js-flags=--max-old-space-size=128',
             '--window-position=-10000,-10000'

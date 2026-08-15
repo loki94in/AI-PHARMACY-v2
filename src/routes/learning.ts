@@ -212,11 +212,21 @@ router.get('/profiles', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
+        store_name TEXT PRIMARY KEY,
+        distributor_id INTEGER,
+        phone TEXT,
+        updated_at DATETIME
+      )
+    `);
+
     const profiles = await db.all(`
       SELECT d.id as distributor_id, d.name as distributor_name, d.email as distributor_email,
              d.phone as distributor_phone,
              lp.last_updated,
              COALESCE(dhf_agg.files_count, 0) as files_count,
+             dhf.filename as last_file_name,
              dhf.status as last_status,
              (
                SELECT GROUP_CONCAT(DISTINCT store_name)
@@ -355,7 +365,8 @@ router.post('/profiles/merge', async (req, res) => {
       'distributor_payments',
       'distributor_payment_details',
       'distributor_historical_files',
-      'distributor_medicine_aliases'
+      'distributor_medicine_aliases',
+      'pharmarack_distributor_mappings'
     ];
 
     for (const tbl of tablesToRelink) {

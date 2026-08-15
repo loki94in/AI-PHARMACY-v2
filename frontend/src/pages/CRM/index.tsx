@@ -4554,7 +4554,7 @@ const CRM: React.FC = () => {
         </div>
 
         {/* Tab Switcher Pills */}
-        <div className="flex items-center gap-1.5 bg-bg3/40 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-1.5 bg-bg2 p-1 rounded-xl border border-border overflow-x-auto scrollbar-none">
           {TABS.map(tab => {
             const isActive = activeTab === tab.key;
             return (

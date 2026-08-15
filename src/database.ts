@@ -195,6 +195,8 @@ export async function ensureSchema(dbPath: string) {
       console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} already applied, skipping DDL (fast boot).`);
       // Still verify the FTS index: a broken one blocks every write to `medicines`,
       // and that damage can happen long after the schema version was recorded.
+      await db.run('CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name)');
       await ensureMedicinesFts(db);
       return;
     }

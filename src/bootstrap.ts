@@ -43,7 +43,11 @@ async function main() {
     return;
   }
 
-  await import('./server.js');
+  try {
+    await import('./server.js');
+  } catch (serverErr) {
+    console.error('[Bootstrap] Unhandled error during server startup:', serverErr);
+  }
 }
 
 main();

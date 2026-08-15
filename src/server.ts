@@ -326,14 +326,35 @@ app.use(errorHandler);
 // --- Python Bridge Function for SciSpacy Medicine Extraction ---
 export function extractMedicinesWithPython(messageText: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-        // Path to the Python executable in your virtual environment
         const pythonExecutable = path.resolve('python_scripts', '.venv', 'Scripts', 'python.exe');
         const scriptPath = path.resolve('python_scripts', 'extract_medicine.py');
+
+        if (!fs.existsSync(pythonExecutable) || !fs.existsSync(scriptPath)) {
+            return resolve([]);
+        }
 
         const pythonProcess = spawn(pythonExecutable, [scriptPath, messageText]);
         
         let resultData = '';
         let errorData = '';
+        let isSettled = false;
+
+        const timer = setTimeout(() => {
+            if (!isSettled) {
+                isSettled = true;
+                console.warn('[Python Warning] Python process execution timed out (5s limit). Terminating...');
+                try { pythonProcess.kill('SIGKILL'); } catch (_) {}
+                reject(new Error('Python process execution timed out.'));
+            }
+        }, 5000);
+
+        pythonProcess.on('error', (err) => {
+            if (isSettled) return;
+            isSettled = true;
+            clearTimeout(timer);
+            console.error(`[Python Error] Failed to spawn Python process: ${err.message}`);
+            reject(new Error(`Python process spawn failed: ${err.message}`));
+        });
 
         pythonProcess.stdout.on('data', (data) => {
             resultData += data.toString();
@@ -344,6 +365,10 @@ export function extractMedicinesWithPython(messageText: string): Promise<string[
         });
 
         pythonProcess.on('close', (code) => {
+            if (isSettled) return;
+            isSettled = true;
+            clearTimeout(timer);
+
             if (code !== 0) {
                 console.error(`[Python Error] Exit code ${code}: ${errorData}`);
                 return reject(new Error('Python script crashed.'));
@@ -395,8 +420,17 @@ const server = app.listen(PORT, async () => {
 server.on('error', (err: any) => {
   if (err.code === 'EADDRINUSE') {
     console.warn(`\n⚠️  Port ${PORT} is already bound by another instance of AI Pharmacy OS.`);
-    console.warn(`AI Pharmacy OS server is already running in the background.\n`);
-    process.exit(0);
+    console.warn(`AI Pharmacy OS server is already running in the background. Opening browser window...\n`);
+    const serverUrl = `http://localhost:${PORT}`;
+    const openerArgs: [string, string[]] = process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', serverUrl]]
+      : process.platform === 'darwin'
+      ? ['open', [serverUrl]]
+      : ['xdg-open', [serverUrl]];
+    try {
+      spawn(openerArgs[0], openerArgs[1], { detached: true, stdio: 'ignore' }).unref();
+    } catch (_) {}
+    setTimeout(() => process.exit(0), 500);
   } else {
     console.error('Server startup error:', err);
   }

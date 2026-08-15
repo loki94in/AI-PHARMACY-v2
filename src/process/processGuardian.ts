@@ -75,10 +75,10 @@ export function registerProcessGuardian(): void {
       return;
     }
 
-    console.error('[ProcessGuardian] CRITICAL — Unhandled Rejection:', reason);
+    console.error('[ProcessGuardian] NON-FATAL — Unhandled Rejection logged:', reason);
     await writeCrashLog(message, stack);
-    process.exit(1);
+    // Do NOT exit process for background unhandled promise rejections in desktop installation mode
   });
 
-  console.log('[ProcessGuardian] Registered — uncaught exceptions will log to crash_log and exit(1).');
+  console.log('[ProcessGuardian] Registered — uncaught exceptions will log to crash_log and exit(1), unhandled rejections logged safely.');
 }

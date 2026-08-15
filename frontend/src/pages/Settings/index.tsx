@@ -778,6 +778,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const [waPreferredSystem, setWaPreferredSystem] = useState(rawSettings.whatsapp_preferred_system || 'web');
   const [waBusinessToken, setWaBusinessToken] = useState(rawSettings.wa_business_access_token || '');
   const [waBusinessPhoneId, setWaBusinessPhoneId] = useState(rawSettings.wa_business_phone_number_id || '');
+  const [notifyOwnerOnEmailWhatsapp, setNotifyOwnerOnEmailWhatsapp] = useState(rawSettings.notify_owner_on_email_whatsapp !== '0');
   
   const [telegramEnabled, setTelegramEnabled] = useState(rawSettings.telegram_enabled === 'true');
   const [telegramToken, setTelegramToken] = useState(rawSettings.telegram_token || '');
@@ -820,6 +821,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     setWaPreferredSystem(rawSettings.whatsapp_preferred_system || 'web');
     setWaBusinessToken(rawSettings.wa_business_access_token || '');
     setWaBusinessPhoneId(rawSettings.wa_business_phone_number_id || '');
+    setNotifyOwnerOnEmailWhatsapp(rawSettings.notify_owner_on_email_whatsapp !== '0');
     setTelegramEnabled(rawSettings.telegram_enabled === 'true');
     setTelegramToken(rawSettings.telegram_token || '');
     setTelegramChatId(rawSettings.telegram_chat_id || '');
@@ -838,6 +840,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         whatsapp_preferred_system: waPreferredSystem,
         wa_business_access_token: waBusinessToken,
         wa_business_phone_number_id: waBusinessPhoneId,
+        notify_owner_on_email_whatsapp: notifyOwnerOnEmailWhatsapp ? '1' : '0',
         telegram_enabled: telegramEnabled ? 'true' : 'false',
         telegram_token: telegramToken,
         telegram_chat_id: telegramChatId,
@@ -940,6 +943,25 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
                 placeholder="Permanent Bearer Token"
               />
             </div>
+          </div>
+
+          {/* Toggle: Store Owner Email Notifications via WhatsApp */}
+          <div className="md:col-span-2 bg-bg3/30 border border-border rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-text uppercase">Store Owner Email Notifications (WhatsApp)</h3>
+              <p className="text-[11px] text-muted mt-0.5">
+                Send instant WhatsApp alerts to the Store Owner when new distributor invoice emails are received. Notifications are routed exclusively to the Store Owner's phone number.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer ml-4">
+              <input
+                type="checkbox"
+                checked={notifyOwnerOnEmailWhatsapp}
+                onChange={(e) => setNotifyOwnerOnEmailWhatsapp(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-bg3 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+            </label>
           </div>
         </div>
       </div>
