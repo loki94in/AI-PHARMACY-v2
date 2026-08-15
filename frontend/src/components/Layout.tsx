@@ -324,7 +324,14 @@ const Sidebar = ({
         <div className="p-3 mx-2 border-t border-glass-border/60 shrink-0">
           <button
             onClick={() => {
+              try {
+                localStorage.removeItem('user_session');
+                sessionStorage.clear();
+              } catch (_) {}
               toastEvent.trigger('Logged out of AI PHARMACY OS', 'info');
+              setTimeout(() => {
+                window.location.reload();
+              }, 300);
             }}
             className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-semibold text-muted hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
             title="Log Out of System"
@@ -1841,8 +1848,8 @@ const Topbar = ({
               <NotificationPanel
                 notifications={notifications}
                 onClearAll={onClearAll}
-                onClearOne={onClearOne}
-                onMarkRead={onMarkRead}
+                onClearOne={(id) => onClearOne(Number(id))}
+                onMarkRead={(id) => onMarkRead(Number(id))}
                 onClose={() => setShowPanel(false)}
               />
             )}

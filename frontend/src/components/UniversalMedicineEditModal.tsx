@@ -960,20 +960,76 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
                           name="sell_price" 
                           placeholder={form.mrp ? `${form.mrp}` : 'Optional'}
                           value={form.sell_price ?? ''} 
-                          onChange={handleChange}
-                          className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-mono font-bold focus:border-primary focus:outline-none"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const numVal = parseFloat(val);
+                            if (!isNaN(numVal) && form.mrp > 0 && numVal <= form.mrp) {
+                              setForm((prev: any) => ({ ...prev, sell_price: val }));
+                            } else if (val === '') {
+                              setForm((prev: any) => ({ ...prev, sell_price: '' }));
+                            }
+                          }}
+                          className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
                         />
                       </div>
                     </div>
 
-                    {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp && (
-                      <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-primary font-medium">
-                        <span>Auto-Calculated POS Discount:</span>
-                        <span className="font-mono font-bold text-sm">
-                          {(((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(2)}%
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                          <Tag size={14} /> Special Offer Discount
                         </span>
+                        {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp ? (
+                          <button
+                            type="button"
+                            onClick={() => setForm((prev: any) => ({ ...prev, sell_price: '' }))}
+                            className="text-[11px] font-semibold text-muted hover:text-text underline"
+                          >
+                            Reset to Full MRP
+                          </button>
+                        ) : null}
                       </div>
-                    )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-muted mb-1">Discount % Off MRP</label>
+                          <div className="relative flex items-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              placeholder="0"
+                              value={
+                                form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp
+                                  ? (((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(2)
+                                  : ''
+                              }
+                              onChange={(e) => {
+                                const disc = parseFloat(e.target.value);
+                                if (!isNaN(disc) && disc >= 0 && disc <= 100 && form.mrp > 0) {
+                                  const sp = Math.round((form.mrp * (1 - disc / 100)) * 100) / 100;
+                                  setForm((prev: any) => ({ ...prev, sell_price: disc > 0 ? String(sp) : '' }));
+                                } else if (e.target.value === '') {
+                                  setForm((prev: any) => ({ ...prev, sell_price: '' }));
+                                }
+                              }}
+                              className="w-full px-3 py-1.5 text-xs bg-bg3 border border-glass-border rounded-lg text-amber-400 font-bold focus:border-amber-500 focus:outline-none pr-6"
+                            />
+                            <Percent size={12} className="text-amber-400 absolute right-2 pointer-events-none" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] text-muted">POS Billing Effect:</p>
+                          <p className="text-xs font-semibold text-text">
+                            {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp
+                              ? `POS auto-applies ${(((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(1)}% discount (₹${Number(form.sell_price).toFixed(2)} instead of ₹${Number(form.mrp).toFixed(2)})`
+                              : 'No special discount active. POS defaults to full MRP.'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

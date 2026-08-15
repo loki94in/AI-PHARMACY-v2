@@ -15,6 +15,7 @@ import { getLocalDateString, getTodayString, getNDaysAgoString, toDateInputValue
 import { toastEvent } from '../../services/events';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
+import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -497,6 +498,9 @@ const Purchases: React.FC = () => {
   const [cnNumber, setCnNumber] = useState(initialActiveTab?.cnNumber || '');
   const [reconcileExpiryReturnId, setReconcileExpiryReturnId] = useState<number | null>(initialActiveTab?.reconcileExpiryReturnId || null);
   const [showCreditNotesPanel, setShowCreditNotesPanel] = useState(false);
+  const [showSpecialPriceModal, setShowSpecialPriceModal] = useState(false);
+  const [specialPriceModalInvoiceNo, setSpecialPriceModalInvoiceNo] = useState('');
+  const [specialPriceModalItems, setSpecialPriceModalItems] = useState<any[]>([]);
   const [items, setItems] = useState<BillItem[]>(
     Array.isArray(initialActiveTab?.items) && initialActiveTab.items.length > 0 
       ? initialActiveTab.items 
@@ -1908,7 +1912,7 @@ const Purchases: React.FC = () => {
         sell_price: i.sell_price || null
       }));
 
-      toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully! Directing to sell price setup...`, 'success');
+      toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully!`, 'success');
       if (typeof (window as any).refreshStagedCounts === 'function') {
         (window as any).refreshStagedCounts(true);
       }
@@ -1924,13 +1928,10 @@ const Purchases: React.FC = () => {
       setExtraCredit('');
       setCnAmount('');
 
-      navigate(`/sell-price-config?invoice=${encodeURIComponent(savedInvoiceNo)}`, {
-        state: {
-          invoiceNo: savedInvoiceNo,
-          saved_medicines: savedMeds,
-          isEdit: !!editPurchaseId
-        }
-      });
+      setSpecialPriceModalInvoiceNo(savedInvoiceNo);
+      setSpecialPriceModalItems(savedMeds);
+      setShowSpecialPriceModal(true);
+
       setInvoiceNo('');
       setGrnNo(nextGrn);
       setGlobalCdPer('');
@@ -3689,6 +3690,13 @@ const Purchases: React.FC = () => {
           }} 
         />
       )}
+
+      <SaveBillSpecialPriceModal
+        isOpen={showSpecialPriceModal}
+        onClose={() => setShowSpecialPriceModal(false)}
+        invoiceNo={specialPriceModalInvoiceNo}
+        items={specialPriceModalItems}
+      />
     </div>
   );
 };
