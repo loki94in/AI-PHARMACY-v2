@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar as CalendarIcon, Clock, Pause, Play, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Pause, Play, ChevronLeft, ChevronRight, ShoppingCart, Send, Building2 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
 import { toastEvent, whatsappQueueEvent } from '../services/events';
 
@@ -35,8 +35,19 @@ interface DateCardItem {
   isPaused: boolean;
 }
 
-export const PharmarackCartCalendar: React.FC = () => {
+interface PharmarackCartCalendarProps {
+  currentTab: string;
+  onTabChange: (tab: string) => void;
+  hasUnreadSentHistory?: boolean;
+}
+
+export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
+  currentTab,
+  onTabChange,
+  hasUnreadSentHistory = false,
+}) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const todayCardRef = useRef<HTMLButtonElement>(null);
 
   // Paused dates set (stored in localStorage & synced to backend settings)
   const [pausedDates, setPausedDates] = useState<string[]>(() => {
@@ -140,6 +151,20 @@ export const PharmarackCartCalendar: React.FC = () => {
     return cards;
   }, [pausedDates]);
 
+  // Auto-scroll to today's date on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (todayCardRef.current && scrollContainerRef.current) {
+        todayCardRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'center'
+        });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
+
   const scrollLeft = () => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollBy({ left: -200, behavior: 'smooth' });
@@ -153,44 +178,109 @@ export const PharmarackCartCalendar: React.FC = () => {
   };
 
   return (
-    <div className="w-full bg-bg2/90 border border-glass-border rounded-2xl p-1.5 shadow-sm mb-3 flex items-center justify-between gap-2 overflow-hidden transition-all shrink-0">
+    <div className="w-full bg-bg2 border border-glass-border rounded-2xl p-1.5 shadow-sm mb-1.5 space-y-1.5 shrink-0 transition-all">
       
-      {/* Left Controller Section: Title + Timer Presets */}
-      <div className="flex items-center gap-2 shrink-0 pl-1">
-        <div className="w-7 h-7 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-          <CalendarIcon size={14} />
-        </div>
-        <div className="hidden sm:flex items-center gap-1 text-[11px] font-bold text-text shrink-0">
-          <span>Dispatch Schedule</span>
+      {/* Top Controls Row: Integrated Navigation Tabs + Timer Pacing Presets */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-glass-border/30">
+        
+        {/* Integrated Navigation Tabs */}
+        <div className="flex items-center gap-1.5 bg-bg p-1 rounded-xl border border-glass-border shrink-0">
+          <button
+            type="button"
+            onClick={() => onTabChange('cart')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+              currentTab === 'cart' || !currentTab
+                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3'
+            }`}
+          >
+            <ShoppingCart size={13} className={currentTab === 'cart' || !currentTab ? 'text-primary' : 'text-muted'} />
+            <span>Pharmarack Cart</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTabChange('sent-history')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer relative ${
+              currentTab === 'sent-history'
+                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3'
+            }`}
+          >
+            <Send size={13} className={currentTab === 'sent-history' ? 'text-primary' : 'text-muted'} />
+            <span>Sent Orders History</span>
+            {hasUnreadSentHistory && currentTab !== 'sent-history' && (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTabChange('non-mapped')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+              currentTab === 'non-mapped'
+                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3'
+            }`}
+          >
+            <Building2 size={13} className={currentTab === 'non-mapped' ? 'text-primary' : 'text-muted'} />
+            <span>Non-Mapped Distributors</span>
+          </button>
         </div>
 
-        {/* Inline Timer Presets */}
-        <div className="flex items-center gap-1 bg-bg px-2 py-1 rounded-xl border border-glass-border shrink-0">
-          <Clock size={11} className="text-sky-400 shrink-0" />
-          <div className="flex items-center gap-0.5">
-            {[1, 5, 10, 30, 60].map(sec => (
-              <button
-                key={sec}
-                type="button"
-                onClick={() => handleTimerChange(sec)}
-                className={`px-1.5 py-0.5 rounded-md text-[9px] font-black transition-all cursor-pointer ${
-                  timerSec === sec
-                    ? 'bg-sky-500 text-white shadow-xs'
-                    : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
-                title={`Set auto-send delay timer to ${sec}s`}
-              >
-                {sec}s
-              </button>
-            ))}
+        {/* Timer Pacing Selector & Controls */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <div className="flex items-center gap-1 bg-bg px-2.5 py-1 rounded-xl border border-glass-border">
+            <Clock size={12} className="text-sky-400 shrink-0" />
+            <span className="text-[11px] font-bold text-muted truncate mr-1">Delay:</span>
+            <div className="flex items-center gap-0.5">
+              {[1, 5, 10, 30, 60].map(sec => (
+                <button
+                  key={sec}
+                  type="button"
+                  onClick={() => handleTimerChange(sec)}
+                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-black transition-all cursor-pointer ${
+                    timerSec === sec
+                      ? 'bg-sky-500 text-white shadow-xs'
+                      : 'text-muted hover:text-text hover:bg-bg3'
+                  }`}
+                  title={`Set auto-send delay timer to ${sec}s`}
+                >
+                  {sec}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={scrollLeft}
+              className="p-1 rounded-lg bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text transition-all cursor-pointer"
+              title="Scroll Left"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={scrollRight}
+              className="p-1 rounded-lg bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text transition-all cursor-pointer"
+              title="Scroll Right"
+            >
+              <ChevronRight size={13} />
+            </button>
           </div>
         </div>
+
       </div>
 
-      {/* Middle Section: Compact Horizontal Date Strip */}
+      {/* Date Strip: High Contrast & Crystal Clear Text */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 flex items-center gap-1.5 overflow-x-auto custom-scrollbar scroll-smooth py-0.5 px-1 min-w-0"
+        className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar scroll-smooth py-0.5 px-0.5 min-w-0"
       >
         {dateCards.map((card) => {
           const isRed = card.isSunday || Boolean(card.holidayName);
@@ -198,17 +288,18 @@ export const PharmarackCartCalendar: React.FC = () => {
           return (
             <button
               key={card.dateStr}
+              ref={card.isToday ? todayCardRef : undefined}
               type="button"
               onClick={() => togglePauseDate(card.dateStr)}
               className={`
-                shrink-0 px-2 py-1 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-left select-none
+                shrink-0 px-2 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-left select-none bg-bg
                 ${card.isPaused
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 ring-1 ring-amber-500/30'
+                  ? 'border-amber-500/60 ring-1 ring-amber-500/40 text-amber-400'
                   : isRed
-                    ? 'bg-rose-500/15 border-rose-500/35 hover:bg-rose-500/25 text-rose-300'
+                    ? 'border-rose-500/40 hover:border-rose-500/70 text-rose-400 font-bold'
                     : card.isToday
-                      ? 'bg-sky-500/15 border-sky-500/40 text-sky-400'
-                      : 'bg-bg/80 border-glass-border/60 hover:bg-bg3 text-text'}
+                      ? 'border-sky-400 ring-2 ring-sky-400/80 shadow-[0_0_15px_rgba(56,189,248,0.6)] text-sky-300 font-black animate-pulse'
+                      : 'border-glass-border hover:border-border text-text'}
               `}
               title={`${card.dayName} ${card.dateNum} ${card.monthName} ${card.holidayName ? `(${card.holidayName})` : card.isSunday ? '(Sunday)' : ''} - Click to ${card.isPaused ? 'resume' : 'pause'}`}
             >
@@ -222,14 +313,18 @@ export const PharmarackCartCalendar: React.FC = () => {
                 </span>
               </div>
 
-              {/* Status Badge: Paused vs Sunday/Holiday Red Label */}
+              {/* Status Badge */}
               {card.isPaused ? (
-                <span className="text-[9px] font-black px-1 rounded bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-0.5 shrink-0">
+                <span className="text-[9px] font-black px-1 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center gap-0.5 shrink-0">
                   <Pause size={8} /> Paused
                 </span>
               ) : isRed ? (
-                <span className="text-[9px] font-black px-1 rounded bg-rose-500/30 text-rose-300 border border-rose-500/40 truncate max-w-[65px] shrink-0">
+                <span className="text-[9px] font-black px-1 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40 truncate max-w-[65px] shrink-0">
                   {card.holidayName || 'Sun'}
+                </span>
+              ) : card.isToday ? (
+                <span className="text-[9px] font-black px-1 rounded bg-sky-500/20 text-sky-400 border border-sky-500/40 shrink-0">
+                  Today
                 </span>
               ) : (
                 <span className="text-[8px] font-extrabold text-emerald-400 shrink-0">
@@ -239,31 +334,6 @@ export const PharmarackCartCalendar: React.FC = () => {
             </button>
           );
         })}
-      </div>
-
-      {/* Right Navigation & Summary Controls */}
-      <div className="flex items-center gap-1 shrink-0 pr-1">
-        {pausedDates.length > 0 && (
-          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30 shrink-0">
-            {pausedDates.length} Paused
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={scrollLeft}
-          className="p-1 rounded-lg bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text transition-all cursor-pointer"
-          title="Scroll Left"
-        >
-          <ChevronLeft size={13} />
-        </button>
-        <button
-          type="button"
-          onClick={scrollRight}
-          className="p-1 rounded-lg bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text transition-all cursor-pointer"
-          title="Scroll Right"
-        >
-          <ChevronRight size={13} />
-        </button>
       </div>
 
     </div>

@@ -20,6 +20,29 @@ interface QueueItem {
   target_name?: string;
 }
 
+function getFormattedFailureReason(errorMsg?: string, status?: string): string {
+  if (!errorMsg && status === 'failed_offline') {
+    return 'PC / Internet is offline or connection lost';
+  }
+  if (!errorMsg) {
+    return 'Message delivery failed during queue dispatch attempt';
+  }
+  const msg = errorMsg.toLowerCase();
+  if (msg.includes('invalid') || msg.includes('phone') || msg.includes('number')) {
+    return 'Invalid recipient phone number format';
+  }
+  if (msg.includes('session') || msg.includes('auth') || msg.includes('token') || msg.includes('login')) {
+    return 'WhatsApp Web session disconnected / login required';
+  }
+  if (msg.includes('timeout') || msg.includes('net::err') || msg.includes('econnrefused')) {
+    return 'Network connection timeout';
+  }
+  if (msg.includes('not registered') || msg.includes('not on whatsapp')) {
+    return 'Recipient phone number is not registered on WhatsApp';
+  }
+  return errorMsg;
+}
+
 interface WhatsAppQueuePopoverProps {
   onClose: () => void;
 }
@@ -592,6 +615,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                           Retry #{item.retry_count}
                         </span>
                       )}
+
+                      {(item.status.includes('failed') || item.error_message) && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1 shrink-0 max-w-[200px] truncate" title={item.error_message || 'Delivery failed'}>
+                          <ShieldAlert size={10} className="shrink-0 text-rose-400" />
+                          <span className="truncate">Reason: {getFormattedFailureReason(item.error_message, item.status)}</span>
+                        </span>
+                      )}
                     </div>
 
                     {/* Right: Status Pill & Quick Expand Trigger */}
@@ -640,10 +670,21 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                         {item.message}
                       </p>
 
-                      {item.error_message && (
-                        <p className="text-[10px] text-rose-400 font-semibold">
-                          ⚠️ Error: {item.error_message}
-                        </p>
+                      {(item.status.includes('failed') || item.error_message) && (
+                        <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs space-y-1 my-1">
+                          <div className="flex items-center gap-1.5 font-bold text-rose-400">
+                            <ShieldAlert size={12} className="shrink-0" />
+                            <span>Failure Cause: {getFormattedFailureReason(item.error_message, item.status)}</span>
+                          </div>
+                          {item.error_message && item.error_message !== getFormattedFailureReason(item.error_message, item.status) && (
+                            <p className="text-[10px] font-mono text-rose-400/80">
+                              Raw Output: {item.error_message}
+                            </p>
+                          )}
+                          <p className="text-[10px] text-muted leading-tight">
+                            💡 <strong>Fixing Tip:</strong> {item.error_message?.toLowerCase().includes('phone') ? 'Click Edit to update the phone number.' : 'Ensure internet is connected or click Retry Failed.'}
+                          </p>
+                        </div>
                       )}
 
                       {item.status.includes('failed') && (
