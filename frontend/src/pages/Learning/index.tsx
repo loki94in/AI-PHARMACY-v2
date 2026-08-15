@@ -357,11 +357,19 @@ const Learning: React.FC = () => {
   const handleRetrain = async () => {
     setRetraining(true);
     try {
-      await apiClient.post('/learning/retrain');
-      toastEvent.trigger('AI Clinical Model retrained successfully!', 'success');
+      const res = await apiClient.post('/learning/retrain');
+      toastEvent.trigger(res.data?.message || 'AI Clinical Model retrained successfully!', 'success');
+      await queryClient.invalidateQueries({ queryKey: ['learning-stats'] });
       refetchStats();
     } catch (err: any) {
-      toastEvent.trigger('Retraining failed: ' + (err.message || 'Server error'), 'error');
+      try {
+        const res2 = await apiClient.post('/learning/refresh-model');
+        toastEvent.trigger(res2.data?.message || 'AI Clinical Model refreshed successfully!', 'success');
+        await queryClient.invalidateQueries({ queryKey: ['learning-stats'] });
+        refetchStats();
+      } catch (err2: any) {
+        toastEvent.trigger('Retraining failed: ' + (err2.response?.data?.error || err2.message || err.message || 'Server error'), 'error');
+      }
     } finally {
       setRetraining(false);
     }
@@ -560,69 +568,46 @@ const Learning: React.FC = () => {
 
   return (
     <div className="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-fadeIn">
-      {/* Executive Command Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-glass-bg border border-glass-border rounded-2xl p-4 sm:p-5 shadow-xl backdrop-blur-xl">
-        {/* Title & Status */}
-        <div className="flex items-center gap-3.5">
-          <div className="p-3 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-inner">
-            <Brain size={24} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-black text-text tracking-tight leading-none">AI Learning Command Center</h1>
-              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Engine
-              </span>
-            </div>
-            <p className="text-xs text-muted mt-1 font-medium">
-              Autonomous OCR correction, clinical knowledge baseline, doctor directory & distributor layout parsing
-            </p>
-          </div>
+      {/* Navigation Bar Tabs & Retrain Control */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-bg border border-border p-1.5 rounded-2xl shadow-sm">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+          {[
+            { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain, badge: correctionsArray.length },
+            { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope, badge: doctorsListArray.length },
+            { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database, badge: profilesList.length }
+          ].map(t => {
+            const Icon = t.icon;
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => handleTabChange(t.id)}
+                className={`flex items-center gap-2.5 px-4 py-2 font-bold text-xs rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-glass-bg text-primary shadow-md border border-glass-border'
+                    : 'text-muted hover:text-text hover:bg-bg3/60 border border-transparent'
+                }`}
+              >
+                <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
+                <span>{t.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold font-mono ${
+                  isActive ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg3 text-muted'
+                }`}>
+                  {t.badge}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Global Controls & Tab Switcher */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          {/* Retrain Action */}
-          <button
-            onClick={handleRetrain}
-            disabled={retraining}
-            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
-          >
-            <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
-            <span>{retraining ? 'Retraining AI Engine...' : 'Retrain Clinical Model'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Navigation Bar Tabs */}
-      <div className="flex items-center gap-2 bg-bg border border-border p-1.5 rounded-2xl overflow-x-auto scrollbar-none shadow-sm">
-        {[
-          { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain, badge: correctionsArray.length },
-          { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope, badge: doctorsListArray.length },
-          { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database, badge: profilesList.length }
-        ].map(t => {
-          const Icon = t.icon;
-          const isActive = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => handleTabChange(t.id)}
-              className={`flex items-center gap-2.5 px-4 py-2 font-bold text-xs rounded-xl transition-all whitespace-nowrap cursor-pointer ${
-                isActive
-                  ? 'bg-glass-bg text-primary shadow-md border border-glass-border'
-                  : 'text-muted hover:text-text hover:bg-bg3/60 border border-transparent'
-              }`}
-            >
-              <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
-              <span>{t.label}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold font-mono ${
-                isActive ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg3 text-muted'
-              }`}>
-                {t.badge}
-              </span>
-            </button>
-          );
-        })}
+        <button
+          onClick={handleRetrain}
+          disabled={retraining}
+          className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
+        >
+          <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
+          <span>{retraining ? 'Retraining Model...' : 'Retrain Model'}</span>
+        </button>
       </div>
 
       {/* ========================================================================= */}
@@ -1055,120 +1040,29 @@ const Learning: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'distributors' && (
         <div className="space-y-6">
-          {/* Top 4 Metrics Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
-                <Building2 size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Distributor Layouts</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {profilesList.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Truck size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Orders Sent Today</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {todaySentOrdersList.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <GitMerge size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Merge Engine</div>
-                <button
-                  onClick={() => setShowMergeModal(true)}
-                  className="text-xs font-bold text-amber-400 hover:underline mt-1 block"
-                >
-                  Merge Profiles...
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
-                <Zap size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Parser Engine</div>
-                <div className="text-xs font-black text-primary mt-1 uppercase tracking-wider">
-                  Active (MARG / Tally)
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Today's Pharmarack Cart Sent Orders Bar */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 space-y-3 shadow-md">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-sm text-text">
-                <Truck size={16} className="text-emerald-400" />
-                <span>
-                  {todaySentOrdersData?.is_recent_fallback
-                    ? `Recent Sent Orders (${todaySentOrdersData.date})`
-                    : "Today's Pharmarack Cart Sent Orders"}
-                </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                  todaySentOrdersData?.is_recent_fallback
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                    : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                }`}>
-                  {todaySentOrdersData?.is_recent_fallback
-                    ? `📅 Recent Orders (${todaySentOrdersList.length})`
-                    : `${todaySentOrdersList.length} Orders Placed Today`}
-                </span>
-              </div>
-            </div>
-
-            {loadingTodaySentOrders ? (
-              <div className="text-xs text-muted py-4 text-center">Loading today's sent orders...</div>
-            ) : todaySentOrdersList.length === 0 ? (
-              <div className="text-xs text-muted py-4 text-center italic bg-bg2/40 rounded-xl border border-border">
-                No orders sent today yet. Orders placed via Pharmarack Cart will automatically log here.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {todaySentOrdersList.map((ord: any) => (
-                  <div key={ord.id} className="p-3 rounded-xl bg-bg2/60 border border-border space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-extrabold text-xs text-text">{ord.store_name}</span>
-                      <span className="text-[10px] font-mono text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
-                        ✅ {ord.placed_at ? new Date(ord.placed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Sent'}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-muted line-clamp-2">
-                      Items: {Array.isArray(ord.items) ? ord.items.map((i: any) => `${i.productName || i.name || 'Item'} (${i.qty || 1})`).join(', ') : 'Standard Items'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Search & Profiles Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Panel: Search & Profiles List */}
             <div className="space-y-4">
-              <div className="relative">
-                <Search size={14} className="absolute left-3.5 top-3.5 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search distributor profiles..."
-                  value={profileSearchQuery}
-                  onChange={e => setProfileSearchQuery(e.target.value)}
-                  className="w-full bg-glass-bg border border-glass-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
-                />
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search size={14} className="absolute left-3.5 top-3.5 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search distributor profiles..."
+                    value={profileSearchQuery}
+                    onChange={e => setProfileSearchQuery(e.target.value)}
+                    className="w-full bg-glass-bg border border-glass-border rounded-xl pl-10 pr-4 py-2.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowMergeModal(true)}
+                  className="px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  title="Merge redundant distributor profiles"
+                >
+                  <GitMerge size={14} />
+                  <span>Merge</span>
+                </button>
               </div>
 
               <div className="space-y-3 max-h-[550px] overflow-y-auto pr-1 scrollbar-thin">

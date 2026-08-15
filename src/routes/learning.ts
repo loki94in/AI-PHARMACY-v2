@@ -172,19 +172,23 @@ router.get('/stats', async (_req, res) => {
 });
 
 // Retrain/Refresh learning model
-router.post('/refresh-model', async (req, res) => {
+const handleRetrainOrRefresh = async (_req: any, res: any) => {
   try {
     const db = await dbManager.getConnection();
     await db.run(
       'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
       ['REFRESH_MODEL', 'Learning engine model retrained']
     );
-        res.json({ success: true, message: 'Learning model refreshed successfully' });
+    await rebuildLearningStatsCache();
+    res.json({ success: true, message: 'Learning model retrained & refreshed successfully' });
   } catch (error) {
     console.error('Refresh model error:', error);
     res.status(500).json({ error: 'Failed to refresh learning model' });
   }
-});
+};
+
+router.post('/refresh-model', handleRetrainOrRefresh);
+router.post('/retrain', handleRetrainOrRefresh);
 
 // Look up a learned mapping for a medicine name
 router.get('/mapping', async (req, res) => {

@@ -2246,36 +2246,19 @@ const QuickAssistSidebar = ({
                       <span className={`font-bold text-xs text-text truncate flex-1 min-w-0 ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
                         {order.product}
                       </span>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {isOrderedOrReady && (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[9px] font-black tracking-wider">
-                            ✓ ADDED
-                          </span>
-                        )}
-                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold">
-                          Qty: {order.qty || 1}
-                        </span>
-                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
+                        Qty: {order.qty || 1}
+                      </span>
                     </div>
                     <div className="text-[10px] text-muted flex items-center justify-between gap-2 min-w-0">
                       <span className="truncate flex-1 min-w-0">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${order.status === 'Ready'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : order.status === 'Ordered'
-                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                            : order.status === 'Cancelled'
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                        }`}>
-                        {order.status || 'Pending'}
-                      </span>
                     </div>
                     <div className="flex items-center flex-wrap gap-1.5 mt-1 min-w-0">
                       {order.status === 'Ready' ? (
                         <button
                           disabled={isProcessing}
                           onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
-                          className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                          className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                           title="Mark special request as Completed and remove from Quick Assist"
                         >
                           {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2286,7 +2269,7 @@ const QuickAssistSidebar = ({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleUpdateSpecialOrderStatus(order, 'Ready')}
-                            className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Mark order as Ready for customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2295,7 +2278,7 @@ const QuickAssistSidebar = ({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
-                            className="py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Directly mark special request as Completed"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2307,7 +2290,7 @@ const QuickAssistSidebar = ({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleSendSpecialOrder(order)}
-                            className="flex-1 py-1 px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            className="flex-1 py-1 px-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Send WhatsApp Order for this Special Request"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <SendIcon size={11} />}
@@ -2316,7 +2299,7 @@ const QuickAssistSidebar = ({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
-                            className="py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Directly mark special request as Completed"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2328,7 +2311,7 @@ const QuickAssistSidebar = ({
                         <button
                           disabled={isProcessing}
                           onClick={() => handleUpdateSpecialOrderStatus(order, 'Cancelled')}
-                          className="py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          className="flex-1 py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap min-w-0"
                           title="Cancel/Dash this medicine request"
                         >
                           Cancel
