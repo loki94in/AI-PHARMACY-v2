@@ -170,23 +170,29 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
       `📅 *Requested On:* ${new Date(item.date).toLocaleString('en-IN')}\n\n` +
       `👉 *Action Required:* Please add this item to today's order for ${distName}.`;
 
-    // Send WhatsApp notification to Admin number or active delivery boys
-    const { resolveActiveDeliveryBoy } = await import('../utils/whatsappTemplateBuilder.js');
-    const deliveryBoy = await resolveActiveDeliveryBoy(connection);
-    
-    const adminPhone = deliveryBoy.rawPhone;
+    // Send WhatsApp notification strictly to Pharmacy Admin / Store Owner number
+    const { getPharmacyOwnerPhone } = await import('./storeSettingsService.js');
+    const storeOwnerPhone = await getPharmacyOwnerPhone(connection);
+    const recipientName = 'Admin / Store Owner';
+    const adminPhone = storeOwnerPhone ? storeOwnerPhone.replace(/\D/g, '') : '';
 
     if (adminPhone && adminPhone.length >= 10) {
       const formattedPhone = adminPhone.length === 10 ? `91${adminPhone}` : adminPhone;
       try {
         await notificationService.sendWhatsApp(formattedPhone, adminMessage);
         
-        // Log in automation_notifications
+        // Log in action_logs for Activity Alerts
+        await connection.run(
+          'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+          ['SHORTAGE_REMINDER_SENT', `Sent admin shortage order reminder for ${medName} to ${formattedPhone}`]
+        );
+
+        // Log in automation_notifications for Live WhatsApp Controller tracking
         await connection.run(
           `INSERT INTO automation_notifications 
            (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['admin_shortage_reminder', deliveryBoy.name, formattedPhone, adminMessage, 'sent', `shortage_${item.id}`]
+          ['admin_shortage_reminder', recipientName, formattedPhone, adminMessage, 'sent', `shortage_${item.id}`]
         );
       } catch (err: any) {
         console.error(`[ShortageReminder] Failed to send WhatsApp to admin at ${formattedPhone}:`, err);
@@ -194,11 +200,11 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
           `INSERT INTO automation_notifications 
            (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          ['admin_shortage_reminder', deliveryBoy.name, formattedPhone, adminMessage, 'failed', err?.message || 'Send failed', `shortage_${item.id}`]
+          ['admin_shortage_reminder', recipientName, formattedPhone, adminMessage, 'failed', err?.message || 'Send failed', `shortage_${item.id}`]
         );
       }
     } else {
-      console.warn('[ShortageReminder] Admin WhatsApp number not configured.');
+      console.warn('[ShortageReminder] Pharmacy Owner WhatsApp number not configured in Settings.');
     }
 
     // Mark as Ordered (notified) to avoid duplicate spamming

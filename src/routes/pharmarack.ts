@@ -2688,5 +2688,63 @@ router.get('/live-cart-summary', async (_req, res) => {
   }
 });
 
+// Get Pharmarack dispatch schedule settings & paused dates
+router.get('/dispatch-schedule', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const pausedRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_paused_dispatch_dates'");
+    const timerRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_pacing_min_ms'");
+
+    let pausedDates: string[] = [];
+    if (pausedRow?.value) {
+      try { pausedDates = JSON.parse(pausedRow.value); } catch (_) {}
+    }
+
+    const timerSec = timerRow?.value ? Math.round(Number(timerRow.value) / 1000) : 10;
+
+    res.json({
+      success: true,
+      pausedDates,
+      timerSec
+    });
+  } catch (err: any) {
+    console.error('Error fetching dispatch schedule:', err);
+    res.status(500).json({ error: 'Failed to fetch schedule: ' + err.message });
+  }
+});
+
+// Update Pharmarack dispatch schedule settings & paused dates
+router.post('/dispatch-schedule', async (req, res) => {
+  try {
+    const { pausedDates, timerSec } = req.body;
+    const db = await dbManager.getConnection();
+
+    if (Array.isArray(pausedDates)) {
+      await db.run(
+        "INSERT INTO app_settings (key, value) VALUES ('pharmarack_paused_dispatch_dates', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [JSON.stringify(pausedDates)]
+      );
+    }
+
+    if (typeof timerSec === 'number' && timerSec > 0) {
+      const minMs = timerSec * 1000;
+      const maxMs = minMs + 2000;
+      await db.run(
+        "INSERT INTO app_settings (key, value) VALUES ('whatsapp_pacing_min_ms', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [minMs.toString()]
+      );
+      await db.run(
+        "INSERT INTO app_settings (key, value) VALUES ('whatsapp_pacing_max_ms', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [maxMs.toString()]
+      );
+    }
+
+    res.json({ success: true, message: 'Dispatch schedule updated successfully' });
+  } catch (err: any) {
+    console.error('Error updating dispatch schedule:', err);
+    res.status(500).json({ error: 'Failed to update schedule: ' + err.message });
+  }
+});
+
 export default router;
 

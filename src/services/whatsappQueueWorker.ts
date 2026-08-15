@@ -562,20 +562,49 @@ class WhatsAppQueueWorker {
       SELECT 
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) as sending,
-        SUM(CASE WHEN status = 'sent' AND (sent_at IS NULL OR sent_at >= ${startOfTodayMs}) THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN status = 'failed_offline' THEN 1 ELSE 0 END) as failed_offline,
         SUM(CASE WHEN status = 'failed_perm' THEN 1 ELSE 0 END) as failed_perm
       FROM whatsapp_send_queue
     `);
 
-    // Scope recent items to active items OR items sent today
-    const recentItems: QueueItem[] = await db.all(
-      `SELECT * FROM whatsapp_send_queue 
-       WHERE status IN ('pending', 'sending', 'failed_offline', 'failed_perm')
-          OR (status = 'sent' AND (sent_at IS NULL OR sent_at >= ?))
-       ORDER BY created_at DESC LIMIT 50`,
-      [startOfTodayMs]
+    // Fetch ALL saved WhatsApp queue items (up to 300 recent items)
+    const queueItems: QueueItem[] = await db.all(
+      `SELECT * FROM whatsapp_send_queue ORDER BY created_at DESC LIMIT 300`
     );
+
+    // Also fetch saved notifications from automation_notifications where type relates to WhatsApp / message delivery
+    let automationNotifs: any[] = [];
+    try {
+      automationNotifs = await db.all(
+        `SELECT id, recipient_phone as number, message, type, status, 
+                created_at, recipient_name as target_name, error_message
+         FROM automation_notifications 
+         WHERE type LIKE '%whatsapp%' OR type LIKE '%refill%' OR type LIKE '%delivery%' OR type LIKE '%special%' OR type LIKE '%distributor%'
+         ORDER BY id DESC LIMIT 200`
+      );
+    } catch (_) {
+      automationNotifs = [];
+    }
+
+    // Merge & deduplicate saved notifications
+    const existingQueueIds = new Set(queueItems.map(i => `${i.number}-${i.created_at}`));
+    const mappedAutoNotifs: QueueItem[] = automationNotifs
+      .filter(n => !existingQueueIds.has(`${n.number}-${new Date(n.created_at).getTime()}`))
+      .map(n => ({
+        id: 900000 + n.id,
+        number: n.number || '',
+        message: n.message || '',
+        type: n.type || 'whatsapp_saved',
+        status: n.status === 'sent_manually' ? 'sent' : (n.status === 'sent' ? 'sent' : (n.status === 'pending' ? 'pending' : 'failed_perm')),
+        retry_count: 0,
+        created_at: new Date(n.created_at).getTime() || Date.now(),
+        sent_at: n.status === 'sent' ? new Date(n.created_at).getTime() : null,
+        error_message: n.error_message || undefined,
+        target_name: n.target_name || undefined
+      }));
+
+    const recentItems: QueueItem[] = [...queueItems, ...mappedAutoNotifs].sort((a, b) => b.created_at - a.created_at);
 
     // Determine current sending or next pending item target name for live status display
     let activeTargetName: string | null = null;

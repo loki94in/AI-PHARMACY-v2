@@ -6,6 +6,7 @@ import { productNameFilterService } from '../services/productNameFilterService.j
 import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { verificationService } from '../services/verificationService.js';
+import { activityLogger } from '../services/activityLogger.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -501,6 +502,9 @@ router.post('/', async (req, res) => {
     // Commit transaction
     await db.run('COMMIT');
     inventoryCache.invalidate();
+
+    // Log Activity Alert
+    activityLogger.logSale(invoice_no, Number(total || 0), patient_name || 'Walk-in', paymentStatus || 'paid');
 
     // Bill-to-learning feedback loop: confirm OCR scanned items in ocr_corrections
     (async () => {

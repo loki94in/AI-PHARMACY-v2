@@ -306,6 +306,12 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
         ['pharmarack_daily_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${todayIST()}`]
       );
 
+      // Record in action_logs for Activity Alerts
+      await db.run(
+        'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+        ['PHARMARACK_DISPATCH_BATCH_SENT', `Dispatched daily order pickup list to ${boy.name} (${boy.phone}) for ${distMessages.length} distributors`]
+      );
+
       console.log(`[PharmarackBatch] Sent ${distMessages.length} separate distributor messages + 1 summary message to ${boy.name} (${boy.phone})`);
     } catch (err: any) {
       console.error(`[PharmarackBatch] Failed to send to ${boy.name}:`, err.message);

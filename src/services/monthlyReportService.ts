@@ -574,10 +574,10 @@ export class MonthlyReportService {
       return repPhone.value.trim();
     }
 
-    // 2. Active delivery boy contact from delivery_boys DB table
-    const deliveryBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
-    if (deliveryBoy && deliveryBoy.whatsapp_number) {
-      return deliveryBoy.whatsapp_number.trim();
+    // 2. Store Owner / Admin WhatsApp Number
+    const ownerPhone = await db.get("SELECT value FROM app_settings WHERE key = 'owner_whatsapp_number'");
+    if (ownerPhone && ownerPhone.value && ownerPhone.value.trim() !== '') {
+      return ownerPhone.value.trim();
     }
 
     // 3. Shop phone setting
@@ -663,10 +663,17 @@ export class MonthlyReportService {
         await sendMessage(recipientPhone, undefined, messageText);
       }
 
-      // Record in action_logs
+      // Record in action_logs for Activity Alerts
       await db.run(
         `INSERT INTO action_logs (action_type, description) VALUES (?, ?)`,
         [`SCHEDULED_REPORT_${periodType.toUpperCase()}`, `Sent ${reportData.periodLabel} (${format}) to ${recipientPhone}`]
+      );
+
+      // Record in automation_notifications for WhatsApp Live Quick Controller tracking
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['monthly_report', 'Pharmacy Owner / Admin', recipientPhone, messageText, 'sent', `report_${periodType}_${Date.now()}`]
       );
 
       // Update state in app_settings to mark sent

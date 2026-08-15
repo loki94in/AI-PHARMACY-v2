@@ -3,7 +3,8 @@ const { Client, LocalAuth, MessageMedia } = pkg;
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { eventService } from './services/eventService.js';
 import { dbManager } from './database/connection.js';
 import { config as appConfig, getAppDataDir } from './config/index.js';
@@ -13,6 +14,8 @@ import { cleanProfileLockFiles } from './services/tokenRefreshScheduler.js';
 // whatsapp-web.js uses CommonJS default export, so Client is a value not a type.
 // Use InstanceType<typeof Client> to get the correct instance type.
 type WAClient = InstanceType<typeof Client>;
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,19 +128,29 @@ export async function shouldRouteToBusiness(): Promise<boolean> {
   return false;
 }
 
-/** Kill stale Chrome/Edge processes and remove lock files holding the wwebjs session profile. */
-function cleanupProfileLocks() {
+/**
+ * Kill stale Chrome/Edge processes and remove lock files holding the wwebjs session profile.
+ *
+ * Uses async exec (not execSync) with a hard timeout: the underlying WMI query
+ * (Get-CimInstance) is known to stall for many seconds — occasionally longer —
+ * on real machines (corrupted WMI repo, AV interference, slow disks). This runs
+ * on every WhatsApp init, including the automatic one on server boot whenever a
+ * session was already linked, so a synchronous hang here used to freeze the
+ * entire single-process app, not just WhatsApp.
+ */
+async function cleanupProfileLocks(): Promise<void> {
   const sessionPath = path.join(WWEBJS_AUTH_DIR, 'session');
 
-  try {
-    if (process.platform === 'win32') {
+  if (process.platform === 'win32') {
+    try {
       const filterPattern = sessionPath.replace(/\\/g, '*').replace(/\//g, '*');
       const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"name = 'chrome.exe' or name = 'msedge.exe'\\" | Where-Object { $_.CommandLine -like '*${filterPattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
-      execSync(cmd, { stdio: 'ignore' });
+      await execAsync(cmd, { timeout: 8000 });
       console.log('[WhatsApp Init] Stale WhatsApp browser processes terminated.');
+    } catch (err: any) {
+      // Includes timeout kills (ETIMEDOUT/SIGTERM) — non-fatal either way, WA init proceeds.
+      console.warn('[WhatsApp Init] Could not check/kill running browser processes (non-fatal):', err.message);
     }
-  } catch (err: any) {
-    console.warn('[WhatsApp Init] Could not check/kill running browser processes (non-fatal):', err.message);
   }
 
   // Delegate to the canonical lock-file cleanup (tokenRefreshScheduler.ts) — its 7-file
@@ -328,7 +341,7 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
     });
   }
 
-  cleanupProfileLocks();
+  await cleanupProfileLocks();
 
   initializing = true;
   return new Promise<WAClient>((resolve, reject) => {
@@ -367,7 +380,26 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
     let qrCount = 0;
     let qrAutoStopTimer: NodeJS.Timeout | null = null;
 
+    // Hard watchdog: on some PCs Puppeteer/Chrome launch can hang indefinitely
+    // (browser missing at all 4 hardcoded paths so puppeteer-core has nothing to
+    // launch, a corrupted profile, driver/AV interference) without ever emitting
+    // 'qr', 'ready', or rejecting initialize(). Without this, `initializing` gets
+    // stuck `true` forever and WhatsApp features stay dead until the whole app
+    // is restarted. Cleared as soon as any real progress (qr/ready/init failure)
+    // is observed — legitimate long QR waits are governed by their own 120s timer.
+    const initWatchdog = setTimeout(() => {
+      if (clientInstance) return;
+      console.error('[WhatsApp] Init watchdog fired — no response from browser within 60s. Resetting.');
+      initializing = false;
+      isReady = false;
+      activeClient = null;
+      client.destroy().catch(() => {});
+      reject(new Error('WhatsApp client initialization timed out (60s) — Chrome/Edge may be missing or unresponsive.'));
+    }, 60_000);
+    const clearInitWatchdog = () => clearTimeout(initWatchdog);
+
     client.on('qr', (qr: string) => {
+      clearInitWatchdog();
       // If user did not explicitly request QR scan and no valid saved session exists, stop immediately
       if (!forceQr && !hasSavedSession()) {
         console.log('[WhatsApp] Unsolicited QR event suppressed. Stopping client until explicit user connection.');
@@ -412,6 +444,7 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
 
     client.on('ready', async () => {
       console.log('WhatsApp Client is ready!');
+      clearInitWatchdog();
       if (qrTimeout) clearTimeout(qrTimeout);
       if (qrAutoStopTimer) clearTimeout(qrAutoStopTimer);
       clientInstance = client;
@@ -611,6 +644,7 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
     });
 
     client.initialize().catch(err => {
+      clearInitWatchdog();
       const errMsg = err?.message || String(err);
       if (isPuppeteerDetachedError(errMsg)) {
         console.warn('[WhatsApp] Initialize interrupted by teardown/reconnect:', errMsg);

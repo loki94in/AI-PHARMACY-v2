@@ -52,10 +52,22 @@ export async function sendDailyDoctorReports(dateString?: string): Promise<{ suc
 
     // Send WhatsApp message
     try {
-      console.log(`[Doctor Reporting] Sending summary to Dr. ${doc.name} at number: ${doc.phone}`);
       await sendMessage(doc.phone, undefined, msg);
       messagesSent.push(`Sent report to Dr. ${doc.name} (${doc.phone})`);
       count++;
+
+      // Record in action_logs for Activity Alerts
+      await db.run(
+        'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+        ['DOCTOR_REPORT_SENT', `Sent daily doctor referral summary to Dr. ${doc.name} (${doc.phone})`]
+      );
+
+      // Record in automation_notifications for Live WhatsApp Controller tracking
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['doctor_daily_summary', `Dr. ${doc.name}`, doc.phone, msg, 'sent', `doc_report_${doc.id}_${targetDate}`]
+      );
     } catch (sendErr: any) {
       console.error(`[Doctor Reporting] Failed to send report to Dr. ${doc.name}:`, sendErr.message);
     }

@@ -21,19 +21,12 @@ export class BouncedAlertService {
         return false;
       }
 
-      // 2. Fetch recipient phone (Active delivery staff or Admin)
-      const deliveryBoy = await db.get("SELECT whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
-      if (deliveryBoy && deliveryBoy.whatsapp_number) {
-        recipientPhone = deliveryBoy.whatsapp_number.trim();
-      } else {
-        const phoneSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('admin_whatsapp_number', 'shop_phone', 'phone') AND value IS NOT NULL AND value != '' LIMIT 1");
-        if (phoneSetting && phoneSetting.value && phoneSetting.value.trim() !== '') {
-          recipientPhone = phoneSetting.value.trim();
-        }
-      }
+      // 2. Fetch recipient phone (Admin / Store Owner numbers ONLY)
+      const { getPharmacyOwnerPhone } = await import('./storeSettingsService.js');
+      recipientPhone = await getPharmacyOwnerPhone(db);
 
       if (!recipientPhone) {
-        console.warn('[BouncedAlert] WhatsApp recipient number not configured in Delivery Boys or Settings. Skipping notification.');
+        console.warn('[BouncedAlert] WhatsApp recipient number not configured in Store Settings (owner_whatsapp_number / shop_phone). Skipping notification.');
         return false;
       }
 

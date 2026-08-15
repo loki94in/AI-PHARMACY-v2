@@ -61,6 +61,20 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
 
     await sendMessage(formattedPhone, undefined, msg);
     console.log(`[ExpiryScan] Auto WhatsApp alert summary successfully dispatched to ${targetPhone}`);
+
+    // Record in action_logs for Activity Alerts
+    await db.run(
+      "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
+      ['EXPIRY_ALERT_SENT', `Sent 15-day expiry report alert to ${formattedPhone} (${rows.length} items)`]
+    );
+
+    // Record in automation_notifications for Live WhatsApp Controller tracking
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ['expiry_report', 'Pharmacy Owner / Admin', formattedPhone, msg, 'sent', `expiry_scan_${Date.now()}`]
+    );
+
     return true;
   } catch (err: any) {
     console.error('[ExpiryScan] Error running automatic expiry scan:', err);

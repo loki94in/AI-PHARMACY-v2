@@ -231,11 +231,53 @@ router.post('/notifications/devices/logs/clear', async (req, res) => {
   }
 });
 
-// Get general app action logs
+// Get general app action logs with filtering & pagination
 router.get('/notifications/action-logs', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const rows = await db.all('SELECT * FROM action_logs ORDER BY created_at DESC LIMIT 250');
+    const { category, status, search, limit = '250', offset = '0' } = req.query;
+
+    let query = 'SELECT * FROM action_logs WHERE 1=1';
+    const params: any[] = [];
+
+    if (category && category !== 'all') {
+      if (category === 'sales') {
+        query += " AND (action_type IN ('SALE', 'CUSTOMER_RETURN', 'CREDIT_NOTE') OR description LIKE '%Bill%' OR description LIKE '%Sale%')";
+      } else if (category === 'inventory') {
+        query += " AND (action_type IN ('ADD', 'EDIT', 'DELETE', 'STOCK_OVERRIDE', 'INVENTORY_DELETE') OR description LIKE '%Medicine%' OR description LIKE '%Stock%')";
+      } else if (category === 'automations') {
+        query += " AND (action_type IN ('AUTOMATION', 'AUTOMATION_ALERT', 'WHATSAPP_SEND', 'EMAIL_SEND') OR description LIKE '%WhatsApp%' OR description LIKE '%Email%')";
+      } else if (category === 'backup') {
+        query += " AND (action_type IN ('BACKUP', 'CLOUD_PUSH', 'DATABASE_RESTORE') OR description LIKE '%Backup%' OR description LIKE '%S3%')";
+      } else if (category === 'errors') {
+        query += " AND (action_type IN ('PROCESS_FAIL', 'ERROR') OR description LIKE '%fail%' OR description LIKE '%error%')";
+      }
+    }
+
+    if (status && status !== 'all') {
+      if (status === 'done') {
+        query += " AND (action_type IN ('PROCESS_DONE', 'SALE', 'PURCHASE', 'ADD', 'SAVE', 'BACKUP') AND description NOT LIKE '%fail%')";
+      } else if (status === 'fail') {
+        query += " AND (action_type IN ('PROCESS_FAIL', 'ERROR') OR description LIKE '%fail%' OR description LIKE '%error%')";
+      } else if (status === 'adding') {
+        query += " AND (action_type = 'ADD' OR description LIKE 'Added%')";
+      } else if (status === 'editing') {
+        query += " AND (action_type = 'EDIT' OR description LIKE 'Edited%')";
+      } else if (status === 'deleting') {
+        query += " AND (action_type = 'DELETE' OR description LIKE 'Deleted%')";
+      }
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      query += ' AND (description LIKE ? OR action_type LIKE ?)';
+      const term = `%${search.trim()}%`;
+      params.push(term, term);
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit as string, 10) || 250, parseInt(offset as string, 10) || 0);
+
+    const rows = await db.all(query, params);
     res.json({ success: true, logs: rows });
   } catch (err: any) {
     console.error('Failed to fetch action logs:', err);

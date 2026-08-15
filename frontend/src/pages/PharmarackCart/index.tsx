@@ -9,6 +9,7 @@ import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import NonMappedDistributors from '../NonMappedDistributors';
+import { PharmarackCartCalendar } from '../../components/PharmarackCartCalendar';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
 
@@ -2038,7 +2039,10 @@ export default function PharmarackCart() {
   const totalAmount = distributors.reduce((s, d) => s + d.items.reduce((a, i) => a + getCartItemAmount(i), 0), 0);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-3 p-6 pb-4">
+    <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-2 p-4 pb-4">
+      {/* Direct Top Compact Calendar & Controller Strip */}
+      <PharmarackCartCalendar />
+
       {/* Compact Unified Top Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm shrink-0">
         {/* Title */}

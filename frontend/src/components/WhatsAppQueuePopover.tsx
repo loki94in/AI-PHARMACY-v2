@@ -24,7 +24,7 @@ interface WhatsAppQueuePopoverProps {
   onClose: () => void;
 }
 
-type TabType = 'all' | 'special' | 'distributor' | 'delivery' | 'pending' | 'sent' | 'failed';
+type TabType = 'all' | 'customer' | 'delivery' | 'purchase' | 'special' | 'pending' | 'sent' | 'failed';
 
 // Module-level persistent cache for zero-latency instant rendering (<1ms)
 let cachedQueueState: any | null = null;
@@ -36,6 +36,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const [queueState, setQueueState] = useState<any | null>(() => cachedQueueState);
   const [loading, setLoading] = useState(() => !cachedQueueState);
   const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [expandedIds, setExpandedIds] = useState<Record<number, boolean>>({});
 
   // Pacing Slider state
@@ -210,28 +211,42 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const isSpecialOrder = (t: string) => 
     t === 'special_order' || t === 'quick_order' || t === 'special_order_arrived' || t === 'quick_order_resend';
-  const isDistributor = (t: string) => 
-    t === 'distributor' || t === 'distributor_collection' || t === 'pharmarack_batch';
+  const isPurchase = (t: string) => 
+    t === 'distributor' || t === 'distributor_collection' || t === 'pharmarack_batch' || t === 'purchase_order' || t === 'shortage_order';
   const isDelivery = (t: string) => 
-    t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff';
+    t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff' || t === 'dispatch';
+  const isCustomer = (t: string) => 
+    !isPurchase(t) && !isDelivery(t) && !isSpecialOrder(t);
 
   const filteredItems = items.filter(item => {
-    if (activeTab === 'special') return isSpecialOrder(item.type);
-    if (activeTab === 'distributor') return isDistributor(item.type);
+    // Search query check
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchName = item.target_name?.toLowerCase().includes(q);
+      const matchNum = item.number?.includes(q);
+      const matchMsg = item.message?.toLowerCase().includes(q);
+      const matchType = item.type?.toLowerCase().includes(q);
+      if (!matchName && !matchNum && !matchMsg && !matchType) return false;
+    }
+
+    if (activeTab === 'customer') return isCustomer(item.type);
     if (activeTab === 'delivery') return isDelivery(item.type);
-    if (activeTab === 'pending') return (item.status === 'pending' || item.status === 'sending') && !isDistributor(item.type);
-    if (activeTab === 'sent') return item.status === 'sent' && !isDistributor(item.type);
-    if (activeTab === 'failed') return (item.status === 'failed_offline' || item.status === 'failed_perm') && !isDistributor(item.type);
-    return !isDistributor(item.type);
+    if (activeTab === 'purchase') return isPurchase(item.type);
+    if (activeTab === 'special') return isSpecialOrder(item.type);
+    if (activeTab === 'pending') return item.status === 'pending' || item.status === 'sending';
+    if (activeTab === 'sent') return item.status === 'sent';
+    if (activeTab === 'failed') return item.status === 'failed_offline' || item.status === 'failed_perm';
+    return true; // 'all' shows everything
   });
 
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
   const pendingTotal = (counts.pending || 0) + (counts.sending || 0);
   const failedTotal = (counts.failed_offline || 0) + (counts.failed_perm || 0);
 
-  const specialCount = items.filter(i => isSpecialOrder(i.type)).length;
-  const distCount = items.filter(i => isDistributor(i.type)).length;
+  const customerCount = items.filter(i => isCustomer(i.type)).length;
   const deliveryCount = items.filter(i => isDelivery(i.type)).length;
+  const purchaseCount = items.filter(i => isPurchase(i.type)).length;
+  const specialCount = items.filter(i => isSpecialOrder(i.type)).length;
 
   const renderTypeBadge = (type: string) => {
     if (isSpecialOrder(type)) {
@@ -242,11 +257,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
         </span>
       );
     }
-    if (isDistributor(type)) {
+    if (isPurchase(type)) {
       return (
         <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/35 flex items-center gap-1 shrink-0">
           <Building2 size={9} className="text-amber-400" />
-          <span>Distributor</span>
+          <span>Purchase / Distributor</span>
         </span>
       );
     }
@@ -413,85 +428,118 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           </div>
         </div>
 
-        {/* Category Filter Tabs */}
-        <div className="flex border-b border-glass-border/30 px-4 bg-bg2/50 overflow-x-auto custom-scrollbar gap-2 shrink-0 items-center">
-          <button
-            onClick={() => setActiveTab('all')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'all' 
-                ? 'border-sky text-sky' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            All Queue ({items.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('pending')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeTab === 'pending' 
-                ? 'border-sky text-sky' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            <Clock size={11} className="text-sky" />
-            <span>Upcoming / Pending ({pendingTotal})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('sent')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeTab === 'sent' 
-                ? 'border-emerald-400 text-emerald-400' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            <CheckCircle2 size={11} className="text-emerald-400" />
-            <span>Sent / Completed ({counts.sent || 0})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('special')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeTab === 'special' 
-                ? 'border-purple-400 text-purple-300' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            <Zap size={11} className="text-purple-400" />
-            <span>Special Orders ({specialCount})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('distributor')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeTab === 'distributor' 
-                ? 'border-amber-400 text-amber-300' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            <Building2 size={11} className="text-amber-400" />
-            <span>Distributors ({distCount})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('delivery')}
-            className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeTab === 'delivery' 
-                ? 'border-cyan-400 text-cyan-300' 
-                : 'border-transparent text-muted hover:text-text'
-            }`}
-          >
-            <Truck size={11} className="text-cyan-400" />
-            <span>Delivery Staff ({deliveryCount})</span>
-          </button>
-          {failedTotal > 0 && (
+        {/* Search & Category Filter Bar */}
+        <div className="p-3 bg-bg2/60 border-b border-glass-border/30 flex flex-col gap-2 shrink-0">
+          <div className="relative flex items-center w-full">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search saved WhatsApp notifications by phone, recipient, or text..."
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl bg-bg border border-glass-border text-text placeholder:text-muted/60 focus:outline-none focus:border-sky-400/50"
+            />
+            <MessageSquare size={13} className="absolute left-3 text-muted" />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 text-muted hover:text-text cursor-pointer"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          <div className="flex border-b border-glass-border/30 overflow-x-auto custom-scrollbar gap-1.5 shrink-0 items-center pb-1">
             <button
-              onClick={() => setActiveTab('failed')}
-              className={`py-2.5 px-3 text-xs font-bold border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                activeTab === 'failed' 
-                  ? 'border-rose-500 text-rose-400' 
-                  : 'border-transparent text-muted hover:text-text'
+              onClick={() => setActiveTab('all')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'all' 
+                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
               }`}
             >
-              Failed ({failedTotal})
+              💬 All WhatsApp ({items.length})
             </button>
-          )}
+            <button
+              onClick={() => setActiveTab('customer')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'customer' 
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <MessageSquare size={11} className="text-emerald-400" />
+              <span>Customer Messages ({customerCount})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('delivery')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'delivery' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <Truck size={11} className="text-cyan-400" />
+              <span>Delivery Messages ({deliveryCount})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('purchase')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'purchase' 
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <Building2 size={11} className="text-amber-400" />
+              <span>Purchase Messages ({purchaseCount})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('special')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'special' 
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <Zap size={11} className="text-purple-400" />
+              <span>Special Orders ({specialCount})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'pending' 
+                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <Clock size={11} className="text-sky-400" />
+              <span>Pending ({pendingTotal})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('sent')}
+              className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'sent' 
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35' 
+                  : 'bg-bg text-muted hover:text-text border border-glass-border'
+              }`}
+            >
+              <CheckCircle2 size={11} className="text-emerald-400" />
+              <span>Sent ({counts.sent || 0})</span>
+            </button>
+            {failedTotal > 0 && (
+              <button
+                onClick={() => setActiveTab('failed')}
+                className={`py-1.5 px-3 text-xs font-bold rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeTab === 'failed' 
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/35' 
+                    : 'bg-bg text-muted hover:text-text border border-glass-border'
+                }`}
+              >
+                Failed ({failedTotal})
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Streamlined One-Line Queue Items List */}
@@ -508,7 +556,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           ) : (
             filteredItems.map(item => {
               const isExpanded = Boolean(expandedIds[item.id]);
-              const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isDistributor(item.type) ? 'Distributor Pickup' : 'Customer');
+              const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isPurchase(item.type) ? 'Purchase / Distributor' : 'Customer');
 
               return (
                 <div 

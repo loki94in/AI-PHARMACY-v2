@@ -81,6 +81,40 @@ export async function getStorePhone(dbInstance?: any): Promise<string> {
 }
 
 /**
+ * Resolves the Pharmacy / Owner WhatsApp & phone number strictly for major system reports
+ * (Monthly, Expiry, Bounced Alert, Shortage/Admin Order Reminders, Non-Moving, etc.).
+ * Strictly guarantees ZERO fallback to delivery boys, patients, or distributors.
+ */
+export async function getPharmacyOwnerPhone(dbInstance?: any): Promise<string> {
+  try {
+    const db = dbInstance || (await dbManager.getConnection());
+    const row = await db.get(
+      `SELECT value FROM app_settings 
+       WHERE key IN ('owner_whatsapp_number', 'admin_whatsapp_number', 'admin_whatsapp', 'shop_phone', 'store_phone', 'pharmacy_phone', 'phone') 
+         AND value IS NOT NULL 
+         AND TRIM(value) != '' 
+       ORDER BY CASE key 
+         WHEN 'owner_whatsapp_number' THEN 1
+         WHEN 'admin_whatsapp_number' THEN 2
+         WHEN 'admin_whatsapp' THEN 3
+         WHEN 'shop_phone' THEN 4 
+         WHEN 'store_phone' THEN 5 
+         WHEN 'pharmacy_phone' THEN 6
+         ELSE 7 END 
+       LIMIT 1`
+    );
+
+    if (row && row.value && row.value.trim()) {
+      return row.value.trim();
+    }
+  } catch (err) {
+    console.warn('[StoreSettings] Error resolving pharmacy owner phone:', err);
+  }
+  return '';
+}
+
+
+/**
  * Returns formatted store name with phone if available (e.g. "TANMANY MEDICAL (Ph: 9876543210)" or "TANMANY MEDICAL").
  */
 export async function getStoreMedicalNameAndPhone(dbInstance?: any): Promise<string> {

@@ -229,6 +229,15 @@ For full report, check the data/reports directory.
       // Send to Telegram (admins/managers)
       await telegramBotService.sendDefaultNotification(message);
 
+      // Record in action_logs for Activity Alerts
+      try {
+        const db = await dbManager.getConnection();
+        await db.run(
+          "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
+          ['NON_MOVING_REPORT_GENERATED', `Generated non-moving report (${report.totalNonMovingItems} items, value: ₹${report.totalValue.toFixed(2)})`]
+        );
+      } catch (logErr) {}
+
       console.log('Non-moving report notification sent via Telegram');
     } catch (error) {
       console.error('Failed to send non-moving report notification:', error);

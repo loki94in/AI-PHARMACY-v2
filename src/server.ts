@@ -8,6 +8,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import axios from 'axios';
 import { errorHandler } from './middleware/errorHandler.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { dbManager } from './database/connection.js';
@@ -20,6 +21,13 @@ import { config, getAppDataDir, isPackagedApp } from './config/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = config.dbPath;
+
+// Global safety net: every module in this app imports the shared `axios`
+// default instance (no axios.create() instances exist), and most call sites
+// never pass an explicit timeout — a single unresponsive remote endpoint
+// (Pharmarack, Telegram, distributor APIs, etc.) would otherwise hang that
+// request forever. Per-call timeouts still win when they set their own.
+axios.defaults.timeout = 20000;
 
 // Flipped to true once ensureSchema() finishes below. Gates every /api route
 // so the first requests after exe launch can't hit a not-yet-created schema

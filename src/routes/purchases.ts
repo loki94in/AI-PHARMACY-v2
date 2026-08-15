@@ -17,6 +17,7 @@ import { activityTracker } from '../utils/activityTracker.js';
 import { getAppDataDir } from '../config/index.js';
 import { refreshInventoryActiveStatus, refreshInventoryActiveByBatch } from '../utils/inventoryActive.js';
 import { inventoryCache } from '../services/inventoryCache.js';
+import { activityLogger } from '../services/activityLogger.js';
 import fs from 'fs';
 import { medicineService } from '../services/medicineService.js';
 import { OrderFulfillmentService } from '../services/orderFulfillmentService.js';

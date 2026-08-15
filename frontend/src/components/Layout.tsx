@@ -94,7 +94,7 @@ function deferUntilIdle(fn: () => void): () => void {
 // Notification Types
 // ──────────────────────────────────────────────
 export interface AppNotification {
-  id: number;
+  id: number | string;
   message: string;
   type: 'success' | 'error' | 'info' | 'mail' | 'automation';
   time: Date;
@@ -409,13 +409,15 @@ const NotificationPanel = ({
 }: {
   notifications: AppNotification[];
   onClearAll: () => void;
-  onClearOne: (id: number) => void;
-  onMarkRead: (id: number) => void;
+  onClearOne: (id: number | string) => void;
+  onMarkRead: (id: number | string) => void;
   onClose: () => void;
 }) => {
   const navigate = useNavigate();
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'alerts'>('all');
+  const [actionLogs, setActionLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
 
   // Close on outside click
   useEffect(() => {
@@ -444,10 +446,60 @@ const NotificationPanel = ({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-  const alertCount = notifications.filter(n => n.type === 'error' || n.type === 'automation').length;
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/notifications/action-logs?limit=150');
+      if (res.data?.success && Array.isArray(res.data?.logs)) {
+        setActionLogs(res.data.logs);
+      }
+    } catch (_) {}
+  }, []);
 
-  const filteredNotifications = notifications.filter(n => {
+  useEffect(() => {
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, [fetchLogs]);
+
+  // Combine real-time toasts and persistent DB action_logs into unified Activity feed
+  const combinedActivities = useMemo(() => {
+    const toastItems: AppNotification[] = notifications.map(n => ({
+      ...n,
+      time: n.time instanceof Date ? n.time : new Date(n.time)
+    }));
+
+    const logItems: AppNotification[] = actionLogs.map(l => {
+      let type: AppNotification['type'] = 'info';
+      const actionType = String(l.action_type || '').toUpperCase();
+      if (actionType.includes('FAIL') || actionType.includes('ERROR')) type = 'error';
+      else if (actionType.includes('SALE') || actionType.includes('SUCCESS') || actionType.includes('ADD') || actionType.includes('SAVE')) type = 'success';
+      else if (actionType.includes('AUTOMATION') || actionType.includes('WHATSAPP')) type = 'automation';
+      else if (actionType.includes('MAIL')) type = 'mail';
+
+      return {
+        id: `log-${l.id}`,
+        message: l.description || 'System Activity Logged',
+        type,
+        time: new Date(l.created_at || Date.now()),
+        read: true,
+      };
+    });
+
+    const merged = [...toastItems];
+    const existingMessages = new Set(toastItems.map(t => t.message));
+    logItems.forEach(item => {
+      if (!existingMessages.has(item.message)) {
+        merged.push(item);
+      }
+    });
+
+    return merged.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }, [notifications, actionLogs]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+  const alertCount = combinedActivities.filter(n => n.type === 'error' || n.type === 'automation').length;
+
+  const filteredNotifications = combinedActivities.filter(n => {
     if (activeFilter === 'unread') return !n.read;
     if (activeFilter === 'alerts') return n.type === 'error' || n.type === 'automation';
     return true;

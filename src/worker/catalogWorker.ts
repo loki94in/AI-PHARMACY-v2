@@ -6,11 +6,9 @@ import { extractFromPdf, ExtractedMedicine } from '../extractor.js';
 import { eventService } from '../services/eventService.js';
 import { activityTracker } from '../utils/activityTracker.js';
 import csvParser from 'csv-parser';
-import * as XLSX from 'xlsx';
-import XLSX_default from 'xlsx';
-const XLSX_import = (XLSX as any).readFile ? XLSX : XLSX_default;
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { Worker } from 'worker_threads';
 import { runEnrichment, getEnrichmentRunningState } from './compositionEnricher.js';
 
 import { fileURLToPath } from 'url';
@@ -18,6 +16,60 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const getDbPath = () => process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+
+// The catalog worker runs in-process with the HTTP server in packaged installs
+// (see workerSupervisor.ts — SQLite lock contention made forking it out worse).
+// XLSX.readFile()+sheet_to_json() are synchronous, CPU-bound calls that would
+// otherwise block the single event loop — freezing the entire app, including
+// POS and every other open page — for the whole duration of the parse. Running
+// the parse in a worker_thread (via eval, so no extra file needs to ship or be
+// bundled for the SEA build) keeps that work off the main thread. requestXlsx
+// is only decode-to-array-of-arrays; the (cheap) row-object mapping still
+// happens on the main thread afterward.
+function parseXlsxSheetData(filePath: string, timeoutMs = 120000): Promise<any[][]> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(
+      `
+      const { parentPort, workerData } = require('worker_threads');
+      try {
+        const XLSX = require('xlsx');
+        const workbook = XLSX.readFile(workerData.filePath);
+        const sheetName = workbook.SheetNames[0];
+        const sheetData = sheetName
+          ? XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' })
+          : [];
+        parentPort.postMessage({ ok: true, data: sheetData });
+      } catch (err) {
+        parentPort.postMessage({ ok: false, error: err && err.message ? err.message : String(err) });
+      }
+      `,
+      { eval: true, workerData: { filePath } }
+    );
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { worker.terminate(); } catch (_) {}
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error(`XLSX parsing timed out after ${timeoutMs / 1000}s: ${filePath}`)));
+    }, timeoutMs);
+
+    worker.once('message', (msg: any) => {
+      finish(() => (msg.ok ? resolve(msg.data) : reject(new Error(msg.error))));
+    });
+    worker.once('error', (err) => {
+      finish(() => reject(err));
+    });
+    worker.once('exit', (code) => {
+      finish(() => reject(new Error(`XLSX parse worker exited with code ${code}`)));
+    });
+  });
+}
 
 export async function preScanCsv(filePath: string, onProgress?: (rowIdx: number) => void): Promise<{
   totalCount: number;
@@ -286,65 +338,60 @@ export async function runCatalogAnalysis(jobId: number) {
       existingCount = scanResult.existingCount;
       duplicateCount = scanResult.duplicateCount;
     } else if (ext === '.xlsx' || ext === '.xls') {
-      const workbook = XLSX_import.readFile(job.file_path);
-      const sheetName = workbook.SheetNames[0];
-      if (sheetName) {
-        const worksheet = workbook.Sheets[sheetName];
-        const sheetData = XLSX_import.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
-        if (sheetData.length > 0) {
-          headers = sheetData[0].map((h: any, idx: number) => h ? String(h).trim() : `Column_${idx + 1}`);
-          
-          const nameColIdx = sheetData[0].findIndex((c: any) => 
-            /name|brand/i.test(String(c)) || 
-            /product|item|inn|title/i.test(String(c))
-          );
-          const finalNameColIdx = nameColIdx !== -1 ? nameColIdx : 0;
+      const sheetData = await parseXlsxSheetData(job.file_path);
+      if (sheetData.length > 0) {
+        headers = sheetData[0].map((h: any, idx: number) => h ? String(h).trim() : `Column_${idx + 1}`);
 
-          const seenNames = new Set<string>();
-          previewData = sheetData.slice(1, 101).map((row: any[]) => {
-            const rowObj: Record<string, any> = {};
-            headers.forEach((header, idx) => {
-              rowObj[header] = row[idx] !== undefined ? row[idx] : '';
-            });
-            const nameRaw = row[finalNameColIdx] !== undefined ? String(row[finalNameColIdx]).trim().replace(/\s+/g, ' ') : '';
-            const nameNorm = nameRaw.toLowerCase().trim();
-            let status = 'new';
-            if (nameNorm) {
-              if (seenNames.has(nameNorm)) {
-                status = 'duplicate';
-              } else {
-                seenNames.add(nameNorm);
-                if (existingNames.has(nameNorm)) {
-                  status = 'updated';
-                }
-              }
-            }
-            rowObj.__is_existing = status === 'updated';
-            rowObj.__status = status;
-            return rowObj;
+        const nameColIdx = sheetData[0].findIndex((c: any) =>
+          /name|brand/i.test(String(c)) ||
+          /product|item|inn|title/i.test(String(c))
+        );
+        const finalNameColIdx = nameColIdx !== -1 ? nameColIdx : 0;
+
+        const seenNames = new Set<string>();
+        previewData = sheetData.slice(1, 101).map((row: any[]) => {
+          const rowObj: Record<string, any> = {};
+          headers.forEach((header, idx) => {
+            rowObj[header] = row[idx] !== undefined ? row[idx] : '';
           });
-          totalCount = Math.max(0, sheetData.length - 1);
-
-          // Calculate statistics
-          const seenNamesAll = new Set<string>();
-
-          sheetData.slice(1).forEach((row: any[]) => {
-            if (!row || row[finalNameColIdx] === undefined) return;
-            const nameRaw = String(row[finalNameColIdx]).trim().replace(/\s+/g, ' ');
-            if (!nameRaw) return;
-            const nameKey = nameRaw.toLowerCase();
-            if (seenNamesAll.has(nameKey)) {
-              duplicateCount++;
+          const nameRaw = row[finalNameColIdx] !== undefined ? String(row[finalNameColIdx]).trim().replace(/\s+/g, ' ') : '';
+          const nameNorm = nameRaw.toLowerCase().trim();
+          let status = 'new';
+          if (nameNorm) {
+            if (seenNames.has(nameNorm)) {
+              status = 'duplicate';
             } else {
-              seenNamesAll.add(nameKey);
-              if (existingNames.has(nameKey)) {
-                existingCount++;
-              } else {
-                newCount++;
+              seenNames.add(nameNorm);
+              if (existingNames.has(nameNorm)) {
+                status = 'updated';
               }
             }
-          });
-        }
+          }
+          rowObj.__is_existing = status === 'updated';
+          rowObj.__status = status;
+          return rowObj;
+        });
+        totalCount = Math.max(0, sheetData.length - 1);
+
+        // Calculate statistics
+        const seenNamesAll = new Set<string>();
+
+        sheetData.slice(1).forEach((row: any[]) => {
+          if (!row || row[finalNameColIdx] === undefined) return;
+          const nameRaw = String(row[finalNameColIdx]).trim().replace(/\s+/g, ' ');
+          if (!nameRaw) return;
+          const nameKey = nameRaw.toLowerCase();
+          if (seenNamesAll.has(nameKey)) {
+            duplicateCount++;
+          } else {
+            seenNamesAll.add(nameKey);
+            if (existingNames.has(nameKey)) {
+              existingCount++;
+            } else {
+              newCount++;
+            }
+          }
+        });
       }
     } else if (ext === '.pdf') {
       const extracted = await extractFromPdf(job.file_path);
@@ -621,22 +668,17 @@ export async function runCatalogImport(jobId: number) {
 
     const rows: any[] = [];
     if (ext === '.xlsx' || ext === '.xls') {
-      const workbook = XLSX_import.readFile(job.file_path);
-      const sheetName = workbook.SheetNames[0];
-      if (sheetName) {
-        const worksheet = workbook.Sheets[sheetName];
-        const sheetData = XLSX_import.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
-        if (sheetData.length > 0) {
-          const headers = sheetData[0].map((h: any, idx: number) => h ? String(h).trim() : `Column_${idx + 1}`);
-          const excelRows = sheetData.slice(1).map((row: any[]) => {
-            const rowObj: Record<string, any> = {};
-            headers.forEach((header, idx) => {
-              rowObj[header] = row[idx] !== undefined ? row[idx] : '';
-            });
-            return rowObj;
+      const sheetData = await parseXlsxSheetData(job.file_path);
+      if (sheetData.length > 0) {
+        const headers = sheetData[0].map((h: any, idx: number) => h ? String(h).trim() : `Column_${idx + 1}`);
+        const excelRows = sheetData.slice(1).map((row: any[]) => {
+          const rowObj: Record<string, any> = {};
+          headers.forEach((header, idx) => {
+            rowObj[header] = row[idx] !== undefined ? row[idx] : '';
           });
-          rows.push(...excelRows);
-        }
+          return rowObj;
+        });
+        rows.push(...excelRows);
       }
     } else if (ext === '.pdf') {
       const extracted = await extractFromPdf(job.file_path);
