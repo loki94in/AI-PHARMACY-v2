@@ -43,6 +43,7 @@ import {
   Download,
   Keyboard,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -62,7 +63,7 @@ import {
 } from 'lucide-react';
 
 
-import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent, messageSendEvent, specialOrdersEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
@@ -1906,8 +1907,11 @@ const QuickAssistSidebar = ({
   specialOrders?: any[];
   onActionComplete: () => void;
 }) => {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const [processingOrderIds, setProcessingOrderIds] = useState<Set<number>>(new Set());
+  const [optimisticHiddenOrderIds, setOptimisticHiddenOrderIds] = useState<Set<number>>(new Set());
 
   useOnClickOutside(sidebarRef, () => {
     if (expanded) {
@@ -1955,7 +1959,50 @@ const QuickAssistSidebar = ({
     }
   };
 
+  const handleUpdateSpecialOrderStatus = async (order: any, newStatus: string) => {
+    if (processingOrderIds.has(order.id)) return;
+
+    setProcessingOrderIds(prev => new Set(prev).add(order.id));
+    if (newStatus === 'Completed' || newStatus === 'Cancelled') {
+      setOptimisticHiddenOrderIds(prev => new Set(prev).add(order.id));
+    }
+
+    try {
+      await apiClient.post(`/orders/${order.id}/status`, { status: newStatus });
+      if (newStatus === 'Completed') {
+        toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
+      } else if (newStatus === 'Ready') {
+        toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
+      } else if (newStatus === 'Cancelled') {
+        toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
+      } else {
+        toastEvent.trigger(`Updated status for "${order.product}" to ${newStatus}`, 'info');
+      }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      onActionComplete();
+    } catch (err: any) {
+      console.error(`Failed to update status to ${newStatus}:`, err);
+      toastEvent.trigger('Failed to update request status', 'error');
+      setOptimisticHiddenOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    } finally {
+      setProcessingOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    }
+  };
+
   const handleSendSpecialOrder = async (order: any) => {
+    if (processingOrderIds.has(order.id)) return;
+
+    setProcessingOrderIds(prev => new Set(prev).add(order.id));
     try {
       const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
       
@@ -1968,30 +2015,33 @@ const QuickAssistSidebar = ({
 
       await apiClient.post(`/orders/${order.id}/status`, { status: 'Ordered' });
       toastEvent.trigger(`Marked special request "${order.product}" as Ordered!`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
       onActionComplete();
     } catch (e: any) {
       console.error('Failed to send special order:', e);
       toastEvent.trigger('Failed to update special request status', 'error');
+    } finally {
+      setProcessingOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
     }
-  };
-
-  const handleAddToCartSpecialOrder = (order: any) => {
-    liveCartAddEvent.triggerOpen(order.product, order.qty || 1, order.id);
-    toastEvent.trigger(`Added "${order.product}" to Live Cart search!`, 'info');
   };
 
   if (!expanded) {
     const activeRefillsCount = Array.isArray(refills) ? refills.filter(r => r.is_active === 1).length : 0;
     const activeSpecialOrdersCount = Array.isArray(specialOrders) 
-      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled').length 
+      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)).length 
       : 0;
     const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
 
     return (
       <div
         onClick={() => setExpanded(true)}
-        className="w-10 h-full bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-4 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
+        className="w-10 h-full min-h-0 overflow-hidden bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-4 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
         title="Expand Quick Assist"
       >
         <ChevronLeftIcon size={16} className="text-muted mt-1" />
@@ -2043,20 +2093,20 @@ const QuickAssistSidebar = ({
   const activeRefills = refills.filter(r => r.is_active === 1);
   const inactiveRefills = refills.filter(r => r.is_active === 0);
   const activeSpecialOrders = Array.isArray(specialOrders) 
-    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled') 
+    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)) 
     : [];
 
   return (
-    <div ref={sidebarRef} className="w-80 bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full shrink-0 z-20 transition-all duration-300">
+    <div ref={sidebarRef} className="w-80 max-w-[85vw] bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full min-h-0 overflow-hidden shrink-0 z-20 transition-all duration-300">
       {/* Header */}
-      <div className="p-4 border-b border-glass-border flex items-center justify-between shrink-0 bg-white/[0.01]">
+      <div className="p-4 border-b border-glass-border flex items-center justify-between shrink-0 bg-bg2/40">
         <div className="flex items-center gap-2">
-          <ActivityIcon size={16} className="text-purple-400" />
-          <span className="text-sm font-bold text-text uppercase tracking-wider">Quick Assist</span>
+          <ActivityIcon size={16} className="text-purple-400 shrink-0" />
+          <span className="text-sm font-bold text-text uppercase tracking-wider truncate">Quick Assist</span>
         </div>
         <button
           onClick={() => setExpanded(false)}
-          className="p-1 rounded-lg text-muted hover:text-text hover:bg-white/5 transition-all cursor-pointer"
+          className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer shrink-0"
           title="Collapse"
         >
           <ChevronRightIcon size={16} />
@@ -2064,7 +2114,7 @@ const QuickAssistSidebar = ({
       </div>
 
       {/* Main content scroll */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin">
         {/* Active Refills */}
         <div>
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-muted/70">
@@ -2081,29 +2131,29 @@ const QuickAssistSidebar = ({
           ) : (
             <div className="flex flex-col gap-2.5">
               {activeRefills.map(refill => (
-                <div key={refill.id} className="p-3 rounded-xl bg-white/[0.01] border border-glass-border flex flex-col gap-1.5">
-                  <div className="flex items-start justify-between gap-1">
-                    <span className="font-semibold text-xs text-text truncate max-w-[170px]">{refill.patient_name}</span>
+                <div key={refill.id} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-1.5 shadow-sm min-w-0 overflow-hidden">
+                  <div className="flex items-start justify-between gap-1 min-w-0">
+                    <span className="font-semibold text-xs text-text truncate flex-1 min-w-0">{refill.patient_name}</span>
                     {refill.hold_for_stock === 1 && (
                       <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[8px] font-bold uppercase tracking-wider animate-pulse shrink-0">
                         Hold Stock
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-muted flex items-center gap-1">
-                    <span className="font-mono text-purple-400">{refill.medicine_name}</span>
-                    <span>·</span>
-                    <span>{refill.refill_interval_days}d cycle</span>
+                  <div className="text-[10px] text-muted flex items-center gap-1 min-w-0">
+                    <span className="font-mono text-purple-400 truncate flex-1 min-w-0">{refill.medicine_name}</span>
+                    <span className="shrink-0">·</span>
+                    <span className="shrink-0">{refill.refill_interval_days}d cycle</span>
                   </div>
-                  <div className="flex items-center gap-2 mt-1 justify-between">
-                    <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium">
-                      <ClockIcon size={10} />
-                      <span>Next: {new Date(refill.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                  <div className="flex items-center gap-2 mt-1 justify-between min-w-0">
+                    <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium truncate">
+                      <ClockIcon size={10} className="shrink-0" />
+                      <span className="truncate">Next: {new Date(refill.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
                     </div>
                     {refill.hold_for_stock === 1 && (
                       <button
                         onClick={() => handleAcknowledge(refill.id)}
-                        className="py-1 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer"
+                        className="py-1 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer shrink-0"
                         title="Mark item as checked / resolved"
                       >
                         Acknowledge
@@ -2152,9 +2202,9 @@ const QuickAssistSidebar = ({
                   const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
                   const dueLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
                   return (
-                    <div key={refill.id} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex items-center justify-between gap-2">
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="font-semibold text-xs text-text truncate">{refill.patient_name}</span>
+                    <div key={refill.id} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex items-center justify-between gap-2 min-w-0 overflow-hidden">
+                      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                        <span className="font-semibold text-xs text-text truncate min-w-0">{refill.patient_name}</span>
                         <span className="text-[10px] text-emerald-400 font-mono">{dueLabel}</span>
                       </div>
                       <button
@@ -2194,16 +2244,18 @@ const QuickAssistSidebar = ({
               {activeSpecialOrders.map(order => {
                 const isOrderedOrReady = order.status === 'Ordered' || order.status === 'Ready' || order.status === 'Completed' || order.status === 'Fulfilled';
                 const isCancelled = order.status === 'Cancelled';
+                const isProcessing = processingOrderIds.has(order.id);
+
                 return (
-                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
+                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${
                     isOrderedOrReady 
                       ? 'bg-emerald-500/[0.04] border-emerald-500/30' 
                       : isCancelled
                       ? 'bg-red-500/[0.04] border-red-500/20 opacity-60'
                       : 'bg-amber-500/[0.04] border-amber-500/20'
                   }`}>
-                    <div className="flex items-start justify-between gap-1">
-                      <span className={`font-bold text-xs text-text truncate ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
+                    <div className="flex items-start justify-between gap-1 min-w-0">
+                      <span className={`font-bold text-xs text-text truncate flex-1 min-w-0 ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
                         {order.product}
                       </span>
                       <div className="flex items-center gap-1 shrink-0">
@@ -2217,9 +2269,9 @@ const QuickAssistSidebar = ({
                         </span>
                       </div>
                     </div>
-                    <div className="text-[10px] text-muted flex items-center justify-between">
-                      <span className="truncate">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    <div className="text-[10px] text-muted flex items-center justify-between gap-2 min-w-0">
+                      <span className="truncate flex-1 min-w-0">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
+                      <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${
                         order.status === 'Ready' 
                           ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
                           : order.status === 'Ordered' 
@@ -2231,80 +2283,65 @@ const QuickAssistSidebar = ({
                         {order.status || 'Pending'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-1">
+                    <div className="flex items-center flex-wrap gap-1.5 mt-1 min-w-0">
                       {order.status === 'Ready' ? (
                         <button
-                          onClick={async () => {
-                            try {
-                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Completed' });
-                              toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
-                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
-                              onActionComplete();
-                            } catch (err) {
-                              console.error('Failed to complete order:', err);
-                              toastEvent.trigger('Failed to update status', 'error');
-                            }
-                          }}
-                          className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                          title="Mark special request as Completed"
+                          disabled={isProcessing}
+                          onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                          className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                          title="Mark special request as Completed and remove from Quick Assist"
                         >
-                          <Check size={12} />
+                          {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                           Complete
                         </button>
                       ) : order.status === 'Ordered' ? (
-                        <button
-                          onClick={async () => {
-                            try {
-                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Ready' });
-                              toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
-                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
-                              onActionComplete();
-                            } catch (err) {
-                              console.error('Failed to mark order as ready:', err);
-                              toastEvent.trigger('Failed to update status', 'error');
-                            }
-                          }}
-                          className="flex-1 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                          title="Mark order as Ready for customer"
-                        >
-                          <Check size={12} />
-                          Mark Ready
-                        </button>
+                        <>
+                          <button
+                            disabled={isProcessing}
+                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Ready')}
+                            className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            title="Mark order as Ready for customer"
+                          >
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            Mark Ready
+                          </button>
+                          <button
+                            disabled={isProcessing}
+                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                            className="py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            title="Directly mark special request as Completed"
+                          >
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            Complete
+                          </button>
+                        </>
                       ) : (
-                        <button
-                          onClick={() => handleSendSpecialOrder(order)}
-                          className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                          title="Send WhatsApp Order for this Special Request"
-                        >
-                          <SendIcon size={12} />
-                          Send Order
-                        </button>
+                        <>
+                          <button
+                            disabled={isProcessing}
+                            onClick={() => handleSendSpecialOrder(order)}
+                            className="flex-1 py-1 px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            title="Send WhatsApp Order for this Special Request"
+                          >
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <SendIcon size={11} />}
+                            Send Order
+                          </button>
+                          <button
+                            disabled={isProcessing}
+                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                            className="py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                            title="Directly mark special request as Completed"
+                          >
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            Complete
+                          </button>
+                        </>
                       )}
-                      <button
-                        onClick={() => handleAddToCartSpecialOrder(order)}
-                        className="py-1.5 px-2 rounded bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
-                        title="Add item to Pharmarack Cart"
-                      >
-                        <ShoppingCart size={11} />
-                        Cart
-                      </button>
                       {!isCancelled && (
                         <button
-                          onClick={async () => {
-                            try {
-                              await apiClient.post(`/orders/${order.id}/status`, { status: 'Cancelled' });
-                              toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
-                              window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-                              window.dispatchEvent(new CustomEvent('app-special-orders-updated'));
-                              onActionComplete();
-                            } catch (err) {
-                              console.error('Failed to cancel order:', err);
-                              toastEvent.trigger('Failed to cancel request', 'error');
-                            }
-                          }}
-                          className="py-1.5 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
+                          disabled={isProcessing}
+                          onClick={() => handleUpdateSpecialOrderStatus(order, 'Cancelled')}
+                          className="py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
                           title="Cancel/Dash this medicine request"
                         >
                           Cancel
@@ -2329,18 +2366,18 @@ const QuickAssistSidebar = ({
           ) : (
             <div className="flex flex-col gap-2.5">
               {notifications.map(msg => (
-                <div key={msg.id} className="p-3 rounded-xl bg-purple-500/[0.03] border border-purple-500/20 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-text truncate max-w-[140px]">{msg.recipient_name}</span>
-                    <span className="text-[10px] text-purple-400 font-bold font-mono truncate max-w-[100px]">{msg.recipient_phone}</span>
+                <div key={msg.id} className="p-3 rounded-xl bg-purple-500/[0.03] border border-purple-500/20 flex flex-col gap-2 min-w-0 overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="font-semibold text-text truncate flex-1 min-w-0">{msg.recipient_name}</span>
+                    <span className="text-[10px] text-purple-400 font-bold font-mono truncate shrink-0 max-w-[110px]">{msg.recipient_phone}</span>
                   </div>
-                  <p className="text-[11px] text-muted leading-snug italic bg-black/10 p-1.5 rounded-lg border border-glass-border">
+                  <p className="text-[11px] text-muted leading-snug italic bg-bg3 p-1.5 rounded-lg border border-glass-border break-words">
                     "{msg.message}"
                   </p>
-                  <div className="flex items-center gap-1.5 mt-1">
+                  <div className="flex items-center flex-wrap gap-1.5 mt-1 min-w-0">
                     <button
                       onClick={() => handleSend(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                      className="flex-1 min-w-[80px] py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       title="Approve and Send WhatsApp message"
                     >
                       <SendIcon size={12} />
@@ -2348,14 +2385,14 @@ const QuickAssistSidebar = ({
                     </button>
                     <button
                       onClick={() => handlePause(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="py-1 px-2 rounded border border-glass-border hover:bg-white/5 text-muted hover:text-white text-[10px] font-bold uppercase transition-all cursor-pointer"
+                      className="py-1 px-2 rounded border border-glass-border hover:bg-bg3 text-muted hover:text-text text-[10px] font-bold uppercase transition-all cursor-pointer"
                       title="Pause this refill reminder cycle"
                     >
                       <PauseIcon size={10} />
                     </button>
                     <button
                       onClick={() => handleSkip(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="py-1 px-2.5 rounded border border-glass-border hover:bg-white/5 text-muted hover:text-white text-[10px] font-bold uppercase transition-all cursor-pointer"
+                      className="py-1 px-2.5 rounded border border-glass-border hover:bg-bg3 text-muted hover:text-text text-[10px] font-bold uppercase transition-all cursor-pointer"
                       title="Skip this alert for today"
                     >
                       Skip
@@ -2389,6 +2426,7 @@ export const Layout = ({
   setTheme: React.Dispatch<React.SetStateAction<string>>;
 }) => {
   const location = useLocation();
+  const queryClient = useQueryClient();
   const isFitPage = ['/pos', '/inventory', '/database', '/returns', '/purchases', '/manual-purchase', '/sells', '/purchase-history', '/crm', '/reports', '/settings', '/pharmarack-cart', '/investigation', '/phone-sales', '/migration'].includes(location.pathname);
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
@@ -2511,14 +2549,17 @@ export const Layout = ({
   );
 
   useEffect(() => {
-    const handleRefresh = () => refetchSpecialOrders();
+    const handleRefresh = () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      refetchSpecialOrders();
+    };
     window.addEventListener('refresh-special-orders', handleRefresh);
     window.addEventListener('app-special-orders-updated', handleRefresh);
     return () => {
       window.removeEventListener('refresh-special-orders', handleRefresh);
       window.removeEventListener('app-special-orders-updated', handleRefresh);
     };
-  }, [refetchSpecialOrders]);
+  }, [queryClient, refetchSpecialOrders]);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     try {
       const stored = localStorage.getItem('quick_assist_sidebar_expanded') ?? localStorage.getItem('refill_sidebar_expanded');
@@ -2799,8 +2840,8 @@ export const Layout = ({
           onMenuClick={() => setMobileNavOpen(true)}
           compactCacheLoaded={compactCacheLoaded}
         />
-        <div className="flex-1 flex flex-row overflow-hidden relative">
-          <main className={`flex-1 flex flex-col ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative transition-all duration-200`}>
+        <div className="flex-1 flex flex-row overflow-hidden relative min-h-0">
+          <main className={`flex-1 flex flex-col min-h-0 ${isFitPage ? 'overflow-hidden p-3 pt-1.5 pb-3' : 'overflow-y-auto p-4 pt-3 pb-4'} relative transition-all duration-200`}>
             {children}
           </main>
           

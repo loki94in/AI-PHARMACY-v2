@@ -539,7 +539,10 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
     }
 
-    const newStatus = status !== undefined ? status : existing.status;
+    let newStatus = status !== undefined ? status : existing.status;
+    if (newStatus === 'Completed' || newStatus === 'completed') {
+      newStatus = 'Fulfilled';
+    }
 
     const newPriority = priority !== undefined ? priority : existing.priority;
     const newQty = qty !== undefined ? qty : existing.qty;
@@ -595,9 +598,13 @@ router.put('/:id', async (req, res) => {
 // Update order status specifically (supports POST /:id/status and PUT /:id/status)
 const handleStatusUpdate = async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
-  const { status } = req.body;
+  let { status } = req.body;
   if (!status) {
     return res.status(400).json({ error: 'status is required' });
+  }
+
+  if (status === 'Completed' || status === 'completed') {
+    status = 'Fulfilled';
   }
 
   try {

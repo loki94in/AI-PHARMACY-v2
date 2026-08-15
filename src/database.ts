@@ -210,7 +210,7 @@ export async function ensureSchema(dbPath: string) {
   // We'll rely on TypeScript for enum enforcement to prevent future SQLite crashes when new statuses are introduced.
   try {
     const tableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='catalog_jobs'");
-    if (tableSql && tableSql.sql.includes('CHECK(status IN')) {
+    if (tableSql && /CHECK\s*\(\s*status\s+IN/i.test(tableSql.sql)) {
       console.log('Removing strict CHECK constraint from catalog_jobs...');
       await db.run("DROP TABLE IF EXISTS catalog_jobs");
     }
@@ -220,7 +220,7 @@ export async function ensureSchema(dbPath: string) {
 
   try {
     const remTableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='distributor_dispatch_reminders'");
-    if (remTableSql && remTableSql.sql.includes('CHECK(status IN')) {
+    if (remTableSql && /CHECK\s*\(\s*status\s+IN/i.test(remTableSql.sql)) {
       console.log('Removing strict CHECK constraint from distributor_dispatch_reminders...');
       await db.exec(`
         CREATE TABLE IF NOT EXISTS distributor_dispatch_reminders_new (
@@ -250,7 +250,7 @@ export async function ensureSchema(dbPath: string) {
   }
   try {
     const spTableSql = await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='special_orders'");
-    if (spTableSql && spTableSql.sql.includes('CHECK(status IN')) {
+    if (spTableSql && /CHECK\s*\(\s*status\s+IN/i.test(spTableSql.sql)) {
       console.log('Removing strict CHECK constraint from special_orders...');
       const cols: Array<{ name: string }> = await db.all("PRAGMA table_info(special_orders)");
       const colNames = cols.map(c => c.name).join(', ');

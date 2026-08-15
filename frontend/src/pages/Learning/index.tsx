@@ -23,7 +23,6 @@ import {
   GitMerge,
   Building2,
   ExternalLink,
-  QrCode,
   AlertCircle,
   Clock,
   TrendingUp,
@@ -81,7 +80,7 @@ let cachedDoctorsList: any[] = [];
 let cachedProfiles: LearningProfileSummary[] = [];
 const cachedProfileDetailsMap: Record<number, any> = {};
 
-const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors', 'operations', 'reorders'];
+const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors'];
 
 const Learning: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -91,8 +90,6 @@ const Learning: React.FC = () => {
     if (!t) return 'clinical';
     const lower = t.toLowerCase();
     if (lower === 'distributor_layouts' || lower === 'distributors') return 'distributors';
-    if (lower === 'ingestion' || lower === 'operations') return 'operations';
-    if (lower === 'reorders' || lower === 'inventory' || lower === 'snoozed') return 'reorders';
     if (VALID_LEARNING_TABS.includes(lower)) return lower;
     return 'clinical';
   };
@@ -118,11 +115,6 @@ const Learning: React.FC = () => {
   const [docSpecialty, setDocSpecialty] = useState('');
   const [docClinic, setDocClinic] = useState('');
   const [doctorSearch, setDoctorSearch] = useState('');
-
-  // Operations Scanner Playground State
-  const [scannerSampleType, setScannerSampleType] = useState<'marg' | 'tally' | 'redbook' | 'custom'>('marg');
-  const [isScanningSandbox, setIsScanningSandbox] = useState(false);
-  const [scanResultData, setScanResultData] = useState<any>(null);
 
   // Retrain state
   const [retraining, setRetraining] = useState(false);
@@ -361,16 +353,6 @@ const Learning: React.FC = () => {
     }
   );
 
-  // Snoozed Reorders Query
-  const { data: snoozedReordersData, isLoading: loadingSnoozed, refetch: refetchSnoozed } = useApiQuery<any>(
-    'learning-snoozed-reorders',
-    async () => {
-      return await api.getSnoozedReorders();
-    },
-    { enabled: isPageVisible && activeTab === 'reorders' }
-  );
-  const snoozedItems: any[] = snoozedReordersData?.items || [];
-
   // Retrain AI Model
   const handleRetrain = async () => {
     setRetraining(true);
@@ -399,54 +381,6 @@ const Learning: React.FC = () => {
     } finally {
       setTestingBrand(false);
     }
-  };
-
-  // Run Operations Sandbox Scanner Test
-  const handleRunSampleScan = (type: 'marg' | 'tally' | 'redbook' | 'custom') => {
-    setScannerSampleType(type);
-    setIsScanningSandbox(true);
-    setTimeout(() => {
-      setIsScanningSandbox(false);
-      if (type === 'marg') {
-        setScanResultData({
-          distributor: 'Apex Pharma Distributors',
-          invoiceNo: 'APX-2026/8912',
-          date: '2026-08-10',
-          confidence: '99.4%',
-          format: 'MARG Soft CSV Export',
-          items: [
-            { name: 'Dolo 650mg Tablet', batch: 'DL8912', exp: '12/28', qty: 10, free: 1, ptr: 24.50, mrp: 30.80, gst: '12%' },
-            { name: 'Pantocid 40mg', batch: 'PT4021', exp: '09/27', qty: 5, free: 0, ptr: 112.00, mrp: 154.00, gst: '12%' },
-            { name: 'Azithral 500mg', batch: 'AZ5019', exp: '03/28', qty: 3, free: 0, ptr: 78.20, mrp: 119.50, gst: '12%' }
-          ]
-        });
-      } else if (type === 'tally') {
-        setScanResultData({
-          distributor: 'MedPlus Wholesale Corp',
-          invoiceNo: 'MP-GST-78912',
-          date: '2026-08-11',
-          confidence: '98.8%',
-          format: 'Tally Prime XML/PDF Invoice',
-          items: [
-            { name: 'Augmentin 625 Duo', batch: 'AG6259', exp: '11/27', qty: 15, free: 2, ptr: 165.00, mrp: 223.50, gst: '12%' },
-            { name: 'Montek LC Tablet', batch: 'ML7820', exp: '05/28', qty: 8, free: 0, ptr: 142.30, mrp: 198.00, gst: '12%' }
-          ]
-        });
-      } else {
-        setScanResultData({
-          distributor: 'RedBook Healthcare Agencies',
-          invoiceNo: 'RB-9021-X',
-          date: '2026-08-09',
-          confidence: '97.2%',
-          format: 'RedBook Thermal Printed Receipt',
-          items: [
-            { name: 'Calpol 500mg Suspension', batch: 'CP5012', exp: '08/27', qty: 12, free: 1, ptr: 42.00, mrp: 58.00, gst: '12%' },
-            { name: 'Combiflam Tablet', batch: 'CB1092', exp: '01/29', qty: 20, free: 2, ptr: 31.50, mrp: 45.00, gst: '12%' }
-          ]
-        });
-      }
-      toastEvent.trigger(`OCR Scanner simulation complete for ${type.toUpperCase()} layout`, 'success');
-    }, 600);
   };
 
   // Add OCR Correction Rule
@@ -665,9 +599,7 @@ const Learning: React.FC = () => {
         {[
           { id: 'clinical', label: 'Clinical AI & OCR Rules', icon: Brain, badge: correctionsArray.length },
           { id: 'doctors', label: 'Doctor Directory', icon: Stethoscope, badge: doctorsListArray.length },
-          { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database, badge: profilesList.length },
-          { id: 'operations', label: 'Scanner Sandbox & Parser', icon: QrCode, badge: 'Interactive' },
-          { id: 'reorders', label: 'Inventory & Paused Reorders', icon: TrendingUp, badge: snoozedItems.length }
+          { id: 'distributors', label: 'Distributor OCR Layouts', icon: Database, badge: profilesList.length }
         ].map(t => {
           const Icon = t.icon;
           const isActive = activeTab === t.id;
@@ -1390,334 +1322,6 @@ const Learning: React.FC = () => {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 4: Document & Scanner Sandbox */}
-      {/* ========================================================================= */}
-      {activeTab === 'operations' && (
-        <div className="space-y-6">
-          {/* Top Info Bar */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-text flex items-center gap-2">
-                <QrCode size={18} className="text-primary" />
-                OCR Document & Scanner Playground
-              </h2>
-              <p className="text-xs text-muted mt-0.5">
-                Simulate invoice OCR parsing across MARG, Tally, RedBook & custom thermal receipts in a safe sandbox environment.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => handleRunSampleScan('marg')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
-                  scannerSampleType === 'marg' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
-                }`}
-              >
-                MARG Invoice
-              </button>
-              <button
-                onClick={() => handleRunSampleScan('tally')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
-                  scannerSampleType === 'tally' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
-                }`}
-              >
-                Tally GST Bill
-              </button>
-              <button
-                onClick={() => handleRunSampleScan('redbook')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs border cursor-pointer transition-all ${
-                  scannerSampleType === 'redbook' ? 'bg-primary text-primary-foreground border-primary' : 'bg-bg2 text-text border-border hover:bg-bg3'
-                }`}
-              >
-                RedBook Receipt
-              </button>
-            </div>
-          </div>
-
-          {/* 2-Column Split Sandbox Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left Column: Dropzone & Interactive Controls */}
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-border pb-3">
-                  <div className="font-bold text-text text-sm flex items-center gap-2">
-                    <FileText size={16} className="text-sky" />
-                    <span>Upload or Drop Test Document</span>
-                  </div>
-                  <span className="text-[10px] font-bold text-muted bg-bg2 px-2 py-0.5 rounded border border-border">
-                    PDF, PNG, JPG, CSV
-                  </span>
-                </div>
-
-                <div
-                  onClick={() => handleRunSampleScan('marg')}
-                  className="border-2 border-dashed border-border hover:border-primary/60 rounded-2xl p-10 text-center space-y-3 bg-bg/50 transition-all cursor-pointer group"
-                >
-                  <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
-                    <QrCode size={28} />
-                  </div>
-                  <div>
-                    <div className="font-bold text-text text-sm group-hover:text-primary transition-colors">
-                      Drag & Drop Invoice File or Click to Test Sandbox
-                    </div>
-                    <div className="text-xs text-muted mt-1">
-                      Simulates instant key-value extraction & column mapping logic
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border">
-                <div className="text-xs font-bold text-muted mb-2">Preset Layout Quick Tests:</div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => handleRunSampleScan('marg')}
-                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
-                  >
-                    🚀 Load MARG CSV
-                  </button>
-                  <button
-                    onClick={() => handleRunSampleScan('tally')}
-                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
-                  >
-                    📄 Load Tally PDF
-                  </button>
-                  <button
-                    onClick={() => handleRunSampleScan('redbook')}
-                    className="p-2.5 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-center text-xs font-bold text-text cursor-pointer transition-all"
-                  >
-                    🧾 Load RedBook Receipt
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Real-time OCR Parsing Engine Output */}
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <div className="font-bold text-text text-sm flex items-center gap-2">
-                  <Zap size={16} className="text-emerald-400" />
-                  <span>OCR Parsing Extraction Results</span>
-                </div>
-                {scanResultData && (
-                  <span className="text-xs font-extrabold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                    Confidence: {scanResultData.confidence}
-                  </span>
-                )}
-              </div>
-
-              {isScanningSandbox ? (
-                <div className="py-20 flex flex-col items-center justify-center gap-3">
-                  <RefreshCw size={28} className="text-primary animate-spin" />
-                  <span className="text-xs font-bold text-muted animate-pulse uppercase tracking-wider">
-                    Running OCR Neural Model Extraction...
-                  </span>
-                </div>
-              ) : scanResultData ? (
-                <div className="space-y-4">
-                  {/* Extracted Header Meta */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs bg-bg2/60 p-3 rounded-xl border border-border font-mono">
-                    <div>
-                      <span className="text-muted text-[10px] block">Distributor:</span>
-                      <strong className="text-text">{scanResultData.distributor}</strong>
-                    </div>
-                    <div>
-                      <span className="text-muted text-[10px] block">Invoice No:</span>
-                      <strong className="text-primary">{scanResultData.invoiceNo}</strong>
-                    </div>
-                    <div>
-                      <span className="text-muted text-[10px] block">Layout Format:</span>
-                      <strong className="text-sky">{scanResultData.format}</strong>
-                    </div>
-                  </div>
-
-                  {/* Extracted Items Table */}
-                  <div className="overflow-x-auto rounded-xl border border-border">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-bg2 text-muted font-bold text-[10px] uppercase">
-                        <tr>
-                          <th className="p-2.5">Medicine Name</th>
-                          <th className="p-2.5">Batch / Exp</th>
-                          <th className="p-2.5">Qty + Free</th>
-                          <th className="p-2.5">PTR</th>
-                          <th className="p-2.5">MRP</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {scanResultData.items.map((item: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-bg2/40">
-                            <td className="p-2.5 font-bold text-text">{item.name}</td>
-                            <td className="p-2.5 font-mono text-muted">{item.batch} ({item.exp})</td>
-                            <td className="p-2.5 font-mono font-bold text-emerald-400">
-                              {item.qty} {item.free > 0 ? `+ ${item.free} Free` : ''}
-                            </td>
-                            <td className="p-2.5 font-mono text-text">₹{item.ptr}</td>
-                            <td className="p-2.5 font-mono text-muted">₹{item.mrp}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div className="py-20 text-center space-y-2">
-                  <QrCode size={32} className="text-muted mx-auto opacity-50" />
-                  <div className="text-xs text-muted italic">
-                    Click any preset layout quick test on the left to simulate live OCR parsing.
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 5: Inventory & Paused Reorders Audit Panel */}
-      {/* ========================================================================= */}
-      {activeTab === 'reorders' && (
-        <div className="space-y-6">
-          {/* Top 4 Metrics Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <Clock size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Total Paused Reorder Rules</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {snoozedItems.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
-                <TrendingUp size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Seasonal (6 Months) Paused</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {snoozedItems.filter(i => i.snoozeType === '6_months' || i.snoozeType === '180_days').length}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Sparkles size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Short-Term (7 Days) Ignored</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {snoozedItems.filter(i => i.snoozeType === '7_days').length}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
-              <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
-                <ShieldCheck size={22} />
-              </div>
-              <div>
-                <div className="text-xs text-muted font-bold">Restock Safety Net</div>
-                <div className="text-xs font-black text-emerald-400 mt-1 uppercase tracking-wider">
-                  Active Audit
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Table of Snoozed Reorder Rules */}
-          <div className="bg-glass-bg border border-glass-border rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
-              <div>
-                <h2 className="text-base font-bold text-text flex items-center gap-2">
-                  <TrendingUp size={18} className="text-primary" />
-                  <span>Paused & Seasonal Reorder Audit Registry</span>
-                </h2>
-                <p className="text-xs text-muted mt-0.5">
-                  View medicines currently hidden from Pending Reorder. Restore them instantly if paused by mistake.
-                </p>
-              </div>
-              <button
-                onClick={() => refetchSnoozed()}
-                className="px-3.5 py-2 rounded-xl bg-bg2 hover:bg-bg3 border border-border text-text font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
-              >
-                <RefreshCw size={13} className={loadingSnoozed ? 'animate-spin' : ''} />
-                <span>Refresh Registry</span>
-              </button>
-            </div>
-
-            {loadingSnoozed ? (
-              <div className="py-16 text-center text-xs text-muted animate-pulse">Loading paused reorder rules...</div>
-            ) : snoozedItems.length === 0 ? (
-              <div className="py-16 text-center text-xs text-muted italic bg-bg2/30 rounded-xl border border-glass-border space-y-1">
-                <div className="font-bold text-text text-sm">No Paused Reorder Rules</div>
-                <div>All low-stock and hot mover medicines are actively active in Pending Reorders!</div>
-              </div>
-            ) : (
-              <div className="overflow-x-auto border border-border rounded-xl">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-bg2/80 text-muted font-bold uppercase text-[10px] tracking-wider border-b border-border">
-                    <tr>
-                      <th className="p-3.5">Medicine & Brand</th>
-                      <th className="p-3.5">Current Stock</th>
-                      <th className="p-3.5">Purchases 6M</th>
-                      <th className="p-3.5">Sales 6M</th>
-                      <th className="p-3.5">Pause Type</th>
-                      <th className="p-3.5">Until Expiry Date</th>
-                      <th className="p-3.5 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {snoozedItems.map((item: any) => (
-                      <tr key={item.medicineId} className="hover:bg-bg2/40 transition-all">
-                        <td className="p-3.5">
-                          <div className="font-bold text-text">{item.medicineName}</div>
-                          <div className="text-[10px] text-muted">{item.company} {item.packaging ? `• ${item.packaging}` : ''}</div>
-                        </td>
-                        <td className="p-3.5 font-mono font-bold">
-                          <span className={item.currentStock <= 2 ? 'text-amber-400 font-extrabold' : 'text-text'}>
-                            {item.currentStock} units
-                          </span>
-                        </td>
-                        <td className="p-3.5 font-mono text-emerald-400 font-bold">{item.sixMonthPurchases || 0}</td>
-                        <td className="p-3.5 font-mono text-primary font-bold">{item.sixMonthSales || 0}</td>
-                        <td className="p-3.5">
-                          <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                            {item.snoozeType === '6_months' ? 'Seasonal (6 Months)' : item.snoozeType === '30_days' ? '1 Month (30d)' : '7 Days'}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-muted font-mono text-[11px]">
-                          {formatDisplayDate(item.snoozeUntil)}
-                        </td>
-                        <td className="p-3.5 text-right">
-                          <button
-                            onClick={async () => {
-                              try {
-                                await api.unsnoozeReorderSuggestion(item.medicineId);
-                                toastEvent.trigger(`Restored "${item.medicineName}" to Pending Reorders!`, 'success');
-                                refetchSnoozed();
-                              } catch (err: any) {
-                                toastEvent.trigger('Failed to restore medicine', 'error');
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-[11px] hover:bg-primary/90 transition-all cursor-pointer shadow-md"
-                          >
-                            Restore to Reorders
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </div>
       )}

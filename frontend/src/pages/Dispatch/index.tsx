@@ -594,55 +594,7 @@ const Dispatch = () => {
   });
 
   return (
-    <div className="w-full flex-1 flex flex-col gap-5 pb-8 text-left animate-in fade-in duration-300">
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center border border-primary/30 shrink-0">
-            <Truck size={20} />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-text">Dispatch &amp; Delivery</h2>
-            <p className="text-muted text-xs mt-0.5">Home delivery queue, distributor collection reminders, and staff tracking.</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => { fetchAll(); fetchDistributorReminders(); fetchMessageDates(); }}
-            className="p-2.5 rounded-xl bg-bg2/60 hover:bg-bg3 border border-glass-border text-muted hover:text-text transition-colors active:scale-95 cursor-pointer"
-            title="Refresh All Data"
-          >
-            <RefreshCw size={16} className={loading || loadingDistributorReminders ? 'animate-spin text-primary' : ''} />
-          </button>
-
-          <button
-            onClick={handleSendAllViaWhatsApp}
-            className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-semibold transition-colors active:scale-95 cursor-pointer"
-            title="Send all active collection orders via WhatsApp with 8s-12s pacing"
-          >
-            <Send size={14} />
-            <span>Send All via WhatsApp</span>
-          </button>
-
-          <button
-            onClick={() => setShowBoysModal(true)}
-            className="bg-sky/15 border border-sky/30 text-sky hover:bg-sky/25 text-xs flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-semibold transition-colors active:scale-95 cursor-pointer"
-          >
-            <User size={14} />
-            <span>Staff ({allBoys.length})</span>
-          </button>
-
-          <button
-            onClick={() => setShowModal(true)}
-            className="bg-primary hover:bg-primary/90 text-black text-xs px-3.5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-md shadow-primary/20 transition-colors active:scale-95 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>New Dispatch Order</span>
-          </button>
-        </div>
-      </div>
-
+    <div className="w-full flex-1 flex flex-col gap-4 pb-8 text-left animate-in fade-in duration-300">
       {/* ── SIGNATURE: LIVE DISTRIBUTOR COLLECTION WINDOW ── */}
       {(() => {
         const cd = getWindowCountdownInfo(nowTime, windowSchedule.start, windowSchedule.end);
@@ -778,6 +730,14 @@ const Dispatch = () => {
 
             {/* Queue Search & Status Filter */}
             <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                onClick={() => setShowModal(true)}
+                className="bg-primary hover:bg-primary/90 text-black text-xs px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus size={14} />
+                <span>New Order</span>
+              </button>
+
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input

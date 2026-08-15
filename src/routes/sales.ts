@@ -2590,7 +2590,7 @@ router.get('/reorder-suggestions', async (_req, res) => {
         SELECT 
           m.id as medicine_id,
           m.name as medicine_name,
-          m.company,
+          m.manufacturer as company,
           m.packaging,
           m.ptr,
           m.mrp,
@@ -2648,7 +2648,7 @@ router.get('/reorder-suggestions', async (_req, res) => {
       SELECT 
         m.id as medicine_id,
         m.name as medicine_name,
-        m.company,
+        m.manufacturer as company,
         m.packaging,
         m.ptr,
         m.mrp,
@@ -2806,7 +2806,7 @@ router.get('/reorder-suggestions/snoozed', async (_req, res) => {
         s.reason,
         s.created_at,
         m.name as medicine_name,
-        m.company,
+        m.manufacturer as company,
         m.packaging,
         m.ptr,
         m.mrp,
