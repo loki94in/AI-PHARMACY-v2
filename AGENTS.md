@@ -340,17 +340,32 @@ To prevent missing delivery boy contact numbers, broken templates, or unformatte
 
 To maintain total data integrity across the pharmacy POS ecosystem:
 
+**Core Engineering Principle:**
+- **Real data → process it.**
+- **Missing data → request/validate it.**
+- **Invalid data → reject it.**
+- **Never → invent it.**
+
 1. **Zero Dummy/Fabricated Business Data**:
-   - Never use dummy, placeholder, fabricated, synthetic, guessed, or arbitrary business data anywhere in the application.
+   - Never introduce, retain, or silently use dummy, placeholder, fabricated, synthetic, guessed, or arbitrary business data anywhere in the application.
    - Prohibited values include: `MANUAL`, `AUTO`, `SPECIAL`, `DEFAULT`, `BATCH123`, `B-GEN`, `B-CATALOG`, `B-IMPORT`, `B-OFFLINE`, `B-REISSUE`, `B-MANUAL`, `B-NEW`, `12/28`, `12/30`, `2028-12-31`, `100`, `10`, `mrp * 0.7`, `Generic Medicine`, `Item + id`, `123 Health Ave`, `+91 99999 99999`.
 2. **Never Add Invented Fallbacks**:
    - Missing required data must remain missing and require the user or a legitimate workflow to provide it.
-   - Do not silently create, estimate, assume, auto-generate, or substitute values just to make a feature work.
+   - Do not silently create, estimate, assume, auto-generate, or substitute values just to make a feature work or prevent an error.
 3. **No Automatic Inventory Creation**:
    - Inventory stock can ONLY be created through a legitimate, verified purchase workflow (`Purchase -> Purchase Invoice Entered -> Verified -> Saved -> Inventory Created`).
    - Registering a medicine master, scanning OCR, receiving emails, or catalog syncs must never automatically create inventory stock.
 4. **Mandatory Pre & Post Task Audit**:
-   - Every agent task must perform an audit before and after implementation.
-   - Every task response MUST conclude with the 8-point Audit Summary.
+   - Every agent task (bug fix, feature, refactor, integration) must perform a repository-wide audit before and after implementation.
+   - Every task response MUST conclude with the 8-point Audit Summary:
+     1. Existing dummy/fallback logic found.
+     2. What was removed or changed.
+     3. New dummy/fallback logic introduced (must be None).
+     4. Missing-data handling.
+     5. Error/fallback behavior.
+     6. Auto-created records or values.
+     7. Data source and traceability.
+     8. Any remaining risk or location that needs review.
+
 
 

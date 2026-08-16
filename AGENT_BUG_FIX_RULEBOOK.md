@@ -155,6 +155,18 @@ Interpret as:
 - Keep caching and loading patterns  
 - Surgical edits, not rewrites  
 
+### 6.5 Zero Fabricated Business Data & Mandatory Audit Rule
+
+**Fundamental Engineering Rule:**
+- **Real data → process it.**
+- **Missing data → request/validate it.**
+- **Invalid data → reject it.**
+- **Never → invent it.**
+
+1. **NEVER** introduce, retain, or silently use fabricated, dummy, placeholder, guessed, synthetic, or arbitrary business data or fallback logic (batches, expiry dates, MRP, prices, cost prices, quantities, pack sizes, medicines, inventory, purchases, sales, bills, customers, suppliers, shop details, IDs).
+2. **Missing data must remain missing** and require the legitimate workflow or user to provide it. Never invent a value just to prevent an error or make the UI work.
+3. **Mandatory Pre & Post Audit on Every Task**: Before editing, audit the affected workflow and existing implementation across the codebase. After editing, audit again and report the 8-point summary.
+
 ---
 
 ## 7. Diagnosis toolkit (technology-agnostic)
