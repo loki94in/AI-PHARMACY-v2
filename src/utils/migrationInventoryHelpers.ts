@@ -9,7 +9,7 @@ export async function upsertInventoryFromPurchase(
   },
   medicineId: number,
   batchNo: string,
-  expiryDate: string,
+  expiryDate: string | null,
   quantity: number,
   costPrice: number,
   mrp: number

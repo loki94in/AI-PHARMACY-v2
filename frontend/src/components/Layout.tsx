@@ -154,6 +154,7 @@ const Sidebar = ({
     { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { path: '/migration', label: 'Data Migration', icon: <Database size={18} /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon size={18} /> },
+    { path: '/audit', label: 'Audit Center', icon: <ShieldCheckIcon size={18} /> },
   ];
 
   return (

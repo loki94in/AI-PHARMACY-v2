@@ -27,7 +27,9 @@ describe('migrationDistributorHelpers', () => {
     await db.run('INSERT INTO distributors (name) VALUES (?)', ['Sun Pharma Ltd.']);
     const first = await findOrCreateDistributor(db, 'SUN PHARMA');
     const second = await findOrCreateDistributor(db, 'Sun Pharmaceutical');
-    expect(first.id).toBe(second.id);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(first!.id).toBe(second!.id);
     const count = await db.get('SELECT COUNT(*) as cnt FROM distributors');
     expect(count.cnt).toBe(1);
   });

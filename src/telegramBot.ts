@@ -466,11 +466,14 @@ class TelegramBotService {
                     distributorName = distMatch[1].toUpperCase();
                   }
                   const validDist = (distributorName && isValidDistributorName(distributorName)) ? distributorName.trim() : null;
+                  const invMatch = (result.text || '').match(/(?:inv(?:oice)?|bill)[\s#.:-]*([a-z0-9\/-]+)/i);
+                  const rawInvoiceNo = invMatch ? invMatch[1].trim() : '';
 
                   const extractedDate = extractDateFromText(result.text || '');
                   const billDate = extractedDate || null;
                   
                   const invoiceNo = billDate ? formatInvoiceWithFY(rawInvoiceNo, billDate) : rawInvoiceNo;
+                  const hasUnparseablePrices = medicines.some(item => !item.mrp && !item.costPrice);
                   
                   let totalAmount = 0;
                   for (const item of medicines) {

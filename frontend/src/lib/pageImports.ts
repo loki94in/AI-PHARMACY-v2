@@ -19,4 +19,5 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/dispatch': () => import('../pages/Dispatch'),
   '/sell-price-config': () => import('../pages/SellPriceConfig'),
   '/learning': () => import('../pages/Learning'),
+  '/audit': () => import('../pages/AuditCenter'),
 };

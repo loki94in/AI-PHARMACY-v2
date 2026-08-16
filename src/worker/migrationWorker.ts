@@ -20,7 +20,7 @@ import { findOrCreateDistributor, resetDistributorLookupCache } from '../utils/m
 import { formatInvoiceWithFY } from '../utils/migrationValidation.js';
 import { isValidCustomerName, isValidDoctorName, isValidDistributorName } from '../utils/nameNormalizer.js';
 import { sanitizeDoctorName } from '../utils/doctorUtils.js';
-import { ensureMigrationAuditTable, flushMigrationAudits, queueMigrationAudit, clearMigrationAudit } from '../utils/migrationAudit.js';
+import { ensureMigrationAuditTable, flushMigrationAudits, queueMigrationAudit, clearMigrationAudit, saveMigrationAuditSummary, getMigrationAuditSummary } from '../utils/migrationAudit.js';
 import { config, getAppDataDir } from '../config/index.js';
 
 // PostgreSQL COPY parser
@@ -1474,7 +1474,16 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
 
           if (dataType === 'inventory') {
             let nameKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'name');
-            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || 'Unknown Product').trim();
+            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || '').trim();
+            if (!rawName) {
+              migrationStatus.errorCount++;
+              await db.run(
+                'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+                [path.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), 'Missing required medicine name']
+              );
+              insertCount++;
+              return;
+            }
             let medName = rawName;
             if (rawName && medicineActions) {
               const actionObj = medicineActions[rawName];
@@ -1705,7 +1714,16 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             }
 
             let nameKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'name');
-            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || 'Unknown Product').trim();
+            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || '').trim();
+            if (!rawName) {
+              migrationStatus.errorCount++;
+              await db.run(
+                'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+                [path.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), 'Sale item missing required medicine name']
+              );
+              insertCount++;
+              return;
+            }
             let medName = rawName;
             if (rawName && medicineActions) {
               const actionObj = medicineActions[rawName];
@@ -1820,7 +1838,16 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             }
 
             let nameKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'name');
-            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || 'Unknown Product').trim();
+            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || '').trim();
+            if (!rawName) {
+              migrationStatus.errorCount++;
+              await db.run(
+                'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+                [path.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), 'Purchase item missing required medicine name']
+              );
+              insertCount++;
+              return;
+            }
             let medName = rawName;
             if (rawName && medicineActions) {
               const actionObj = medicineActions[rawName];
@@ -1921,7 +1948,16 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             }
 
             let nameKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'name');
-            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || 'Unknown Product').trim();
+            let rawName = nameKey ? String(cleanRow[nameKey] || '').trim() : String(cleanRow['Medicine'] || cleanRow['name'] || '').trim();
+            if (!rawName) {
+              migrationStatus.errorCount++;
+              await db.run(
+                'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+                [path.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), 'Return item missing required medicine name']
+              );
+              insertCount++;
+              return;
+            }
             let medName = rawName;
             if (rawName && medicineActions) {
               const actionObj = medicineActions[rawName];
@@ -2270,7 +2306,9 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                      VALUES (?, ?, ?, ?, ?, ?, ?)`,
                     [purchase.id, medicineId, batchNo, expiryDate, quantity, costPrice, mrp]
                   );
-                  await upsertInventoryFromPurchase(db, medicineId, batchNo, expiryDate, quantity, costPrice, mrp);
+                  if (medicineId) {
+                    await upsertInventoryFromPurchase(db, medicineId, batchNo, expiryDate, quantity, costPrice, mrp);
+                  }
                 }
               }
             }

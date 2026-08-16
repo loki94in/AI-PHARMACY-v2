@@ -44,6 +44,7 @@ const DispatchPage = lazy(pageImports['/dispatch']);
 const CompliancePage = lazy(() => import('./pages/Compliance'));
 const SellPriceConfig = lazy(pageImports['/sell-price-config']);
 const Learning = lazy(pageImports['/learning']);
+const AuditCenter = lazy(pageImports['/audit']);
 
 // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
 const pageRoutes: KeepAliveRoute[] = [
@@ -69,6 +70,7 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/composition-queue', element: <CompositionQueue /> },
   { path: '/sell-price-config', element: <SellPriceConfig /> },
   { path: '/learning', element: <Learning /> },
+  { path: '/audit', element: <AuditCenter /> },
 ];
 
 // ──────────────────────────────────────────────
