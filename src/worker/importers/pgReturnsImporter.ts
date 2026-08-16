@@ -10,6 +10,7 @@ import { medicineMap, distributorMap, patientMap, customerMap } from './pgMaster
 import { purchaseMap, legacyBatchIdToNoMap } from './pgPurchaseImporter.js';
 import { salesInvoiceMap } from './pgSalesImporter.js';
 import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
+import { queueMigrationAudit } from '../../utils/migrationAudit.js';
 
 // Maps for cross-referencing
 export const returnMap = new Map<string, number>(); // legacy return_order_id → new returns.id
@@ -49,6 +50,28 @@ export async function importReturnOrder(row: Record<string, string | null>, db: 
   let customerId: number | null = null;
   if (legacyPatientId) customerId = patientMap.get(legacyPatientId) || null;
   if (!customerId && legacyCustomerId) customerId = customerMap.get(legacyCustomerId) || null;
+
+  if (returnType === 'purchase' && legacyDistId && !distributorMap.has(legacyDistId)) {
+    queueMigrationAudit({
+      record_type: 'return',
+      record_identifier: returnNo,
+      entity_type: 'distributor',
+      raw_value: legacyDistId,
+      status: 'preserved_null',
+      reason: `Unresolved legacy distributor ID "${legacyDistId}" not found in distributor master; distributor_id preserved as NULL`,
+    });
+  }
+
+  if (returnType === 'sale' && (legacyPatientId || legacyCustomerId) && !customerId) {
+    queueMigrationAudit({
+      record_type: 'return',
+      record_identifier: returnNo,
+      entity_type: 'customer',
+      raw_value: legacyPatientId || legacyCustomerId,
+      status: 'preserved_null',
+      reason: `Unresolved legacy customer ID "${legacyPatientId || legacyCustomerId}" not found in customer master; customer relationship preserved as NULL`,
+    });
+  }
 
   const rawReturnType = row['return_type'] || null;
   let subType = 'good';

@@ -473,6 +473,8 @@ export const api = {
   deleteStagingReturnItem: (returnId: number, itemId: number) => apiClient.delete(`/migration/staging/returns/${returnId}/items/${itemId}`).then(r => r.data),
   addStagingReturnItem: (returnId: number, data: any) => apiClient.post(`/migration/staging/returns/${returnId}/items`, data).then(r => r.data),
   getStagingErrors: () => apiClient.get('/migration/staging/errors').then(r => r.data),
+  getStagingAudits: (params?: { limit?: number; offset?: number }) => apiClient.get('/migration/staging/audits', { params }).then(r => r.data),
+  getStagingAuditSummary: () => apiClient.get('/migration/staging/audit').then(r => r.data),
   finalizeMigration: (regenerateInvoices: boolean = false, reportCutoverDate?: string) =>
     apiClient.post('/migration/staging/finalize', { regenerateInvoices, reportCutoverDate }).then(r => r.data),
   rollbackMigration: () =>
@@ -677,8 +679,40 @@ export const api = {
     if (batch) params.batch = batch;
     return apiClient.get('/returns/lookup-purchases', { params }).then(res => res.data);
   },
-  processReturns: (items: any[]) => apiClient.post('/returns/process-returns', { items }).then(res => res.data),
+  processReturns: (items: any[], lossPercentage?: number) => apiClient.post('/returns/process-returns', { items, loss_percentage: lossPercentage }).then(res => res.data),
   exportReturnsPDF: (items: any[]) => apiClient.post('/returns/export-pdf-report', { items }, { responseType: 'blob' }).then(res => res.data),
+  
+  // Expiry Return Reviews (Pharmacist Approval Gate)
+  getExpiryReviews: (params?: { status?: string; search?: string; date_from?: string; date_to?: string }) =>
+    apiClient.get<{
+      success: boolean;
+      reviews: any[];
+      stats: {
+        pendingCount: number;
+        approvedCount: number;
+        rejectedCount: number;
+        pendingAmount: number;
+        approvedAmount: number;
+        totalCount: number;
+      };
+    }>('/returns/expiry-reviews', { params }).then(res => res.data),
+  scanExpiryReviews: () =>
+    apiClient.post<{
+      success: boolean;
+      message: string;
+      scannedCount: number;
+      expiredCount: number;
+      pendingCreated: number;
+      totalPending: number;
+    }>('/returns/expiry-reviews/scan').then(res => res.data),
+  approveExpiryReview: (id: number, data: { notes?: string; loss_percentage: number }) =>
+    apiClient.post<{ success: boolean; message: string; returnNo: string; returnId: number }>(`/returns/expiry-reviews/${id}/approve`, data).then(res => res.data),
+  rejectExpiryReview: (id: number, data?: { notes?: string }) =>
+    apiClient.post<{ success: boolean; message: string }>(`/returns/expiry-reviews/${id}/reject`, data || {}).then(res => res.data),
+  bulkApproveExpiryReviews: (ids: number[], lossPercentage: number) =>
+    apiClient.post<{ success: boolean; message: string; approvedCount: number; returnNos: string[] }>('/returns/expiry-reviews/bulk-approve', { ids, loss_percentage: lossPercentage }).then(res => res.data),
+  getExpiryReviewsAuditHistory: () =>
+    apiClient.get<{ success: boolean; logs: any[] }>('/returns/expiry-reviews/audit-history').then(res => res.data),
   
   // Purchase PDF
   getPurchasePDF: (id: number) => apiClient.get(`/purchases/${id}/pdf`, { responseType: 'blob' }).then(res => res.data),
@@ -713,8 +747,8 @@ export const api = {
   sendExpiryAlerts: (data: { phone?: string, days?: number }) => apiClient.post('/expiry/send-alerts', data).then(res => res.data),
   exportExpiryReport: (params: { date_from?: string; date_to?: string; format: 'pdf' | 'csv' }) =>
     apiClient.get('/expiry/export', { params, responseType: 'blob' }).then(res => res.data),
-  createReturnFromExpiry: (inventoryId: number, quantity: number) =>
-    apiClient.post('/expiry/create-return', { inventory_id: inventoryId, quantity }).then(res => res.data),
+  createReturnFromExpiry: (inventoryId: number, quantity: number, lossPercentage: number) =>
+    apiClient.post('/expiry/create-return', { inventory_id: inventoryId, quantity, loss_percentage: lossPercentage }).then(res => res.data),
 
   // Dispatch Orders
   getDispatchOrders: () => apiClient.get('/dispatch/orders').then(res => res.data),

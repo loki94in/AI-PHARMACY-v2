@@ -55,6 +55,32 @@ export const isValidDistributorName = (name: string | null | undefined): boolean
   const trimmed = String(name).trim();
   if (!trimmed || trimmed.length < 2) return false;
 
+  // 0. Filter out placeholder / fallback distributor names
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'default distributor' ||
+    lower === 'unknown distributor' ||
+    lower === 'unknown dist.' ||
+    lower === 'unknown supplier' ||
+    lower === 'email import' ||
+    lower === 'telegram import' ||
+    lower === 'ocr import' ||
+    lower === 'whatsapp import' ||
+    lower === 'csv import' ||
+    lower === 'excel import' ||
+    lower === 'mobile import' ||
+    lower === 'import' ||
+    lower === 'unassigned' ||
+    lower === 'default' ||
+    lower === 'undefined' ||
+    lower === 'null' ||
+    lower === 'n/a' ||
+    lower === 'na' ||
+    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)?\s*import$/i.test(trimmed)
+  ) {
+    return false;
+  }
+
   // 1. Filter out emails (e.g. ctinvoice@gmail.com)
   if (trimmed.includes('@') || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return false;

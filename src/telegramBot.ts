@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import { normalizeDistributorName, formatInvoiceWithFY } from './utils/migrationValidation.js';
+import { isValidDistributorName } from './utils/nameNormalizer.js';
 import { fileURLToPath } from 'url';
 import { dbManager } from './database/connection.js';
 import { ensureSchema } from './database.js';
@@ -459,20 +460,17 @@ class TelegramBotService {
 
                   const db = await dbManager.getConnection();
                   
-                  let distributorName = 'TELEGRAM IMPORT';
+                  let distributorName = '';
                   const distMatch = ocrTextLower.match(/(nitin agency|cipla|alkem|abbott|cadila|zydus|intas|lupin)/i);
                   if (distMatch) {
                     distributorName = distMatch[1].toUpperCase();
                   }
+                  const validDist = (distributorName && isValidDistributorName(distributorName)) ? distributorName.trim() : null;
 
-                  const rawInvoiceNo = `TG-INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  let billDate = new Date().toISOString();
                   const extractedDate = extractDateFromText(result.text || '');
-                  if (extractedDate) {
-                    billDate = extractedDate;
-                  }
+                  const billDate = extractedDate || null;
                   
-                  const invoiceNo = formatInvoiceWithFY(rawInvoiceNo, billDate);
+                  const invoiceNo = billDate ? formatInvoiceWithFY(rawInvoiceNo, billDate) : rawInvoiceNo;
                   
                   let totalAmount = 0;
                   for (const item of medicines) {
@@ -493,7 +491,7 @@ class TelegramBotService {
 
                   await db.run(
                     `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
-                    [distributorName, invoiceNo, billDate, totalAmount, JSON.stringify(stagedItems)]
+                    [validDist, invoiceNo, billDate, totalAmount, JSON.stringify(stagedItems)]
                   );
 
                   let importDetails = '';
@@ -503,14 +501,14 @@ class TelegramBotService {
 
                   await db.run(
                     'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-                    ['TELEGRAM_BILL_STAGED', `Staged invoice ${invoiceNo} from distributor ${distributorName} for review`]
+                    ['TELEGRAM_BILL_STAGED', `Staged invoice ${invoiceNo}${validDist ? ` from distributor ${validDist}` : ''} for review`]
                   );
                   
                   notificationManager.broadcast({
                     type: 'telegram_bill',
                     title: 'Telegram Bill Processed',
-                    message: `Imported invoice ${invoiceNo} from ${distributorName}.`,
-                    distributorName,
+                    message: `Imported invoice ${invoiceNo}${validDist ? ` from ${validDist}` : ''}.`,
+                    distributorName: validDist || undefined,
                     invoiceNo,
                     timestamp: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
                   });

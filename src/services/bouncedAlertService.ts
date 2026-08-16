@@ -49,7 +49,7 @@ export class BouncedAlertService {
       for (const email of orderEmails) {
         const orderInfo = await emailService.extractOrderInfo(email);
         const invoiceNo = orderInfo.invoiceNumber;
-        const distName = orderInfo.distributorName || email.distributor_name || 'Unknown Distributor';
+        const distName = (orderInfo.distributorName && orderInfo.distributorName !== 'Unknown Distributor' ? orderInfo.distributorName : '') || (email.distributor_name && email.distributor_name !== 'Unknown Distributor' ? email.distributor_name : '') || 'Unassigned';
 
         if (!invoiceNo || invoiceNo === 'N/A') {
           continue; // Cannot reconcile without invoice number

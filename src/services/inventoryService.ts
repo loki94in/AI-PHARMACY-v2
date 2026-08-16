@@ -202,7 +202,8 @@ export class InventoryService {
    * This enhances the existing triggerPendingRefillsForMedicine function
    */
   async checkAndTriggerRefillsForMedicine(medicineId: number): Promise<void> {
-    return await dbManager.transaction(async (db) => {
+    try {
+      const db = await dbManager.getConnection();
       const { triggerPendingRefillsForMedicine } = await import('./refillService.js');
       await triggerPendingRefillsForMedicine(db, medicineId);
       
@@ -211,7 +212,9 @@ export class InventoryService {
         const { orderFulfillmentService } = await import('./orderFulfillmentService.js');
         await orderFulfillmentService.reconcileIncomingInventory(db, med.name);
       }
-    });
+    } catch (err) {
+      console.error('[InventoryService] checkAndTriggerRefillsForMedicine error:', err);
+    }
   }
 
   /**

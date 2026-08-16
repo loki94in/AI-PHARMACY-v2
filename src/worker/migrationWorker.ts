@@ -18,6 +18,9 @@ import { recordStagedModule, saveImportStats } from '../utils/migrationMeta.js';
 import { validateStagingDatabaseFile } from '../utils/validateStagingDatabase.js';
 import { findOrCreateDistributor, resetDistributorLookupCache } from '../utils/migrationDistributorHelpers.js';
 import { formatInvoiceWithFY } from '../utils/migrationValidation.js';
+import { isValidCustomerName, isValidDoctorName, isValidDistributorName } from '../utils/nameNormalizer.js';
+import { sanitizeDoctorName } from '../utils/doctorUtils.js';
+import { ensureMigrationAuditTable, flushMigrationAudits, queueMigrationAudit, clearMigrationAudit } from '../utils/migrationAudit.js';
 import { config, getAppDataDir } from '../config/index.js';
 
 // PostgreSQL COPY parser
@@ -147,6 +150,7 @@ async function ensureMigrationErrorsTable(db: any) {
     );
   `);
   await db.run('DELETE FROM migration_errors');
+  await clearMigrationAudit(db);
 }
 
 function validateAndCleanCSVRow(row: any, mapping?: Record<string, string>): { isValid: boolean; errors: string[]; cleaned: any } {
@@ -1096,6 +1100,7 @@ async function parseAndImportPgDump(sqlPath: string, targetDbPath: string) {
 
   // ─── Generate Summary Report ──────────────────────────────
   migrationStatus.message = 'Generating migration summary report...';
+  await flushMigrationAudits(db);
   await generateMigrationReport(db, stats);
 
   migrationStatus.message = `Migration Complete! ${stats.medicines} medicines, ${stats.purchases} purchases, ${stats.salesInvoices} sales, ${stats.returns} returns, ${stats.payments} payments, ${stats.b2bInvoices} B2B invoices, ${stats.purchaseOrders} POs imported.`;
@@ -1208,6 +1213,9 @@ async function generateMigrationReport(db: any, stats: any) {
   const reportsDir = path.join(getAppDataDir(), 'data', 'migration_reports');
   if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
 
+  await saveMigrationAuditSummary(db);
+  const auditSummary = await getMigrationAuditSummary(db);
+
   // Summary report
   const summary = {
     migration_date: new Date().toISOString(),
@@ -1225,12 +1233,19 @@ async function generateMigrationReport(db: any, stats: any) {
       payments: paymentMap.size,
       b2b_invoices: b2bInvoiceMap.size,
       purchase_orders: purchaseOrderMap.size,
-    }
+    },
+    audit_summary: auditSummary,
   };
 
   fs.writeFileSync(
     path.join(reportsDir, 'migration_summary.json'),
     JSON.stringify(summary, null, 2)
+  );
+
+  // Audit log report
+  fs.writeFileSync(
+    path.join(reportsDir, 'migration_audit_report.json'),
+    JSON.stringify(auditSummary, null, 2)
   );
 
   // Quick row-count verification from SQLite
@@ -1594,26 +1609,75 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const cgstKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'cgst');
             const sgstKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'sgst');
 
-            const rawInvoiceNo = invoiceNoKey ? String(cleanRow[invoiceNoKey] || '').trim() : `INV-${Date.now()}-${insertCount}`;
+            // invoice_no is a mandatory accounting identifier — never fabricate one.
+            // Skip rows where the column is unmapped OR the cell value is empty.
+            const rawInvoiceNo = invoiceNoKey ? String(cleanRow[invoiceNoKey] || '').trim() : '';
+            if (!rawInvoiceNo) {
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'sales_invoice',
+                record_identifier: `row-${insertCount + 1}`,
+                entity_type: 'invoice',
+                status: 'skipped',
+                reason: invoiceNoKey
+                  ? `Sales row ${insertCount + 1} has an empty invoice_no — record skipped; never fabricate an invoice number`
+                  : `Sales row ${insertCount + 1} has no mapped invoice_no column — record skipped; map invoice_no before importing`,
+              });
+              insertCount++;
+              return;
+            }
             const dateStr = dateKey ? cleanRow[dateKey] : new Date().toISOString();
             const invoiceNo = formatInvoiceWithFY(rawInvoiceNo, String(dateStr));
-            const patientName = patientKey ? String(cleanRow[patientKey] || '').trim() : 'Walk-in Customer';
-            const doctorName = doctorKey ? String(cleanRow[doctorKey] || '').trim() : 'Self';
+            const patientName = patientKey ? String(cleanRow[patientKey] || '').trim() : '';
+            const doctorName = doctorKey ? String(cleanRow[doctorKey] || '').trim() : '';
             const totalAmount = totalAmountKey ? parseFloat(cleanRow[totalAmountKey]) || 0 : 0;
             const discount = discountKey ? parseFloat(cleanRow[discountKey]) || 0 : 0;
             const cgstVal = cgstKey ? parseFloat(cleanRow[cgstKey]) || 0 : 0;
             const sgstVal = sgstKey ? parseFloat(cleanRow[sgstKey]) || 0 : 0;
 
-            let customer = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?)', [patientName]);
-            if (!customer) {
-              const result = await db.run('INSERT INTO customers (name) VALUES (?)', [patientName]);
-              customer = { id: result.lastID };
+            let customerId: number | null = null;
+            if (isValidCustomerName(patientName)) {
+              let customer = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?)', [patientName]);
+              if (!customer) {
+                const result = await db.run('INSERT INTO customers (name) VALUES (?)', [patientName]);
+                customerId = result.lastID ?? null;
+              } else {
+                customerId = customer.id;
+              }
+            } else if (patientName) {
+              customerId = null;
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'sales_invoice',
+                record_identifier: invoiceNo,
+                entity_type: 'customer',
+                raw_value: patientName,
+                status: 'preserved_null',
+                reason: `Unresolved or invalid customer name "${patientName}"; customer_id preserved as NULL`,
+              });
             }
 
-            let doctor = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?)', [doctorName]);
-            if (!doctor) {
-              const result = await db.run('INSERT INTO doctors (name) VALUES (?)', [doctorName]);
-              doctor = { id: result.lastID };
+            let doctorId: number | null = null;
+            if (isValidDoctorName(doctorName)) {
+              const cleanDoc = sanitizeDoctorName(doctorName) || doctorName;
+              let doctor = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?)', [cleanDoc]);
+              if (!doctor) {
+                const result = await db.run('INSERT INTO doctors (name) VALUES (?)', [cleanDoc]);
+                doctorId = result.lastID ?? null;
+              } else {
+                doctorId = doctor.id;
+              }
+            } else if (doctorName) {
+              doctorId = null;
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'sales_invoice',
+                record_identifier: invoiceNo,
+                entity_type: 'doctor',
+                raw_value: doctorName,
+                status: 'preserved_null',
+                reason: `Unresolved or invalid doctor name "${doctorName}"; doctor_id preserved as NULL`,
+              });
             }
 
             let invoice = await db.get('SELECT id FROM sales_invoices WHERE invoice_no = ?', [invoiceNo]);
@@ -1630,7 +1694,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
               }
               const subtotal = totalAmount + discount;
               const baseCols = ['invoice_no', 'customer_id', 'doctor_id', 'date', 'total_amount', 'discount', 'subtotal', 'cgst_value', 'sgst_value'];
-              const baseVals = [invoiceNo, customer.id, doctor.id, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal];
+              const baseVals = [invoiceNo, customerId, doctorId, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal];
               const colsStr = [...baseCols, ...saleCols].join(', ');
               const placeholdersStr = [...baseCols, ...saleCols].map(() => '?').join(', ');
               const result = await db.run(
@@ -1701,15 +1765,38 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const distributorKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'distributor_name');
             const totalAmountKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'total_amount');
 
-            const rawInvoiceNo = invoiceNoKey ? String(cleanRow[invoiceNoKey] || '').trim() : `PUR-${Date.now()}-${insertCount}`;
+            // invoice_no is a mandatory accounting identifier — never fabricate one.
+            // Skip rows where the column is unmapped OR the cell value is empty.
+            const rawInvoiceNo = invoiceNoKey ? String(cleanRow[invoiceNoKey] || '').trim() : '';
+            if (!rawInvoiceNo) {
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'purchase',
+                record_identifier: `row-${insertCount + 1}`,
+                entity_type: 'invoice',
+                status: 'skipped',
+                reason: invoiceNoKey
+                  ? `Purchase row ${insertCount + 1} has an empty invoice_no — record skipped; never fabricate an invoice number`
+                  : `Purchase row ${insertCount + 1} has no mapped invoice_no column — record skipped; map invoice_no before importing`,
+              });
+              insertCount++;
+              return;
+            }
             const dateStr = dateKey ? cleanRow[dateKey] : new Date().toISOString();
-            const distributorName = distributorKey ? String(cleanRow[distributorKey] || '').trim() : 'Unknown Supplier';
+            const distributorName = distributorKey ? String(cleanRow[distributorKey] || '').trim() : '';
             const totalAmount = totalAmountKey ? parseFloat(cleanRow[totalAmountKey]) || 0 : 0;
             const invoiceNo = formatInvoiceWithFY(rawInvoiceNo, String(dateStr));
 
-            const distributor = await findOrCreateDistributor(db, distributorName);
+            let distributorId: number | null = null;
+            if (isValidDistributorName(distributorName)) {
+              const distributor = await findOrCreateDistributor(db, distributorName);
+              distributorId = distributor ? distributor.id : null;
+            }
 
-            let purchase = await db.get('SELECT id FROM purchases WHERE invoice_no = ? AND distributor_id = ?', [invoiceNo, distributor.id]);
+            let purchase = await db.get(
+              'SELECT id FROM purchases WHERE invoice_no = ? AND (distributor_id = ? OR (distributor_id IS NULL AND ? IS NULL))',
+              [invoiceNo, distributorId, distributorId]
+            );
             if (!purchase) {
               const purCols: string[] = [];
               const purVals: any[] = [];
@@ -1722,7 +1809,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                 }
               }
               const baseCols = ['invoice_no', 'distributor_id', 'date', 'total_amount'];
-              const baseVals = [invoiceNo, distributor.id, dateStr, totalAmount];
+              const baseVals = [invoiceNo, distributorId, dateStr, totalAmount];
               const colsStr = [...baseCols, ...purCols].join(', ');
               const placeholdersStr = [...baseCols, ...purCols].map(() => '?').join(', ');
               const result = await db.run(
@@ -1776,9 +1863,25 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const returnSubTypeKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'return_sub_type' || mapping?.[k] === 'return_status');
             const returnDateTimeKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'return_date_time');
 
-            const returnNo = returnNoKey ? String(cleanRow[returnNoKey] || '').trim() : `RET-${Date.now()}-${insertCount}`;
+            // return_no is a mandatory accounting identifier — never fabricate one.
+            // Skip rows where the column is unmapped OR the cell value is empty.
+            const returnNo = returnNoKey ? String(cleanRow[returnNoKey] || '').trim() : '';
+            if (!returnNo) {
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'return',
+                record_identifier: `row-${insertCount + 1}`,
+                entity_type: 'invoice',
+                status: 'skipped',
+                reason: returnNoKey
+                  ? `Return row ${insertCount + 1} has an empty return_no — record skipped; never fabricate a return number`
+                  : `Return row ${insertCount + 1} has no mapped return_no column — record skipped; map return_no before importing`,
+              });
+              insertCount++;
+              return;
+            }
             const dateStr = dateKey ? cleanRow[dateKey] : new Date().toISOString();
-            const distributorName = distributorKey ? String(cleanRow[distributorKey] || '').trim() : 'Unknown Supplier';
+            const distributorName = distributorKey ? String(cleanRow[distributorKey] || '').trim() : '';
             const totalAmount = totalAmountKey ? parseFloat(cleanRow[totalAmountKey]) || 0 : 0;
             const returnInvoiceId = returnInvoiceIdKey ? String(cleanRow[returnInvoiceIdKey] || '').trim() : null;
             const rawReturnSubType = returnSubTypeKey ? String(cleanRow[returnSubTypeKey] || '').trim() : '';
@@ -1788,7 +1891,12 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             }
             const returnDateTime = returnDateTimeKey ? cleanRow[returnDateTimeKey] : null;
 
-            const distributor = await findOrCreateDistributor(db, distributorName);
+            let distributorId: number | null = null;
+            if (isValidDistributorName(distributorName)) {
+              const distributor = await findOrCreateDistributor(db, distributorName);
+              distributorId = distributor ? distributor.id : null;
+            }
+
             let retRecord = await db.get('SELECT id FROM returns WHERE return_no = ?', [returnNo]);
             if (!retRecord) {
               const retCols: string[] = [];
@@ -1802,7 +1910,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                 }
               }
               const baseCols = ['return_no', 'distributor_id', 'type', 'date', 'total_amount', 'return_invoice_id', 'return_sub_type', 'raw_return_type', 'return_date_time'];
-              const baseVals = [returnNo, distributor.id, 'purchase', dateStr, totalAmount, returnInvoiceId, resolvedReturnSubType, rawReturnSubType || null, returnDateTime];
+              const baseVals = [returnNo, distributorId, 'purchase', dateStr, totalAmount, returnInvoiceId, resolvedReturnSubType, rawReturnSubType || null, returnDateTime];
               const colsStr = [...baseCols, ...retCols].join(', ');
               const placeholdersStr = [...baseCols, ...retCols].map(() => '?').join(', ');
               const result = await db.run(
@@ -1854,7 +1962,17 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const addressKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'address');
             const notesKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'notes');
 
-            const name = nameKeyCust ? String(cleanRow[nameKeyCust] || '').trim() : 'Unnamed Customer';
+            const name = nameKeyCust ? String(cleanRow[nameKeyCust] || '').trim() : '';
+            if (!isValidCustomerName(name)) {
+              migrationStatus.errorCount++;
+              await db.run(
+                'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+                [path.basename(csvPath), insertCount + skipLines + 1, JSON.stringify(row), 'Skipped: Missing required customer name']
+              );
+              insertCount++;
+              return;
+            }
+
             const phone = phoneKey ? String(cleanRow[phoneKey] || '').trim() : '';
             const address = addressKey ? String(cleanRow[addressKey] || '').trim() : '';
             const notes = notesKey ? String(cleanRow[notesKey] || '').trim() : '';
@@ -1896,24 +2014,37 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const nameKeyCust = Object.keys(mapping || {}).find(k => mapping?.[k] === 'name') || patientKey;
             if (nameKeyCust && cleanRow[nameKeyCust] && patientKey) {
               const patientName = String(cleanRow[nameKeyCust] || '').trim();
-              const phoneKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'phone') || Object.keys(mapping || {}).find(k => mapping?.[k] === 'mobile');
-              const addressKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'address');
-              const notesKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'notes');
+              if (isValidCustomerName(patientName)) {
+                const phoneKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'phone') || Object.keys(mapping || {}).find(k => mapping?.[k] === 'mobile');
+                const addressKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'address');
+                const notesKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'notes');
 
-              const phone = phoneKey ? String(cleanRow[phoneKey] || '').trim() : '';
-              const address = addressKey ? String(cleanRow[addressKey] || '').trim() : '';
-              const notes = notesKey ? String(cleanRow[notesKey] || '').trim() : '';
+                const phone = phoneKey ? String(cleanRow[phoneKey] || '').trim() : '';
+                const address = addressKey ? String(cleanRow[addressKey] || '').trim() : '';
+                const notes = notesKey ? String(cleanRow[notesKey] || '').trim() : '';
 
-              let customer = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?)', [patientName]);
-              if (!customer) {
-                const result = await db.run('INSERT INTO customers (name, phone, address, notes) VALUES (?, ?, ?, ?)', [patientName, phone, address, notes]);
-                customerId = result.lastID ?? null;
-              } else {
-                customerId = customer.id;
-                await db.run(
-                  `UPDATE customers SET phone = COALESCE(NULLIF(phone, ""), ?), address = COALESCE(NULLIF(address, ""), ?), notes = COALESCE(NULLIF(notes, ""), ?) WHERE id = ?`,
-                  [phone, address, notes, customer.id]
-                );
+                let customer = await db.get('SELECT id FROM customers WHERE LOWER(name) = LOWER(?)', [patientName]);
+                if (!customer) {
+                  const result = await db.run('INSERT INTO customers (name, phone, address, notes) VALUES (?, ?, ?, ?)', [patientName, phone, address, notes]);
+                  customerId = result.lastID ?? null;
+                } else {
+                  customerId = customer.id;
+                  await db.run(
+                    `UPDATE customers SET phone = COALESCE(NULLIF(phone, ""), ?), address = COALESCE(NULLIF(address, ""), ?), notes = COALESCE(NULLIF(notes, ""), ?) WHERE id = ?`,
+                    [phone, address, notes, customer.id]
+                  );
+                }
+              } else if (patientName) {
+                customerId = null;
+                queueMigrationAudit({
+                  file_name: path.basename(csvPath),
+                  record_type: 'sales_invoice',
+                  record_identifier: String(cleanRow[Object.keys(mapping || {}).find(k => mapping?.[k] === 'invoice_no' || mapping?.[k] === 'bill_no') || ''] || 'ROW-' + (insertCount + 1)),
+                  entity_type: 'customer',
+                  raw_value: patientName,
+                  status: 'preserved_null',
+                  reason: `Unresolved or invalid customer name "${patientName}"; customer_id preserved as NULL`,
+                });
               }
             }
 
@@ -1922,12 +2053,26 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const doctorKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'doctor_name');
             if (doctorKey && cleanRow[doctorKey]) {
               const doctorName = String(cleanRow[doctorKey] || '').trim();
-              let doctor = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?)', [doctorName]);
-              if (!doctor) {
-                const result = await db.run('INSERT INTO doctors (name) VALUES (?)', [doctorName]);
-                doctorId = result.lastID ?? null;
-              } else {
-                doctorId = doctor.id;
+              if (isValidDoctorName(doctorName)) {
+                const cleanDoc = sanitizeDoctorName(doctorName) || doctorName;
+                let doctor = await db.get('SELECT id FROM doctors WHERE LOWER(name) = LOWER(?)', [cleanDoc]);
+                if (!doctor) {
+                  const result = await db.run('INSERT INTO doctors (name) VALUES (?)', [cleanDoc]);
+                  doctorId = result.lastID ?? null;
+                } else {
+                  doctorId = doctor.id;
+                }
+              } else if (doctorName) {
+                doctorId = null;
+                queueMigrationAudit({
+                  file_name: path.basename(csvPath),
+                  record_type: 'sales_invoice',
+                  record_identifier: String(cleanRow[Object.keys(mapping || {}).find(k => mapping?.[k] === 'invoice_no' || mapping?.[k] === 'bill_no') || ''] || 'ROW-' + (insertCount + 1)),
+                  entity_type: 'doctor',
+                  raw_value: doctorName,
+                  status: 'preserved_null',
+                  reason: `Unresolved or invalid doctor name "${doctorName}"; doctor_id preserved as NULL`,
+                });
               }
             }
 
@@ -1936,8 +2081,10 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const distributorKey = Object.keys(mapping || {}).find(k => mapping?.[k] === 'distributor_name' || mapping?.[k] === 'distributor');
             if (distributorKey && cleanRow[distributorKey]) {
               const distributorName = String(cleanRow[distributorKey] || '').trim();
-              const distributor = await findOrCreateDistributor(db, distributorName);
-              distributorId = distributor.id;
+              if (isValidDistributorName(distributorName)) {
+                const distributor = await findOrCreateDistributor(db, distributorName);
+                distributorId = distributor ? distributor.id : null;
+              }
             }
 
             // 4. Medicine
@@ -2067,7 +2214,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                   const result = await db.run(
                     `INSERT INTO sales_invoices (invoice_no, customer_id, doctor_id, date, total_amount, discount, subtotal, cgst_value, sgst_value)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [invoiceNo, customerId || 1, doctorId || 1, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal]
+                    [invoiceNo, customerId, doctorId, dateStr, totalAmount, discount, subtotal, cgstVal, sgstVal]
                   );
                   invoice = { id: result.lastID };
                 }
@@ -2092,12 +2239,15 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
               }
               else if (distributorKey && cleanRow[distributorKey]) {
                 // Purchase Invoice
-                let purchase = await db.get('SELECT id FROM purchases WHERE invoice_no = ? AND distributor_id = ?', [invoiceNo, distributorId || 1]);
+                let purchase = await db.get(
+                  'SELECT id FROM purchases WHERE invoice_no = ? AND (distributor_id = ? OR (distributor_id IS NULL AND ? IS NULL))',
+                  [invoiceNo, distributorId, distributorId]
+                );
                 if (!purchase) {
                   const result = await db.run(
                     `INSERT INTO purchases (invoice_no, distributor_id, date, total_amount)
                      VALUES (?, ?, ?, ?)`,
-                    [invoiceNo, distributorId || 1, dateStr, totalAmount]
+                    [invoiceNo, distributorId, dateStr, totalAmount]
                   );
                   purchase = { id: result.lastID };
                 }
@@ -2202,6 +2352,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
 
           }
 
+          await flushMigrationAudits(db);
           await recordStagedModule(db, dataType);
           migrationStatus.message = 'Reconciling inventory stock from transactions...';
           await rebuildMigrationInventoryStock(db);

@@ -1760,12 +1760,12 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
           </div>
         </div>
 
-        {/* Trigger 5: Auto Expiry Return Memos */}
+        {/* Trigger 5: Auto Expiry Return Review Scans */}
         <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <RotateCcw size={16} className="text-indigo-500" />
-              <span className="text-xs font-bold text-text">Auto Expiry Return Memos</span>
+              <span className="text-xs font-bold text-text">Auto Expiry Return Review Scans</span>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -1777,7 +1777,7 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
               <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
             </label>
           </div>
-          <p className="text-[11px] text-muted">Auto-creates distributor return memos for expired batches on selected days of the month.</p>
+          <p className="text-[11px] text-muted">Automatically detects expired batches on selected days and creates pending items for pharmacist review (requires manual approval before stock deduction).</p>
           <div className="flex items-center gap-2">
             <label className="text-[11px] font-semibold text-text whitespace-nowrap">Days of Month:</label>
             <input

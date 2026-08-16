@@ -11,11 +11,12 @@ interface ComplianceLog {
   date: string;
   drug_name: string;
   patient_name: string;
-  doctor_name: string;
-  license_no?: string;
+  doctor_name: string | null;
+  license_no?: string | null;
   qty: number;
   bill_no: string;
   schedule_type: string;
+  missing_license?: number;
 }
 
 const CompliancePage: React.FC = () => {
@@ -200,7 +201,26 @@ const CompliancePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Compliance Warning Banner — missing registration info */}
+      {stats.pendingDoctorAssignments > 0 && (
+        <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/40 rounded-2xl">
+          <AlertTriangle size={20} className="text-amber-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-amber-400">
+              {stats.pendingDoctorAssignments} Compliance Record{stats.pendingDoctorAssignments > 1 ? 's' : ''} Require Prescriber / Registration Review
+            </p>
+            <p className="text-xs text-amber-400/80 mt-0.5">
+              These Schedule H/H1/X drug sales were dispensed without a verified doctor registration number.
+              Under the Drugs &amp; Cosmetics Rules, a valid prescriber registration must be recorded.
+              Use the <strong>Assign Doctor</strong> button on each affected row to enter the real information.
+              No fake or placeholder registration number has been stored.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Filter Bar */}
+
       <form onSubmit={handleFilterSubmit} className="p-4 bg-bg2 border border-glass-border rounded-2xl space-y-3">
         <div className="flex items-center gap-2 text-xs font-bold text-text uppercase tracking-wider">
           <Filter size={14} className="text-primary" /> Filter H1 Compliance Register
@@ -329,7 +349,8 @@ const CompliancePage: React.FC = () => {
                 </tr>
               ) : (
                 logs.map((log) => {
-                  const isDoctorPending = !log.doctor_name || log.doctor_name.includes('Pending') || log.doctor_name.includes('Self');
+                  const isDoctorPending = !log.doctor_name || log.doctor_name.includes('Pending') || log.doctor_name.includes('Self') || !!log.missing_license;
+                  const isLicenseMissing = !!log.missing_license || !log.license_no;
                   return (
                     <tr key={log.id} className="hover:bg-bg3/50 transition-colors">
                       <td className="p-3 font-mono text-muted whitespace-nowrap">{formatDisplayDate(log.date)}</td>
@@ -347,7 +368,11 @@ const CompliancePage: React.FC = () => {
                           </span>
                         ) : (
                           <span className="text-text font-bold">
-                            Dr. {log.doctor_name} {log.license_no ? `(${log.license_no})` : ''}
+                            Dr. {log.doctor_name}
+                            {log.license_no
+                              ? ` (${log.license_no})`
+                              : <span className="ml-1 text-amber-400 text-[10px] font-bold"><AlertTriangle size={10} className="inline" /> Reg. No. Missing</span>
+                            }
                           </span>
                         )}
                       </td>

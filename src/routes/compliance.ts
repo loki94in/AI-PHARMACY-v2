@@ -24,7 +24,18 @@ router.get('/', async (_req, res) => {
         ELSE expiry_date 
       END < strftime('%Y-%m', 'now')
     `);
+
+    // Sanitise any historical compliance records that carry the fake 'REG-NA' placeholder.
+    // These were written by old code; mark them missing_license=1 and NULL the fake value so
+    // they surface in the Compliance page for operator review instead of passing as legitimate.
+    await db.run(
+      `UPDATE compliance_logs
+       SET license_no = NULL, missing_license = 1
+       WHERE license_no = 'REG-NA'`
+    );
+
     res.json({ expiredItems: expiredCount.cnt, status: expiredCount.cnt === 0 ? 'compliant' : 'non-compliant' });
+
   } catch (err) {
     console.error('Compliance error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -90,9 +101,15 @@ router.get('/dashboard', async (_req, res) => {
     `, [firstDayOfMonth]);
 
     const pendingDoctorRow = await db.get(`
-      SELECT COUNT(*) as count FROM compliance_logs 
+      SELECT COUNT(*) as count FROM compliance_logs
       WHERE (schedule_type IN ('H1', 'H', 'X', 'Schedule H1') OR schedule_type LIKE '%H1%')
-      AND (doctor_name IS NULL OR doctor_name = '' OR doctor_name LIKE '%Self%' OR doctor_name LIKE '%Pending%')
+      AND (
+        doctor_name IS NULL OR doctor_name = ''
+        OR doctor_name LIKE '%Self%'
+        OR doctor_name LIKE '%Pending%'
+        OR missing_license = 1
+        OR license_no = 'REG-NA'
+      )
     `);
 
     const totalLogsRow = await db.get(`SELECT COUNT(*) as count FROM compliance_logs`);

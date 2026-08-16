@@ -240,7 +240,7 @@ class TriggerSchedulerService {
     }
 
     // ----------------------------------------------------
-    // Trigger 4: Auto Expiry Returns Creator
+    // Trigger 4: Auto Expiry Returns Review Scanner
     // ----------------------------------------------------
     if (cfg.trigger_expiry_return_enabled === 'true') {
       const daysStr = cfg.trigger_expiry_return_days || '18,19,20';
@@ -250,17 +250,17 @@ class TriggerSchedulerService {
       try {
         const task = cron.schedule(cronExpr, async () => {
           try {
-            console.log(`[Trigger: Auto Expiry Returns] Checking returns for days ${daysStr}...`);
-            const { autoCreateExpiryReturns } = await import('./returnsService.js');
-            await autoCreateExpiryReturns(database);
+            console.log(`[Trigger: Expiry Return Review] Scanning expired stock for pending pharmacist review (Days: ${daysStr})...`);
+            const { scanAndCreateExpiryReviews } = await import('./returnsService.js');
+            await scanAndCreateExpiryReviews(database);
           } catch (err) {
-            console.error('[Trigger: Auto Expiry Returns] Execution failed:', err);
+            console.error('[Trigger: Expiry Return Review] Execution failed:', err);
           }
         });
         this.scheduledTasks.set('expiry_returns', task);
-        console.log(`[TriggerScheduler] Registered 'Auto Expiry Returns' -> Cron: ${cronExpr} (Days: ${daysStr})`);
+        console.log(`[TriggerScheduler] Registered 'Auto Expiry Return Review Scanner' -> Cron: ${cronExpr} (Days: ${daysStr})`);
       } catch (err) {
-        console.error('[TriggerScheduler] Failed to schedule Auto Expiry Returns:', err);
+        console.error('[TriggerScheduler] Failed to schedule Auto Expiry Return Review Scanner:', err);
       }
     }
 

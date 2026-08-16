@@ -38,6 +38,7 @@ describe('salesParser', () => {
 
     // Insert some test inventory for foreign key resolution
     await db.exec(`
+        INSERT INTO customers (id, name, phone) VALUES (1, 'Test Customer', '9876543210');
         INSERT INTO inventory_master (id, medicine_id, quantity) VALUES (1, 101, 100);
         INSERT INTO inventory_master (id, medicine_id, quantity) VALUES (2, 202, 50);
         INSERT INTO inventory_master (id, medicine_id, quantity) VALUES (3, 303, 75);

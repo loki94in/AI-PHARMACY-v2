@@ -872,7 +872,7 @@ router.post('/cart/add', async (req, res) => {
           RStockVisibility: 0,
           IsMapped: (item.mapped === false || item.isMapped === false) ? 0 : 1,
           ProductId: (() => { const v = item.productId; if (!v) return 0; const n = Number(v); if (!isNaN(n) && n > 0) return n; const stripped = String(v).replace(/^PR/i, ''); const sn = Number(stripped); return (!isNaN(sn) && sn > 0) ? sn : 0; })(),
-          MRP: String(item.mrp || rateVal),
+          MRP: String(item.mrp || 0),
           ProductWiseAmount: 0,
           ProductWiseGSTAmount: 0,
           ProductWiseSchemeAmount: 0,
@@ -1053,7 +1053,7 @@ router.post('/cart/add', async (req, res) => {
               RStockVisibility: 0,
               IsMapped: (item.mapped === false || item.isMapped === false) ? 0 : 1,
               ProductId: (() => { const v = item.productId; if (!v) return 0; const n = Number(v); if (!isNaN(n) && n > 0) return n; const stripped = String(v).replace(/^PR/i, ''); const sn = Number(stripped); return (!isNaN(sn) && sn > 0) ? sn : 0; })(),
-              MRP: String(item.mrp || rateVal),
+              MRP: String(item.mrp || 0),
               ProductWiseAmount: 0,
               ProductWiseGSTAmount: 0,
               ProductWiseSchemeAmount: 0,
@@ -1217,7 +1217,7 @@ router.post('/delete-cart-item', async (req, res) => {
     let resolvedProductCode = productCode || '';
     let resolvedCompany = company || '';
     let resolvedPtr = Number(ptr || 0);
-    let resolvedMrp = Number(mrp || resolvedPtr);
+    let resolvedMrp = Number(mrp || 0);
 
     // Step A: Search enrichment if ProductId or ProductCode is missing/0
     if ((!resolvedProductId || !resolvedProductCode) && token) {
@@ -1328,7 +1328,7 @@ router.post('/delete-cart-item', async (req, res) => {
           RStockVisibility: 0,
           IsMapped: 1,
           ProductId: resolvedProductId,
-          MRP: String(resolvedMrp || resolvedPtr),
+          MRP: String(resolvedMrp || 0),
           ProductWiseAmount: 0,
           ProductWiseGSTAmount: 0,
           ProductWiseSchemeAmount: 0,

@@ -18,6 +18,7 @@ import { extractCleanEmail } from '../utils/emailSanitizer.js';
 import { getEmailRetentionLimit, getStorePhone } from './storeSettingsService.js';
 import { config, getAppDataDir } from '../config/index.js';
 import { medicineService } from './medicineService.js';
+import { isValidDistributorName } from '../utils/nameNormalizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1317,8 +1318,8 @@ export class EmailService {
     const subject = email.subject || '';
     const body = email.body || '';
 
-    // Detect distributor name
-    let distributorName = 'Unknown Distributor';
+    // Detect distributor name (unresolved by default)
+    let distributorName = '';
 
     // 1. First priority: Check database (Distributors table & AI Learning Mappings) by clean email
     const cleanFromEmail = extractCleanEmail(email.from || '');
@@ -1337,34 +1338,55 @@ export class EmailService {
       }
     }
 
-    // 2. Second priority: If not resolved from DB, check email text body for known manufacturer keywords
-    if (distributorName === 'Unknown Distributor') {
-      const mfgMatch = body.match(/(Nitin Agency|Nitin Agencies|Cipla|Alkem|Abbott|Cadila|Zydus|Intas|Lupin)/i);
+    // 2. Second priority: If not resolved from DB, check email text body / subject for known manufacturer/distributor keywords
+    if (!distributorName) {
+      const combinedText = subject + ' ' + body;
+      const mfgMatch = combinedText.match(/(Nitin Agency|Nitin Agencies|Cipla|Alkem|Abbott|Cadila|Zydus|Intas|Lupin)/i);
       if (mfgMatch) {
         distributorName = mfgMatch[1].toUpperCase();
-      } else {
-        const fromMatch = (email.from || '').match(/([^<]+)/);
-        if (fromMatch && fromMatch[1].trim()) {
-          distributorName = fromMatch[1].trim().replace(/['"]/g, '');
-        }
       }
 
       // Clean up distributorName based on typical distributors in the inbox
       const lowerFrom = (email.from || '').toLowerCase();
-      if (lowerFrom.includes('senior')) {
-        distributorName = 'Senior Agency';
-      } else if (lowerFrom.includes('mahalaxmi')) {
-        distributorName = 'New Mahalaxmi Cosmetics';
-      } else if (lowerFrom.includes('bajaj')) {
-        distributorName = 'Bajaj Pharma';
-      } else if (lowerFrom.includes('tapadiya')) {
-        distributorName = 'Tapadiya Distributors';
-      } else if (lowerFrom.includes('nitin')) {
-        distributorName = 'Nitin Agency';
-      } else if (lowerFrom.includes('prime')) {
-        distributorName = 'Prime Distributors';
-      } else if (lowerFrom.includes('success')) {
-        distributorName = 'Pro Success Pharma';
+      const lowerSubject = subject.toLowerCase();
+      if (!distributorName) {
+        if (lowerFrom.includes('senior') || lowerSubject.includes('senior agency')) {
+          distributorName = 'Senior Agency';
+        } else if (lowerFrom.includes('mahalaxmi') || lowerSubject.includes('mahalaxmi')) {
+          distributorName = 'New Mahalaxmi Cosmetics';
+        } else if (lowerFrom.includes('bajaj') || lowerSubject.includes('bajaj pharma')) {
+          distributorName = 'Bajaj Pharma';
+        } else if (lowerFrom.includes('tapadiya') || lowerSubject.includes('tapadiya')) {
+          distributorName = 'Tapadiya Distributors';
+        } else if (lowerFrom.includes('nitin') || lowerSubject.includes('nitin agency')) {
+          distributorName = 'Nitin Agency';
+        } else if (lowerFrom.includes('prime') || lowerSubject.includes('prime distributors')) {
+          distributorName = 'Prime Distributors';
+        } else if (lowerFrom.includes('success') || lowerSubject.includes('pro success pharma')) {
+          distributorName = 'Pro Success Pharma';
+        }
+      }
+
+      // 3. Third priority: If still not resolved, check if sender display name matches an existing distributor in the DB
+      if (!distributorName) {
+        const fromMatch = (email.from || '').match(/([^<]+)/);
+        if (fromMatch && fromMatch[1].trim()) {
+          const candidateName = fromMatch[1].trim().replace(/['"]/g, '');
+          if (candidateName && candidateName.length > 2 && !candidateName.includes('@')) {
+            try {
+              const db = await dbManager.getConnection();
+              const dbMatch = await db.get(
+                `SELECT name FROM distributors WHERE LOWER(TRIM(name)) = ? LIMIT 1`,
+                [candidateName.toLowerCase()]
+              );
+              if (dbMatch?.name && dbMatch.name.trim()) {
+                distributorName = dbMatch.name.trim();
+              }
+            } catch (dbErr) {
+              console.warn('[EmailService] Distributor lookup by sender name failed:', dbErr);
+            }
+          }
+        }
       }
     }
 
@@ -1571,7 +1593,7 @@ export class EmailService {
           type: 'new_email',
           title: isOrder ? 'New Distributor Email' : 'New Mail Received',
           message: `New mail received from ${processedEmail.from}: ${processedEmail.subject}`,
-          distributorName: orderInfo?.distributorName !== 'Unknown Distributor' ? orderInfo?.distributorName : processedEmail.from,
+          distributorName: (orderInfo?.distributorName && isValidDistributorName(orderInfo.distributorName)) ? orderInfo.distributorName.trim() : undefined,
           invoiceNo: orderInfo?.invoiceNumber !== 'N/A' ? orderInfo?.invoiceNumber : undefined,
           timestamp: timeStr,
           whatsappSent: whatsappSentToOwner,
@@ -1658,7 +1680,8 @@ export class EmailService {
       });
 
       if (isOrderRelated) {
-        const logMsg = `${orderInfo.distributorName} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
+        const logDist = orderInfo.distributorName || 'Unresolved Distributor';
+        const logMsg = `${logDist} - ${orderInfo.invoiceNumber} ${orderInfo.timeStr}`;
 
         // Log as potential order for follow-up
         const db = await dbManager.getConnection();
@@ -1669,17 +1692,15 @@ export class EmailService {
 
         // No automatic background import of purchase bills (should be manually processed by user on frontend).
         // Instead, queue the detected order into a review table so it can be surfaced to the user
-        // (e.g. a badge on the Learning or Dispatch page — not built in this task) for manual handling
-        // via the existing Purchases page. Do NOT call processMedicineOrder() — it fabricates pricing
-        // and auto-writes inventory data; left in place unused for a future redesign.
+        // for manual handling via the existing Purchases page.
         try {
+          const validDistName = (orderInfo.distributorName && isValidDistributorName(orderInfo.distributorName)) ? orderInfo.distributorName.trim() : null;
           await db.run(
             `INSERT INTO email_order_reviews (email_uid, distributor_name, invoice_number, medicines_json, email_subject, email_date, status)
              VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
             [
-              // email_uid not populated: ProcessedEmail lacks IMAP uid; would need to thread it through call chain
-              null,
-              orderInfo.distributorName,
+              (email as any).uid || null,
+              validDistName,
               orderInfo.invoiceNumber,
               JSON.stringify(orderInfo.medicines || []),
               email.subject,
@@ -1687,14 +1708,14 @@ export class EmailService {
             ]
           );
 
-          // Auto-update today's distributor dispatch reminder status to 'Dispatched'
-          if (orderInfo.distributorName) {
+          // Auto-update today's distributor dispatch reminder status to 'Dispatched' only if distributor is valid
+          if (validDistName) {
             const todayStr = new Date().toISOString().split('T')[0];
             await db.run(
               `UPDATE distributor_dispatch_reminders
                SET status = 'Dispatched', email_received_at = CURRENT_TIMESTAMP
                WHERE date = ? AND LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND status = 'Pending'`,
-              [todayStr, orderInfo.distributorName.trim()]
+              [todayStr, validDistName]
             );
           }
         } catch (queueError) {
@@ -1779,15 +1800,17 @@ export class EmailService {
         ['EMAIL_ORDER_PROCESSING', `Manually importing invoice: ${orderInfo.invoiceNumber} from ${orderInfo.distributorName}`]
       );
 
-      // Upsert distributor
-      await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [orderInfo.distributorName]);
-      const dist = await db.get('SELECT id FROM distributors WHERE name = ?', [orderInfo.distributorName]);
-      
-      let billDate = email.date ? new Date(email.date).toISOString() : new Date().toISOString();
-      const extractedDate = extractDateFromText(email.subject + ' ' + email.body);
-      if (extractedDate) {
-        billDate = extractedDate;
+      // Upsert distributor only if legitimate
+      const validDistName = (orderInfo.distributorName && isValidDistributorName(orderInfo.distributorName))
+        ? orderInfo.distributorName.trim()
+        : null;
+
+      if (validDistName) {
+        await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [validDistName]);
       }
+      
+      const extractedDate = extractDateFromText(email.subject + ' ' + email.body);
+      const billDate = extractedDate || null;
 
       // Stage the order for user verification instead of fabricating dummy inventory
       const stagedItems = (orderInfo.medicines || []).map((item: any) => ({
@@ -1802,13 +1825,13 @@ export class EmailService {
 
       await db.run(
         `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
-        [orderInfo.distributorName, orderInfo.invoiceNumber, billDate, 0, JSON.stringify(stagedItems)]
+        [validDistName, orderInfo.invoiceNumber, billDate, 0, JSON.stringify(stagedItems)]
       );
 
       // Log the staged email order
       await db.run(
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-        ['EMAIL_ORDER_STAGED', `Staged ${stagedItems.length} products from ${orderInfo.distributorName} for review.`]
+        ['EMAIL_ORDER_STAGED', `Staged ${stagedItems.length} products${validDistName ? ` from ${validDistName}` : ''} for review.`]
       );
       
       try {
@@ -2013,7 +2036,7 @@ export class EmailService {
         }
       }
       
-      let distributor_name = 'Unknown Distributor';
+      let distributor_name = '';
       let distributorId: number | undefined;
       let invoice_no = '';
       let invoice_date = '';
@@ -2440,16 +2463,10 @@ export class EmailService {
             const line = cleanLines[i];
             if (line.toLowerCase().includes('tax invoice')) {
               if (cleanLines[i + 1]) {
-                distributor_name = cleanLines[i + 1];
+                distributor_name = cleanLines[i + 1].trim();
                 break;
               }
             }
-          }
-          if (!distributor_name && cleanLines.length > 1) {
-            distributor_name = cleanLines[1];
-          }
-          if (!distributor_name) {
-            distributor_name = 'Unknown Distributor';
           }
 
           if (!invoice_date) {
@@ -2655,7 +2672,7 @@ export class EmailService {
       }
 
       // 3. Match Distributor from DB using the parsed distributor name (if not already found via email metadata)
-      if (!distributorId && distributor_name && distributor_name !== 'Unknown Distributor') {
+      if (!distributorId && distributor_name && isValidDistributorName(distributor_name)) {
         const cleanedName = distributor_name.trim().toLowerCase();
         
         let matchedDist = await db.get('SELECT * FROM distributors WHERE LOWER(name) = ?', [cleanedName]);
@@ -2673,7 +2690,7 @@ export class EmailService {
           distributorId = undefined;
         }
       } else if (!distributorId) {
-        if (distributor_name === 'Unknown Distributor') {
+        if (!isValidDistributorName(distributor_name)) {
           distributor_name = '';
         }
       }
@@ -2722,9 +2739,12 @@ export class EmailService {
       if (importData) {
         // Stage parsed attachment as a staged purchase for user verification
         const filename = path.basename(filePath);
+        const validDistName = (distributor_name && isValidDistributorName(distributor_name))
+          ? distributor_name.trim()
+          : null;
         await db.run(
           `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
-          [distributor_name || distributorName || 'Email Import', invoice_no || filename, invoice_date || new Date().toISOString(), total_amount || 0, JSON.stringify(items)]
+          [validDistName, invoice_no || filename, invoice_date ? invoice_date : null, total_amount || 0, JSON.stringify(items)]
         );
 
         // Log action
@@ -3279,10 +3299,10 @@ export class EmailService {
               parsed.date ? parsed.date.toISOString() : new Date().toISOString(),
               isSeen,
               isOrder,
-              orderInfo.distributorName,
+              orderInfo.distributorName || null,
               hasAttachments,
               orderInfo.invoiceNumber !== 'N/A' ? orderInfo.invoiceNumber : null,
-              orderInfo.distributorName !== 'Unknown Distributor' ? orderInfo.distributorName : null
+              orderInfo.distributorName || null
             ]
           );
 

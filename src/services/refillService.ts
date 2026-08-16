@@ -1,7 +1,7 @@
 import { Database } from 'sqlite';
 import { sendMessage } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
-import { getStoreMedicalName, getStoreMedicalNameAndPhone } from './storeSettingsService.js';
+import { getStoreMedicalName, getStoreMedicalNameAndPhone, getConfiguredPharmacyName, getStorePhone } from './storeSettingsService.js';
 
 export async function checkAllRefills(db: Database): Promise<void> {
   // Clean up paused refills (is_active = 0) so they don't remain marked ready or held
@@ -187,13 +187,17 @@ async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
     [invoice_no, temp_label, refill.patient_name, refill.patient_phone, 'AUTO_REFILL_BILL', cart_data]
   );
   
-  const medicalName = await getStoreMedicalNameAndPhone(db);
-  const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from ${medicalName}.`;
-  await db.run(
-    `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, needs_confirmation, reference_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ['refill_collection', refill.patient_name, refill.patient_phone, msg, 'staged', 1, String(refill.id)]
-  );
+  const configuredName = await getConfiguredPharmacyName(db);
+  if (configuredName) {
+    const storePhone = await getStorePhone(db);
+    const storeLabel = storePhone ? `${configuredName} (Ph: ${storePhone})` : configuredName;
+    const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from ${storeLabel}.`;
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, needs_confirmation, reference_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ['refill_collection', refill.patient_name, refill.patient_phone, msg, 'staged', 1, String(refill.id)]
+    );
+  }
 
   return billResult.lastID;
 }

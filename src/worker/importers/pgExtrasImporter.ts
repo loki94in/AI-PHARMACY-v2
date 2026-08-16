@@ -9,6 +9,7 @@
 import { Database } from 'sqlite';
 import { medicineMap, distributorMap, patientMap } from './pgMasterImporter.js';
 import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
+import { recordAuditEntry } from '../../utils/migrationAudit.js';
 
 // Maps for cross-referencing
 export const purchaseOrderMap = new Map<string, number>(); // legacy PO id → new id
@@ -156,17 +157,42 @@ export async function flushRefills(db: Database) {
       try {
         // Resolve patient → customer to get name and phone
         const customerId = r.patient_id ? patientMap.get(r.patient_id) : null;
-        if (!customerId) continue; // Can't create refill without patient
+        if (!customerId) {
+          await recordAuditEntry({
+            table: 'patient_refills',
+            recordIdentifier: `scheduled_order_${r.legacy_id}`,
+            entityType: 'customer',
+            action: 'skipped',
+            reason: `Mandatory customer relationship unresolved for scheduled order "${r.legacy_id}" (patient_id: "${r.patient_id || 'N/A'}") — record skipped`,
+            rawId: r.patient_id,
+          }, db);
+          try {
+            await db.run(
+              'INSERT INTO migration_errors (file_name, row_index, raw_data, error_message) VALUES (?, ?, ?, ?)',
+              ['scheduled_orders', 0, JSON.stringify(r), `Skipped scheduled order ${r.legacy_id}: Unresolved mandatory patient relationship (patient_id: ${r.patient_id})`]
+            );
+          } catch (_) {}
+          continue;
+        }
 
-        const customer = await db.get('SELECT name, phone FROM customers WHERE id = ?', [customerId]);
-        if (!customer) continue;
+        const customer = await db.get('SELECT id, name, phone FROM customers WHERE id = ?', [customerId]);
+        if (!customer) {
+          await recordAuditEntry({
+            table: 'patient_refills',
+            recordIdentifier: `scheduled_order_${r.legacy_id}`,
+            entityType: 'customer',
+            action: 'skipped',
+            reason: `Customer ID "${customerId}" not found in database for scheduled order "${r.legacy_id}" — record skipped`,
+            rawId: customerId,
+          }, db);
+          continue;
+        }
 
-        // Try to find a medicine from the title or skip if no medicine link
-        // ponytail: scheduled_item has the medicine; we handle it separately via importScheduledItem
         await db.run(
-          `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, refill_interval_days, last_refill_date, next_refill_date, status, is_active)
-           VALUES (?, ?, 0, ?, ?, ?, 'pending', ?)`,
+          `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, last_refill_date, next_refill_date, status, is_active)
+           VALUES (?, ?, ?, NULL, ?, ?, ?, 'pending', ?)`,
           [
+            customer.id,
             customer.name,
             customer.phone || '',
             r.interval_days,

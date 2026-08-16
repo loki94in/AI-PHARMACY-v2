@@ -12,7 +12,8 @@ import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import CustomerReturn from '../CustomerReturn';
 import CustomerReturnHistory from '../CustomerReturnHistory';
-import { CalendarDays, Users, History } from 'lucide-react';
+import ExpiryReturnReview from './ExpiryReturnReview';
+import { CalendarDays, Users, History, ShieldAlert } from 'lucide-react';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -158,6 +159,13 @@ const Returns: React.FC = () => {
 
   const [items, setItems] = useState<ReturnItem[]>(initialActiveTab.items || []);
   const [saving, setSaving] = useState(false);
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
+
+  useEffect(() => {
+    api.getExpiryReviews({ status: 'pending' }).then(res => {
+      if (res?.stats) setPendingReviewCount(res.stats.pendingCount || 0);
+    }).catch(() => {});
+  }, []);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
@@ -1006,6 +1014,17 @@ const Returns: React.FC = () => {
       return;
     }
 
+    const lossInput = window.prompt(
+      'Enter agreed Distributor Return Loss / Deduction % (0% to 100%, enter 0 for 100% full credit note claim):',
+      '0'
+    );
+    if (lossInput === null) return;
+    const lossPercentage = parseFloat(lossInput);
+    if (isNaN(lossPercentage) || lossPercentage < 0 || lossPercentage > 100) {
+      alert('Invalid percentage. Please enter a valid number between 0 and 100.');
+      return;
+    }
+
     setSaving(true);
     try {
       // Process each group separately (one return per distributor/invoice)
@@ -1018,7 +1037,7 @@ const Returns: React.FC = () => {
           mrp: parseFloat(item.mrp as any) || 0,
           distributor_id: group.distributor_id,
           invoice_no: group.invoice_no,
-        })));
+        })), lossPercentage);
       }
 
       alert(`Successfully processed ${grouped.length} return(s)!`);
@@ -1094,6 +1113,7 @@ const Returns: React.FC = () => {
           {[
             { id: 'returns', label: 'Supplier Returns', icon: RotateCcw, count: tabs.length },
             { id: 'expiry', label: 'Expiry Monitor', icon: CalendarDays },
+            { id: 'expiry-review', label: 'Expiry Return Review', icon: ShieldAlert, count: pendingReviewCount },
             { id: 'customer', label: 'Customer Returns', icon: Users },
             { id: 'customer-history', label: 'Return History', icon: History, count: returnHistory.length },
           ].map(t => {
@@ -1127,6 +1147,10 @@ const Returns: React.FC = () => {
       {currentTab === 'expiry' ? (
         <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-bg2/50 border border-border/60 rounded-2xl p-4">
           <Expiry />
+        </div>
+      ) : currentTab === 'expiry-review' ? (
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-bg2/50 border border-border/60 rounded-2xl p-4">
+          <ExpiryReturnReview onPendingCountChange={setPendingReviewCount} />
         </div>
       ) : currentTab === 'customer' ? (
         <div className="flex-1 flex flex-col overflow-y-auto relative min-h-0 bg-bg2/50 border border-border/60 rounded-2xl p-5 custom-scrollbar">

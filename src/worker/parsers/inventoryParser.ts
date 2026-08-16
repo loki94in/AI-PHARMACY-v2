@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3';
 import { Database } from 'sqlite';
 import { parseValues, cleanValue, normalizeDate } from '../../utils/migrationUtils.js';
+import { recordAuditEntry } from '../../utils/migrationAudit.js';
 
 /**
  * Cache for database lookups to avoid repeated queries
@@ -108,12 +109,20 @@ export async function processInventoryLine(sqlLine: string, db: Database): Promi
         if (medicineLookup) {
             medicineRecordId = medicineLookup.id;
         } else {
-            // Create the medicine record for legacy medicine_id
-            const medicineInsertResult = await db.run(
-                'INSERT INTO medicines (id, name) VALUES (?, ?)',
-                [medicineId, `LEGACY_MEDICINE_${medicineId}`]
+            // ponytail: unresolved medicine — skip and audit, never fabricate a name
+            console.warn(`Legacy medicine_id ${medicineId} not found in medicines table — inventory line skipped`);
+            await recordAuditEntry(
+                {
+                    table: 'inventory_master',
+                    recordIdentifier: `medicine_id:${medicineId}`,
+                    entityType: 'medicine',
+                    action: 'skipped',
+                    reason: `Legacy medicine_id "${medicineId}" not found in medicines master — inventory line skipped; no fake medicine or inventory created`,
+                    rawId: medicineId,
+                },
+                db
             );
-            medicineRecordId = medicineInsertResult.lastID!;
+            return false;
         }
         medicineCache.set(medicineId, medicineRecordId);
     }

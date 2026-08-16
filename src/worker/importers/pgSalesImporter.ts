@@ -8,6 +8,7 @@ import { Database } from 'sqlite';
 import { medicineMap, doctorMap, patientMap } from './pgMasterImporter.js';
 import { batchMap, legacyBatchIdToNoMap } from './pgPurchaseImporter.js';
 import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
+import { recordAuditEntry } from '../../utils/migrationAudit.js';
 
 // Maps for cross-referencing
 export const salesInvoiceMap = new Map<string, number>(); // legacy order_id → new sales_invoices.id
@@ -62,27 +63,47 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
   const status = (row['order_status'] || '').trim().toUpperCase();
   if (status && !COMPLETED_STATUSES.has(status)) return;
 
-  // Resolve patient → customer
-  const legacyPatientId = row['patient_id'];
-  const customerId = legacyPatientId ? patientMap.get(legacyPatientId) : null;
-
-  // Resolve doctor
-  const legacyDoctorId = row['doctor_id'];
-  const doctorId = legacyDoctorId ? doctorMap.get(legacyDoctorId) : null;
-
   const rawInvoice = row['invoice'] || legacyId;
   const uniqueInvoice = await ensureInvoiceNoUnique(rawInvoice, legacyId, db);
+
+  // Resolve patient → customer (strictly preserve as NULL if unresolved, never fallback to arbitrary numeric ID)
+  const legacyPatientId = row['patient_id'];
+  const customerId = (legacyPatientId && patientMap.has(legacyPatientId)) ? (patientMap.get(legacyPatientId) ?? null) : null;
+  if (legacyPatientId && customerId === null) {
+    await recordAuditEntry({
+      table: 'sales_invoices',
+      recordIdentifier: uniqueInvoice,
+      entityType: 'customer',
+      action: 'preserved_null',
+      reason: `Legacy patient_id "${legacyPatientId}" was not found in patient master — relationship preserved as NULL`,
+      rawId: legacyPatientId,
+    }, db);
+  }
+
+  // Resolve doctor (strictly preserve as NULL if unresolved, never fallback to arbitrary numeric ID)
+  const legacyDoctorId = row['doctor_id'];
+  const doctorId = (legacyDoctorId && doctorMap.has(legacyDoctorId)) ? (doctorMap.get(legacyDoctorId) ?? null) : null;
+  if (legacyDoctorId && doctorId === null) {
+    await recordAuditEntry({
+      table: 'sales_invoices',
+      recordIdentifier: uniqueInvoice,
+      entityType: 'doctor',
+      action: 'preserved_null',
+      reason: `Legacy doctor_id "${legacyDoctorId}" was not found in doctor master — relationship preserved as NULL`,
+      rawId: legacyDoctorId,
+    }, db);
+  }
 
   const total_amount = parseFloat(row['amount'] || '0') || 0;
   const discount = parseFloat(row['discount'] || '0') || 0;
 
   salesBatch.push({
     invoice_no: uniqueInvoice,
-    customer_id: customerId || null,
+    customer_id: customerId,
     date: normalizeDateOrRaw(row['created_time']),
     total_amount,
     tax_amount: parseFloat(row['net_gst_value'] || '0') || 0,
-    doctor_id: doctorId || null,
+    doctor_id: doctorId,
     payment_medium: row['payment_medium'] || null,
     roff: parseFloat(row['roff'] || '0') || 0,
     cgst_value: parseFloat(row['cgst_value'] || '0') || 0,

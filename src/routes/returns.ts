@@ -89,8 +89,17 @@ router.post('/', async (req, res) => {
     );
     
     if (type === 'purchase' && is_expiry && distributor_id) {
+      if (
+        loss_percentage === undefined ||
+        loss_percentage === null ||
+        isNaN(Number(loss_percentage)) ||
+        Number(loss_percentage) < 0 ||
+        Number(loss_percentage) > 100
+      ) {
+        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required for supplier expiry returns and cannot be assumed.' });
+      }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
-      await trackExpiryReturn(db, result.lastID as number, distributor_id as number, total_amount || 0, loss_percentage || 3.0);
+      await trackExpiryReturn(db, result.lastID as number, distributor_id as number, total_amount || 0, Number(loss_percentage));
     }
 
         res.json({ success: true, message: 'Return recorded' });
@@ -294,7 +303,7 @@ router.get('/lookup-purchases', async (req, res) => {
 router.post('/process-returns', async (req, res) => {
   let db;
   try {
-    const { items } = req.body;
+    const { items, loss_percentage } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'A non-empty list of return items is required' });
     }
@@ -336,8 +345,13 @@ router.post('/process-returns', async (req, res) => {
     const returnId = result.lastID;
     
     if (distributorId) {
+      const parsedLoss = loss_percentage !== undefined ? Number(loss_percentage) : (firstItem?.loss_percentage !== undefined ? Number(firstItem.loss_percentage) : NaN);
+      if (isNaN(parsedLoss) || parsedLoss < 0 || parsedLoss > 100) {
+        await db.run('ROLLBACK');
+        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to process supplier returns and track credit notes.' });
+      }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
-      await trackExpiryReturn(db, returnId as number, distributorId as number, totalAmount, 3.0);
+      await trackExpiryReturn(db, returnId as number, distributorId as number, totalAmount, parsedLoss);
     }
 
     for (const item of items) {
@@ -703,4 +717,504 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// EXPIRY RETURN REVIEWS (Pharmacist Approval Gate)
+// ==========================================
+
+// 1. Get list of expiry reviews with filtering and summary stats
+router.get('/expiry-reviews', async (req, res) => {
+  let db;
+  try {
+    const { status, search, date_from, date_to } = req.query;
+    db = await dbManager.getConnection();
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS expiry_return_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inventory_id INTEGER NOT NULL,
+        medicine_id INTEGER NOT NULL,
+        batch_no TEXT NOT NULL,
+        expiry_date TEXT,
+        quantity REAL NOT NULL,
+        distributor_id INTEGER,
+        distributor_name TEXT,
+        cost_price REAL DEFAULT 0,
+        mrp REAL DEFAULT 0,
+        proposed_return_amount REAL DEFAULT 0,
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at DATETIME,
+        reviewed_by TEXT,
+        return_id INTEGER,
+        notes TEXT
+      )
+    `);
+
+    let query = `
+      SELECT er.*, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size,
+             im.quantity as current_stock_qty,
+             r.return_no,
+             COALESCE(er.distributor_name, d.name, 'Unknown Distributor') as distributor_display_name
+      FROM expiry_return_reviews er
+      JOIN medicines m ON er.medicine_id = m.id
+      LEFT JOIN inventory_master im ON er.inventory_id = im.id
+      LEFT JOIN distributors d ON er.distributor_id = d.id
+      LEFT JOIN returns r ON er.return_id = r.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (status && status !== 'all') {
+      query += ` AND er.status = ?`;
+      params.push(status);
+    }
+    if (search) {
+      query += ` AND (m.name LIKE ? OR er.batch_no LIKE ? OR er.distributor_name LIKE ? OR d.name LIKE ?)`;
+      const searchParam = `%${search}%`;
+      params.push(searchParam, searchParam, searchParam, searchParam);
+    }
+    if (date_from) {
+      query += ` AND DATE(er.created_at, 'localtime') >= DATE(?)`;
+      params.push(date_from);
+    }
+    if (date_to) {
+      query += ` AND DATE(er.created_at, 'localtime') <= DATE(?)`;
+      params.push(date_to);
+    }
+
+    query += ` ORDER BY CASE WHEN er.status = 'pending' THEN 1 WHEN er.status = 'approved' THEN 2 ELSE 3 END, er.created_at DESC`;
+
+    const reviews = await db.all(query, params);
+
+    // Get summary statistics
+    const stats = await db.get<{
+      pending_count: number;
+      approved_count: number;
+      rejected_count: number;
+      pending_amount: number;
+      approved_amount: number;
+    }>(`
+      SELECT 
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_count,
+        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
+        SUM(CASE WHEN status = 'pending' THEN proposed_return_amount ELSE 0 END) as pending_amount,
+        SUM(CASE WHEN status = 'approved' THEN proposed_return_amount ELSE 0 END) as approved_amount
+      FROM expiry_return_reviews
+    `);
+
+    res.json({
+      success: true,
+      reviews,
+      stats: {
+        pendingCount: stats?.pending_count || 0,
+        approvedCount: stats?.approved_count || 0,
+        rejectedCount: stats?.rejected_count || 0,
+        pendingAmount: stats?.pending_amount || 0,
+        approvedAmount: stats?.approved_amount || 0,
+        totalCount: reviews.length
+      }
+    });
+  } catch (err: any) {
+    console.error('Error fetching expiry reviews:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 2. Trigger on-demand expiry scan to detect expired stock and populate pending reviews
+router.post('/expiry-reviews/scan', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const { scanAndCreateExpiryReviews } = await import('../services/returnsService.js');
+    const result = await scanAndCreateExpiryReviews(db);
+    res.json({
+      success: true,
+      message: `Expiry scan completed. Created ${result.pendingCreated} new review(s).`,
+      ...result
+    });
+  } catch (err: any) {
+    console.error('Error running manual expiry review scan:', err);
+    res.status(500).json({ error: 'Failed to run expiry scan' });
+  }
+});
+
+// 3. Approve a pending expiry return review (Requires explicit pharmacist action)
+router.post('/expiry-reviews/:id/approve', async (req, res) => {
+  let db;
+  try {
+    const { id } = req.params;
+    const { notes, loss_percentage } = req.body;
+    db = await dbManager.getConnection();
+
+    const review = await db.get<any>(`
+      SELECT er.*, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size
+      FROM expiry_return_reviews er
+      JOIN medicines m ON er.medicine_id = m.id
+      WHERE er.id = ?
+    `, [id]);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Expiry review item not found' });
+    }
+
+    if (review.status === 'approved') {
+      return res.status(400).json({ error: 'This return review has already been approved' });
+    }
+
+    if (
+      loss_percentage === undefined ||
+      loss_percentage === null ||
+      isNaN(Number(loss_percentage)) ||
+      Number(loss_percentage) < 0 ||
+      Number(loss_percentage) > 100
+    ) {
+      return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to approve expiry return and track expected credit note.' });
+    }
+
+    // Check inventory stock
+    const invItem = await db.get<any>(
+      'SELECT id, quantity, loose_quantity FROM inventory_master WHERE id = ?',
+      [review.inventory_id]
+    );
+
+    if (!invItem || invItem.quantity <= 0) {
+      return res.status(400).json({ error: 'Inventory stock is already zero or batch not found' });
+    }
+
+    await db.run('BEGIN TRANSACTION');
+
+    // 1. Generate return number PR-XXX
+    const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
+    let nextNum = 1;
+    if (lastRet && lastRet.return_no) {
+      const match = lastRet.return_no.match(/PR-(\d+)/);
+      if (match) {
+        nextNum = parseInt(match[1], 10) + 1;
+      } else {
+        const anyNum = lastRet.return_no.match(/\d+/);
+        if (anyNum) nextNum = parseInt(anyNum[0], 10) + 1;
+      }
+    }
+    const returnNo = `PR-${String(nextNum).padStart(3, '0')}`;
+    const totalAmount = (review.cost_price || 0) * (review.quantity || 0);
+
+    // 2. Create Master Return Record
+    const result = await db.run(
+      `INSERT INTO returns (return_no, type, total_amount, distributor_id, reason, date, return_sub_type)
+       VALUES (?, 'purchase', ?, ?, 'Approved Expiry Return', CURRENT_TIMESTAMP, 'expiry')`,
+      [returnNo, totalAmount, review.distributor_id || null]
+    );
+    const returnId = result.lastID;
+
+    // 3. Create Return Item Record
+    await db.run(
+      `INSERT INTO return_items (return_id, medicine_id, batch_no, expiry_date, quantity, cost_price, mrp, total_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        returnId,
+        review.medicine_id,
+        review.batch_no,
+        review.expiry_date,
+        review.quantity,
+        review.cost_price,
+        review.mrp,
+        totalAmount
+      ]
+    );
+
+    // 4. Decrement Inventory & Record Stock Ledger
+    const packSize = review.pack_size || 10;
+    const restored = applyStockDelta(
+      { quantity: invItem.quantity, loose_quantity: invItem.loose_quantity },
+      -Number(review.quantity),
+      0,
+      packSize
+    );
+    const newQuantity = restored.quantity < 0 ? 0 : restored.quantity;
+    const newLoose = restored.quantity < 0 ? 0 : restored.loose_quantity;
+
+    await db.run(
+      'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+      [newQuantity, newLoose, invItem.id]
+    );
+
+    const { refreshInventoryActiveStatus } = await import('../utils/inventoryActive.js');
+    await refreshInventoryActiveStatus(db, invItem.id);
+
+    await recordStockLedger(db, {
+      medicine_id: review.medicine_id,
+      batch_no: review.batch_no,
+      quantity: -Number(review.quantity),
+      loose_quantity: 0,
+      transaction_type: 'return_to_distributor',
+      transaction_id: returnId
+    });
+
+    // 5. Track Credit Note Reconciliation
+    if (review.distributor_id) {
+      if (
+        loss_percentage === undefined ||
+        loss_percentage === null ||
+        isNaN(Number(loss_percentage)) ||
+        Number(loss_percentage) < 0 ||
+        Number(loss_percentage) > 100
+      ) {
+        await db.run('ROLLBACK');
+        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to approve expiry return and calculate credit note expectation.' });
+      }
+      const { trackExpiryReturn } = await import('../services/creditNoteService.js');
+      await trackExpiryReturn(db, returnId as number, review.distributor_id, totalAmount, Number(loss_percentage));
+    }
+
+    // 6. Update Expiry Review Record Status
+    await db.run(
+      `UPDATE expiry_return_reviews
+       SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?, notes = ?
+       WHERE id = ?`,
+      [returnId, notes || review.notes || null, id]
+    );
+
+    // 7. Audit Log
+    await db.run(
+      `INSERT INTO action_logs (action_type, description, metadata)
+       VALUES (?, ?, ?)`,
+      [
+        'EXPIRY_RETURN_APPROVED',
+        `Pharmacist approved expiry return ${returnNo} for ${review.medicine_name} (Batch: ${review.batch_no}, Qty: ${review.quantity}, Amount: ₹${totalAmount.toFixed(2)})`,
+        JSON.stringify({ reviewId: id, returnId, returnNo, amount: totalAmount })
+      ]
+    );
+
+    await db.run('COMMIT');
+
+    inventoryCache.invalidate();
+
+    // Trigger debounced cache rebuild for expiry views
+    import('../services/expiryAlertService.js')
+      .then(m => m.triggerExpiryCacheRebuildDebounced([review.inventory_id]))
+      .catch(() => {});
+
+    res.json({
+      success: true,
+      message: `Return ${returnNo} approved and processed successfully`,
+      returnNo,
+      returnId
+    });
+  } catch (err: any) {
+    if (db) await db.run('ROLLBACK');
+    console.error('Error approving expiry review:', err);
+    res.status(500).json({ error: err.message || 'Failed to approve return review' });
+  }
+});
+
+// 4. Reject a pending expiry return review (Leaves inventory untouched)
+router.post('/expiry-reviews/:id/reject', async (req, res) => {
+  let db;
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    db = await dbManager.getConnection();
+
+    const review = await db.get<any>(`
+      SELECT er.*, m.name as medicine_name
+      FROM expiry_return_reviews er
+      JOIN medicines m ON er.medicine_id = m.id
+      WHERE er.id = ?
+    `, [id]);
+
+    if (!review) {
+      return res.status(404).json({ error: 'Expiry review item not found' });
+    }
+
+    await db.run(
+      `UPDATE expiry_return_reviews
+       SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', notes = ?
+       WHERE id = ?`,
+      [notes || 'Rejected by pharmacist', id]
+    );
+
+    // Audit log
+    await db.run(
+      `INSERT INTO action_logs (action_type, description, metadata)
+       VALUES (?, ?, ?)`,
+      [
+        'EXPIRY_RETURN_REJECTED',
+        `Pharmacist rejected proposed expiry return for ${review.medicine_name} (Batch: ${review.batch_no}, Qty: ${review.quantity})`,
+        JSON.stringify({ reviewId: id, notes: notes || 'Rejected by pharmacist' })
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: 'Expiry return proposal rejected. Inventory remains untouched.'
+    });
+  } catch (err: any) {
+    console.error('Error rejecting expiry review:', err);
+    res.status(500).json({ error: 'Failed to reject expiry review' });
+  }
+});
+
+// 5. Bulk approve multiple pending expiry reviews
+router.post('/expiry-reviews/bulk-approve', async (req, res) => {
+  let db;
+  try {
+    const { ids, loss_percentage } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Review IDs array is required' });
+    }
+    if (
+      loss_percentage === undefined ||
+      loss_percentage === null ||
+      isNaN(Number(loss_percentage)) ||
+      Number(loss_percentage) < 0 ||
+      Number(loss_percentage) > 100
+    ) {
+      return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required for bulk approval and credit note tracking.' });
+    }
+
+    db = await dbManager.getConnection();
+    const approvedReturnNos: string[] = [];
+
+    await db.run('BEGIN TRANSACTION');
+
+    const { refreshInventoryActiveStatus } = await import('../utils/inventoryActive.js');
+    const { trackExpiryReturn } = await import('../services/creditNoteService.js');
+
+    for (const reviewId of ids) {
+      const review = await db.get<any>(`
+        SELECT er.*, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size
+        FROM expiry_return_reviews er
+        JOIN medicines m ON er.medicine_id = m.id
+        WHERE er.id = ? AND er.status = 'pending'
+      `, [reviewId]);
+
+      if (!review) continue;
+
+      const invItem = await db.get<any>(
+        'SELECT id, quantity, loose_quantity FROM inventory_master WHERE id = ?',
+        [review.inventory_id]
+      );
+
+      if (!invItem || invItem.quantity <= 0) continue;
+
+      const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
+      let nextNum = 1;
+      if (lastRet && lastRet.return_no) {
+        const match = lastRet.return_no.match(/PR-(\d+)/);
+        if (match) {
+          nextNum = parseInt(match[1], 10) + 1;
+        } else {
+          const anyNum = lastRet.return_no.match(/\d+/);
+          if (anyNum) nextNum = parseInt(anyNum[0], 10) + 1;
+        }
+      }
+      const returnNo = `PR-${String(nextNum).padStart(3, '0')}`;
+      const totalAmount = (review.cost_price || 0) * (review.quantity || 0);
+
+      const result = await db.run(
+        `INSERT INTO returns (return_no, type, total_amount, distributor_id, reason, date, return_sub_type)
+         VALUES (?, 'purchase', ?, ?, 'Approved Expiry Return', CURRENT_TIMESTAMP, 'expiry')`,
+        [returnNo, totalAmount, review.distributor_id || null]
+      );
+      const returnId = result.lastID;
+
+      await db.run(
+        `INSERT INTO return_items (return_id, medicine_id, batch_no, expiry_date, quantity, cost_price, mrp, total_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          returnId,
+          review.medicine_id,
+          review.batch_no,
+          review.expiry_date,
+          review.quantity,
+          review.cost_price,
+          review.mrp,
+          totalAmount
+        ]
+      );
+
+      const packSize = review.pack_size || 10;
+      const restored = applyStockDelta(
+        { quantity: invItem.quantity, loose_quantity: invItem.loose_quantity },
+        -Number(review.quantity),
+        0,
+        packSize
+      );
+      const newQuantity = restored.quantity < 0 ? 0 : restored.quantity;
+      const newLoose = restored.quantity < 0 ? 0 : restored.loose_quantity;
+
+      await db.run(
+        'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
+        [newQuantity, newLoose, invItem.id]
+      );
+
+      await refreshInventoryActiveStatus(db, invItem.id);
+
+      await recordStockLedger(db, {
+        medicine_id: review.medicine_id,
+        batch_no: review.batch_no,
+        quantity: -Number(review.quantity),
+        loose_quantity: 0,
+        transaction_type: 'return_to_distributor',
+        transaction_id: returnId
+      });
+
+      if (review.distributor_id) {
+        await trackExpiryReturn(db, returnId as number, review.distributor_id, totalAmount, Number(loss_percentage));
+      }
+
+      await db.run(
+        `UPDATE expiry_return_reviews
+         SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?
+         WHERE id = ?`,
+        [returnId, reviewId]
+      );
+
+      await db.run(
+        `INSERT INTO action_logs (action_type, description, metadata)
+         VALUES (?, ?, ?)`,
+        [
+          'EXPIRY_RETURN_APPROVED',
+          `Pharmacist bulk approved expiry return ${returnNo} for ${review.medicine_name} (Batch: ${review.batch_no}, Qty: ${review.quantity}, Amount: ₹${totalAmount.toFixed(2)})`,
+          JSON.stringify({ reviewId, returnId, returnNo, amount: totalAmount })
+        ]
+      );
+
+      approvedReturnNos.push(returnNo);
+    }
+
+    await db.run('COMMIT');
+    inventoryCache.invalidate();
+
+    res.json({
+      success: true,
+      message: `Bulk approved ${approvedReturnNos.length} expiry returns.`,
+      approvedCount: approvedReturnNos.length,
+      returnNos: approvedReturnNos
+    });
+  } catch (err: any) {
+    if (db) await db.run('ROLLBACK');
+    console.error('Error bulk approving expiry reviews:', err);
+    res.status(500).json({ error: 'Failed to bulk approve expiry reviews' });
+  }
+});
+
+// 6. Get Audit History for Expiry Returns
+router.get('/expiry-reviews/audit-history', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const logs = await db.all(`
+      SELECT * FROM action_logs 
+      WHERE action_type IN ('EXPIRY_REVIEW_PENDING', 'EXPIRY_RETURN_APPROVED', 'EXPIRY_RETURN_REJECTED', 'EXPIRY_ALERT_SENT')
+      ORDER BY created_at DESC 
+      LIMIT 100
+    `);
+    res.json({ success: true, logs });
+  } catch (err: any) {
+    console.error('Error fetching expiry audit history:', err);
+    res.status(500).json({ error: 'Failed to fetch audit history' });
+  }
+});
+
 export default router;
+

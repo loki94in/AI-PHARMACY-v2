@@ -34,8 +34,23 @@ describe('migrationDistributorHelpers', () => {
 
   it('creates a new distributor when no normalized match exists', async () => {
     const created = await findOrCreateDistributor(db, 'Acme Medical Agency');
-    expect(created.id).toBeGreaterThan(0);
-    const row = await db.get('SELECT name FROM distributors WHERE id = ?', [created.id]);
+    expect(created).not.toBeNull();
+    expect(created!.id).toBeGreaterThan(0);
+    const row = await db.get('SELECT name FROM distributors WHERE id = ?', [created!.id]);
     expect(row.name).toBe('Acme Medical Agency');
+  });
+
+  it('returns null and does not insert rows for placeholder or invalid distributor names', async () => {
+    const res1 = await findOrCreateDistributor(db, 'Unknown Supplier');
+    expect(res1).toBeNull();
+
+    const res2 = await findOrCreateDistributor(db, '');
+    expect(res2).toBeNull();
+
+    const res3 = await findOrCreateDistributor(db, 'Default');
+    expect(res3).toBeNull();
+
+    const count = await db.get('SELECT COUNT(*) as cnt FROM distributors');
+    expect(count.cnt).toBe(0);
   });
 });

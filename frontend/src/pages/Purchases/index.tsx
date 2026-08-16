@@ -1496,7 +1496,7 @@ const Purchases: React.FC = () => {
       if (editPurchaseId) setEditPurchaseId(editPurchaseId);
       if (distributor_id) setSelectedDistributor(distributor_id);
       if (prefInvoiceNo) setInvoiceNo(prefInvoiceNo);
-      if (prefDate) setInvoiceDate(prefDate);
+      if (prefDate !== undefined) setInvoiceDate(prefDate || '');
       if (prefCnAmount !== undefined) setCnAmount(prefCnAmount);
       if (prefCnNumber !== undefined) setCnNumber(prefCnNumber);
       if (prefReconcileExpiryReturnId !== undefined) setReconcileExpiryReturnId(prefReconcileExpiryReturnId);
@@ -1879,7 +1879,15 @@ const Purchases: React.FC = () => {
     }
 
     if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
-      distNameToSave = 'Default Distributor';
+      toastEvent.trigger('Distributor is required. Please select or enter a legitimate distributor.', 'error', '/purchases');
+      alert('Distributor is required. Please select or enter a legitimate distributor.');
+      return;
+    }
+
+    if (distNameToSave.trim().toLowerCase() === 'default distributor' || distNameToSave.trim().toLowerCase() === 'unknown distributor') {
+      toastEvent.trigger('Distributor is required. Please select or enter a legitimate distributor.', 'error', '/purchases');
+      alert('Distributor is required. Please select or enter a legitimate distributor.');
+      return;
     }
 
     let finalInvoiceNo = (invoiceNo || '').trim();
@@ -1901,6 +1909,25 @@ const Purchases: React.FC = () => {
       return;
     }
 
+    // Strict validation: Every valid item must have legitimate MRP > 0
+    for (let i = 0; i < validItems.length; i++) {
+      const item = validItems[i];
+      const name = item.medicine_name || item.name || item.medicine || `Item #${i + 1}`;
+      const mrpNum = parseFloat(String(item.mrp || 0));
+      if (isNaN(mrpNum) || mrpNum <= 0) {
+        toastEvent.trigger(`MRP is required for "${name}". Please enter the actual MRP from invoice before saving.`, 'error', '/purchases');
+        alert(`MRP is required for "${name}". Please enter the actual MRP from invoice before saving.`);
+        return;
+      }
+    }
+
+    const cleanInvoiceDate = (invoiceDate || '').trim();
+    if (!cleanInvoiceDate) {
+      toastEvent.trigger('Invoice date is required. Please enter or verify the actual invoice date before saving.', 'error', '/purchases');
+      alert('Invoice date is required. Please enter or verify the actual invoice date before saving.');
+      return;
+    }
+
     setSaving(true);
     savingStartedAtRef.current = Date.now();
     // Safety net: auto-reset after 35s no matter what
@@ -1912,7 +1939,7 @@ const Purchases: React.FC = () => {
         distributor_id: distIdToSave,
         distributor: distNameToSave,
         invoice_no: finalInvoiceNo,
-        date: invoiceDate || getTodayString(),
+        date: cleanInvoiceDate,
         cd_per: parseFloat(String(globalCdPer || 0)) || 0,
         cn_amount: parseFloat(String(cnAmount || 0)) || 0,
         cn_number: cnNumber,
@@ -2132,6 +2159,8 @@ const Purchases: React.FC = () => {
 
       if (response.data.invoice_date) {
         setInvoiceDate(response.data.invoice_date);
+      } else {
+        setInvoiceDate('');
       }
 
       if (response.data.global_cd_per !== undefined) {
@@ -2396,7 +2425,20 @@ const Purchases: React.FC = () => {
         <div className="flex flex-wrap items-end gap-3">
           {/* Distributor */}
           <div className="flex-1 min-w-[280px] max-w-sm">
-            <label className="block text-sm font-medium text-gray-300 mb-1">Distributor *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-gray-300">
+                Distributor <span className="text-rose-400 font-bold">*</span>
+              </label>
+              {(!selectedDistributor && !distributorSearch.trim()) ? (
+                <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                  ⚠️ Required
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                  ✓ Valid
+                </span>
+              )}
+            </div>
             <div className="flex gap-1">
               <div className="flex-1 min-w-0 relative">
                 <input
@@ -2412,7 +2454,11 @@ const Purchases: React.FC = () => {
                   onFocus={() => setShowDistributorDropdown(true)}
                   onClick={() => setShowDistributorDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDistributorDropdown(false), 200)}
-                  className="w-full bg-bg3 border border-glass-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 focus:ring-sky"
+                  className={`w-full bg-bg3 border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 transition-all ${
+                    (!selectedDistributor && !distributorSearch.trim())
+                      ? 'border-rose-500/40 focus:ring-rose-500'
+                      : 'border-glass-border focus:ring-sky'
+                  }`}
                   placeholder="Type to search distributor..."
                 />
                 {showDistributorDropdown && (
@@ -2549,13 +2595,23 @@ const Purchases: React.FC = () => {
 
           {/* Date */}
           <div className="w-36">
-            <label className="block text-sm font-medium text-gray-300 mb-1">Date</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-300">Date <span className="text-red-400">*</span></label>
+              {!invoiceDate && (
+                <span className="text-[10px] text-amber-400 font-bold">Required</span>
+              )}
+            </div>
             <input
               type="date"
               value={toDateInputValue(invoiceDate)}
               onChange={(e) => setInvoiceDate(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={`w-full bg-white/10 border rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                !invoiceDate ? 'border-amber-500/80 bg-amber-500/10 ring-1 ring-amber-500/50' : 'border-white/20'
+              }`}
             />
+            {!invoiceDate && (
+              <p className="text-[10px] text-amber-400 mt-1">⚠️ Missing invoice date</p>
+            )}
           </div>
 
           {/* Global CD % */}
@@ -3032,15 +3088,26 @@ const Purchases: React.FC = () => {
                     onMouseEnter={() => setHoveredPriceRow(item.id)}
                     onMouseLeave={() => setHoveredPriceRow(null)}
                   >
-                    <input
-                      type="number"
-                      data-row-index={index}
-                      data-field="mrp"
-                      value={item.mrp}
-                      onChange={(e) => updateItem(index, 'mrp', e.target.value)}
-                      onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
-                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm text-right h-8"
-                    />
+                    {(() => {
+                      const isMrpMissing = (item.medicine_name || item.qty) && (!item.mrp || parseFloat(String(item.mrp || 0)) <= 0);
+                      return (
+                        <input
+                          type="number"
+                          data-row-index={index}
+                          data-field="mrp"
+                          value={item.mrp}
+                          placeholder={isMrpMissing ? "Req. MRP" : ""}
+                          onChange={(e) => updateItem(index, 'mrp', e.target.value)}
+                          onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
+                          className={`w-20 rounded px-1.5 py-1 text-white text-sm text-right h-8 transition-colors ${
+                            isMrpMissing 
+                              ? 'border-2 border-amber-400/90 bg-amber-500/10 placeholder-amber-400/70' 
+                              : 'bg-white/10 border border-white/20'
+                          }`}
+                          title={isMrpMissing ? `MRP is required for "${item.medicine_name || 'this item'}"` : 'MRP'}
+                        />
+                      );
+                    })()}
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
                         <div className="bg-gray-900 border border-purple-500 rounded-lg p-2 shadow-xl">
@@ -3236,6 +3303,11 @@ const Purchases: React.FC = () => {
                 {generatingProductBarcode ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
                 <span>Print Product Barcodes</span>
               </button>
+            )}
+            {(!selectedDistributor && !distributorSearch.trim()) && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 px-3 py-2 rounded-xl border border-rose-500/20 shadow-sm">
+                <span>⚠️ Distributor required to save</span>
+              </div>
             )}
             <button
               onClick={savePurchase}

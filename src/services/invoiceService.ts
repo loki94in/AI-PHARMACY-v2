@@ -217,23 +217,35 @@ export class InvoiceService {
         `, [invId]);
 
         if (medData && medData.schedule_type && ['H', 'H1', 'X'].includes(medData.schedule_type.toUpperCase())) {
-          let doctorName = 'Self/Walk-in';
+          let doctorName: string | null = null;
+          let licenseNo: string | null = null;
+
           if (data.doctorId) {
-            const doc = await db.get('SELECT name FROM doctors WHERE id = ?', [data.doctorId]);
-            if (doc) doctorName = doc.name;
+            const doc = await db.get('SELECT name, reg_no FROM doctors WHERE id = ?', [data.doctorId]);
+            if (doc) {
+              doctorName = doc.name;
+              // Use the verified registration number; NULL if not yet recorded
+              licenseNo = doc.reg_no && doc.reg_no.trim() ? doc.reg_no.trim() : null;
+            }
           }
+
+          // missing_license = 1 flags records where the prescriber or their registration
+          // is absent so the Compliance page can surface them for user review.
+          const missingLicense = !doctorName || !licenseNo ? 1 : 0;
+
           await db.run(
-            `INSERT INTO compliance_logs 
-            (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type)
-            VALUES (CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO compliance_logs
+            (date, drug_name, patient_name, doctor_name, license_no, qty, bill_no, schedule_type, missing_license)
+            VALUES (CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              medData.name, 
+              medData.name,
               data.patientName || 'Walk-in',
-              doctorName,
-              'REG-NA', // Default license or could be pulled from doctor
+              doctorName,       // NULL when no doctor recorded
+              licenseNo,        // NULL when no verified registration — never a fake value
               item.quantity,
               invoiceNo,
-              medData.schedule_type.toUpperCase()
+              medData.schedule_type.toUpperCase(),
+              missingLicense
             ]
           );
         }

@@ -40,6 +40,14 @@ let cachedExpiryItems: ExpiryItem[] | null = null;
 const Expiry = () => {
   const navigate = useNavigate();
   const todayStr = getTodayString();
+  const [pendingReviewsCount, setPendingReviewsCount] = useState(0);
+
+  useEffect(() => {
+    api.getExpiryReviews({ status: 'pending' }).then(res => {
+      if (res?.stats) setPendingReviewsCount(res.stats.pendingCount || 0);
+    }).catch(() => {});
+  }, []);
+
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'expiry-date-range',
     defaultFrom: getNDaysAgoString(365), // Default to 1 year ago to show expired medicines
@@ -234,6 +242,29 @@ const Expiry = () => {
 
   return (
     <div className="h-full flex flex-col fade-in gap-3">
+      {/* Pending Expiry Returns Alert Banner */}
+      {pendingReviewsCount > 0 && (
+        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm shrink-0">
+          <div className="flex items-center gap-2.5 text-xs">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-500 shrink-0">
+              <AlertTriangle size={16} />
+            </div>
+            <div>
+              <span className="text-text font-bold">
+                {pendingReviewsCount} expired stock batch{pendingReviewsCount > 1 ? 'es' : ''} detected & awaiting pharmacist approval.
+              </span>
+              <p className="text-muted text-[11px] font-medium">Inventory is preserved until explicitly approved in Expiry Return Review.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/returns?tab=expiry-review')}
+            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-bg font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm"
+          >
+            <span>Open Review Hub</span>
+            <RotateCcw size={12} />
+          </button>
+        </div>
+      )}
 
       {/* Selection action bar — only visible when items are selected */}
       {selectedIds.size > 0 && (

@@ -92,6 +92,32 @@ export function isValidDistributorName(name: string | null | undefined): boolean
   const trimmed = String(name).trim();
   if (!trimmed || trimmed.length < 2) return false;
 
+  // 0. Filter out placeholder / fallback distributor names
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'default distributor' ||
+    lower === 'unknown distributor' ||
+    lower === 'unknown dist.' ||
+    lower === 'unknown supplier' ||
+    lower === 'email import' ||
+    lower === 'telegram import' ||
+    lower === 'ocr import' ||
+    lower === 'whatsapp import' ||
+    lower === 'csv import' ||
+    lower === 'excel import' ||
+    lower === 'mobile import' ||
+    lower === 'import' ||
+    lower === 'unassigned' ||
+    lower === 'default' ||
+    lower === 'undefined' ||
+    lower === 'null' ||
+    lower === 'n/a' ||
+    lower === 'na' ||
+    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)?\s*import$/i.test(trimmed)
+  ) {
+    return false;
+  }
+
   // 1. Filter out emails (e.g. ctinvoice@gmail.com)
   if (trimmed.includes('@') || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return false;
@@ -134,3 +160,97 @@ export function sanitizeDistributorName(name: string | null | undefined): string
   if (!isValidDistributorName(trimmed)) return '';
   return trimmed;
 }
+
+/**
+ * Validates if a string is a legitimate customer / patient name.
+ * Rejects empty strings, placeholders, and dummy default values.
+ */
+export function isValidCustomerName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (!trimmed || trimmed.length < 2) return false;
+
+  const lower = trimmed.toLowerCase();
+  const placeholders = [
+    'walk-in customer',
+    'walk in customer',
+    'walk-in',
+    'walk in',
+    'walk-in patient',
+    'walk in patient',
+    'walkin',
+    'unnamed customer',
+    'unnamed patient',
+    'unnamed',
+    'customer',
+    'patient',
+    'self',
+    'unknown customer',
+    'unknown patient',
+    'unknown',
+    'default customer',
+    'default',
+    'n/a',
+    'na',
+    'none',
+    'null',
+    '-',
+    '.'
+  ];
+
+  if (placeholders.includes(lower)) {
+    return false;
+  }
+
+  // Reject pure numeric strings
+  if (/^\d+$/.test(trimmed)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validates if a string is a legitimate doctor name.
+ * Rejects empty strings, placeholders, and dummy default values.
+ */
+export function isValidDoctorName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (!trimmed || trimmed.length < 2) return false;
+
+  const lower = trimmed.toLowerCase();
+  const placeholders = [
+    'self',
+    'doctor',
+    'dr',
+    'dr.',
+    'dr .',
+    'doctor .',
+    'unknown doctor',
+    'unknown doc',
+    'unknown',
+    'general doctor',
+    'general',
+    'default doctor',
+    'default',
+    'n/a',
+    'na',
+    'none',
+    'null',
+    '-',
+    '.'
+  ];
+
+  if (placeholders.includes(lower)) {
+    return false;
+  }
+
+  // Reject pure numeric strings
+  if (/^\d+$/.test(trimmed)) {
+    return false;
+  }
+
+  return true;
+}
+

@@ -52,6 +52,7 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
         source TEXT
       )
     `);
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('shop_name', 'LifeCare Pharmacy')");
     await db.close();
 
     mockSendMessage = (await import('../src/whatsappClient.js')).sendMessage;

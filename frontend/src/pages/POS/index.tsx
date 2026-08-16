@@ -1919,7 +1919,8 @@ const POS = () => {
         manufacturer: sug.manufacturer
       });
       
-      toastEvent.trigger(`"${newMed.name}" added to master database. Please record a purchase invoice with batch & price before billing.`, "info");
+      const addedName = res?.medicine?.name || sug.name;
+      toastEvent.trigger(`"${addedName}" added to master database. Please record a purchase invoice with batch & price before billing.`, "info");
       
       setSearchTerm('');
       setOnlineResults([]);

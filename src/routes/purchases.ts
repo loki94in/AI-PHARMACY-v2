@@ -22,6 +22,8 @@ import fs from 'fs';
 import { medicineService } from '../services/medicineService.js';
 import { OrderFulfillmentService } from '../services/orderFulfillmentService.js';
 import { getSummaryCache, rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '../services/summaryCacheService.js';
+import { isValidDistributorName } from '../utils/nameNormalizer.js';
+import { extractDateFromText } from '../utils/dateExtractor.js';
 
 
 
@@ -174,11 +176,8 @@ function parseTextInvoice(text: string, filename: string) {
       }
     }
   }
-  if (!distributorName && cleanLines.length > 1) {
-    distributorName = cleanLines[1];
-  }
   if (!distributorName) {
-    distributorName = 'Unknown Distributor';
+    distributorName = '';
   }
 
   for (let i = 0; i < cleanLines.length; i++) {
@@ -288,7 +287,7 @@ function parseTextInvoice(text: string, filename: string) {
           name: match[1].trim(),
           quantity: parseInt(match[2], 10),
           price: parseFloat(match[3]),
-          mrp: parseFloat(match[3]),
+          mrp: 0,
           batch_no: '',
           expiry_date: '',
           hsn_code: '',
@@ -317,7 +316,7 @@ function parseTextInvoice(text: string, filename: string) {
                 name: namePart,
                 quantity: qtyVal,
                 price: priceVal,
-                mrp: priceVal,
+                mrp: 0,
                 batch_no: '',
                 expiry_date: '',
                 hsn_code: '',
@@ -373,7 +372,7 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
     const text = fileBuffer.toString('utf8');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     
-    let distributorName = 'Unknown Distributor';
+    let distributorName = '';
     let invoiceNo = '';
     let invoiceDate = '';
     let total_amount = 0;
@@ -822,8 +821,9 @@ router.post('/manual', async (req, res) => {
     db = await dbManager.getConnection();
 
     // 1. Resolve distributor info before opening transaction
-    let distId = distributor_id;
-    let distName = distributor;
+    let distId = distributor_id ? parseInt(String(distributor_id), 10) : null;
+    if (isNaN(distId as any)) distId = null;
+    let distName = typeof distributor === 'string' ? distributor.trim() : '';
 
     if (distId) {
       const dbDist = await db.get('SELECT name FROM distributors WHERE id = ?', [distId]);
@@ -835,8 +835,40 @@ router.post('/manual', async (req, res) => {
     }
 
     if (!distId && distName) {
-      const dbDist = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [distName.trim()]);
+      const dbDist = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [distName]);
       if (dbDist) distId = dbDist.id;
+    }
+
+    // STRICT VALIDATION: Distributor is required. Never auto-create "Default Distributor" or placeholder
+    if (!distId && !distName) {
+      return res.status(400).json({ error: 'Distributor is required.' });
+    }
+    if (!distId && !isValidDistributorName(distName)) {
+      return res.status(400).json({ error: 'Distributor is required. Please select or enter a legitimate distributor.' });
+    }
+
+    // STRICT VALIDATION: Require valid items and non-zero legitimate MRP
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Please add at least one medicine item.' });
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemName = item.medicine || item.medicine_name || item.name || `Item #${i + 1}`;
+      const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
+      const rawFreeQty = parseFloat(item.free_qty !== undefined ? item.free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
+      const totalQty = rawQty + rawFreeQty;
+      if (totalQty <= 0) {
+        return res.status(400).json({ error: `Quantity must be greater than 0 for "${itemName}".` });
+      }
+      const rawMrp = parseFloat(item.mrp);
+      if (isNaN(rawMrp) || rawMrp <= 0) {
+        return res.status(400).json({ error: `Item "${itemName}" requires a valid MRP (> 0). MRP must come from legitimate purchase/invoice data or explicit user input.` });
+      }
+      const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price);
+      if (isNaN(rawRate) || rawRate < 0) {
+        return res.status(400).json({ error: `Valid purchase rate is required for "${itemName}".` });
+      }
     }
 
     // Check for duplicate invoice BEFORE starting transaction (eliminates Risk 1: rollback-redirect)
@@ -846,7 +878,7 @@ router.post('/manual', async (req, res) => {
          LEFT JOIN distributors d ON p.distributor_id = d.id
          WHERE (p.distributor_id = ? OR (d.name IS NOT NULL AND LOWER(d.name) = LOWER(?))) 
          AND LOWER(TRIM(p.invoice_no)) = LOWER(TRIM(?))`,
-        [distId || 0, distName || '', invoice_no.trim()]
+        [distId || 0, distName, invoice_no.trim()]
       );
       if (existing) {
         return handleUpdatePurchaseFull(req, res, existing.id);
@@ -856,13 +888,6 @@ router.post('/manual', async (req, res) => {
     await db.run('BEGIN TRANSACTION');
 
     if (!distId && distName) {
-      await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
-      const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
-      if (dbDist) distId = dbDist.id;
-    }
-
-    if (!distId && !distName) {
-      distName = 'Default Distributor';
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
       const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
       if (dbDist) distId = dbDist.id;
@@ -960,7 +985,7 @@ router.post('/manual', async (req, res) => {
       const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       const rawFreeQty = parseFloat(free_qty !== undefined ? free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
       const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price) || 0;
-      const rawMrp = parseFloat(item.mrp !== undefined ? item.mrp : item.price) || (rawRate > 0 ? rawRate : 0);
+      const rawMrp = parseFloat(item.mrp) || 0;
       const rawSellPrice = (item.sell_price !== undefined && item.sell_price !== null && item.sell_price !== '' && !isNaN(Number(item.sell_price))) ? parseFloat(item.sell_price) : (rawMrp > 0 ? rawMrp : null);
       const rawCgst = parseFloat(item.cgst !== undefined ? item.cgst : (item.cgst_per !== undefined ? item.cgst_per : 0)) || 0;
       const rawSgst = parseFloat(item.sgst !== undefined ? item.sgst : (item.sgst_per !== undefined ? item.sgst_per : 0)) || 0;
@@ -997,9 +1022,9 @@ router.post('/manual', async (req, res) => {
           medId = resObj.medicineId;
         } else {
           // Check OCR corrections mapping
-          const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
-          if (ocrRow?.target_name) {
-            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
+          const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [cleanName]).catch(() => null);
+          if (ocrRow?.correct) {
+            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.correct.trim()]);
             if (targetMed?.id) medId = targetMed.id;
           }
           // Auto-create new medicine if no existing match exists
@@ -1250,6 +1275,56 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
   let db;
   try {
     db = await dbManager.getConnection();
+
+    let distId = distributor_id ? parseInt(String(distributor_id), 10) : null;
+    if (isNaN(distId as any)) distId = null;
+    let distName = typeof distributor === 'string' ? distributor.trim() : '';
+
+    if (distId) {
+      const dbDist = await db.get('SELECT name FROM distributors WHERE id = ?', [distId]);
+      if (dbDist) {
+        distName = dbDist.name;
+      } else {
+        distId = null;
+      }
+    }
+
+    if (!distId && distName) {
+      const dbDist = await db.get('SELECT id FROM distributors WHERE LOWER(name) = LOWER(?)', [distName]);
+      if (dbDist) distId = dbDist.id;
+    }
+
+    if (!distId && !distName) {
+      return res.status(400).json({ error: 'Distributor is required.' });
+    }
+    if (!distId && !isValidDistributorName(distName)) {
+      return res.status(400).json({ error: 'Distributor is required. Please select or enter a legitimate distributor.' });
+    }
+
+    // STRICT VALIDATION: Require valid items and non-zero legitimate MRP
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Please add at least one medicine item.' });
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemName = item.medicine || item.medicine_name || item.name || `Item #${i + 1}`;
+      const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
+      const rawFreeQty = parseFloat(item.free_qty !== undefined ? item.free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
+      const totalQty = rawQty + rawFreeQty;
+      if (totalQty <= 0) {
+        return res.status(400).json({ error: `Quantity must be greater than 0 for "${itemName}".` });
+      }
+      const rawMrp = parseFloat(item.mrp);
+      if (isNaN(rawMrp) || rawMrp <= 0) {
+        return res.status(400).json({ error: `Item "${itemName}" requires a valid MRP (> 0). MRP must come from legitimate purchase/invoice data or explicit user input.` });
+      }
+      const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price);
+      if (isNaN(rawRate) || rawRate < 0) {
+        return res.status(400).json({ error: `Valid purchase rate is required for "${itemName}".` });
+      }
+    }
+
     await db.run('BEGIN TRANSACTION');
 
     // 1. Revert old items from inventory
@@ -1276,8 +1351,12 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [id]);
 
     // 2. Handle distributor
-    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distributor]);
-    const distRow = await db.get('SELECT id FROM distributors WHERE name = ?', [distributor]);
+    if (!distId && distName) {
+      await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
+      const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
+      if (dbDist) distId = dbDist.id;
+    }
+    const distRow = { id: distId, name: distName };
 
     if (distRow && invoice_no) {
       const existing = await db.get(
@@ -1369,6 +1448,7 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       const rawQty = parseFloat(item.qty !== undefined ? item.qty : item.quantity) || 0;
       const rawFreeQty = parseFloat(free_qty !== undefined ? free_qty : (item.free_quantity !== undefined ? item.free_quantity : 0)) || 0;
       const rawRate = parseFloat(item.rate !== undefined ? item.rate : item.price) || 0;
+      const rawMrp = parseFloat(item.mrp) || 0;
       const rawCgst = parseFloat(item.cgst !== undefined ? item.cgst : (item.cgst_per !== undefined ? item.cgst_per : 0)) || 0;
       const rawSgst = parseFloat(item.sgst !== undefined ? item.sgst : (item.sgst_per !== undefined ? item.sgst_per : 0)) || 0;
       const rawDiscPer = parseFloat(item.discPer !== undefined ? item.discPer : (item.cd_per !== undefined ? item.cd_per : 0)) || 0;
@@ -1396,9 +1476,9 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
           if (aliasRow?.medicine_id) {
             medId = aliasRow.medicine_id;
           } else {
-            const ocrRow = await db.get('SELECT target_name FROM ocr_corrections WHERE LOWER(raw_ocr_text) = LOWER(?)', [cleanName]);
-            if (ocrRow?.target_name) {
-              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.target_name.trim()]);
+            const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [cleanName]).catch(() => null);
+            if (ocrRow?.correct) {
+              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.correct.trim()]);
               if (targetMed?.id) medId = targetMed.id;
             }
             if (!medId && cleanName.length >= 4) {
@@ -1427,7 +1507,7 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
         INSERT INTO purchase_items 
         (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, mrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+      `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
 
       // Fetch current sell_price for saved_items
       const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
@@ -1436,7 +1516,7 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
         name: medName,
         medicine_name: medName,
         rate: rawRate,
-        mrp: mrp || 0,
+        mrp: rawMrp || 0,
         sell_price: medRow?.sell_price ?? null
       });
 
@@ -1449,18 +1529,18 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       );
       if (invRow) {
         await db.run('UPDATE inventory_master SET quantity = quantity + ?, cost_price = ?, mrp = COALESCE(NULLIF(?, 0), mrp), expiry_date = COALESCE(?, expiry_date) WHERE id = ?', 
-          [totalQty, rawRate, mrp || 0, rawExpiry || null, invRow.id]);
+          [totalQty, rawRate, rawMrp || 0, rawExpiry || null, invRow.id]);
         await refreshInventoryActiveStatus(db, invRow.id);
       } else {
         await db.run(`
           INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, cost_price, mrp, is_active)
           VALUES (?, ?, ?, ?, ?, ?, 1)
-        `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, mrp || 0]);
+        `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, rawMrp || 0]);
         await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
 
-      if (mrp && mrp > 0) {
-        await db.run('UPDATE medicines SET mrp = ?, rate = ? WHERE id = ?', [mrp, rawRate, medId]);
+      if (rawMrp && rawMrp > 0) {
+        await db.run('UPDATE medicines SET mrp = ?, rate = ? WHERE id = ?', [rawMrp, rawRate, medId]);
       }
     }
 
@@ -1499,18 +1579,21 @@ router.put('/:id', async (req, res) => {
   const { distributor, invoice_no, total_amount, date } = req.body;
   try {
     const db = await dbManager.getConnection();
-    // Upsert distributor name → get its id
-    if (distributor) {
-      await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distributor]);
+    const cleanDist = (distributor || '').trim();
+    if (!cleanDist || !isValidDistributorName(cleanDist)) {
+      return res.status(400).json({ error: 'Distributor is required.' });
     }
-    const distRow = distributor
-      ? await db.get('SELECT id FROM distributors WHERE name = ?', [distributor])
-      : null;
+    // Upsert distributor name → get its id
+    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [cleanDist]);
+    const distRow = await db.get('SELECT id FROM distributors WHERE name = ?', [cleanDist]);
+    if (!distRow) {
+      return res.status(400).json({ error: 'Failed to resolve distributor.' });
+    }
     await db.run(
       'UPDATE purchases SET distributor_id = ?, invoice_no = ?, total_amount = ?, date = ? WHERE id = ?',
-      [distRow ? distRow.id : null, invoice_no, total_amount, date, id]
+      [distRow.id, invoice_no, total_amount, date, id]
     );
-        res.json({ success: true, message: 'Purchase updated' });
+    res.json({ success: true, message: 'Purchase updated' });
   } catch (error) {
     console.error('Purchase update error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -2114,11 +2197,11 @@ router.get('/reconciliation', async (req, res) => {
         });
 
         extractedInvoiceNo = orderInfo.invoiceNumber || 'N/A';
-        distributorName = orderInfo.distributorName || email.distributor_name || 'Unknown Dist.';
+        distributorName = (orderInfo.distributorName && isValidDistributorName(orderInfo.distributorName) ? orderInfo.distributorName.trim() : '') || (email.distributor_name && isValidDistributorName(email.distributor_name) ? email.distributor_name.trim() : '') || '';
         
         await db.run(
           'UPDATE emails SET extracted_invoice_no = ?, extracted_distributor = ? WHERE uid = ?',
-          [extractedInvoiceNo, distributorName, email.uid]
+          [extractedInvoiceNo, distributorName || null, email.uid]
         );
       }
 
@@ -2488,7 +2571,7 @@ router.get('/reconciliation/preview/:email_uid', async (req, res) => {
     const parsedItems: any[] = [];
     let parsedDistributorName = email.extracted_distributor || '';
     let parsedInvoiceNo = email.extracted_invoice_no || '';
-    let parsedInvoiceDate = email.date ? email.date.split('T')[0] : '';
+    let parsedInvoiceDate = '';
     let parsedTotalAmount = 0;
     let parsedGlobalCdPer = 0;
 
@@ -2508,6 +2591,11 @@ router.get('/reconciliation/preview/:email_uid', async (req, res) => {
           }
         } catch (err) {}
       }
+    }
+
+    if (!parsedInvoiceDate) {
+      const extracted = extractDateFromText((email.subject || '') + ' ' + (email.body || ''));
+      if (extracted) parsedInvoiceDate = extracted;
     }
 
     if (parsedItems.length === 0) {
@@ -2534,9 +2622,15 @@ router.get('/reconciliation/preview/:email_uid', async (req, res) => {
     res.json({
       success: true,
       email_uid: email.uid,
-      distributorName: parsedDistributorName || email.distributor_name || email.from_addr || '',
+      distributorName: (parsedDistributorName && isValidDistributorName(parsedDistributorName))
+        ? parsedDistributorName.trim()
+        : (email.extracted_distributor && isValidDistributorName(email.extracted_distributor)
+          ? email.extracted_distributor.trim()
+          : (email.distributor_name && isValidDistributorName(email.distributor_name)
+            ? email.distributor_name.trim()
+            : '')),
       invoiceNo: parsedInvoiceNo || 'N/A',
-      date: parsedInvoiceDate || new Date().toISOString().split('T')[0],
+      date: parsedInvoiceDate || '',
       totalAmount: parsedTotalAmount,
       globalCdPer: parsedGlobalCdPer,
       items: parsedItems.map(item => ({
@@ -2565,8 +2659,9 @@ router.post('/reconciliation/reissue', async (req, res) => {
     return res.status(400).json({ error: 'email_uid is required' });
   }
 
+  let db: any;
   try {
-    const db = await dbManager.getConnection();
+    db = await dbManager.getConnection();
     
     // 1. Fetch the email
     const email = await db.get('SELECT * FROM emails WHERE uid = ?', [email_uid]);
@@ -2574,9 +2669,33 @@ router.post('/reconciliation/reissue', async (req, res) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    // 2. Fetch attachments
-    const dbAttachments = await db.all('SELECT * FROM email_attachments WHERE uid = ?', [email_uid]);
-    
+    let orderInfo: any = null;
+    const getOrderInfo = async () => {
+      if (!orderInfo) {
+        orderInfo = await emailService.extractOrderInfo({
+          subject: email.subject || '',
+          body: email.body || '',
+          from: email.from_addr || '',
+          attachments: []
+        });
+      }
+      return orderInfo;
+    };
+
+    // 2. Validate distributor before proceeding
+    let rawCandidateDist = (req.body.distributor_name || req.body.distributor || (email.extracted_distributor && isValidDistributorName(email.extracted_distributor) ? email.extracted_distributor : '') || (email.distributor_name && isValidDistributorName(email.distributor_name) ? email.distributor_name : '') || '').trim();
+    if (!rawCandidateDist) {
+      const extracted = await getOrderInfo();
+      if (extracted.distributorName && isValidDistributorName(extracted.distributorName)) {
+        rawCandidateDist = extracted.distributorName.trim();
+      }
+    }
+    const resolvedDistName = isValidDistributorName(rawCandidateDist) ? rawCandidateDist : '';
+    if (!resolvedDistName) {
+      return res.status(400).json({ error: 'Distributor is required. Please assign a valid distributor before issuing.' });
+    }
+
+    // 3. Fetch items from request body, attachments, or email body
     const parsedItems: Array<{
       name: string;
       quantity: number;
@@ -2587,30 +2706,31 @@ router.post('/reconciliation/reissue', async (req, res) => {
       free_qty?: number;
     }> = [];
 
-    // 3. Try to parse attachments if they exist
-    for (const att of dbAttachments) {
-      if (att.local_path && fs.existsSync(att.local_path)) {
-        try {
-          const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
-          if (resParse && resParse.success && resParse.items && resParse.items.length > 0) {
-            parsedItems.push(...resParse.items);
+    if (Array.isArray(req.body.items) && req.body.items.length > 0) {
+      parsedItems.push(...req.body.items);
+    }
+
+    // Try attachments if no items passed in request body
+    if (parsedItems.length === 0) {
+      const dbAttachments = await db.all('SELECT * FROM email_attachments WHERE uid = ?', [email_uid]);
+      for (const att of dbAttachments) {
+        if (att.local_path && fs.existsSync(att.local_path)) {
+          try {
+            const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
+            if (resParse && resParse.success && resParse.items && resParse.items.length > 0) {
+              parsedItems.push(...resParse.items);
+            }
+          } catch (parseErr) {
+            console.warn(`Failed parsing attachment ${att.filename} during reissue:`, parseErr);
           }
-        } catch (parseErr) {
-          console.warn(`Failed parsing attachment ${att.filename} during reissue:`, parseErr);
         }
       }
     }
 
-    const orderInfo = await emailService.extractOrderInfo({
-      subject: email.subject || '',
-      body: email.body || '',
-      from: email.from_addr || '',
-      attachments: []
-    });
-
-    // 4. Fallback to email body if no items parsed from attachments
+    // Fallback to email body if no items parsed from attachments
     if (parsedItems.length === 0) {
-      for (const item of orderInfo.medicines) {
+      const extracted = await getOrderInfo();
+      for (const item of (extracted.medicines as any[] || [])) {
         parsedItems.push({
           name: item.name,
           quantity: parseInt(item.quantity, 10) || 0,
@@ -2627,15 +2747,40 @@ router.post('/reconciliation/reissue', async (req, res) => {
       return res.status(400).json({ error: 'No items could be parsed from email body or attachments.' });
     }
 
-    // 5. Begin transaction to reissue order
+    // STRICT VALIDATION: Require valid quantities and non-zero legitimate MRP
+    for (let idx = 0; idx < parsedItems.length; idx++) {
+      const it = parsedItems[idx];
+      const itName = it.name || `Item #${idx + 1}`;
+      const itMrp = Number(it.mrp || 0);
+      const itRate = Number(it.rate || 0);
+      const itQty = Number(it.quantity || 0) + Number(it.free_qty || 0);
+      if (itQty <= 0) {
+        return res.status(400).json({ error: `Quantity must be greater than 0 for "${itName}".` });
+      }
+      if (!itMrp || itMrp <= 0 || isNaN(itMrp)) {
+        return res.status(400).json({
+          error: `Item "${itName}" is missing MRP. MRP must come from legitimate purchase/invoice data or explicit user input. Please open in Purchase Entry and enter the actual MRP.`
+        });
+      }
+      if (itRate < 0 || isNaN(itRate)) {
+        return res.status(400).json({
+          error: `Item "${itName}" has invalid purchase rate.`
+        });
+      }
+    }
+
     await db.run('BEGIN TRANSACTION');
 
     // Handle distributor
     let distId = null;
-    let distName = orderInfo.distributorName || 'Default Distributor';
+    let distName = resolvedDistName;
     await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
     const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [distName]);
-    distId = dbDist.id;
+    distId = dbDist?.id || null;
+    if (!distId) {
+      await db.run('ROLLBACK');
+      return res.status(400).json({ error: 'Failed to resolve distributor.' });
+    }
 
     // Generate app_invoice_no sequentially
     const lastPur = await db.get(
@@ -2654,7 +2799,8 @@ router.post('/reconciliation/reissue', async (req, res) => {
       }
     }
     const appInvoiceNo = `P-${nextSeq.toString().padStart(3, '0')}`;
-    const invoiceNo = orderInfo.invoiceNumber !== 'N/A' ? orderInfo.invoiceNumber : appInvoiceNo;
+    const rawExtractedInv = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A' && orderInfo.invoiceNumber !== 'INV-PENDING') ? orderInfo.invoiceNumber : '';
+    const invoiceNo = (req.body.invoice_no || email.extracted_invoice_no || rawExtractedInv || (email.subject && email.subject.match(/INV-[\w\d-]+/i)?.[0]) || appInvoiceNo).trim();
 
     // Check for duplicate invoice number
     if (distId && invoiceNo) {
@@ -2708,33 +2854,8 @@ router.post('/reconciliation/reissue', async (req, res) => {
       const rawExpiry = item.expiry_date || null;
       const qty = Number(item.quantity) || 0;
       const freeQty = Number(item.free_qty) || 0;
-
-      // Price lookup: if rate or mrp is missing/0, retrieve historical pricing from inventory or previous purchase items
-      let rate = Number(item.rate) || 0;
-      let mrp = Number(item.mrp) || 0;
-
-      if (!rate || rate <= 0 || !mrp || mrp <= 0) {
-        const histInv = await db.get(
-          'SELECT cost_price, mrp FROM inventory_master WHERE medicine_id = ? AND cost_price > 0 ORDER BY id DESC LIMIT 1',
-          [medId]
-        );
-        if (histInv && histInv.cost_price > 0) {
-          if (!rate || rate <= 0) rate = Number(histInv.cost_price);
-          if (!mrp || mrp <= 0) mrp = Number(histInv.mrp);
-        } else {
-          const histPur = await db.get(
-            'SELECT cost_price, mrp FROM purchase_items WHERE medicine_id = ? AND cost_price > 0 ORDER BY id DESC LIMIT 1',
-            [medId]
-          );
-          if (histPur && histPur.cost_price > 0) {
-            if (!rate || rate <= 0) rate = Number(histPur.cost_price);
-            if (!mrp || mrp <= 0) mrp = Number(histPur.mrp);
-          }
-        }
-      }
-
-      if (!rate) rate = 0;
-      if (!mrp) mrp = rate > 0 ? parseFloat((rate * 1.2).toFixed(2)) : 0;
+      const rate = Number(item.rate) || 0;
+      const mrp = Number(item.mrp) || 0;
 
       subtotal += (qty * rate);
 
@@ -2774,15 +2895,21 @@ router.post('/reconciliation/reissue', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Trigger refills and special orders after transaction commits successfully
-    const { inventoryService } = await import('../services/inventoryService.js');
-    for (const medId of uniqueMedicineIds) {
+    // Trigger refills and special orders in background after transaction commits
+    setImmediate(async () => {
       try {
-        await inventoryService.checkAndTriggerRefillsForMedicine(medId);
+        const { inventoryService } = await import('../services/inventoryService.js');
+        for (const medId of uniqueMedicineIds) {
+          try {
+            await inventoryService.checkAndTriggerRefillsForMedicine(medId);
+          } catch (err) {
+            console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in reissue:`, err);
+          }
+        }
       } catch (err) {
-        console.error(`Failed to trigger refills/special orders for medicine ID ${medId} in reissue:`, err);
+        console.error('Failed to run background tasks after reissue:', err);
       }
-    }
+    });
     
     res.json({
       success: true,
@@ -2792,6 +2919,9 @@ router.post('/reconciliation/reissue', async (req, res) => {
     });
 
   } catch (error) {
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (_) {}
+    }
     console.error('Reissue email order error:', error);
     res.status(500).json({ error: 'Internal server error: ' + (error as Error).message });
   }
@@ -2871,12 +3001,15 @@ router.post('/sync', async (req, res) => {
 
     let stagedCount = 0;
     for (const pur of purchases) {
-      const { distributor_name = '', invoice_no = '', date = new Date().toISOString(), total_amount = 0, items = [] } = pur;
+      const { distributor_name = '', invoice_no = '', total_amount = 0, items = [] } = pur;
       if (!Array.isArray(items) || items.length === 0) continue;
+
+      const date = pur.date && String(pur.date).trim() ? String(pur.date).trim() : null;
+      const validDist = (distributor_name && isValidDistributorName(distributor_name)) ? distributor_name.trim() : null;
 
       await db.run(
         `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
-        [distributor_name, invoice_no, date, Number(total_amount), JSON.stringify(items)]
+        [validDist, invoice_no, date, Number(total_amount), JSON.stringify(items)]
       );
       stagedCount++;
     }
@@ -2917,33 +3050,48 @@ router.post('/staged/:id/approve', async (req, res) => {
     }
 
     const itemsToProcess = items || JSON.parse(staged.items_json);
-    const finalDistName = distributor_name !== undefined ? distributor_name : staged.distributor_name;
+    const finalDistName = (distributor_name !== undefined ? distributor_name : (staged.distributor_name || '')).trim();
     const finalInvoiceNo = invoice_no !== undefined ? invoice_no : staged.invoice_no;
-    const finalDate = date !== undefined ? date : staged.date;
+    const finalDate = (date !== undefined ? date : staged.date)?.trim();
     const finalTotalAmt = total_amount !== undefined ? total_amount : staged.total_amount;
 
-    // Strict validation: Require legitimate batch and positive quantity for every item
+    // Strict validation: Distributor is required before approving staged purchase
+    if (!finalDistName || !isValidDistributorName(finalDistName)) {
+      return res.status(400).json({ error: 'Distributor is required. Please assign a valid distributor before approving.' });
+    }
+
+    // Strict validation: Invoice date is required before approving staged purchase
+    if (!finalDate || finalDate === 'null' || finalDate === 'undefined') {
+      return res.status(400).json({ error: 'Invoice date is required. Please verify and enter the actual invoice date before approving.' });
+    }
+
+    // Strict validation: Require legitimate batch, positive quantity, and legitimate MRP for every item
     for (let idx = 0; idx < itemsToProcess.length; idx++) {
       const it = itemsToProcess[idx];
       const itName = it.name || it.medicine_name || `Item #${idx + 1}`;
       const itBatch = String(it.batch_no || '').trim();
       const itQty = Number(it.quantity || it.qty || 0) + Number(it.free_qty || 0);
+      const itMrp = Number(it.mrp || 0);
       if (!itBatch) {
         return res.status(400).json({ error: `Batch number is required for "${itName}". Please verify/enter the actual batch before approving.` });
       }
       if (itQty <= 0) {
         return res.status(400).json({ error: `Quantity must be greater than 0 for "${itName}".` });
       }
+      if (itMrp <= 0 || isNaN(itMrp)) {
+        return res.status(400).json({ error: `MRP is required for "${itName}". Please verify/enter the actual MRP before approving.` });
+      }
     }
 
     await db.run('BEGIN TRANSACTION');
 
     // Resolve/create distributor
-    let distId = null;
-    if (finalDistName) {
-      await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [finalDistName]);
-      const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [finalDistName]);
-      distId = dbDist.id;
+    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [finalDistName]);
+    const dbDist = await db.get('SELECT id FROM distributors WHERE name = ?', [finalDistName]);
+    const distId = dbDist?.id || null;
+    if (!distId) {
+      await db.run('ROLLBACK');
+      return res.status(400).json({ error: 'Failed to resolve distributor.' });
     }
 
     if (distId && finalInvoiceNo) {

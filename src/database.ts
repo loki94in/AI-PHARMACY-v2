@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 36;
+const CURRENT_SCHEMA_VERSION = 37;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -434,6 +434,31 @@ export async function ensureSchema(dbPath: string) {
       total_amount REAL,
       raw_return_type TEXT
     );
+    CREATE TABLE IF NOT EXISTS expiry_return_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inventory_id INTEGER NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      batch_no TEXT NOT NULL,
+      expiry_date TEXT,
+      quantity REAL NOT NULL,
+      distributor_id INTEGER,
+      distributor_name TEXT,
+      cost_price REAL DEFAULT 0,
+      mrp REAL DEFAULT 0,
+      proposed_return_amount REAL DEFAULT 0,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME,
+      reviewed_by TEXT,
+      return_id INTEGER,
+      notes TEXT,
+      FOREIGN KEY(inventory_id) REFERENCES inventory_master(id),
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      FOREIGN KEY(distributor_id) REFERENCES distributors(id),
+      FOREIGN KEY(return_id) REFERENCES returns(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_expiry_reviews_status ON expiry_return_reviews(status);
+    CREATE INDEX IF NOT EXISTS idx_expiry_reviews_inv ON expiry_return_reviews(inventory_id);
 
     -- Agent B: CRM, Communication, & Utilities Schemas
     CREATE TABLE IF NOT EXISTS customers (
@@ -1465,7 +1490,7 @@ export async function ensureSchema(dbPath: string) {
       distributor_id INTEGER,
       return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       original_amount REAL,
-      loss_percentage REAL DEFAULT 3.0,
+      loss_percentage REAL NOT NULL,
       expected_credit_amount REAL,
       reminder_date DATETIME,
       status TEXT CHECK(status IN ('pending', 'reconciled', 'overdue')) DEFAULT 'pending',
@@ -2180,7 +2205,16 @@ export async function ensureSchema(dbPath: string) {
 
 
 
+  // Add missing_license column to compliance_logs (idempotent — SQLite raises an error if the
+  // column already exists; we swallow it so this is safe on every boot).
+  try {
+    await db.run('ALTER TABLE compliance_logs ADD COLUMN missing_license INTEGER DEFAULT 0');
+  } catch {
+    // Column already exists — no action needed
+  }
+
   // Consolidate legacy 'contact' into 'phone' if 'phone' is empty, then ensure 'phone' is the single source of truth
+
   try {
     await db.run("UPDATE distributors SET phone = contact WHERE (phone IS NULL OR phone = '') AND contact IS NOT NULL AND contact != ''");
     await db.run("UPDATE distributors SET contact = phone WHERE phone IS NOT NULL AND phone != ''");

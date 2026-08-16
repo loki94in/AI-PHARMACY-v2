@@ -1,6 +1,6 @@
 import { Database } from 'sqlite';
 
-function isExpired(expiryDateStr: string | null | undefined): boolean {
+export function isExpired(expiryDateStr: string | null | undefined): boolean {
   if (!expiryDateStr) return false;
   let expDate;
   if (expiryDateStr.includes('/')) {
@@ -17,9 +17,48 @@ function isExpired(expiryDateStr: string | null | undefined): boolean {
   return expDate < today;
 }
 
-export async function autoCreateExpiryReturns(db: Database): Promise<void> {
-  console.log('[Auto Expiry Return] Starting scanning for expired medicines...');
-  
+export interface ExpiryScanResult {
+  scannedCount: number;
+  expiredCount: number;
+  pendingCreated: number;
+  totalPending: number;
+}
+
+/**
+ * Scans active inventory for expired medicines and creates pending review items.
+ *
+ * CRITICAL SAFETY RULES:
+ * 1. Must NOT create a completed return.
+ * 2. Must NOT zero or decrement inventory.
+ * 3. Must NOT create a credit note automatically.
+ * 4. Only creates or updates pending review items in expiry_return_reviews.
+ * 5. Requires explicit pharmacist approval before any stock or return modification.
+ */
+export async function scanAndCreateExpiryReviews(db: Database): Promise<ExpiryScanResult> {
+  console.log('[Expiry Return Scan] Scanning inventory for expired stock pending pharmacist review...');
+
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS expiry_return_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inventory_id INTEGER NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      batch_no TEXT NOT NULL,
+      expiry_date TEXT,
+      quantity REAL NOT NULL,
+      distributor_id INTEGER,
+      distributor_name TEXT,
+      cost_price REAL DEFAULT 0,
+      mrp REAL DEFAULT 0,
+      proposed_return_amount REAL DEFAULT 0,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME,
+      reviewed_by TEXT,
+      return_id INTEGER,
+      notes TEXT
+    )
+  `);
+
   // Fetch active inventory items with stock > 0
   const rows = await db.all(`
     SELECT im.id as inventory_id, im.batch_no, im.expiry_date, im.quantity, im.cost_price, im.mrp, im.medicine_id,
@@ -29,90 +68,89 @@ export async function autoCreateExpiryReturns(db: Database): Promise<void> {
     LEFT JOIN purchase_items pi ON pi.medicine_id = m.id AND pi.batch_no = im.batch_no
     LEFT JOIN purchases p ON pi.purchase_id = p.id
     LEFT JOIN distributors d ON p.distributor_id = d.id
-    WHERE im.quantity > 0
+    WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
     GROUP BY im.id
   `);
 
   const expiredItems = rows.filter(row => isExpired(row.expiry_date));
+  let pendingCreated = 0;
+
   if (expiredItems.length === 0) {
-    console.log('[Auto Expiry Return] No expired medicines found in inventory.');
-    return;
+    console.log('[Expiry Return Scan] No expired medicines found in inventory.');
+    const pendingRow = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM expiry_return_reviews WHERE status = "pending"');
+    return {
+      scannedCount: rows.length,
+      expiredCount: 0,
+      pendingCreated: 0,
+      totalPending: pendingRow?.count || 0
+    };
   }
 
-  console.log(`[Auto Expiry Return] Found ${expiredItems.length} expired inventory records to return.`);
+  console.log(`[Expiry Return Scan] Found ${expiredItems.length} expired inventory record(s) to flag for pharmacist review.`);
 
-  // Group by distributor_id
-  const grouped: Record<string, typeof expiredItems> = {};
   for (const item of expiredItems) {
-    const key = item.distributor_id ? String(item.distributor_id) : 'unknown';
-    if (!grouped[key]) {
-      grouped[key] = [];
-    }
-    grouped[key].push(item);
-  }
+    const costPrice = item.cost_price || 0;
+    const qty = item.quantity || 0;
+    const proposedAmount = costPrice * qty;
 
-  // Process returns for each group
-  for (const [distKey, items] of Object.entries(grouped)) {
-    const distributorId = distKey === 'unknown' ? null : parseInt(distKey, 10);
-    const distributorName = items[0].distributor_name || 'Unknown Distributor';
-    
-    const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
-    let nextNum = 1;
-    if (lastRet && lastRet.return_no) {
-      const match = lastRet.return_no.match(/PR-(\d+)/);
-      if (match) {
-        nextNum = parseInt(match[1], 10) + 1;
-      } else {
-        const anyNum = lastRet.return_no.match(/\d+/);
-        if (anyNum) nextNum = parseInt(anyNum[0], 10) + 1;
-      }
-    }
-    const returnNo = `PR-${String(nextNum).padStart(3, '0')}`;
-    const totalAmount = items.reduce((sum, item) => sum + ((item.cost_price || 0) * (item.quantity || 0)), 0);
+    // Check if an existing pending review already exists for this inventory ID
+    const existing = await db.get<{ id: number; quantity: number }>(
+      'SELECT id, quantity FROM expiry_return_reviews WHERE inventory_id = ? AND status = "pending"',
+      [item.inventory_id]
+    );
 
-    console.log(`[Auto Expiry Return] Creating return ${returnNo} for distributor: ${distributorName} containing ${items.length} items. Total claim amount: ₹${totalAmount.toFixed(2)}`);
-
-    await db.run('BEGIN TRANSACTION');
-    try {
-      // 1. Create the return master record
-      const result = await db.run(
-        `INSERT INTO returns (return_no, type, total_amount, distributor_id, reason, date)
-         VALUES (?, 'purchase', ?, ?, 'Automatic Expiry Return', CURRENT_TIMESTAMP)`,
-        [returnNo, totalAmount, distributorId]
+    if (!existing) {
+      await db.run(
+        `INSERT INTO expiry_return_reviews 
+          (inventory_id, medicine_id, batch_no, expiry_date, quantity, distributor_id, distributor_name, cost_price, mrp, proposed_return_amount, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          item.inventory_id,
+          item.medicine_id,
+          item.batch_no,
+          item.expiry_date,
+          qty,
+          item.distributor_id || null,
+          item.distributor_name || null,
+          costPrice,
+          item.mrp || 0,
+          proposedAmount
+        ]
       );
-      const returnId = result.lastID;
+      pendingCreated++;
 
-      // 2. Insert return line items and set inventory quantity to 0
-      for (const item of items) {
-        await db.run(
-          `INSERT INTO return_items (return_id, medicine_id, batch_no, quantity, cost_price, mrp, total_price)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            returnId,
-            item.medicine_id,
-            item.batch_no,
-            item.quantity,
-            item.cost_price,
-            item.mrp,
-            (item.cost_price || 0) * (item.quantity || 0)
-          ]
-        );
-
-        // Remove from inventory
-        await db.run('UPDATE inventory_master SET quantity = 0 WHERE id = ?', [item.inventory_id]);
-      }
-
-      // 3. Track expiry return for credit note reconciliation
-      if (distributorId) {
-        const { trackExpiryReturn } = await import('./creditNoteService.js');
-        await trackExpiryReturn(db, returnId as number, distributorId, totalAmount, 3.0);
-      }
-
-      await db.run('COMMIT');
-      console.log(`[Auto Expiry Return] Successfully created return transaction ID: ${returnId}`);
-    } catch (err) {
-      await db.run('ROLLBACK');
-      console.error(`[Auto Expiry Return] Failed to create return for ${distributorName}:`, err);
+      // Log alert in action_logs for Activity Alerts
+      await db.run(
+        'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+        [
+          'EXPIRY_REVIEW_PENDING',
+          `Expired stock flagged for review: ${item.medicine_name} (Batch: ${item.batch_no}, Qty: ${qty}, Amount: ₹${proposedAmount.toFixed(2)})`
+        ]
+      );
+    } else if (existing.quantity !== qty) {
+      // Update quantity if changed in inventory while pending
+      await db.run(
+        'UPDATE expiry_return_reviews SET quantity = ?, proposed_return_amount = ? WHERE id = ?',
+        [qty, proposedAmount, existing.id]
+      );
     }
   }
+
+  const totalPendingRow = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM expiry_return_reviews WHERE status = "pending"');
+  const totalPending = totalPendingRow?.count || 0;
+
+  console.log(`[Expiry Return Scan] Created ${pendingCreated} new pending review item(s). Total pending pharmacist reviews: ${totalPending}. Inventory stock remains unchanged.`);
+
+  return {
+    scannedCount: rows.length,
+    expiredCount: expiredItems.length,
+    pendingCreated,
+    totalPending
+  };
 }
+
+/**
+ * Backward compatibility alias for legacy callers
+ */
+export const autoCreateExpiryReturns = scanAndCreateExpiryReviews;
+

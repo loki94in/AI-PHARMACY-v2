@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { checkAllRefills } from '../services/refillService.js';
 import { sendMessage } from '../whatsappClient.js';
 import { getMessage } from '../i18n/getMessage.js';
+import { getConfiguredPharmacyName } from '../services/storeSettingsService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -169,8 +170,12 @@ router.post('/:id/send', async (req, res) => {
       return res.status(404).json({ error: 'Refill schedule not found' });
     }
 
-    const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
-    const storeName = storeSetting?.value || 'AI Pharmacy';
+    const storeName = await getConfiguredPharmacyName(db);
+    if (!storeName) {
+      return res.status(400).json({
+        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
     const lang = (refill.language === 'hi' || refill.language === 'mr') ? refill.language : 'en';
 
     const message = getMessage(lang, 'whatsapp.refillReminder', {
@@ -541,10 +546,11 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
     const patientName = tomorrowRefills[0].patient_name;
     const medicineNames = tomorrowRefills.map(r => r.medicine_name).join(', ');
 
-    let medicalName = 'XYZ MEDICAL';
-    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-    if (nameRow && nameRow.value) {
-      medicalName = nameRow.value;
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
     }
 
     const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
@@ -603,9 +609,12 @@ router.post('/send-reminder-now', async (req, res) => {
       ? new Date(rows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : 'soon';
 
-    let medicalName = 'XYZ MEDICAL';
-    const nameRow = await db.get("SELECT value FROM app_settings WHERE key = 'medical_name'");
-    if (nameRow?.value) medicalName = nameRow.value;
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
 
     const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
 

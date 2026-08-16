@@ -6,8 +6,19 @@ export async function trackExpiryReturn(
   returnId: number,
   distributorId: number,
   originalAmount: number,
-  lossPercentage: number = 3.0
+  lossPercentage: number
 ): Promise<void> {
+  if (
+    lossPercentage === undefined ||
+    lossPercentage === null ||
+    typeof lossPercentage !== 'number' ||
+    isNaN(lossPercentage) ||
+    lossPercentage < 0 ||
+    lossPercentage > 100
+  ) {
+    throw new Error(`Invalid lossPercentage: ${lossPercentage}. A valid percentage between 0 and 100 is required and cannot be assumed.`);
+  }
+
   const expectedCreditAmount = originalAmount * (1 - lossPercentage / 100);
   
   // Calculate 3 months in the future for reminder
@@ -32,7 +43,7 @@ export async function checkOverdueCreditNotes(db: Database): Promise<void> {
   for (const item of overdueItems) {
     const alertMessage = `⚠️ OVERDUE EXPIRY CREDIT NOTE:
 You returned expired medicines worth ₹${Number(item.original_amount).toFixed(2)} to "${item.distributor_name}" 3 months ago (on ${item.return_date}).
-Expected Credit Note Value: ₹${Number(item.expected_credit_amount).toFixed(2)} (after ~${item.loss_percentage}% standard loss).
+Expected Credit Note Value: ₹${Number(item.expected_credit_amount).toFixed(2)} (after ${Number(item.loss_percentage).toFixed(2)}% loss deduction).
 Please follow up with the distributor to claim your credit!`;
 
     try {

@@ -42,6 +42,27 @@ interface StagingConflict {
   raw_imported_data: string;
 }
 
+interface StagingError {
+  id: number;
+  file_name: string;
+  row_index: number;
+  raw_data: string;
+  error_message: string;
+  created_at?: string;
+}
+
+interface StagingAudit {
+  id: number;
+  file_name?: string;
+  record_type: string;
+  record_identifier: string;
+  entity_type: string;
+  raw_value?: string;
+  status: 'preserved_null' | 'skipped';
+  reason: string;
+  created_at?: string;
+}
+
 export const ReviewModal: React.FC<ReviewModalProps> = ({
   isOpen,
   onClose,
@@ -62,6 +83,19 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
   const [status, setStatus] = useState<any>(null);
   const [stagingConflicts, setStagingConflicts] = useState<StagingConflict[]>([]);
+  const [stagingErrors, setStagingErrors] = useState<StagingError[]>([]);
+  const [stagingAudits, setStagingAudits] = useState<StagingAudit[]>([]);
+  const [auditSummary, setAuditSummary] = useState<{
+    unresolvedCustomers: number;
+    unresolvedDoctors: number;
+    unresolvedDistributors: number;
+    unresolvedMedicines: number;
+    skippedRecords: number;
+    preservedNullRecords: number;
+    totalAuditEntries: number;
+  } | null>(null);
+  const [showErrorsExpanded, setShowErrorsExpanded] = useState<boolean>(true);
+  const [showAuditsExpanded, setShowAuditsExpanded] = useState<boolean>(true);
   const [resolvingConflictId, setResolvingConflictId] = useState<number | null>(null);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [importStats, setImportStats] = useState<{ totalRows: number; errorRows: number; validRows: number } | null>(null);
@@ -106,9 +140,11 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
   const loadStagingData = useCallback(async () => {
     try {
-      const [stagingRes, conflicts] = await Promise.all([
+      const [stagingRes, conflicts, errorsRes, auditsRes] = await Promise.all([
         api.getStagingSummary(),
         api.getStagingConflicts(),
+        api.getStagingErrors().catch(() => ({ rows: [], total: 0 })),
+        api.getStagingAudits().catch(() => ({ rows: [], total: 0 })),
       ]);
       if (stagingRes.success && stagingRes.stats) {
         setSummary({
@@ -131,8 +167,13 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             validRows: stagingRes.importStats.validRows || 0,
           });
         }
+        if (stagingRes.auditSummary) {
+          setAuditSummary(stagingRes.auditSummary);
+        }
       }
       setStagingConflicts(Array.isArray(conflicts) ? conflicts : []);
+      setStagingErrors(Array.isArray(errorsRes?.rows) ? errorsRes.rows : []);
+      setStagingAudits(Array.isArray(auditsRes?.rows) ? auditsRes.rows : []);
     } catch (err) {
       console.warn('Failed to load staging summary:', err);
     }
@@ -422,8 +463,8 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                   </div>
                 )}
 
-                {(summary.errors > 0 || summary.conflicts > 0 || importWarnings.length > 0) && (
-                  <div className="space-y-2">
+                {(summary.errors > 0 || summary.conflicts > 0 || importWarnings.length > 0 || stagingErrors.length > 0) && (
+                  <div className="space-y-3">
                     {importStats && (
                       <div className="p-3 rounded-lg bg-bg3/40 border border-glass-border text-sm text-muted">
                         File validation: {importStats.validRows.toLocaleString()} valid / {importStats.totalRows.toLocaleString()} total rows
@@ -437,11 +478,95 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                       </div>
                     ))}
                     {summary.errors > 0 && (
-                      <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
-                        <AlertTriangle size={16} />
-                        {summary.errors.toLocaleString()} rows were skipped due to validation errors (logged in migration_errors).
+                      <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={16} />
+                          <span>{summary.errors.toLocaleString()} row(s) were skipped due to missing required information or validation errors.</span>
+                        </div>
+                        {stagingErrors.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowErrorsExpanded(!showErrorsExpanded)}
+                            className="text-xs underline hover:text-amber-300 ml-2"
+                          >
+                            {showErrorsExpanded ? 'Hide Details' : 'View Skipped Reasons'}
+                          </button>
+                        )}
                       </div>
                     )}
+
+                    {stagingErrors.length > 0 && showErrorsExpanded && (
+                      <div className="border border-glass-border rounded-xl overflow-hidden bg-bg3/20">
+                        <div className="px-4 py-2 bg-bg3/60 border-b border-glass-border flex items-center justify-between text-xs font-semibold text-text uppercase tracking-wider">
+                          <span>Skipped Records Audit Log ({stagingErrors.length})</span>
+                          <span className="text-muted font-mono font-normal lowercase">no placeholder records created</span>
+                        </div>
+                        <div className="divide-y divide-glass-border/30 max-h-56 overflow-y-auto">
+                          {stagingErrors.map((err, idx) => (
+                            <div key={err.id || idx} className="p-3 text-xs space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-mono text-muted">Row #{err.row_index} {err.file_name ? `(${err.file_name})` : ''}</span>
+                                <span className="text-rose-400 font-medium">{err.error_message}</span>
+                              </div>
+                              {err.raw_data && (
+                                <p className="font-mono text-[11px] text-muted truncate max-w-full bg-bg/50 px-2 py-1 rounded">
+                                  {typeof err.raw_data === 'string' ? err.raw_data : JSON.stringify(err.raw_data)}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {auditSummary && (auditSummary.unresolvedCustomers > 0 || auditSummary.unresolvedDoctors > 0 || auditSummary.unresolvedMedicines > 0 || stagingAudits.length > 0) && (
+                      <div className="space-y-2">
+                        <div className="p-3 rounded-lg bg-sky/10 border border-sky/30 text-sky text-sm flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Database size={16} />
+                            <span>
+                              Relationship Audit: {auditSummary.unresolvedCustomers} unresolved customer(s), {auditSummary.unresolvedDoctors} unresolved doctor(s){auditSummary.unresolvedMedicines > 0 ? `, ${auditSummary.unresolvedMedicines} unresolved medicine(s) — sale items skipped` : ''} (Preserved with NULL · 0 phantom IDs)
+                            </span>
+                          </div>
+                          {stagingAudits.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAuditsExpanded(!showAuditsExpanded)}
+                              className="text-xs underline hover:text-sky-300 ml-2"
+                            >
+                              {showAuditsExpanded ? 'Hide Audit Log' : 'View Audit Log'}
+                            </button>
+                          )}
+                        </div>
+
+                        {stagingAudits.length > 0 && showAuditsExpanded && (
+                          <div className="border border-glass-border rounded-xl overflow-hidden bg-bg3/20">
+                            <div className="px-4 py-2 bg-bg3/60 border-b border-glass-border flex items-center justify-between text-xs font-semibold text-text uppercase tracking-wider">
+                              <span>Relationship Integrity Audit ({stagingAudits.length})</span>
+                              <span className="text-sky font-mono font-normal lowercase">preserved NULL / safe skip</span>
+                            </div>
+                            <div className="divide-y divide-glass-border/30 max-h-56 overflow-y-auto">
+                              {stagingAudits.map((aud, idx) => (
+                                <div key={aud.id || idx} className="p-3 text-xs space-y-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-mono text-muted">
+                                      {aud.record_type.toUpperCase()} #{aud.record_identifier} {aud.file_name ? `(${aud.file_name})` : ''}
+                                    </span>
+                                    <span className={`font-medium ${aud.status === 'skipped' ? 'text-amber-400' : 'text-sky'}`}>
+                                      {aud.status === 'skipped' ? 'SKIPPED' : 'PRESERVED NULL'}
+                                    </span>
+                                  </div>
+                                  <p className="text-text font-mono text-[11px]">
+                                    {aud.reason}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {summary.conflicts > 0 && (
                       <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm flex items-center gap-2">
                         <AlertCircle size={16} />
@@ -515,32 +640,48 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-xl font-semibold text-text">Migration Complete!</h4>
-                  <p className="text-sm text-muted">Records committed to the live pharmacy database. Reload recommended for all pages to pick up new data.</p>
+                  <p className="text-sm text-muted">Records committed to the live pharmacy database. No placeholder entities were created.</p>
                 </div>
-                <div className="w-full max-w-md border border-glass-border rounded-xl overflow-hidden bg-bg3/20">
+                <div className="w-full max-w-lg border border-glass-border rounded-xl overflow-hidden bg-bg3/20">
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="bg-bg3/60 text-muted border-b border-glass-border">
-                        <th className="px-4 py-2 font-medium">Entity</th>
+                        <th className="px-4 py-2 font-medium">Status / Entity</th>
                         <th className="px-4 py-2 font-medium text-right">Count</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-glass-border/30 text-text/90">
                       {statRows.map(row => (
                         <tr key={row.label}>
-                          <td className="px-4 py-2.5">{row.label}</td>
+                          <td className="px-4 py-2.5">{row.label} (Migrated)</td>
                           <td className="px-4 py-2.5 text-right font-mono text-emerald-400">{row.value.toLocaleString()}</td>
                         </tr>
                       ))}
                       {summary.errors > 0 && (
                         <tr>
-                          <td className="px-4 py-2.5 text-rose-400">⚠️ Skipped / Errors</td>
+                          <td className="px-4 py-2.5 text-rose-400">⚠️ Skipped / Missing Info</td>
                           <td className="px-4 py-2.5 text-right font-mono text-rose-400">{summary.errors.toLocaleString()}</td>
                         </tr>
                       )}
                     </tbody>
                   </table>
                 </div>
+
+                {stagingErrors.length > 0 && (
+                  <div className="w-full max-w-lg text-left border border-glass-border rounded-xl overflow-hidden bg-bg3/20">
+                    <div className="px-4 py-2 bg-bg3/60 border-b border-glass-border text-xs font-semibold text-text uppercase">
+                      Exact Reason for Skipped Records ({stagingErrors.length})
+                    </div>
+                    <div className="divide-y divide-glass-border/30 max-h-40 overflow-y-auto p-2">
+                      {stagingErrors.map((err, idx) => (
+                        <div key={err.id || idx} className="py-1.5 px-2 text-xs">
+                          <span className="font-mono text-muted">Row #{err.row_index}: </span>
+                          <span className="text-rose-400">{err.error_message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 

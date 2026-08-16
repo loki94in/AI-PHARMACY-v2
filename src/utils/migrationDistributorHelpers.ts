@@ -19,9 +19,12 @@ export async function findOrCreateDistributor(
     run: (sql: string, params?: unknown[]) => Promise<any>;
   },
   name: string
-): Promise<{ id: number }> {
+): Promise<{ id: number } | null> {
   const rawTrimmed = String(name || '').trim();
-  const trimmed = isValidDistributorName(rawTrimmed) ? rawTrimmed : 'Unknown Supplier';
+  if (!isValidDistributorName(rawTrimmed)) {
+    return null;
+  }
+  const trimmed = rawTrimmed;
   const norm = normalizeDistributorName(trimmed);
 
   if (norm && normalizedCache.has(norm)) {

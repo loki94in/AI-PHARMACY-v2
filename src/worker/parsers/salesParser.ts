@@ -1,5 +1,6 @@
 import { Database } from 'sqlite';
 import { parseValues, cleanValue, normalizeDate } from '../../utils/migrationUtils.js';
+import { recordAuditEntry } from '../../utils/migrationAudit.js';
 
 /**
  * Cache for database lookups to avoid repeated queries
@@ -92,13 +93,39 @@ export async function processSalesLine(sqlLine: string, db: Database): Promise<b
             // Extract values (adjust indices based on actual legacy structure)
             // Assuming common legacy columns: invoice_id, bill_no, customer_id, date, total_amount, tax_amount
             const invoiceIdOrBillNo = cleanValue(values[0]); // Could be invoice_id or bill_no
-            const customerIdStr = cleanValue(values[1] || '0');
+            const customerIdStr = cleanValue(values[1] || '');
             const dateStr = cleanValue(values[2]);
             const totalAmountStr = cleanValue(values[3] || '0');
             const taxAmountStr = cleanValue(values[4] || '0');
 
-            // Convert numeric values
-            const customerId = parseInt(customerIdStr, 10) || null;
+            // Convert numeric values & verify customer existence
+            const rawCustomerId = parseInt(customerIdStr, 10);
+            let customerId: number | null = null;
+            if (!isNaN(rawCustomerId) && rawCustomerId > 0) {
+                const customerLookup = await db.get('SELECT id FROM customers WHERE id = ?', [rawCustomerId]);
+                if (customerLookup) {
+                    customerId = customerLookup.id;
+                } else {
+                    customerId = null;
+                    await recordAuditEntry({
+                        table: 'sales_invoices',
+                        recordIdentifier: invoiceIdOrBillNo || 'UNKNOWN',
+                        entityType: 'customer',
+                        action: 'preserved_null',
+                        reason: `Unresolved legacy customer ID "${customerIdStr}" not found in customer master — preserved as NULL`,
+                        rawId: customerIdStr,
+                    }, db);
+                }
+            } else if (customerIdStr && customerIdStr !== '0') {
+                await recordAuditEntry({
+                    table: 'sales_invoices',
+                    recordIdentifier: invoiceIdOrBillNo || 'UNKNOWN',
+                    entityType: 'customer',
+                    action: 'preserved_null',
+                    reason: `Invalid customer ID string "${customerIdStr}" — preserved as NULL`,
+                    rawId: customerIdStr,
+                }, db);
+            }
             const totalAmount = parseFloat(totalAmountStr);
             const taxAmount = parseFloat(taxAmountStr);
 
@@ -107,10 +134,24 @@ export async function processSalesLine(sqlLine: string, db: Database): Promise<b
                 return false;
             }
 
-            // Generate invoice number (use invoiceIdOrBillNo or create new one)
-            // For now, we'll use the legacy invoice_id/bill_no as invoice_no
-            // In a real system, you might want to generate new sequential numbers
-            const invoice_no = invoiceIdOrBillNo || `LEGACY-${Date.now()}`;
+            // Invoice number is a mandatory accounting identifier — never fabricate one.
+            // If the legacy record has no bill_no/invoice_id, skip it and report for manual review.
+            // Also treat the SQL literal NULL (unquoted) as absent — it is not a valid invoice number.
+            if (!invoiceIdOrBillNo || invoiceIdOrBillNo.toUpperCase() === 'NULL') {
+                await recordAuditEntry(
+                    {
+                        table: 'sales_invoices',
+                        recordIdentifier: 'UNKNOWN',
+                        entityType: 'invoice',
+                        action: 'skipped',
+                        reason: 'Legacy sales INSERT has no invoice_id / bill_no — record skipped; never fabricate an invoice number',
+                        rawId: null,
+                    },
+                    db
+                );
+                return false;
+            }
+            const invoice_no = invoiceIdOrBillNo;
 
             // Check if invoice already exists to avoid duplication
             const existingInvoice = await db.get('SELECT id FROM sales_invoices WHERE invoice_no = ?', [invoice_no]);
@@ -225,34 +266,20 @@ export async function processSalesLine(sqlLine: string, db: Database): Promise<b
                     inventory_id_result = inventoryLookup.id;
                     inventoryCache.set(medicineId, inventoryLookup.id);
                 } else {
-                    // Legacy medicine_id not found in inventory_master - CREATE IT instead of skipping
-                    console.warn(`Legacy medicine_id ${medicineId} not found in inventory_master - auto-creating medicine record`);
-
-                    // First, check if the medicine exists in medicines table
-                    const medicineLookup = await db.get(
-                        'SELECT id FROM medicines WHERE id = ?',
-                        [medicineId]
+                    // ponytail: unresolved medicine — skip and audit, never fabricate a name or inventory
+                    console.warn(`Legacy medicine_id ${medicineId} not found in inventory_master — sale item skipped`);
+                    await recordAuditEntry(
+                        {
+                            table: 'sale_items',
+                            recordIdentifier: `invoice:${invoiceIdOrBillNo},medicine_id:${medicineId}`,
+                            entityType: 'medicine',
+                            action: 'skipped',
+                            reason: `Legacy medicine_id "${medicineId}" not found in medicines/inventory master — sale item skipped; no fake medicine or inventory created`,
+                            rawId: medicineId,
+                        },
+                        db
                     );
-
-                    let medicine_record_id: number;
-                    if (medicineLookup) {
-                        medicine_record_id = medicineLookup.id;
-                    } else {
-                        // Create the medicine record
-                        const medicineInsertResult = await db.run(
-                            'INSERT INTO medicines (id, name) VALUES (?, ?)',
-                            [medicineId, `LEGACY_MEDICINE_${medicineId}`]
-                        );
-                        medicine_record_id = medicineInsertResult.lastID!;
-                    }
-
-                    // Create the inventory_master record
-                    const inventoryInsertResult = await db.run(
-                        'INSERT INTO inventory_master (medicine_id, quantity, rack_location, batch_no, expiry_date) VALUES (?, ?, ?, ?, ?)',
-                        [medicine_record_id, 0, 'UNKNOWN', 'LEGACY', null]
-                    );
-                    inventory_id_result = inventoryInsertResult.lastID!;
-                    inventoryCache.set(medicineId, inventory_id_result);
+                    return false;
                 }
 
                 inventoryId = inventory_id_result;

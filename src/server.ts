@@ -530,12 +530,12 @@ server.on('error', (err: any) => {
                   const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
                   await checkOverdueCreditNotes(db);
                   
-                  // Auto expiry return on 18th, 19th, 20th of the month
+                  // Auto expiry return review scan on 18th, 19th, 20th of the month
                   const dayOfMonth = new Date().getDate();
                   if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-                    console.log(`[Boot] Today is the ${dayOfMonth}th. Running catch-up for expired returns...`);
-                    const { autoCreateExpiryReturns } = await import('./services/returnsService.js');
-                    await autoCreateExpiryReturns(db);
+                    console.log(`[Boot] Today is the ${dayOfMonth}th. Running catch-up scan for expired stock pending pharmacist review...`);
+                    const { scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
+                    await scanAndCreateExpiryReviews(db);
                   }
 
                   await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);

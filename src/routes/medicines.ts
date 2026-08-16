@@ -216,7 +216,7 @@ router.post('/medicines', async (req, res) => {
     const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();
     const rawRate = parseFloat(rate) || 0;
-    const rawMrp = parseFloat(mrp) || (rawRate > 0 ? rawRate : 0);
+    const rawMrp = parseFloat(mrp) || 0;
     const rawSellPrice = (sell_price !== undefined && sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : (rawMrp > 0 ? rawMrp : null);
     const result = await db.run(
       `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging, mrp, rate, sell_price)

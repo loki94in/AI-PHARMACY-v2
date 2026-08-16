@@ -713,7 +713,13 @@ const PurchaseHistory = () => {
                           {new Date(recon.date).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-text font-medium">
-                          {recon.extracted_distributor}
+                          {recon.extracted_distributor && recon.extracted_distributor.trim() && recon.extracted_distributor !== 'Unknown Dist.' && recon.extracted_distributor !== 'Unknown Distributor' && recon.extracted_distributor !== 'Default Distributor' ? (
+                            recon.extracted_distributor
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                              <AlertCircle size={10} /> Unresolved Distributor
+                            </span>
+                          )}
                           <div className="text-xs text-muted font-normal mt-0.5 truncate max-w-[200px]">{recon.from}</div>
                         </td>
                         <td className="px-6 py-4 text-text/80 max-w-xs truncate">
@@ -841,6 +847,20 @@ const PurchaseHistory = () => {
                   <p className="text-[11px] text-muted">Booked on: {new Date(selectedOrder.matched_purchase.date).toLocaleDateString()}</p>
                 </div>
               )}
+
+              {/* Distributor Details */}
+              <div className="bg-bg3 p-4 rounded-xl border border-glass-border space-y-1">
+                <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide">Distributor</h4>
+                {selectedOrder.extracted_distributor && selectedOrder.extracted_distributor.trim() && selectedOrder.extracted_distributor !== 'Unknown Dist.' && selectedOrder.extracted_distributor !== 'Unknown Distributor' && selectedOrder.extracted_distributor !== 'Default Distributor' ? (
+                  <p className="text-text font-medium">{selectedOrder.extracted_distributor}</p>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-amber-500 font-bold">
+                    <AlertCircle size={12} />
+                    <span>Unresolved Distributor — Please assign legitimate distributor before booking.</span>
+                  </div>
+                )}
+                <p className="text-[11px] text-muted">Sender: {selectedOrder.from}</p>
+              </div>
 
               {/* Reconciliation Status / Action */}
               <div className="bg-bg3 p-4 rounded-xl border border-glass-border">

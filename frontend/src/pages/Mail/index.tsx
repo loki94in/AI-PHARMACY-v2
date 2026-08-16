@@ -579,7 +579,7 @@ const Mail = () => {
           prefilledPurchase: {
             distributorName: parsedDistributorName || selectedEmail.distributorName || '',
             invoiceNo: parsedInvoiceNo || (invoiceNoMatch ? invoiceNoMatch[0] : ''),
-            date: parsedInvoiceDate || (selectedEmail.date ? getLocalDateString(new Date(selectedEmail.date)) : getTodayString()),
+            date: parsedInvoiceDate || '',
             totalAmount: parsedTotalAmount || 0,
             globalCdPer: parsedGlobalCdPer || 0,
             source_filename: selectedFiles[0]?.filename || '',
@@ -679,11 +679,17 @@ const Mail = () => {
                 let meds: Array<{ name: string; quantity: string }> = [];
                 try { meds = review.medicines_json ? JSON.parse(review.medicines_json) : []; } catch { /* ignore malformed */ }
                 return (
-                  <div key={review.id} className="flex items-center justify-between gap-3 bg-black/15 border border-glass-border/40 rounded-lg p-2 text-xs">
+                  <div key={review.id} className="flex items-center justify-between gap-3 bg-bg3 border border-glass-border rounded-lg p-2.5 text-xs">
                     <div className="min-w-0">
-                      <div className="font-semibold text-text truncate">
-                        {review.distributor_name || 'Unknown Distributor'}
-                        {review.invoice_number ? ` — ${review.invoice_number}` : ''}
+                      <div className="font-semibold text-text truncate flex items-center gap-1.5">
+                        {review.distributor_name && review.distributor_name !== 'Unknown Distributor' && review.distributor_name !== 'Default Distributor' ? (
+                          <span>{review.distributor_name}</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                            ⚠️ Unresolved Distributor
+                          </span>
+                        )}
+                        {review.invoice_number ? <span className="text-muted font-normal">— {review.invoice_number}</span> : ''}
                       </div>
                       <div className="text-muted truncate">
                         {review.email_subject || ''}{meds.length > 0 ? ` · ${meds.length} item${meds.length !== 1 ? 's' : ''}: ${meds.slice(0, 3).map(m => m.name).join(', ')}${meds.length > 3 ? '…' : ''}` : ''}
@@ -692,13 +698,13 @@ const Mail = () => {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() => processReview(review)}
-                        className="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 font-bold"
+                        className="px-2.5 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 font-bold cursor-pointer"
                       >
                         Process → Purchases
                       </button>
                       <button
                         onClick={() => dismissReview(review.id)}
-                        className="px-2 py-1 rounded bg-white/5 text-muted hover:text-text hover:bg-white/10"
+                        className="px-2.5 py-1 rounded bg-bg3 text-muted hover:text-text hover:bg-glass-bg border border-glass-border cursor-pointer"
                       >
                         Dismiss
                       </button>
@@ -1001,6 +1007,16 @@ const Mail = () => {
                     <span className="font-mono text-muted">
                       {selectedEmail.date ? formatDateTime(selectedEmail.date) : 'N/A'}
                     </span>
+                  </div>
+                  <div>
+                    <span className="font-bold text-muted mr-1.5">Distributor:</span>
+                    {selectedEmail.distributorName && selectedEmail.distributorName !== 'Unknown Distributor' && selectedEmail.distributorName !== 'Default Distributor' ? (
+                      <span className="font-semibold text-text">{selectedEmail.distributorName}</span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                        ⚠️ Unresolved Distributor
+                      </span>
+                    )}
                   </div>
                   <div className="pt-1">
                     {(() => {

@@ -241,7 +241,7 @@ router.get('/export', async (req, res) => {
 
 // Create return directly from an expiry item
 router.post('/create-return', async (req, res) => {
-  const { inventory_id, quantity } = req.body;
+  const { inventory_id, quantity, loss_percentage } = req.body;
   if (!inventory_id || !quantity) {
     return res.status(400).json({ error: 'inventory_id and quantity are required' });
   }
@@ -287,6 +287,18 @@ router.post('/create-return', async (req, res) => {
       return res.status(400).json({ error: 'Cannot create return: no purchase invoice found for this batch/medicine. Please match manually.' });
     }
 
+    if (purchaseItem.distributor_id) {
+      if (
+        loss_percentage === undefined ||
+        loss_percentage === null ||
+        isNaN(Number(loss_percentage)) ||
+        Number(loss_percentage) < 0 ||
+        Number(loss_percentage) > 100
+      ) {
+        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to create return with distributor credit note tracking.' });
+      }
+    }
+
     // 3. Process return
     await db.run('BEGIN TRANSACTION');
     try {
@@ -329,7 +341,7 @@ router.post('/create-return', async (req, res) => {
 
       if (purchaseItem.distributor_id) {
         const { trackExpiryReturn } = await import('../services/creditNoteService.js');
-        await trackExpiryReturn(db, returnId as number, purchaseItem.distributor_id, totalAmount, 3.0);
+        await trackExpiryReturn(db, returnId as number, purchaseItem.distributor_id, totalAmount, Number(loss_percentage));
       }
 
       await db.run('COMMIT');

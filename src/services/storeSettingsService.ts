@@ -1,6 +1,47 @@
 import { dbManager } from '../database/connection.js';
 
 /**
+ * Resolves the user-configured pharmacy name from app_settings.
+ * Returns null if no valid pharmacy name is configured.
+ * Strictly blocks placeholder/dummy pharmacy identities.
+ */
+export async function getConfiguredPharmacyName(dbInstance?: any): Promise<string | null> {
+  try {
+    const db = dbInstance || (await dbManager.getConnection());
+
+    const row = await db.get(
+      `SELECT value FROM app_settings 
+       WHERE key IN ('shop_name', 'store_name', 'pharmacy_name', 'medical_name') 
+         AND value IS NOT NULL 
+         AND TRIM(value) != '' 
+       ORDER BY CASE key 
+         WHEN 'shop_name' THEN 1 
+         WHEN 'store_name' THEN 2 
+         WHEN 'pharmacy_name' THEN 3 
+         WHEN 'medical_name' THEN 4 
+         ELSE 5 END 
+       LIMIT 1`
+    );
+
+    if (row && row.value && row.value.trim()) {
+      const val = row.value.trim();
+      const lower = val.toLowerCase();
+      if (
+        lower === 'xyz medical' ||
+        lower === 'xyz pharmacy' ||
+        lower === 'xyz'
+      ) {
+        return null;
+      }
+      return val;
+    }
+  } catch (err) {
+    console.warn('[StoreSettings] Error resolving configured pharmacy name:', err);
+  }
+  return null;
+}
+
+/**
  * Resolves the configured pharmacy store / medical name from app_settings dynamically.
  * Prioritizes user-configured shop_name / store_name / pharmacy_name over legacy 'XYZ MEDICAL' placeholder.
  */

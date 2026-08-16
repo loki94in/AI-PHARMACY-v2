@@ -14,6 +14,7 @@ import { detectDataModules, autoMapColumn } from '../utils/preMigrationIntellige
 import { normalizeDate } from '../utils/migrationUtils.js';
 import { rebuildMigrationInventoryStock } from '../utils/migrationStockRebuild.js';
 import { getStagedModules, getImportOrderWarnings, getImportStats, clearStagedModuleTracking } from '../utils/migrationMeta.js';
+import { getMigrationAuditSummary, getMigrationAuditRecords } from '../utils/migrationAudit.js';
 import { setReportCutoverDate } from '../utils/reportCutover.js';
 import { config, getAppDataDir } from '../config/index.js';
 
@@ -548,6 +549,7 @@ router.get('/staging/summary', async (_req, res) => {
     const stagedModules = await getStagedModules(db);
     const importStats = await getImportStats(db);
     const warnings = getImportOrderWarnings(stagedModules);
+    const auditSummary = await getMigrationAuditSummary(db);
     const stats = {
       medicines: await count('medicines'),
       inventory: await count('inventory_master'),
@@ -568,7 +570,46 @@ router.get('/staging/summary', async (_req, res) => {
       stagedModules,
       importStats,
       warnings,
+      auditSummary,
     });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Staging audit details — summary of unresolved customers/doctors and preserved/skipped records
+router.get('/staging/audit', async (_req, res) => {
+  if (!fs.existsSync(STAGING_DB_PATH)) {
+    return res.json({
+      unresolvedCustomers: 0,
+      unresolvedDoctors: 0,
+      unresolvedDistributors: 0,
+      unresolvedMedicines: 0,
+      skippedRecords: 0,
+      preservedNullRecords: 0,
+      totalAuditEntries: 0
+    });
+  }
+  try {
+    const db = await openStagingDb();
+    const summary = await getMigrationAuditSummary(db);
+    await db.close();
+    res.json(summary);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Staging audit records — paginated list of relationship audit records
+router.get('/staging/audits', async (req, res) => {
+  if (!fs.existsSync(STAGING_DB_PATH)) return res.json({ rows: [], total: 0 });
+  const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 5000);
+  const offset = parseInt(String(req.query.offset || '0'), 10) || 0;
+  try {
+    const db = await openStagingDb();
+    const result = await getMigrationAuditRecords(db, limit, offset);
+    await db.close();
+    res.json({ rows: result.rows, total: result.total, limit, offset });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

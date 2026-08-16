@@ -27,6 +27,18 @@ describe('Distributor Name Sanitization Tests', () => {
     expect(sanitizeDistributorName('27AAAAA0000A1Z5')).toBe('');
   });
 
+  it('should reject placeholder and fallback distributor names', () => {
+    expect(isValidDistributorName('Default Distributor')).toBe(false);
+    expect(isValidDistributorName('Unknown Distributor')).toBe(false);
+    expect(isValidDistributorName('Unknown Dist.')).toBe(false);
+    expect(isValidDistributorName('Unknown Supplier')).toBe(false);
+    expect(isValidDistributorName('Email Import')).toBe(false);
+    expect(isValidDistributorName('Unassigned')).toBe(false);
+    expect(isValidDistributorName('Default')).toBe(false);
+    expect(sanitizeDistributorName('Default Distributor')).toBe('');
+    expect(sanitizeDistributorName('Unknown Distributor')).toBe('');
+  });
+
   it('should accept valid distributor & agency names', () => {
     expect(isValidDistributorName('Aaru Pharma')).toBe(true);
     expect(isValidDistributorName('Prime Distributors')).toBe(true);
