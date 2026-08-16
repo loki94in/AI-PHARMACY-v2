@@ -125,10 +125,10 @@ const calculateSalesGstAndTotals = async (
   }
 
   for (const item of items) {
-    const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0, inventory_id } = item;
+    const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 1, discount_per = 0, inventory_id } = item;
     const q = Number(quantity);
     const l = Number(loose_qty);
-    const pSize = Number(pack_size || 10);
+    const pSize = Math.max(1, Number(pack_size || 1));
     const d = Number(discount_per || item.discountPer || 0);
     const uPrice = Number(unit_price);
     const dPrice = uPrice * (1 - d / 100);
@@ -339,7 +339,7 @@ router.post('/', async (req, res) => {
     if (knownInventoryIds.length > 0) {
       const placeholders = knownInventoryIds.map(() => '?').join(',');
       const rows = await db.all(
-        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 1) as pack_size, m.name as db_medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
         knownInventoryIds
       );
@@ -348,7 +348,7 @@ router.post('/', async (req, res) => {
     const getStock = async (id: number) => {
       if (stockMap.has(id)) return stockMap.get(id);
       const row = await conn.get(
-        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 1) as pack_size, m.name as db_medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [id]
       );
@@ -799,11 +799,11 @@ router.post('/hold', async (req, res) => {
         const loose = Number(item.looseQty || 0);
         if (qty > 0 || loose > 0) {
           const currentStock = await db.get(
-            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+            `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size
              FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
             [inventory_id]
           );
-          const pSize = currentStock ? currentStock.pack_size : 10;
+          const pSize = currentStock ? (currentStock.pack_size || 1) : 1;
           const requestedTotalUnits = qty * pSize + loose;
           const availableTotalUnits = currentStock ? (currentStock.quantity * pSize + currentStock.loose_quantity) : 0;
           if (!currentStock || availableTotalUnits < requestedTotalUnits) {
@@ -1179,7 +1179,7 @@ router.get('/list', async (req, res) => {
       const placeholders = invoiceIds.map(() => '?').join(',');
       const itemsSql = `
         SELECT si.*, im.batch_no as batch_number, im.expiry_date, m.name as medicine_name,
-               m.mrp, m.id as medicine_id, COALESCE(m.pack_size, 10) as pack_size
+               m.mrp, m.id as medicine_id, COALESCE(m.pack_size, 1) as pack_size
         FROM sale_items si
         JOIN inventory_master im ON si.inventory_id = im.id
         JOIN medicines m ON im.medicine_id = m.id
@@ -1817,7 +1817,7 @@ router.post('/staged', async (req, res) => {
 
       // Try to resolve locally
       const local = await db.get(`
-        SELECT im.id as inventory_id, im.mrp, COALESCE(m.pack_size, 10) as pack_size
+        SELECT im.id as inventory_id, im.mrp, COALESCE(m.pack_size, 1) as pack_size
         FROM inventory_master im
         JOIN medicines m ON im.medicine_id = m.id
         WHERE m.name LIKE ? OR m.name LIKE ?
@@ -1830,7 +1830,7 @@ router.post('/staged', async (req, res) => {
         quantity: quantity,
         unit_price: local ? local.mrp : 0,
         loose_qty: 0,
-        pack_size: local ? local.pack_size : 10,
+        pack_size: local ? (local.pack_size || 1) : 1,
         discount_per: 0
       });
     }
@@ -1983,8 +1983,8 @@ router.get('/:id', async (req, res) => {
 
     invoice.items = await queryAllWithRetry(
       db,
-      `SELECT si.*, COALESCE(im.batch_no, 'AUTO') as batch_number, im.expiry_date, COALESCE(im.mrp, m.mrp, 100) as item_mrp, COALESCE(m.pack_size, 10) as pack_size,
-              COALESCE(m.name, 'Medicine') as medicine_name, COALESCE(m.mrp, 100) as medicine_mrp, COALESCE(m.id, 0) as medicine_id
+      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, COALESCE(im.mrp, m.mrp) as item_mrp, COALESCE(m.pack_size, 1) as pack_size,
+              m.name as medicine_name, m.mrp as medicine_mrp, m.id as medicine_id
        FROM sale_items si
        LEFT JOIN inventory_master im ON si.inventory_id = im.id
        LEFT JOIN medicines m ON im.medicine_id = m.id
@@ -2056,7 +2056,7 @@ router.put('/:id', async (req, res) => {
       if (oldInventoryIds.length > 0) {
         const placeholders = oldInventoryIds.map(() => '?').join(',');
         const rows = await db.all(
-          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
           oldInventoryIds
         );
@@ -2067,7 +2067,7 @@ router.put('/:id', async (req, res) => {
         if (!oldStock) continue;
         const restored = applyStockDelta(
           { quantity: oldStock.quantity, loose_quantity: oldStock.loose_quantity },
-          Number(oi.quantity), Number(oi.loose_qty || 0), oldStock.pack_size
+          Number(oi.quantity), Number(oi.loose_qty || 0), oldStock.pack_size || 1
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, oi.inventory_id]);
         await recordStockLedger(db, {
@@ -2093,7 +2093,7 @@ router.put('/:id', async (req, res) => {
       if (newInventoryIds.length > 0) {
         const placeholders = newInventoryIds.map(() => '?').join(',');
         const rows = await db.all(
-          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 10) as pack_size
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, im.expiry_date, COALESCE(m.pack_size, 1) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
           newInventoryIds
         );
@@ -2105,7 +2105,7 @@ router.put('/:id', async (req, res) => {
 
         // Stock Level & Expiry Verification (strips + loose counted as one pool)
         const currentStock = editStockMap.get(inventory_id);
-        const pSize = currentStock ? currentStock.pack_size : 10;
+        const pSize = currentStock ? (currentStock.pack_size || 1) : 1;
         const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
         const availableTotalUnits = currentStock ? (currentStock.quantity * pSize + currentStock.loose_quantity) : 0;
         if (!currentStock || availableTotalUnits < soldTotalUnits) {
@@ -2189,7 +2189,7 @@ router.delete('/:id', async (req, res) => {
       if (inventoryIds.length > 0) {
         const placeholders = inventoryIds.map(() => '?').join(',');
         const stocks = await db.all(
-          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+          `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size
            FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
           inventoryIds
         );
@@ -2201,7 +2201,7 @@ router.delete('/:id', async (req, res) => {
         if (!stock) continue;
         const restored = applyStockDelta(
           { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
-          Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size
+          Number(item.quantity), Number(item.loose_qty || 0), stock.pack_size || 1
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.inventory_id]);
         await recordStockLedger(db, {
@@ -2270,7 +2270,7 @@ router.delete('/hold/:id', async (req, res) => {
         if (restoreIds.length > 0) {
           const placeholders = restoreIds.map(() => '?').join(',');
           const rows = await db.all(
-            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size
              FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
             restoreIds
           );
@@ -2282,7 +2282,7 @@ router.delete('/hold/:id', async (req, res) => {
             if (!stock) continue;
             const restored = applyStockDelta(
               { quantity: stock.quantity, loose_quantity: stock.loose_quantity },
-              Number(item.qty || 0), Number(item.looseQty || 0), stock.pack_size
+              Number(item.qty || 0), Number(item.looseQty || 0), stock.pack_size || 1
             );
             await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [restored.quantity, restored.loose_quantity, item.id]);
             heldStockMap.set(item.id, { ...stock, quantity: restored.quantity, loose_quantity: restored.loose_quantity });
@@ -2339,10 +2339,10 @@ router.post('/sync', async (req, res) => {
 
         let subtotal = 0;
         for (const item of items) {
-          const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0 } = item;
+          const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 1, discount_per = 0 } = item;
           const q = Number(quantity);
           const l = Number(loose_qty);
-          const pSize = Number(pack_size || 10);
+          const pSize = Number(pack_size || 1);
           const d = Number(discount_per);
           const uPrice = Number(unit_price);
           const dPrice = uPrice * (1 - d / 100);
@@ -2366,7 +2366,7 @@ router.post('/sync', async (req, res) => {
         if (syncInventoryIds.length > 0) {
           const placeholders = syncInventoryIds.map(() => '?').join(',');
           const rows = await db.all(
-            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as db_medicine_name
+            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size, m.name as db_medicine_name
              FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
             syncInventoryIds
           );
@@ -2469,10 +2469,10 @@ router.post('/staged/:id/approve', async (req, res) => {
     // Compute totals
     let subtotal = 0;
     for (const item of itemsToProcess) {
-      const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 10, discount_per = 0 } = item;
+      const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 1, discount_per = 0 } = item;
       const q = Number(quantity);
       const l = Number(loose_qty);
-      const pSize = Number(pack_size || 10);
+      const pSize = Number(pack_size || 1);
       const d = Number(discount_per);
       const uPrice = Number(unit_price);
       const dPrice = uPrice * (1 - d / 100);
@@ -2494,16 +2494,16 @@ router.post('/staged/:id/approve', async (req, res) => {
 
     // Save items & update stock
     for (const item of itemsToProcess) {
-      const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
+      const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0, pack_size = 1 } = item;
       const currentStock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [inventory_id]
       );
       if (currentStock) {
         const newStock = applyStockDelta(
           { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
-          -Number(quantity), -Number(loose_qty), currentStock.pack_size
+          -Number(quantity), -Number(loose_qty), currentStock.pack_size || 1
         );
         await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
       }

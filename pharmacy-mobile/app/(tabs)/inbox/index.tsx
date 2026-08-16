@@ -488,11 +488,11 @@ export default function InboxScreen() {
       ...billItems,
       {
         name: medicine.medicine_name,
-        quantity: 10,
+        quantity: 1,
         rate: medicine.cost_price || 0,
         mrp: medicine.mrp || 0,
-        batch_no: medicine.batch_no || 'BATCH123',
-        expiry_date: medicine.expiry_date || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN'),
+        batch_no: medicine.batch_no || '',
+        expiry_date: medicine.expiry_date || '',
       },
     ]);
     setSearchQuery('');
@@ -506,11 +506,11 @@ export default function InboxScreen() {
       ...billItems,
       {
         name: searchQuery.trim(),
-        quantity: 10,
+        quantity: 1,
         rate: 0,
         mrp: 0,
-        batch_no: 'BATCH123',
-        expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN'),
+        batch_no: '',
+        expiry_date: '',
       },
     ]);
     setSearchQuery('');
@@ -548,6 +548,21 @@ export default function InboxScreen() {
     if (billItems.length === 0) {
       Alert.alert('Input Error', 'Please add at least one item to the purchase bill.');
       return;
+    }
+
+    for (const it of billItems) {
+      if (!it.name || !it.name.trim()) {
+        Alert.alert('Item Error', 'Medicine name is required for all items.');
+        return;
+      }
+      if (!it.batch_no || !it.batch_no.trim()) {
+        Alert.alert('Batch Required', `Batch number is required for "${it.name}". Please enter the actual batch number.`);
+        return;
+      }
+      if (it.quantity <= 0) {
+        Alert.alert('Quantity Required', `Quantity must be greater than 0 for "${it.name}".`);
+        return;
+      }
     }
 
     // Compute total amount

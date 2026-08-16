@@ -334,9 +334,9 @@ interface ProcessedEmail {
 }
 
 function formatExpiryDate(expStr: string): string {
-  if (!expStr) return '01/12';
+  if (!expStr) return '';
   const clean = expStr.trim();
-  if (clean === '00000000' || clean === '*' || clean === '***' || clean === '') return '01/12';
+  if (clean === '00000000' || clean === '*' || clean === '***' || clean === '') return '';
   
   // Format DD/MM/YYYY or MM/YYYY or DD-MM-YYYY
   const match = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
@@ -350,7 +350,8 @@ function formatExpiryDate(expStr: string): string {
     if (year && year.length === 4) {
       year = year.substring(2, 4);
     }
-    return `${month.padStart(2, '0')}/${year || '12'}`;
+    if (!year || !month) return '';
+    return `${month.padStart(2, '0')}/${year}`;
   }
   
   // If it's MM/YY or MM-YY
@@ -371,7 +372,7 @@ function formatExpiryDate(expStr: string): string {
     return `${month}/${year}`;
   }
 
-  return '01/12';
+  return '';
 }
 
 function normalizeDateToYYYYMMDD(dateStr: string): string {
@@ -1782,55 +1783,40 @@ export class EmailService {
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [orderInfo.distributorName]);
       const dist = await db.get('SELECT id FROM distributors WHERE name = ?', [orderInfo.distributorName]);
       
-      // Insert purchase
       let billDate = email.date ? new Date(email.date).toISOString() : new Date().toISOString();
       const extractedDate = extractDateFromText(email.subject + ' ' + email.body);
       if (extractedDate) {
         billDate = extractedDate;
       }
-      const purchaseResult = await db.run(
-        'INSERT INTO purchases (distributor_id, invoice_no, total_amount, date, business_date) VALUES (?, ?, ?, ?, ?)',
-        [dist.id, orderInfo.invoiceNumber, 100 * orderInfo.totalItems, billDate, billDate]
-      );
-      const purchaseId = purchaseResult.lastID;
 
-      // Extract and insert purchase items & add to inventory
-      for (const item of orderInfo.medicines) {
-        // Try to find matching medicine in database
-        let med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
-        if (!med) {
-          // Auto create medicine
-          const medResult = await db.run('INSERT INTO medicines (name) VALUES (?)', [item.name]);
-          med = { id: medResult.lastID };
-        }
-        
-        const qty = parseInt(item.quantity) || 10;
-        
-        // Add to purchase line items
-        await db.run(
-          'INSERT INTO purchase_items (purchase_id, medicine_id, quantity, cost_price, mrp) VALUES (?, ?, ?, ?, ?)',
-          [purchaseId, med.id, qty, 10, 15]
-        );
-        
-        // Add/Update inventory stock
-        const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? LIMIT 1', [med.id]);
-        if (existingInv) {
-          await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [qty, existingInv.id]);
-        } else {
-          await db.run(
-            'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, unit_price, cost_price, reorder_level, mrp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [med.id, qty, 'B-IMPORT-' + Date.now().toString().slice(-4), '2028-12-31', 10, 8, 10, 15]
-          );
-        }
-      }
-      
-      // Log the email order completion
+      // Stage the order for user verification instead of fabricating dummy inventory
+      const stagedItems = (orderInfo.medicines || []).map((item: any) => ({
+        name: item.name,
+        quantity: parseInt(item.quantity, 10) || 0,
+        cost_price: parseFloat(item.costPrice) || 0,
+        rate: parseFloat(item.costPrice) || 0,
+        mrp: parseFloat(item.mrp) || 0,
+        batch_no: item.batch_no || item.batch || '',
+        expiry_date: item.expiry_date || item.expiry || ''
+      }));
+
+      await db.run(
+        `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
+        [orderInfo.distributorName, orderInfo.invoiceNumber, billDate, 0, JSON.stringify(stagedItems)]
+      );
+
+      // Log the staged email order
       await db.run(
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-        ['EMAIL_ORDER_COMPLETED', `Successfully added ${orderInfo.medicines.length} products to inventory from ${orderInfo.distributorName}`]
+        ['EMAIL_ORDER_STAGED', `Staged ${stagedItems.length} products from ${orderInfo.distributorName} for review.`]
       );
       
-            console.log('Medicine order processed & stock added:', orderInfo.invoiceNumber);
+      try {
+        const { eventService } = await import('./eventService.js');
+        eventService.broadcast('purchases_sync', { success: true, count: 1 });
+      } catch (_) {}
+
+      console.log('Medicine order staged for verification:', orderInfo.invoiceNumber);
     } catch (error) {
       console.error('Error processing medicine order:', error);
       try {
@@ -2196,7 +2182,7 @@ export class EmailService {
             const rate = parseFloat(r[headerMap.rate] || r['Rate'] || r['Price'] || r['rate'] || r['price'] || '0') || 0;
             const mrp = parseFloat(r[headerMap.mrp] || r['MRP'] || r['mrp'] || '0') || 0;
             const batch_no = (r[headerMap.batch_no] || r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
-            const expiry_date = formatExpiryDate(r[headerMap.expiry_date] || r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12');
+            const expiry_date = formatExpiryDate(r[headerMap.expiry_date] || r['expiry'] || r['expiry_date'] || r['Expiry'] || '');
             const manufacturer = (r[headerMap.manufacturer] || r['mfg'] || r['company'] || r['manufacturer'] || r['mfg_name'] || r['mfg_by'] || r['mfg_code'] || r['Company'] || r['Mfg'] || r['MANUFACTURER'] || r['MFG'] || '').toString().trim();
             const hsn_code = (r[headerMap.hsn_code] || r['hsn'] || r['hsn_code'] || r['hsncode'] || r['sac'] || r['HSN'] || r['HSN Code'] || r['HSNCODE'] || '').toString().trim();
 
@@ -2563,7 +2549,7 @@ export class EmailService {
                   const mrp = parseFloat(pricesTokens[2]);
                   
                   let batch_no = '';
-                  let expiry_date = '01/12';
+                  let expiry_date = '';
                   
                   if (batchExpHsnLine && batchExpHsnLine.length > 9) {
                     expiry_date = formatExpiryDate(batchExpHsnLine.substring(batchExpHsnLine.length - 5));
@@ -2613,7 +2599,7 @@ export class EmailService {
                     rate: parseFloat(match[3]),
                     mrp: parseFloat(match[3]),
                     batch_no: '',
-                    expiry_date: '01/12',
+                    expiry_date: '',
                     cgst_per: 0,
                     sgst_per: 0,
                     cd_per: global_cd_per,
@@ -2643,7 +2629,7 @@ export class EmailService {
                           rate: priceVal,
                           mrp: priceVal,
                           batch_no: '',
-                          expiry_date: '01/12',
+                          expiry_date: '',
                           cgst_per: 0,
                           sgst_per: 0,
                           cd_per: global_cd_per,
@@ -2734,54 +2720,18 @@ export class EmailService {
       }
 
       if (importData) {
-        // Add/update to database inventory
-        const db = await dbManager.getConnection();
-        const uniqueMedicineIds = new Set<number>();
-        for (const item of items) {
-          let med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
-          if (!med) {
-            const medResult = await db.run('INSERT INTO medicines (name) VALUES (?)', [item.name]);
-            med = { id: medResult.lastID };
-          }
-          if (med && med.id) {
-            uniqueMedicineIds.add(med.id);
-          }
-          const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? LIMIT 1', [med.id]);
-          if (existingInv) {
-            await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [item.quantity, existingInv.id]);
-          } else {
-            await db.run(
-              'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, unit_price, cost_price, reorder_level, mrp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-              [
-                med.id,
-                item.quantity,
-                item.batch_no || 'B-IMPORT-' + Date.now().toString().slice(-4),
-                item.expiry_date || '2028-12-31',
-                item.rate || 10,
-                item.rate || 8,
-                10,
-                item.mrp || 15
-              ]
-            );
-          }
-        }
-
-        // Log action
+        // Stage parsed attachment as a staged purchase for user verification
         const filename = path.basename(filePath);
         await db.run(
-          'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-          ['EMAIL_ATTACHMENT_PROCESSED', `Manually parsed attachment: ${filename}, imported ${items.length} items.`]
+          `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
+          [distributor_name || distributorName || 'Email Import', invoice_no || filename, invoice_date || new Date().toISOString(), total_amount || 0, JSON.stringify(items)]
         );
 
-        // Trigger refills and special orders
-        const { inventoryService } = await import('./inventoryService.js');
-        for (const medId of uniqueMedicineIds) {
-          try {
-            await inventoryService.checkAndTriggerRefillsForMedicine(medId);
-          } catch (err) {
-            console.error(`Failed to trigger refills/special orders in email service for medicine ID ${medId}:`, err);
-          }
-        }
+        // Log action
+        await db.run(
+          'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+          ['EMAIL_ATTACHMENT_PROCESSED', `Manually parsed attachment: ${filename}, staged ${items.length} items for review.`]
+        );
       }
 
       return {

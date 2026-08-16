@@ -240,7 +240,7 @@ function parseTextInvoice(text: string, filename: string) {
         
         let hsn_code = '';
         let batch_no = '';
-        let expiry_date = '01/12';
+        let expiry_date = '';
         
         if (batchExpHsnLine && batchExpHsnLine.length > 9) {
           hsn_code = batchExpHsnLine.substring(0, 4);
@@ -290,7 +290,7 @@ function parseTextInvoice(text: string, filename: string) {
           price: parseFloat(match[3]),
           mrp: parseFloat(match[3]),
           batch_no: '',
-          expiry_date: '01/12',
+          expiry_date: '',
           hsn_code: '',
           cgst_per: 0,
           sgst_per: 0,
@@ -319,7 +319,7 @@ function parseTextInvoice(text: string, filename: string) {
                 price: priceVal,
                 mrp: priceVal,
                 batch_no: '',
-                expiry_date: '01/12',
+                expiry_date: '',
                 hsn_code: '',
                 cgst_per: 0,
                 sgst_per: 0,
@@ -420,7 +420,7 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
         const mrp = parseFloat(parts[15 + offset] || parts[16]) || 0;
         const batch = (parts[7 + offset] || parts[8] || '').trim();
         const rawExp = (parts[8 + offset] || parts[9] || '').trim();
-        let expiry = '01/12';
+        let expiry = '';
         
         if (rawExp && rawExp.length >= 6) {
           if (rawExp.length === 8) {
@@ -518,7 +518,7 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
       const hsnVal = (r['hsncode'] || r['hsn_code'] || r['hsn'] || r['HSN'] || '').toString().trim();
       const nameVal = (r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown CSV Item').toString().trim();
       const batchVal = (r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
-      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12').toString().trim();
+      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '').toString().trim();
 
       return {
         name: nameVal,
@@ -593,7 +593,7 @@ async function parseInvoiceBuffer(fileBuffer: Buffer, filename: string): Promise
       const hsnVal = (r['hsncode'] || r['hsn_code'] || r['hsn'] || r['HSN'] || '').toString().trim();
       const nameVal = (r['prod_name'] || r['product_name'] || r['Medicine Name'] || r['Product'] || r['Item'] || r['item'] || r['Name'] || r['name'] || 'Unknown Excel Item').toString().trim();
       const batchVal = (r['pr_batchno'] || r['batch_no'] || r['Batch'] || '').toString().trim();
-      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '01/12').toString().trim();
+      const expVal = (r['expiry'] || r['expiry_date'] || r['Expiry'] || '').toString().trim();
       
       return {
         name: nameVal,
@@ -2613,11 +2613,11 @@ router.post('/reconciliation/reissue', async (req, res) => {
       for (const item of orderInfo.medicines) {
         parsedItems.push({
           name: item.name,
-          quantity: parseInt(item.quantity) || 10,
-          rate: 0,
-          mrp: 0,
-          batch_no: 'B-REISSUE-' + Date.now().toString().slice(-4),
-          expiry_date: '2028-12-31',
+          quantity: parseInt(item.quantity, 10) || 0,
+          rate: parseFloat(item.costPrice) || 0,
+          mrp: parseFloat(item.mrp) || 0,
+          batch_no: item.batch_no || item.batch || '',
+          expiry_date: item.expiry_date || item.expiry || '',
           free_qty: 0
         });
       }
@@ -2704,10 +2704,10 @@ router.post('/reconciliation/reissue', async (req, res) => {
         uniqueMedicineIds.add(medId);
       }
 
-      const rawBatch = item.batch_no || 'B-REISSUE-' + Date.now().toString().slice(-4);
-      const rawExpiry = item.expiry_date || '2028-12-31';
-      const qty = item.quantity || 10;
-      const freeQty = item.free_qty || 0;
+      const rawBatch = item.batch_no || null;
+      const rawExpiry = item.expiry_date || null;
+      const qty = Number(item.quantity) || 0;
+      const freeQty = Number(item.free_qty) || 0;
 
       // Price lookup: if rate or mrp is missing/0, retrieve historical pricing from inventory or previous purchase items
       let rate = Number(item.rate) || 0;
@@ -2922,6 +2922,20 @@ router.post('/staged/:id/approve', async (req, res) => {
     const finalDate = date !== undefined ? date : staged.date;
     const finalTotalAmt = total_amount !== undefined ? total_amount : staged.total_amount;
 
+    // Strict validation: Require legitimate batch and positive quantity for every item
+    for (let idx = 0; idx < itemsToProcess.length; idx++) {
+      const it = itemsToProcess[idx];
+      const itName = it.name || it.medicine_name || `Item #${idx + 1}`;
+      const itBatch = String(it.batch_no || '').trim();
+      const itQty = Number(it.quantity || it.qty || 0) + Number(it.free_qty || 0);
+      if (!itBatch) {
+        return res.status(400).json({ error: `Batch number is required for "${itName}". Please verify/enter the actual batch before approving.` });
+      }
+      if (itQty <= 0) {
+        return res.status(400).json({ error: `Quantity must be greater than 0 for "${itName}".` });
+      }
+    }
+
     await db.run('BEGIN TRANSACTION');
 
     // Resolve/create distributor
@@ -2980,7 +2994,7 @@ router.post('/staged/:id/approve', async (req, res) => {
         } catch (_) {}
       }
 
-      const rawBatch = item.batch_no || 'B-OFFLINE';
+      const rawBatch = item.batch_no || null;
       const rawExpiry = item.expiry_date || null;
       const qty = Number(item.quantity || item.qty || 0);
       const freeQty = Number(item.free_qty || 0);

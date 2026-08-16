@@ -894,7 +894,7 @@ router.put('/sales/:invoiceId', async (req, res) => {
       if (netQty === 0 && netLoose === 0) continue;
 
       const currentStock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 10) as pack_size, m.name as medicine_name
+        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size, m.name as medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [invId]
       );
@@ -903,7 +903,7 @@ router.put('/sales/:invoiceId', async (req, res) => {
         throw new Error(`Inventory item ID ${invId} does not exist.`);
       }
 
-      const packSize = currentStock.pack_size;
+      const packSize = currentStock.pack_size || 1;
       const currentTotalUnits = currentStock.quantity * packSize + currentStock.loose_quantity;
       const netUnitsSold = netQty * packSize + netLoose;
 
@@ -943,10 +943,10 @@ router.put('/sales/:invoiceId', async (req, res) => {
       );
       
       const currentStock = await db.get(
-        'SELECT COALESCE(m.pack_size, 10) as pack_size FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?',
+        'SELECT COALESCE(m.pack_size, 1) as pack_size FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?',
         [inventory_id]
       );
-      const pSize = currentStock ? currentStock.pack_size : 10;
+      const pSize = currentStock ? (currentStock.pack_size || 1) : 1;
       subtotal += (quantity * unit_price) + (loose_qty * (unit_price / pSize));
     }
 
@@ -1047,29 +1047,33 @@ router.put('/purchases/:purchaseId', async (req, res) => {
         batch_no: oi.batch_no,
         oldQty: oi.quantity || 0,
         newQty: 0,
-        expiry_date: oi.expiry_date || '12/28',
+        expiry_date: oi.expiry_date || null,
         mrp: oi.mrp || 0,
         cost_price: oi.cost_price || 0
       });
     }
 
     for (const ni of items) {
-      const key = `${ni.medicine_id}_${ni.batch_no}`;
+      if (!ni.batch_no || String(ni.batch_no).trim() === '') {
+        throw new Error('Batch number is required for all purchase items.');
+      }
+      const batchNo = String(ni.batch_no).trim();
+      const key = `${ni.medicine_id}_${batchNo}`;
       if (deltaMap.has(key)) {
         const entry = deltaMap.get(key)!;
-        entry.newQty = ni.quantity || 0;
+        entry.newQty = Number(ni.quantity) || 0;
         entry.expiry_date = ni.expiry_date || entry.expiry_date;
-        entry.mrp = ni.mrp || entry.mrp;
-        entry.cost_price = ni.cost_price || entry.cost_price;
+        entry.mrp = Number(ni.mrp) || entry.mrp;
+        entry.cost_price = Number(ni.cost_price) || entry.cost_price;
       } else {
         deltaMap.set(key, {
-          medicine_id: ni.medicine_id,
-          batch_no: ni.batch_no,
+          medicine_id: Number(ni.medicine_id),
+          batch_no: batchNo,
           oldQty: 0,
-          newQty: ni.quantity || 0,
-          expiry_date: ni.expiry_date || '12/28',
-          mrp: ni.mrp || 0,
-          cost_price: ni.cost_price || 0
+          newQty: Number(ni.quantity) || 0,
+          expiry_date: ni.expiry_date || null,
+          mrp: Number(ni.mrp) || 0,
+          cost_price: Number(ni.cost_price) || 0
         });
       }
     }
@@ -1121,18 +1125,22 @@ router.put('/purchases/:purchaseId', async (req, res) => {
     let totalCgst = 0;
     let totalSgst = 0;
     for (const item of items) {
-      const { medicine_id, batch_no, expiry_date = '12/28', quantity, free_qty = 0, cost_price, mrp } = item;
+      if (!item.batch_no || String(item.batch_no).trim() === '') {
+        throw new Error('Batch number is required for all purchase items.');
+      }
+      const batchNo = String(item.batch_no).trim();
+      const { medicine_id, expiry_date = null, quantity, free_qty = 0, cost_price = 0, mrp = 0 } = item;
       const cgstPer = parseFloat(item.cgst_per) || 0;
       const sgstPer = parseFloat(item.sgst_per) || 0;
       const cdValue = parseFloat(item.cd_value) || 0;
-      const baseAmt = quantity * cost_price;
+      const baseAmt = Number(quantity) * Number(cost_price);
       const taxable = baseAmt - cdValue;
       const cgstValue = taxable * (cgstPer / 100);
       const sgstValue = taxable * (sgstPer / 100);
       await db.run(
         `INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [purchaseId, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgstPer, cgstValue, sgstPer, sgstValue, cdValue]
+        [purchaseId, medicine_id, batchNo, expiry_date, quantity, free_qty, cost_price, mrp, cgstPer, cgstValue, sgstPer, sgstValue, cdValue]
       );
       totalAmount += taxable + cgstValue + sgstValue;
       totalCgst += cgstValue;

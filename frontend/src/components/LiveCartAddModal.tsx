@@ -655,7 +655,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             const dueDate = new Date(patient.next_refill_date);
             const diffMs = dueDate.getTime() - today.getTime();
             const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-            const reqQty = Number(m.quantity_needed || 10);
+            const reqQty = Number(m.quantity_needed || 1);
             const stockQty = Number(m.in_stock_qty || 0);
 
             if (stockQty < reqQty || diffDays <= 14 || m.hold_for_stock === 1) {

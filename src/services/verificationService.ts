@@ -162,13 +162,13 @@ export class VerificationService {
       let computedSubtotal = 0;
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const { inventory_id, quantity = 0, loose_qty = 0, unit_price = 0, discount_per = 0, pack_size = 10, medicine_name } = item;
+        const { inventory_id, quantity = 0, loose_qty = 0, unit_price = 0, discount_per = 0, pack_size = 1, medicine_name } = item;
 
         const qty = Number(quantity);
         const loose = Number(loose_qty);
         const uPrice = Number(unit_price);
         const discPer = Number(discount_per);
-        const pSize = Number(pack_size || 10);
+        const pSize = Math.max(1, Number(pack_size || 1));
 
         if (isNaN(qty) || qty < 0 || isNaN(loose) || loose < 0) {
           return {
@@ -194,12 +194,19 @@ export class VerificationService {
           };
         }
 
+        if (!inventory_id) {
+          return {
+            success: false,
+            layer: 'Validation',
+            message: `Inventory validation failed: Item "${medicine_name || 'unknown'}" is missing inventory batch selection.`
+          };
+        }
+
         // Verify stock is available in database
-        if (inventory_id) {
-          const invRow = await db.get(
-            "SELECT quantity, loose_quantity, medicine_id FROM inventory_master WHERE id = ?",
-            [inventory_id]
-          );
+        const invRow = await db.get(
+          "SELECT quantity, loose_quantity, medicine_id FROM inventory_master WHERE id = ?",
+          [inventory_id]
+        );
 
           if (!invRow) {
             return {
@@ -225,7 +232,6 @@ export class VerificationService {
               message: `Stock validation failed: Requested loose quantity (${loose}) for "${medicine_name || 'unknown'}" exceeds available loose stock (${invRow.loose_quantity}).`
             };
           }
-        }
 
         // Subtotal calculation match check
         const dPrice = uPrice * (1 - discPer / 100);

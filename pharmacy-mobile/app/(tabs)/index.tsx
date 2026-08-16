@@ -141,22 +141,18 @@ export default function AssistantScreen() {
   
   // New States for User Role & ABC Checklist
   const [userRole, setUserRole] = useState<'staff' | 'distributor'>('staff');
-  const [abcChecklist, setAbcChecklist] = useState<Array<{ name: string; checked: boolean }>>([
-    { name: 'ONDEM MD 4', checked: false },
-    { name: 'CROCIN 650', checked: false },
-    { name: 'PAN D', checked: false },
-    { name: 'AMOXICILLIN 500', checked: false }
-  ]);
+  const [abcChecklist, setAbcChecklist] = useState<Array<{ name: string; checked: boolean }>>([]);
 
   // Prescription modal form state
   const [showPrescriptionModal, setShowPrescriptionModal] = useState(false);
-  const [prescriptionForm, setPrescriptionForm] = useState({
-    patient_name: 'Dinesh Kumar',
-    doctor_name: 'Dr. A. K. Sharma',
-    medicines: [
-      { name: 'ONDEM MD 4', quantity: 2, unit_price: 12.50, inventory_id: 1 },
-      { name: 'CROCIN 650', quantity: 10, unit_price: 2.00, inventory_id: 2 }
-    ]
+  const [prescriptionForm, setPrescriptionForm] = useState<{
+    patient_name: string;
+    doctor_name: string;
+    medicines: Array<{ name: string; quantity: number; unit_price: number; inventory_id?: number }>;
+  }>({
+    patient_name: '',
+    doctor_name: '',
+    medicines: []
   });
 
   const [messages, setMessages] = useState<Message[]>([

@@ -3141,7 +3141,7 @@ const Purchases: React.FC = () => {
                             setUniversalEditItem({
                               name: item.name,
                               mrp: item.mrp,
-                              pack_size: item.pack_size || 10,
+                              pack_size: item.pack_size || '',
                               batch_no: item.batch_no,
                               quantity: item.qty
                             });

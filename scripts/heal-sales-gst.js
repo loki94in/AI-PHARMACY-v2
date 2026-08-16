@@ -42,7 +42,7 @@ async function healSalesGst() {
       for (const item of items) {
         const q = Number(item.quantity || 0);
         const l = Number(item.loose_qty || 0);
-        const pSize = Number(item.pack_size || 10);
+        const pSize = Number(item.pack_size || 1);
         const d = Number(item.discount_per || 0);
         const uPrice = Number(item.unit_price || 0);
         const dPrice = uPrice * (1 - d / 100);

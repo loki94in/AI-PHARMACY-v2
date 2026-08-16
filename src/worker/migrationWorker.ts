@@ -1674,7 +1674,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             if (!inv) {
               const result = await db.run(
                 'INSERT INTO inventory_master (medicine_id, quantity, batch_no) VALUES (?, 0, ?)',
-                [med.id, batchVal || 'MIGRATED']
+                [med.id, batchVal || '']
               );
               inv = { id: result.lastID! };
             }
@@ -1757,8 +1757,8 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const quantity = qtyKey ? parseInt(cleanRow[qtyKey]) || 0 : 0;
             const mrp = mrpKey ? parseFloat(cleanRow[mrpKey]) || 0 : 0;
             const costPrice = costPriceKey ? parseFloat(cleanRow[costPriceKey]) || mrp : mrp;
-            const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : 'BATCH';
-            const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : '2028-12-01 00:00:00';
+            const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : '';
+            const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : null;
 
             await db.run(
               `INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, cost_price, mrp)
@@ -1837,7 +1837,7 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             const quantity = qtyKey ? parseInt(cleanRow[qtyKey]) || 0 : 0;
             const mrp = mrpKey ? parseFloat(cleanRow[mrpKey]) || 0 : 0;
             const costPrice = costPriceKey ? parseFloat(cleanRow[costPriceKey]) || mrp : mrp;
-            const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : 'BATCH';
+            const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : '';
             const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : null;
 
             await db.run(
@@ -2019,8 +2019,8 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
               const looseQty = looseQtyKey ? parseInt(cleanRow[looseQtyKey]) || 0 : 0;
               const mrp = mrpKey ? parseFloat(cleanRow[mrpKey]) || 0 : 0;
               const costPrice = costPriceKey ? parseFloat(cleanRow[costPriceKey]) || mrp : mrp;
-              const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : 'BATCH';
-              const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : '2028-12-01 00:00:00';
+              const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : '';
+              const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : null;
               const rackLocation = rackKey ? String(cleanRow[rackKey] || '').trim() : '';
 
               let inv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medicineId, batchNo]);
@@ -2112,8 +2112,8 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
                   const quantity = qtyKey ? parseInt(cleanRow[qtyKey]) || 0 : 0;
                   const mrp = mrpKey ? parseFloat(cleanRow[mrpKey]) || 0 : 0;
                   const costPrice = costPriceKey ? parseFloat(cleanRow[costPriceKey]) || mrp : mrp;
-                  const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : 'BATCH';
-                  const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : '2028-12-01 00:00:00';
+                  const batchNo = batchNoKey ? String(cleanRow[batchNoKey] || '').trim() : '';
+                  const expiryDate = expKey ? (normalizeDate(String(cleanRow[expKey] || '')) || String(cleanRow[expKey] || '').trim()) : null;
 
                   await db.run(
                     `INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, cost_price, mrp)

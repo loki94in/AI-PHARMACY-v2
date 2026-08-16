@@ -389,8 +389,15 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
       return res.status(404).json({ error: 'Review not found' });
     }
     
-    const job = await db.get('SELECT mapping_config FROM catalog_jobs WHERE id = ?', review.job_id);
-    const mapping = job && job.mapping_config ? JSON.parse(job.mapping_config) : {};
+    let mapping: any = {};
+    if (review.job_id) {
+      try {
+        const job = await db.get('SELECT * FROM catalog_jobs WHERE id = ?', review.job_id);
+        if (job && job.mapping_config) {
+          mapping = JSON.parse(job.mapping_config);
+        }
+      } catch (_) {}
+    }
     const row = review.original_row_data ? JSON.parse(review.original_row_data) : {};
     
     // 1. Create or update medicine
@@ -470,27 +477,8 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
       }
     }
     
-    // 3. Stock
-    const qtyCol = Object.keys(mapping).find(k => mapping[k] === 'quantity');
-    const batchCol = Object.keys(mapping).find(k => mapping[k] === 'batch_no');
-    const expCol = Object.keys(mapping).find(k => mapping[k] === 'expiry_date');
-    
-    if (qtyCol || batchCol || expCol) {
-      const qty = qtyCol ? parseInt(row[qtyCol], 10) || 0 : 0;
-      const batchNo = batchCol ? String(row[batchCol] || '').trim() : 'B-CATALOG';
-      const expiry = expCol ? String(row[expCol] || '').trim() : '2028-12-31';
-      const mrpVal = parseFloat(row.mrp) || 0;
-      
-      const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medId, batchNo]);
-      if (existingInv) {
-        await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [qty, existingInv.id]);
-      } else {
-        await db.run(
-          'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp) VALUES (?, ?, ?, ?, ?)',
-          [medId, qty, batchNo, expiry, mrpVal]
-        );
-      }
-    }
+    // 3. Catalog review updates medicine master catalog only. Stock is created exclusively via purchase invoices.
+
     
     // 4. Update status
     await db.run(
@@ -505,8 +493,6 @@ router.post('/catalog/review/:id/approve', async (req, res) => {
         review.job_id
       );
     }
-    
-    await dbManager.close();
 
     // [DISABLED] Auto-feed enrichment after catalog approve — only runs on explicit user action.
     // if (!getEnrichmentRunningState()) {

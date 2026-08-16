@@ -68,7 +68,7 @@ export class InvoiceService {
     const subtotal = items.reduce((sum, item) => {
       const q = Number(item.quantity || 0);
       const l = Number(item.loose_qty || 0);
-      const pSize = Number(item.packSize || 10);
+      const pSize = Number(item.packSize || 1);
       const d = Number(item.discount_per || 0);
       const uPrice = Number(item.unitPrice || 0);
       const dPrice = uPrice * (1 - d / 100);
@@ -160,54 +160,27 @@ export class InvoiceService {
         let invId = item.inventoryId;
         
         if (!invId && item.medicineName) {
-          // Find or create medicine
-          let med = await db.get('SELECT id FROM medicines WHERE name = ?', [item.medicineName]);
-          let medId;
-          if (med) {
-            medId = med.id;
-          } else {
-            const medRes = await db.run('INSERT INTO medicines (name, mrp) VALUES (?, ?)', [item.medicineName, item.mrp || item.unitPrice]);
-            medId = medRes.lastID;
+          const med = await db.get('SELECT id FROM medicines WHERE name = ?', [item.medicineName]);
+          if (!med) {
+            throw new Error(`Medicine "${item.medicineName}" not found in system.`);
           }
+          const medId = med.id;
+          const batch = item.batchNo || null;
+          let inv = batch
+            ? await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medId, batch])
+            : await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? ORDER BY quantity DESC LIMIT 1', [medId]);
           
-          // Find or create inventory item under this medicine & batch
-          const batch = item.batchNo || 'B-MANUAL';
-          let inv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medId, batch]);
-          if (inv) {
-            invId = inv.id;
-          } else {
-            const invRes = await db.run(
-              'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp, unit_price) VALUES (?, ?, ?, ?, ?, ?)',
-              [medId, 100, batch, item.expiryDate || '12/30', item.mrp || item.unitPrice, item.unitPrice]
-            );
-            invId = invRes.lastID;
+          if (!inv) {
+            throw new Error(`No active inventory batch found for medicine "${item.medicineName}". Please purchase stock first.`);
           }
+          invId = inv.id;
         } else if (invId) {
-          // If inventoryId is provided, double check it exists, otherwise auto-create or fall back
           const invExists = await db.get('SELECT id FROM inventory_master WHERE id = ?', [invId]);
           if (!invExists) {
-            if (item.medicineName) {
-              let med = await db.get('SELECT id FROM medicines WHERE name = ?', [item.medicineName]);
-              let medId = med ? med.id : (await db.run('INSERT INTO medicines (name) VALUES (?)', [item.medicineName])).lastID;
-              invId = (await db.run(
-                'INSERT INTO inventory_master (id, medicine_id, quantity, batch_no, expiry_date, mrp, unit_price) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [invId, medId, 100, item.batchNo || 'B-MANUAL', item.expiryDate || '12/30', item.mrp || item.unitPrice, item.unitPrice]
-              )).lastID;
-            } else {
-              const medId = (await db.run('INSERT INTO medicines (name) VALUES (?)', [`Item ${invId}`])).lastID;
-              await db.run(
-                'INSERT INTO inventory_master (id, medicine_id, quantity, batch_no, expiry_date, mrp, unit_price) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [invId, medId, 100, 'B-MANUAL', '12/30', item.unitPrice, item.unitPrice]
-              );
-            }
+            throw new Error(`Inventory item ID ${invId} not found.`);
           }
         } else {
-          // Absolute fallback
-          const medId = (await db.run('INSERT INTO medicines (name) VALUES (?)', ['Generic Medicine'])).lastID;
-          invId = (await db.run(
-            'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp, unit_price) VALUES (?, ?, ?, ?, ?, ?)',
-            [medId, 100, 'B-MANUAL', '12/30', item.unitPrice, item.unitPrice]
-          )).lastID;
+          throw new Error('Medicine name or inventory ID is required for each sale item.');
         }
 
         // Verify stock is sufficient and not expired for the transaction

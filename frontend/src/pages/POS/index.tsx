@@ -287,7 +287,7 @@ const POS = () => {
     const refillMedicineId = params.get('refillMedicineId');
     const refillMedicineName = params.get('refillMedicineName');
     const refillId = params.get('refillId');
-    const refillQty = params.get('refillQty') || '10';
+    const refillQty = params.get('refillQty') || '1';
     const refillDaysParam = params.get('refillDays') || '30';
 
     if (refillPatientName && refillMedicineId && refillMedicineName && refillId) {
@@ -303,39 +303,27 @@ const POS = () => {
           if (results && results.length > 0) {
             const matched = results[0];
             const sellPrice = Number(matched.sell_price || 0);
-            const mrp = Number(matched.mrp || 100);
+            const mrp = Number(matched.mrp || 0);
             const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
               ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
               : 0;
             const cartItem = {
               id: matched.id,
               name: matched.name,
-              batch: matched.batch_no || matched.batch_number || 'AUTO',
-              expiry: matched.expiry_date || '12/28',
-              mrp: matched.mrp || 100,
+              batch: matched.batch_no || matched.batch_number || '',
+              expiry: matched.expiry_date || '',
+              mrp: matched.mrp || 0,
               sell_price: matched.sell_price || null,
               qty: Number(refillQty),
               quantity: Number(refillQty),
-              unitPrice: matched.unit_price || matched.mrp || 100,
+              unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
               looseQty: 0,
               discount: autoDisc,
-              packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10
+              packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1
             };
             setCart([cartItem]);
           } else {
-            setCart([{
-              id: Number(refillMedicineId),
-              name: refillMedicineName,
-              batch: 'AUTO',
-              expiry: '12/28',
-              mrp: 100,
-              qty: Number(refillQty),
-              quantity: Number(refillQty),
-              unitPrice: 100,
-              looseQty: 0,
-              discount: 0,
-              packSize: 10
-            }]);
+            toastEvent.trigger(`Refill medicine "${refillMedicineName}" is not available in inventory. Please record a purchase first.`, "error");
           }
         } catch (err) {
           console.error('Failed to resolve refill medicine in POS:', err);
@@ -370,16 +358,16 @@ const POS = () => {
           const itemLooseQty = it.loose_qty !== undefined && it.loose_qty !== null
             ? Number(it.loose_qty)
             : (it.looseQty !== undefined && it.looseQty !== null ? Number(it.looseQty) : 0);
-          const packSize = Number(it.pack_size || it.packSize || 10);
-          const unitPrice = Number(it.unit_price !== undefined && it.unit_price !== null ? it.unit_price : (it.rate || it.sell_price || it.mrp || 100));
+          const packSize = Number(it.pack_size || it.packSize || 1);
+          const unitPrice = Number(it.unit_price !== undefined && it.unit_price !== null ? it.unit_price : (it.rate || it.sell_price || it.mrp || 0));
           return {
             id: it.inventory_id || it.id || `edit_item_${idx}_${Date.now()}`,
             inventory_id: it.inventory_id,
             medicine_id: it.medicine_id,
             name: it.medicine_name || it.name || it.product_name || 'Medicine',
-            batch: it.batch_number || it.batch_no || 'AUTO',
-            expiry: it.expiry_date || '12/28',
-            mrp: Number(it.item_mrp ?? it.mrp ?? unitPrice ?? 100),
+            batch: it.batch_number || it.batch_no || '',
+            expiry: it.expiry_date || '',
+            mrp: Number(it.item_mrp ?? it.mrp ?? unitPrice ?? 0),
             sell_price: unitPrice,
             qty: itemQty,
             quantity: itemQty,
@@ -450,34 +438,34 @@ const POS = () => {
                 if (matched && matched.length > 0) {
                   const m = matched[0];
                   const sellPrice = Number(m.sell_price || 0);
-                  const mrp = Number(m.mrp || 100);
+                  const mrp = Number(m.mrp || 0);
                   const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
                     ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
                     : 0;
                   return {
                     id: m.id,
                     name: m.name,
-                    batch: m.batch_no || m.batch_number || 'AUTO',
-                    expiry: m.expiry_date || '12/28',
-                    mrp: m.mrp || 100,
+                    batch: m.batch_no || m.batch_number || '',
+                    expiry: m.expiry_date || '',
+                    mrp: m.mrp || 0,
                     sell_price: m.sell_price || null,
                     qty: targetQty,
                     quantity: targetQty,
-                    unitPrice: m.unit_price || m.mrp || 100,
+                    unitPrice: m.unit_price || m.sell_price || m.mrp || 0,
                     looseQty: 0,
                     discount: autoDisc,
-                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 10
+                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1
                   };
                 }
                 return {
                   id: 'special_' + Date.now() + '_' + Math.random(),
                   name: targetName || 'Special Request Medicine',
-                  batch: 'SPECIAL',
-                  expiry: '12/28',
-                  mrp: 100,
+                  batch: '',
+                  expiry: '',
+                  mrp: 0,
                   qty: targetQty,
                   quantity: targetQty,
-                  unitPrice: 100,
+                  unitPrice: 0,
                   looseQty: 0,
                   discount: 0,
                   packSize: 1
@@ -486,12 +474,12 @@ const POS = () => {
                 return {
                   id: 'special_' + Date.now() + '_' + Math.random(),
                   name: targetName || 'Special Request Medicine',
-                  batch: 'SPECIAL',
-                  expiry: '12/28',
-                  mrp: 100,
+                  batch: '',
+                  expiry: '',
+                  mrp: 0,
                   qty: targetQty,
                   quantity: targetQty,
-                  unitPrice: 100,
+                  unitPrice: 0,
                   looseQty: 0,
                   discount: 0,
                   packSize: 1
@@ -511,15 +499,15 @@ const POS = () => {
               setCart([{
                 id: med.id || Number(prefill.medicineId),
                 name: med.name || 'Refill Medicine',
-                batch: inv.batch_no || med.batch_no || 'AUTO',
-                expiry: inv.expiry_date || med.expiry_date || '12/28',
-                mrp: med.mrp || 100,
+                batch: inv.batch_no || med.batch_no || '',
+                expiry: inv.expiry_date || med.expiry_date || '',
+                mrp: med.mrp || 0,
                 qty: Number(prefill.quantity) || 1,
                 quantity: Number(prefill.quantity) || 1,
-                unitPrice: med.rate || med.mrp || 100,
+                unitPrice: med.rate || med.sell_price || med.mrp || 0,
                 looseQty: 0,
                 discount: 0,
-                packSize: med.pack_size || 10
+                packSize: med.pack_size || 1
               }]);
             }
           }
@@ -656,12 +644,12 @@ const POS = () => {
       const topItems = data.slice(0, 12).map(med => ({
         id: med.id,
         name: med.name,
-        batch: med.batch_number || 'B-GEN',
-        expiry: med.expiry_date || '12/28',
+        batch: med.batch_number || '',
+        expiry: med.expiry_date || '',
         mrp: med.mrp || 0,
-        costPrice: med.purchase_price || ((med.mrp || 0) * 0.7),
-        salts: med.hsn || 'Generic',
-        packSize: parseInt(med.pack_size || '10', 10) || 10,
+        costPrice: med.purchase_price || med.cost_price || 0,
+        salts: med.hsn || '',
+        packSize: parseInt(med.pack_size || '1', 10) || 1,
         recommendedQty: 1,
         recommendedLooseQty: 0,
         recommendationMsg: '',
@@ -765,7 +753,7 @@ const POS = () => {
         qty: 0,
         looseQty: 0,
         discount: 0,
-        packSize: 10,
+        packSize: 1,
         isEmptyRow: true
       }]);
       return;
@@ -786,7 +774,7 @@ const POS = () => {
             qty: 0,
             looseQty: 0,
             discount: 0,
-            packSize: 10,
+            packSize: 1,
             isEmptyRow: true
           }
         ]);
@@ -1224,24 +1212,28 @@ const POS = () => {
     try {
       const results = await api.searchMedicine(matchedRefill.medicine_name);
       const matched = (results && results.length > 0) ? results[0] : null;
-      const sellPrice = matched ? Number(matched.sell_price || 0) : 0;
-      const mrp = matched ? Number(matched.mrp || 100) : 100;
+      if (!matched) {
+        toastEvent.trigger(`Refill medicine "${matchedRefill.medicine_name}" is not in current inventory stock.`, "error");
+        return;
+      }
+      const sellPrice = Number(matched.sell_price || 0);
+      const mrp = Number(matched.mrp || 0);
       const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
         ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
         : 0;
       const cartItem = {
-        id: matched ? matched.id : matchedRefill.medicine_id,
+        id: matched.id,
         name: matchedRefill.medicine_name,
-        batch: matched ? (matched.batch_no || matched.batch_number || 'AUTO') : 'AUTO',
-        expiry: matched ? (matched.expiry_date || '12/28') : '12/28',
-        mrp: matched ? (matched.mrp || 100) : 100,
-        sell_price: matched?.sell_price || null,
+        batch: matched.batch_no || matched.batch_number || '',
+        expiry: matched.expiry_date || '',
+        mrp: matched.mrp || 0,
+        sell_price: matched.sell_price || null,
         qty: Number(matchedRefill.quantity),
         quantity: Number(matchedRefill.quantity),
-        unitPrice: matched ? (matched.unit_price || matched.mrp || 100) : 100,
+        unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
         looseQty: 0,
         discount: autoDisc,
-        packSize: matched ? (parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 10) : 10
+        packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1
       };
 
       setCart(prev => {
@@ -1479,7 +1471,7 @@ const POS = () => {
 
     // 2. Determine the new total requested quantity for this medicine.
     let totalRequestedTablets = 0;
-    const packSize = medicineItems[0].packSize || 10;
+    const packSize = medicineItems[0].packSize || 1;
 
     for (const item of medicineItems) {
       let itemQty = item.qty ?? item.quantity ?? 0;
@@ -1523,14 +1515,14 @@ const POS = () => {
         activeBatches.push({
           inventory_id: refItem.inventory_id || refItem.id,
           medicine_id: medicineId,
-          batch_no: refItem.batch || 'AUTO',
-          expiry_date: refItem.expiry || '12/28',
+          batch_no: refItem.batch || '',
+          expiry_date: refItem.expiry || '',
           stock_qty: Math.max(refQty, refItem.stock_qty ?? 0),
           loose_quantity: Math.max(refLoose, refItem.loose_quantity ?? 0),
-          mrp: refItem.mrp || 100,
-          cost_price: refItem.costPrice || (refItem.mrp || 100),
-          unit_price: refItem.unitPrice || refItem.mrp || 100,
-          pack_size: refItem.packSize || 10,
+          mrp: refItem.mrp || 0,
+          cost_price: refItem.costPrice || 0,
+          unit_price: refItem.unitPrice || refItem.sell_price || refItem.mrp || 0,
+          pack_size: refItem.packSize || 1,
           isExpired: false
         });
       } else {
@@ -1632,7 +1624,7 @@ const POS = () => {
         mrp: rowMrp,
         sell_price: rowSellPrice,
         discount: rowDiscount || 0,
-        costPrice: alloc.batch.cost_price || (rowMrp * 0.7),
+        costPrice: alloc.batch.cost_price != null ? alloc.batch.cost_price : null,
         unitPrice: rowUnitPrice,
         availableStock: alloc.batch.stock_qty,
         availableLooseStock: alloc.batch.loose_quantity,
@@ -1716,7 +1708,7 @@ const POS = () => {
         return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id, existingItem.id, { qty: newQty, looseQty: newLoose });
       }
       
-      const hasRealBatch = !!(med.batch_no || med.batch) && med.batch !== 'AUTO' && med.batch !== 'SPECIAL' && med.batch !== 'B-GEN' && !!(med.inventory_id || (typeof med.id === 'number' && med.id < 1000000000));
+      const hasRealBatch = !!(med.batch_no || med.batch) && !!(med.inventory_id || (typeof med.id === 'number' && med.id < 1000000000));
       const initialMrp = hasRealBatch ? (med.mrp || 0) : 0;
       const initialUnitPrice = hasRealBatch ? (med.unitPrice || med.unit_price || med.mrp || 0) : 0;
       const initialGst = med.gst_percent !== undefined ? med.gst_percent : (med.gst !== undefined ? med.gst : (med.tax_percent !== undefined ? med.tax_percent : 12));
@@ -1742,11 +1734,11 @@ const POS = () => {
         looseQty: incLooseQty,
         discount: initialDiscount,
         gst_percent: initialGst,
-        packSize: med.packSize || 10,
+        packSize: med.packSize || med.pack_size || 1,
         mrp: initialMrp, 
         sell_price: med.sell_price || null,
         unitPrice: initialUnitPrice,
-        costPrice: med.costPrice || (initialMrp * 0.7),
+        costPrice: med.costPrice != null ? med.costPrice : (med.cost_price != null ? med.cost_price : null),
         salts: med.salts || '',
         availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0)),
         availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : (med.availableLooseStock !== undefined ? med.availableLooseStock : 0),
@@ -1840,12 +1832,12 @@ const POS = () => {
         id: Date.now(),
         medicine_id: medicineId,
         name: details.name,
-        batch: 'B-GEN',
-        expiry: '12/28',
+        batch: details.batch_no || '',
+        expiry: details.expiry_date || '',
         mrp: details.mrp || 0,
-        costPrice: details.mrp ? details.mrp * 0.7 : 0,
-        salts: details.api_reference || 'Generic',
-        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10,
+        costPrice: details.cost_price || details.purchase_price || 0,
+        salts: details.api_reference || details.hsn_code || '',
+        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 1,
         quantity: 0
       });
     } catch (err) {
@@ -1863,8 +1855,8 @@ const POS = () => {
       mrp: item.mrp,
       sell_price: item.sell_price,
       costPrice: item.cost_price,
-      salts: item.salts || item.hsn_code || 'Generic',
-      packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 10,
+      salts: item.salts || item.hsn_code || '',
+      packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 1,
       quantity: item.quantity,
       batch_quantity: item.batch_quantity,
       loose_quantity: item.loose_quantity,
@@ -1927,19 +1919,7 @@ const POS = () => {
         manufacturer: sug.manufacturer
       });
       
-      const newMed = res.data;
-      
-      addToCart({
-        id: Date.now(),
-        medicine_id: newMed.id,
-        name: newMed.name,
-        batch: 'B-GEN',
-        expiry: '12/28',
-        mrp: 0,
-        costPrice: 0,
-        salts: newMed.api_reference || 'Generic',
-        packSize: 10
-      });
+      toastEvent.trigger(`"${newMed.name}" added to master database. Please record a purchase invoice with batch & price before billing.`, "info");
       
       setSearchTerm('');
       setOnlineResults([]);
@@ -1999,8 +1979,8 @@ const POS = () => {
           expiry: med.expiry_date,
           mrp: med.mrp,
           costPrice: med.cost_price,
-          salts: med.salts || med.hsn_code || 'Generic',
-          packSize: med.pack_size || 10,
+          salts: med.salts || med.hsn_code || '',
+          packSize: med.pack_size || 1,
           qty: defaultQty,
           quantity: defaultQty,
           availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
@@ -2038,7 +2018,7 @@ const POS = () => {
             const updated = [...prevCart];
             const target = updated[index];
             if (!target || target.medicine_id !== med.medicine_id) return prevCart;
-            target.salts = details.api_reference || details.hsn_code || target.salts || 'Generic';
+            target.salts = details.api_reference || details.hsn_code || target.salts || '';
             target.alternatives = details.alternatives || target.alternatives;
             return updated;
           });
@@ -2062,7 +2042,7 @@ const POS = () => {
           updatedQty = Math.max(0, Number(value));
         } else if (field === 'looseQty') {
           const looseVal = Math.max(0, Number(value));
-          const pSize = item.packSize || 10;
+          const pSize = item.packSize || 1;
           if (looseVal >= pSize) {
             const extraStrips = Math.floor(looseVal / pSize);
             updatedQty = (item.qty || 0) + extraStrips;
@@ -2184,8 +2164,8 @@ const POS = () => {
         addToCart({
           id: Date.now(),
           name: nameQuery.trim() || 'Scanned Item',
-          batch: info.batchNumber || 'MANUAL',
-          expiry: info.expiryDate || '12/28',
+          batch: info.batchNumber || '',
+          expiry: info.expiryDate || '',
           mrp: info.mrp || 0,
           costPrice: info.costPrice || 0,
           salts: 'OCR Scan Entry',
@@ -2212,7 +2192,7 @@ const POS = () => {
       const itemTotalBeforeDiscount = (stripPrice * item.qty) + (unitRate * (item.looseQty || 0));
       sub += itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
 
-      const itemCost = item.costPrice != null ? item.costPrice : (stripPrice * 0.7);
+      const itemCost = item.costPrice != null ? item.costPrice : 0;
       const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
       cost += (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
     }
@@ -2287,7 +2267,7 @@ const POS = () => {
         // the server re-verifies stock authoritatively and rejects the sale if truly insufficient.
         if (item.availableStock === undefined && item.availableLooseStock === undefined) continue;
 
-        const packSize = item.packSize || 10;
+        const packSize = item.packSize || 1;
         const reqQty = Number(item.qty || 0);
         const reqLoose = Number(item.looseQty || 0);
         const reqTotalUnits = reqQty * packSize + reqLoose;
@@ -2302,6 +2282,25 @@ const POS = () => {
         }
       }
     }
+
+    // Verify that all items have legitimate inventory batch and price before finalizing
+    for (const item of cart) {
+      if (item.isEmptyRow) continue;
+      const name = item.name || item.medicine_name || '';
+      if (!name.trim()) continue;
+      const batch = item.batch || item.batch_no || '';
+      const unitPrice = Number(item.unitPrice || item.unit_price || item.mrp || 0);
+      const inventoryId = item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined);
+
+      if (!inventoryId || !batch.trim()) {
+        alert(`❌ Missing Inventory Batch:\n\n"${name}" is not linked to verified inventory stock. Please select an in-stock batch or record a purchase first.`);
+        return;
+      }
+      if (unitPrice <= 0) {
+        alert(`❌ Invalid Price:\n\n"${name}" must have a selling price greater than ₹0.`);
+        return;
+      }
+    }
     
     try {
       const salesItems = cart.filter(item => {
@@ -2310,20 +2309,19 @@ const POS = () => {
         return name.trim() !== '';
       }).map(item => {
         const itemDiscount = item.discount || item.discountPer || 0;
-        // Resolve unit price: prefer explicit unitPrice, then mrp, then 1 as absolute fallback
-        const resolvedUnitPrice = Number(item.unitPrice || item.mrp || item.unit_price || 1);
+        const resolvedUnitPrice = Number(item.unitPrice || item.mrp || item.unit_price || 0);
         const name = item.name || item.medicine_name || 'Medicine';
         return {
-          inventory_id: typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined,
+          inventory_id: item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined),
           medicine_name: name,
-          batch_no: item.batch || item.batch_no || 'N/A',
+          batch_no: item.batch || item.batch_no || '',
           expiry_date: item.expiry || item.expiry_date || '',
           mrp: item.mrp || resolvedUnitPrice,
           quantity: Number(item.qty !== undefined ? item.qty : (item.quantity || 0)),
           unit_price: resolvedUnitPrice,
           loose_qty: item.looseQty || item.loose_qty || 0,
           discount_per: itemDiscount,
-          pack_size: item.packSize || item.pack_size || 10
+          pack_size: item.packSize || item.pack_size || 1
         };
       });
 
@@ -2585,9 +2583,9 @@ const POS = () => {
       costPrice: it.cost_price || 0,
       batch: it.batch_number || it.batch || '',
       expiry: it.expiry_date || it.expiry || '',
-      salts: it.salts || 'Generic',
-      packSize: it.pack_size || 10,
-      availableStock: 999,
+      salts: it.salts || '',
+      packSize: it.pack_size || 1,
+      availableStock: Number(it.availableStock ?? it.stock_qty ?? it.quantity ?? 0),
       isEmptyRow: false,
     }));
 
@@ -3112,12 +3110,12 @@ const POS = () => {
                           addToCart({
                             id: Date.now(),
                             name: searchTerm.trim(),
-                            batch: 'MANUAL',
-                            expiry: '12/28',
+                            batch: '',
+                            expiry: '',
                             mrp: 0,
                             costPrice: 0,
                             salts: 'Custom Manual Entry',
-                            packSize: 10,
+                            packSize: 1,
                             quantity: 0
                           });
                           setSearchTerm('');
@@ -3127,7 +3125,7 @@ const POS = () => {
                       >
                         <div className="flex flex-col gap-1">
                           <span className="font-semibold text-text group-hover:text-primary transition-all">Add "{searchTerm.trim()}" directly to cart (Quick Add)</span>
-                          <span className="text-[13px] text-muted font-normal">Will use default batch MANUAL and expiry 12/28 (editable later)</span>
+                          <span className="text-[13px] text-muted font-normal">Added as custom entry — please input real rate, batch, and expiry</span>
                         </div>
                         <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
                       </button>
@@ -3153,7 +3151,7 @@ const POS = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
                               <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
@@ -3199,7 +3197,7 @@ const POS = () => {
                       {searchResults.map((med) => {
                         const renderMedicineItem = (item: any, isAlt = false) => {
                           const isHighlighted = !isAlt && searchHighlightIndex === searchResults.indexOf(item);
-                          const packSize = item.pack_size || 10;
+                          const packSize = item.pack_size || 1;
                           const totalUnits = (item.quantity || 0) * packSize + (item.loose_quantity || 0);
                           const cartUnits = cart.reduce((sum, c) => {
                             const isSameMed = c.medicine_id === item.medicine_id || 
@@ -3253,7 +3251,7 @@ const POS = () => {
                                   )}
                                 </div>
                                 <span className="text-[13px] text-muted">
-                                  Company: <span className="text-text font-semibold">{item.manufacturer || 'Generic'}</span>
+                                  Company: <span className="text-text font-semibold">{item.manufacturer || '—'}</span>
                                   {item.quantity !== undefined && (() => {
                                     const remainingLoose = remainingUnits % packSize;
                                     const hasLoose = (item.loose_quantity !== undefined && item.loose_quantity > 0) || remainingLoose > 0;
@@ -3371,7 +3369,7 @@ const POS = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'Generic'}</strong></span>
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
                               <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
@@ -3503,7 +3501,7 @@ const POS = () => {
                     // Color 1 (Theme Normal): Registered in Local Inventory with active stock & batch
                     // Color 2 (Amber Tint): Exists in Master Catalog, but NOT in active local inventory (0 stock)
                     // Color 3 (Purple Tint): Completely new / manual / unmapped item
-                    const hasLocalStock = !!item.inventory_id && ((item.availableStock || 0) > 0 || (item.availableLooseStock || 0) > 0 || (item.batch && item.batch !== 'AUTO' && item.batch !== 'SPECIAL'));
+                    const hasLocalStock = !!item.inventory_id && ((item.availableStock || 0) > 0 || (item.availableLooseStock || 0) > 0 || !!item.batch);
                     const isMasterDbOnly = !hasLocalStock && (!!item.medicine_id || (typeof item.id === 'number' && item.id < 1000000000));
                     const isUnmappedNew = !hasLocalStock && !isMasterDbOnly && !item.isEmptyRow;
 
@@ -3617,7 +3615,7 @@ const POS = () => {
                                         <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
                                         <span className="text-[11px] text-green font-bold font-mono mt-0.5">
                                           MRP: ₹{Math.round(med.mrp)} | Stock: {(() => {
-                                            const packSize = med.pack_size || 10;
+                                            const packSize = med.pack_size || 1;
                                             const totalUnits = (med.quantity || 0) * packSize + (med.loose_quantity || med.loose_qty || 0);
                                             const cartUnits = cart.reduce((sum, c) => {
                                               const isSameMed = c.medicine_id === med.medicine_id || 
@@ -3873,7 +3871,7 @@ const POS = () => {
                             
                             let remainingStock: number | string = 'N/A';
                             let remainingLoose = 0;
-                            const packSize = item.packSize || 10;
+                            const packSize = item.packSize || 1;
                             
                             if (medicineBatches.length > 0) {
                               const totalAvailableStock = medicineBatches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
@@ -4630,7 +4628,7 @@ const POS = () => {
               if (!currentMedId) return;
               try {
                 const details = await api.getMedicineQuickDetails(currentMedId);
-                const newPackSize = parsePackSizeFromPackaging(details.packaging) || details.pack_size || 10;
+                const newPackSize = parsePackSizeFromPackaging(details.packaging) || details.pack_size || 1;
                 
                 updateCart(prevCart => {
                   const updatedCart = prevCart.map(item => {

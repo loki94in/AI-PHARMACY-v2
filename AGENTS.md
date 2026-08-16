@@ -334,3 +334,23 @@ To prevent missing delivery boy contact numbers, broken templates, or unformatte
    - Special Order Request management UI resides on `/crm?tab=special_orders` (`SpecialOrdersSection` in `frontend/src/pages/CRM/index.tsx`).
    - Special Order Requests **MUST** support full editing via the Edit Modal (`showEditModal`), allowing users to edit product name, requester name, phone number, quantity, advance payment, priority, status, and distributor metadata via `api.updateOrder(id, data)` (PUT `/api/orders/:id`).
 
+---
+
+## Strict Legitimate Data & Mandatory Workflow Audit Contract
+
+To maintain total data integrity across the pharmacy POS ecosystem:
+
+1. **Zero Dummy/Fabricated Business Data**:
+   - Never use dummy, placeholder, fabricated, synthetic, guessed, or arbitrary business data anywhere in the application.
+   - Prohibited values include: `MANUAL`, `AUTO`, `SPECIAL`, `DEFAULT`, `BATCH123`, `B-GEN`, `B-CATALOG`, `B-IMPORT`, `B-OFFLINE`, `B-REISSUE`, `B-MANUAL`, `B-NEW`, `12/28`, `12/30`, `2028-12-31`, `100`, `10`, `mrp * 0.7`, `Generic Medicine`, `Item + id`, `123 Health Ave`, `+91 99999 99999`.
+2. **Never Add Invented Fallbacks**:
+   - Missing required data must remain missing and require the user or a legitimate workflow to provide it.
+   - Do not silently create, estimate, assume, auto-generate, or substitute values just to make a feature work.
+3. **No Automatic Inventory Creation**:
+   - Inventory stock can ONLY be created through a legitimate, verified purchase workflow (`Purchase -> Purchase Invoice Entered -> Verified -> Saved -> Inventory Created`).
+   - Registering a medicine master, scanning OCR, receiving emails, or catalog syncs must never automatically create inventory stock.
+4. **Mandatory Pre & Post Task Audit**:
+   - Every agent task must perform an audit before and after implementation.
+   - Every task response MUST conclude with the 8-point Audit Summary.
+
+

@@ -196,7 +196,7 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
       category: initialData.category || 'Allopathy',
       pack_unit: initialData.pack_unit || 'TAB',
       packaging: ocrData?.packaging || packagingVal,
-      pack_size: initialData.pack_size || 10,
+      pack_size: initialData.pack_size ?? (parsePackSizeFromPackaging(packagingVal) || 1),
       therapeutic: initialData.therapeutic || '',
       sub_therapeutic: initialData.sub_therapeutic || '',
       schedule_type: initialData.schedule_type || 'None',
@@ -321,7 +321,7 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
             category: med.category || 'Allopathy',
             pack_unit: med.pack_unit || 'TAB',
             packaging: ocrData?.packaging || packagingVal,
-            pack_size: med.pack_size || 10,
+            pack_size: med.pack_size ?? (parsePackSizeFromPackaging(packagingVal) || 1),
             therapeutic: med.therapeutic || '',
             sub_therapeutic: med.sub_therapeutic || '',
             schedule_type: med.schedule_type || 'None',
@@ -677,7 +677,7 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
                       <input 
                         type="number" 
                         name="pack_size" 
-                        value={form.pack_size || 10} 
+                        value={form.pack_size !== undefined && form.pack_size !== null ? form.pack_size : ''} 
                         onChange={handleChange}
                         className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-mono font-bold focus:border-primary focus:outline-none"
                       />

@@ -454,31 +454,16 @@ router.post('/', async (req, res) => {
       medicineId = medResult.lastID;
     }
     
-    // 2. Insert initial inventory master record
-    const invResult = await db.run(
-      `INSERT INTO inventory_master (medicine_id, quantity, rack_location, batch_no, expiry_date, unit_price, cost_price, mrp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        medicineId,
-        parseInt(quantity, 10) || 100,
-        rack_location || 'A-1',
-        batch_no || 'B-NEW',
-        expiry_date || '12/2028',
-        parseFloat(mrp) || 0,
-        parseFloat(cost_price) || 0,
-        parseFloat(mrp) || 0
-      ]
-    );
-    
+    // Do NOT auto-create dummy inventory_master records.
+    // Stock is only created when an actual purchase is recorded through the Purchases workflow.
     inventoryCache.invalidate();
-        res.json({
+    res.json({
       success: true,
-      message: 'Medicine and inventory registered successfully',
-      medicine_id: medicineId,
-      inventory_id: invResult.lastID
+      message: 'Medicine registered successfully',
+      medicine_id: medicineId
     });
   } catch (error: any) {
-    console.error('Failed to create medicine and inventory:', error);
+    console.error('Failed to create medicine:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -95,10 +95,11 @@ export async function checkAllRefills(db: Database): Promise<void> {
 
           if (!existingOrder) {
             // Log order in special_orders
+            const orderQty = Number(refill.quantity || 1);
             await db.run(
               `INSERT INTO special_orders (product, requester, phone, qty, priority, status, pharmarack_mapped, source_refill_id, source)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [refill.medicine_name, refill.patient_name, refill.patient_phone, 10, 'High', 'Pending', 1, refill.id, 'refill']
+              [refill.medicine_name, refill.patient_name, refill.patient_phone, orderQty, 'High', 'Pending', 1, refill.id, 'refill']
             );
           }
           
@@ -120,7 +121,7 @@ export async function checkAllRefills(db: Database): Promise<void> {
               body: JSON.stringify({
                 items: [{
                   name: refill.medicine_name,
-                  qty: 10
+                  qty: Number(refill.quantity || 1)
                 }]
               })
             }).catch(e => console.error('Failed to auto-add to Pharmarack cart:', e));
@@ -151,26 +152,34 @@ async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
   const invoice_no = `H-REF-${Date.now()}`;
   const temp_label = `Refill - ${refill.patient_name}`;
   
-  const medPriceRow = await db.get('SELECT mrp FROM medicines WHERE id = ?', [refill.medicine_id]);
-  const mrp = medPriceRow ? (medPriceRow.mrp || 0) : 0;
-  const unit_price = mrp || 100;
+  const invRow = await db.get(
+    `SELECT im.id as inventory_id, im.batch_no, im.expiry_date, im.mrp, im.unit_price, COALESCE(im.unit_price, im.mrp, m.mrp, 0) as price, COALESCE(m.pack_size, 1) as pack_size
+     FROM inventory_master im
+     JOIN medicines m ON im.medicine_id = m.id
+     WHERE im.medicine_id = ? AND (im.quantity > 0 OR im.loose_quantity > 0)
+     ORDER BY im.expiry_date ASC LIMIT 1`,
+    [refill.medicine_id]
+  );
+
+  const unit_price = invRow ? Number(invRow.price || invRow.mrp || 0) : 0;
+  const refillQty = Number(refill.quantity || 1);
 
   const cartItems = [{
-    id: refill.medicine_id,
+    id: invRow ? invRow.inventory_id : refill.medicine_id,
+    inventory_id: invRow ? invRow.inventory_id : undefined,
+    medicine_id: refill.medicine_id,
     medicine_name: refill.medicine_name,
-    qty: 10,
+    batch: invRow ? (invRow.batch_no || '') : '',
+    expiry: invRow ? (invRow.expiry_date || '') : '',
+    mrp: invRow ? (invRow.mrp || unit_price) : unit_price,
+    qty: refillQty,
+    quantity: refillQty,
     unit_price: unit_price,
+    pack_size: invRow ? (invRow.pack_size || 1) : 1,
     discount_per: 0
   }];
   
   const cart_data = JSON.stringify(cartItems);
-  const dataBlob = JSON.stringify({
-    items: cartItems,
-    patient: { name: refill.patient_name, phone: refill.patient_phone },
-    discount: 0,
-    date: new Date().toLocaleString(),
-    remarks: 'AUTO_REFILL_BILL'
-  });
 
   const billResult = await db.run(
     `INSERT INTO held_bills (invoice_no, temp_label, patient_name, patient_phone, remarks, cart_data)

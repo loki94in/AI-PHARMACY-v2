@@ -846,24 +846,7 @@ export async function runCatalogImport(jobId: number) {
           medId = insertRes.lastID!;
           existingMedicinesMap.set(key, medId);
         }
-
-        // Handle inventory stock insertion if stock fields are mapped
-        if (item.quantity !== undefined || item.batch_no !== undefined || item.expiry_date !== undefined) {
-          const qty = parseInt(item.quantity) || 0;
-          const batchNo = (item.batch_no || 'B-CATALOG').trim();
-          const expiry = item.expiry_date || '2028-12-31';
-          const mrpVal = parseFloat(item.mrp) || 0;
-
-          const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? AND batch_no = ?', [medId, batchNo]);
-          if (existingInv) {
-            await db.run('UPDATE inventory_master SET quantity = quantity + ? WHERE id = ?', [qty, existingInv.id]);
-          } else {
-            await db.run(
-              'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, mrp) VALUES (?, ?, ?, ?, ?)',
-              [medId, qty, batchNo, expiry, mrpVal]
-            );
-          }
-        }
+        // Catalog workers import medicines into master catalog; inventory is never created without purchase
       }
       await db.run('COMMIT');
       await new Promise(resolve => setImmediate(resolve));

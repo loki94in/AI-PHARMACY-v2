@@ -420,7 +420,7 @@ class TelegramBotService {
                                ocrTextLower.includes('invoice') || ocrTextLower.includes('bill no') || ocrTextLower.includes('mrp') || ocrTextLower.includes('tax invoice');
 
                 if (isBill) {
-                  this.bot?.sendMessage(chatId, '📄 Invoice detected. Processing items into inventory...');
+                  this.bot?.sendMessage(chatId, '📄 Invoice detected. Processing invoice items for staging & review...');
                   
                   const medicines: Array<{ name: string; quantity: number; costPrice?: number | null; mrp?: number | null }> = [];
                   const lines = (result.text || '').split('\n');
@@ -429,7 +429,7 @@ class TelegramBotService {
                     if (!trimmed) continue;
                     const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
                     if (qtyMatch) {
-                      const qty = parseInt(qtyMatch[1] || qtyMatch[2]) || 10;
+                      const qty = parseInt(qtyMatch[1] || qtyMatch[2], 10) || 1;
                       let name = trimmed.replace(qtyMatch[0], '').replace(/[:\-\t\r\n]/g, ' ').trim();
                       if (name && name.length > 3 && isNaN(Number(name))) {
                         let costPrice: number | null = null;
@@ -438,7 +438,7 @@ class TelegramBotService {
                         if (decimals && decimals.length > 0) {
                           if (decimals.length === 1) {
                             mrp = parseFloat(decimals[0]);
-                            costPrice = Number((mrp * 0.7).toFixed(2));
+                            costPrice = null;
                           } else {
                             const sorted = decimals.map((d: string) => parseFloat(d)).sort((a: number, b: number) => a - b);
                             costPrice = sorted[0];
@@ -451,8 +451,10 @@ class TelegramBotService {
                   }
 
                   if (medicines.length === 0) {
-                    const potentialName = result.medicineInfo?.potentialName || 'Unknown Product';
-                    medicines.push({ name: potentialName, quantity: 10, costPrice: null, mrp: null });
+                    const potentialName = result.medicineInfo?.potentialName;
+                    if (potentialName) {
+                      medicines.push({ name: potentialName, quantity: 1, costPrice: null, mrp: null });
+                    }
                   }
 
                   const db = await dbManager.getConnection();
@@ -463,14 +465,6 @@ class TelegramBotService {
                     distributorName = distMatch[1].toUpperCase();
                   }
 
-                  const normName = normalizeDistributorName(distributorName);
-                  let dist = await db.get(`SELECT id FROM distributors WHERE REPLACE(UPPER(name), ' ', '') LIKE ? LIMIT 1`, [`%${normName}%`]);
-                  
-                  if (!dist) {
-                    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distributorName]);
-                    dist = await db.get('SELECT id FROM distributors WHERE name = ?', [distributorName]);
-                  }
-                  
                   const rawInvoiceNo = `TG-INV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                   let billDate = new Date().toISOString();
                   const extractedDate = extractDateFromText(result.text || '');
@@ -481,61 +475,35 @@ class TelegramBotService {
                   const invoiceNo = formatInvoiceWithFY(rawInvoiceNo, billDate);
                   
                   let totalAmount = 0;
-                  let hasUnparseablePrices = false;
                   for (const item of medicines) {
                     if (item.mrp) {
                       totalAmount += (item.mrp * item.quantity);
-                    } else {
-                      hasUnparseablePrices = true;
                     }
                   }
 
-                  const purchaseResult = await db.run(
-                    'INSERT INTO purchases (distributor_id, invoice_no, total_amount, date, business_date) VALUES (?, ?, ?, ?, ?)',
-                    [dist.id, invoiceNo, totalAmount, billDate, billDate]
+                  const stagedItems = medicines.map((item: any) => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    cost_price: item.costPrice || 0,
+                    rate: item.costPrice || 0,
+                    mrp: item.mrp || 0,
+                    batch_no: '',
+                    expiry_date: ''
+                  }));
+
+                  await db.run(
+                    `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
+                    [distributorName, invoiceNo, billDate, totalAmount, JSON.stringify(stagedItems)]
                   );
-                  const purchaseId = purchaseResult.lastID;
 
                   let importDetails = '';
                   for (const item of medicines) {
-                    let med = await db.get('SELECT id FROM medicines WHERE name = ? LIMIT 1', [item.name]);
-                    if (!med) {
-                      med = await db.get('SELECT id FROM medicines WHERE LOWER(REPLACE(name, " ", "")) = LOWER(REPLACE(?, " ", "")) LIMIT 1', [item.name]);
-                    }
-                    if (!med) {
-                      const enrichmentStatus = item.mrp ? null : 'needs_review';
-                      const medResult = await db.run('INSERT INTO medicines (name, enrichment_status) VALUES (?, ?)', [item.name, enrichmentStatus]);
-                      med = { id: medResult.lastID };
-                    } else if (!item.mrp) {
-                      await db.run("UPDATE medicines SET enrichment_status = 'needs_review' WHERE id = ? AND enrichment_status IS NULL", [med.id]);
-                    }
-                    
-                    const itemCost = item.costPrice || 0;
-                    const itemMrp = item.mrp || 0;
-                    
-                    await db.run(
-                      'INSERT INTO purchase_items (purchase_id, medicine_id, quantity, cost_price, mrp) VALUES (?, ?, ?, ?, ?)',
-                      [purchaseId, med.id, item.quantity, itemCost, itemMrp]
-                    );
-
-                    const existingInv = await db.get('SELECT id FROM inventory_master WHERE medicine_id = ? LIMIT 1', [med.id]);
-                    if (existingInv) {
-                      await db.run(
-                        'UPDATE inventory_master SET quantity = quantity + ?, mrp = COALESCE(?, mrp), cost_price = COALESCE(?, cost_price) WHERE id = ?', 
-                        [item.quantity, itemMrp || null, itemCost || null, existingInv.id]
-                      );
-                    } else {
-                      await db.run(
-                        'INSERT INTO inventory_master (medicine_id, quantity, batch_no, expiry_date, unit_price, cost_price, reorder_level, mrp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                        [med.id, item.quantity, 'B-TG-' + Date.now().toString().slice(-4), '2028-12-31', itemMrp, itemCost, 10, itemMrp]
-                      );
-                    }
                     importDetails += `• ${item.name} x${item.quantity}${item.mrp ? ` (MRP: ₹${item.mrp})` : ' (No price)'}\n`;
                   }
 
                   await db.run(
                     'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-                    ['TELEGRAM_BILL_IMPORTED', `Imported invoice ${invoiceNo} from distributor ${distributorName}`]
+                    ['TELEGRAM_BILL_STAGED', `Staged invoice ${invoiceNo} from distributor ${distributorName} for review`]
                   );
                   
                   notificationManager.broadcast({

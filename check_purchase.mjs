@@ -14,3 +14,12 @@ if (purchases.length > 0) {
 // Check distributors
 const dists = db.prepare('SELECT id, name FROM distributors LIMIT 10').all();
 console.log('\nDistributors:', JSON.stringify(dists, null, 2));
+
+
+
+
+
+
+
+
+

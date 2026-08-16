@@ -36,7 +36,7 @@ export class PdfInvoiceService {
 
     // Fetch line items
     const items = await db.all(
-      `SELECT si.quantity, si.unit_price, si.loose_qty, si.discount_per, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size
+      `SELECT si.quantity, si.unit_price, si.loose_qty, si.discount_per, m.name as medicine_name, COALESCE(m.pack_size, 1) as pack_size
        FROM sale_items si
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
@@ -45,10 +45,10 @@ export class PdfInvoiceService {
     );
 
     
-    const shopName = settings.shop_name || 'AI PHARMACY OS';
-    const shopAddress = settings.shop_address || '123 Health Ave, Medical District, Tech City';
-    const shopPhone = settings.shop_phone || '+91 99999 99999';
-    const shopLicence = settings.shop_licence || 'N/A';
+    const shopName = settings.shop_name || 'PHARMACY INVOICE';
+    const shopAddress = settings.shop_address || '';
+    const shopPhone = settings.shop_phone || '';
+    const shopLicence = settings.shop_licence || '';
 
     const barcodeData = await generateInvoiceBarcodeData(invoice.invoice_no, invoice.date);
 
@@ -62,8 +62,15 @@ export class PdfInvoiceService {
 
         // Header / Business Info
         doc.font('Helvetica-Bold').fontSize(20).fillColor('#0284c7').text(shopName, { align: 'center' });
-        doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(shopAddress, { align: 'center' });
-        doc.text(`Phone: ${shopPhone} | Licence: ${shopLicence}`, { align: 'center' });
+        if (shopAddress) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(shopAddress, { align: 'center' });
+        }
+        const contactParts = [];
+        if (shopPhone) contactParts.push(`Phone: ${shopPhone}`);
+        if (shopLicence) contactParts.push(`Licence: ${shopLicence}`);
+        if (contactParts.length > 0) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(contactParts.join(' | '), { align: 'center' });
+        }
         doc.moveDown(1.5);
 
         // Divider
@@ -109,7 +116,7 @@ export class PdfInvoiceService {
           
           const discPer = item.discount_per || 0;
           const discountedPrice = item.unit_price * (1 - discPer / 100);
-          const packSize = item.pack_size || 10;
+          const packSize = item.pack_size || 1;
           const looseQty = item.loose_qty || 0;
           const itemTotal = (discountedPrice * item.quantity) + ((discountedPrice / packSize) * looseQty);
           

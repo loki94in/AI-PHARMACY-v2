@@ -127,7 +127,7 @@ const Inventory = () => {
 
     const formattedData = items.map(item => ({
       ...item,
-      expiry_date: formatExpiryToMMYY(item.expiry_date) || '12/28'
+      expiry_date: formatExpiryToMMYY(item.expiry_date) || '—'
     }));
 
     if (type === 'csv') {
@@ -580,10 +580,10 @@ const Inventory = () => {
                       )}
                     </td>
                     {col('id') && <td className="px-3 py-0 text-[12px] text-muted w-16 shrink-0 font-mono">{item.id}</td>}
-                    {col('batch') && <td className="px-3 py-0 text-[12px] text-muted w-28 shrink-0 font-mono truncate">{item.batch_number || 'B-NEW'}</td>}
+                    {col('batch') && <td className="px-3 py-0 text-[12px] text-muted w-28 shrink-0 font-mono truncate">{item.batch_number || '—'}</td>}
                     {col('expiry') && (
                       <td className="px-3 py-0 text-[12px] w-24 shrink-0">
-                        <span className="text-muted font-mono">{formatExpiryToMMYY(item.expiry_date) || '12/28'}</span>
+                        <span className="text-muted font-mono">{formatExpiryToMMYY(item.expiry_date) || '—'}</span>
                       </td>
                     )}
                     {col('packs') && (
@@ -839,7 +839,7 @@ const Inventory = () => {
                       {isEditing ? (
                         <input type="text" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-primary focus:outline-none transition-all" value={editForm.batch_number ?? ''} onChange={e => setEditForm({ ...editForm, batch_number: e.target.value })} />
                       ) : (
-                        <span className="text-sm font-bold text-text font-mono">{selectedItem.batch_number || 'B-NEW'}</span>
+                        <span className="text-sm font-bold text-text font-mono">{selectedItem.batch_number || '—'}</span>
                       )}
                     </div>
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
@@ -847,7 +847,7 @@ const Inventory = () => {
                       {isEditing ? (
                         <input type="text" placeholder="MM/YY" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-primary focus:outline-none transition-all" value={editForm.expiry_date ?? ''} onChange={e => setEditForm({ ...editForm, expiry_date: formatExpiryToMMYY(e.target.value) })} />
                       ) : (
-                        <span className="text-sm font-bold text-text font-mono">{selectedItem.expiry_date || '12/28'}</span>
+                        <span className="text-sm font-bold text-text font-mono">{formatExpiryToMMYY(selectedItem.expiry_date) || selectedItem.expiry_date || '—'}</span>
                       )}
                     </div>
                   </div>

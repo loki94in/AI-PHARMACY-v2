@@ -908,7 +908,7 @@ const Sells = () => {
                     </thead>
                     <tbody>
                       {editItems.map((item, idx) => {
-                        const packSize = item.pack_size || 10;
+                        const packSize = item.pack_size || 1;
                         const looseQty = item.loose_qty || 0;
                         const discPer = item.discount_per || 0;
                         const discountedPrice = item.unit_price * (1 - discPer / 100);
@@ -1025,7 +1025,7 @@ const Sells = () => {
                         <td colSpan={6} className="p-3 text-sm font-bold text-muted text-right">Subtotal:</td>
                         <td className="p-3 text-sm font-bold text-green text-right">
                           ₹{Math.round(editItems.reduce((sum, item) => {
-                            const pSize = item.pack_size || 10;
+                            const pSize = item.pack_size || 1;
                             const q = item.quantity || 0;
                             const l = item.loose_qty || 0;
                             const d = item.discount_per || 0;
@@ -1066,7 +1066,7 @@ const Sells = () => {
                   <div className="text-xs text-muted">Total</div>
                   <div className="text-lg font-extrabold text-green">
                     ₹{Math.round(editItems.reduce((sum, item) => {
-                      const pSize = item.pack_size || 10;
+                      const pSize = item.pack_size || 1;
                       const q = item.quantity || 0;
                       const l = item.loose_qty || 0;
                       const d = item.discount_per || 0;
@@ -1198,7 +1198,7 @@ const Sells = () => {
                     </thead>
                     <tbody>
                       {viewInvoice.items?.map((item, idx) => {
-                        const packSize = item.pack_size || 10;
+                        const packSize = item.pack_size || 1;
                         const looseQty = item.loose_qty || 0;
                         const discPer = item.discount_per || 0;
                         const discountedPrice = item.unit_price * (1 - discPer / 100);

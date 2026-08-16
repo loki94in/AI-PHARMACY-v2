@@ -4482,7 +4482,7 @@ const CustomerCreditSection: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-border/30">
                       {viewInvoice.items?.map((item: any, idx: number) => {
-                        const packSize = item.pack_size || 10;
+                        const packSize = item.pack_size || 1;
                         const looseQty = item.loose_qty || 0;
                         const discPer = item.discount_per || 0;
                         const discountedPrice = item.unit_price * (1 - discPer / 100);

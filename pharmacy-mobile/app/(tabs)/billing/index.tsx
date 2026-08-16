@@ -237,14 +237,14 @@ export default function BillingScreen() {
 
     const availableBatches = sameMedicineBatches.length > 0
       ? sameMedicineBatches.map(b => ({
-          batch_no: b.batch_no || 'DEFAULT',
+          batch_no: b.batch_no || '',
           expiry_date: b.expiry_date,
           stock: b.quantity,
           mrp: b.mrp || b.unit_price || 0,
         }))
       : [
           {
-            batch_no: item.batch_no || 'DEFAULT',
+            batch_no: item.batch_no || '',
             expiry_date: item.expiry_date,
             stock: item.quantity,
             mrp: item.mrp || item.unit_price || 0,
@@ -269,7 +269,7 @@ export default function BillingScreen() {
             ...item,
             strip_qty: 1,
             loose_qty: 0,
-            selected_batch: item.batch_no || 'DEFAULT',
+            selected_batch: item.batch_no || '',
             available_batches: availableBatches,
             is_collapsed: false, // newly added item starts open for quick fine-tuning
           },
@@ -419,6 +419,17 @@ export default function BillingScreen() {
     if (saleMode === 'CREDIT' && !patientName.trim()) {
       Alert.alert('Customer Required', 'Credit sales require a registered or entered customer name.');
       return;
+    }
+
+    for (const c of cart) {
+      if (!c.inventory_id || !c.selected_batch || !c.selected_batch.trim()) {
+        Alert.alert('Batch Required', `Please select a valid inventory batch for "${c.medicine_name}".`);
+        return;
+      }
+      if (c.strip_qty <= 0 && c.loose_qty <= 0) {
+        Alert.alert('Quantity Required', `Please specify a valid quantity for "${c.medicine_name}".`);
+        return;
+      }
     }
 
     setSubmitting(true);
