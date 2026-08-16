@@ -6,6 +6,7 @@ import { BaseApiClient } from './apiClients/baseApiClient.js';
 import { cacheService } from './cacheService.js';
 import { mergeOcrAndEnrichedData, MergedMedicineResult } from './dataMerger.js';
 import { withRetry } from '../utils/retry.js';
+import { matchLocalSchedule, learnSchedule } from './scheduleReferenceService.js';
 
 export class OnlineDataEnricher {
   private apiClients: BaseApiClient[] = [];
@@ -63,95 +64,195 @@ export class OnlineDataEnricher {
     return mergeOcrAndEnrichedData(ocrResult, null);
   }
 
-  async enrichMedicineByName(medicineName: string, searchTerm?: string): Promise<void> {
+  /**
+   * Background enrichment for one medicine: fills in composition (API clients
+   * → cache → Google fallback) and, separately, the Indian drug-schedule
+   * classification (local reference table → learned-from-Google fallback).
+   * Schedule lookup always tries the local reference first — most repeat
+   * substances resolve with zero network calls. `manufacturer`, when given
+   * (e.g. right after a medicine is created with both name + company), is
+   * folded into a single combined Google query along with `searchTerm`.
+   */
+  async enrichMedicineByName(medicineName: string, searchTerm?: string, manufacturer?: string): Promise<void> {
     if (!medicineName) return;
     const cleanName = medicineName.trim();
     if (!cleanName) return;
 
     try {
-      // 1. Check cache first (offline capable)
-      const cachedData = await cacheService.get(cleanName);
-      if (cachedData) {
-        return;
+      const stateDb = await dbManager.getConnection();
+      let existing: any;
+      try {
+        existing = await stateDb.get(
+          'SELECT api_reference, schedule_type FROM medicines WHERE name = ? COLLATE NOCASE',
+          [cleanName]
+        );
+      } finally {
+        await dbManager.close();
       }
 
-      // 2. Check network connectivity
-      this.isOnline = await checkConnectivity();
-      if (!this.isOnline) {
-        return;
+      let composition: string | null = existing?.api_reference || null;
+      let needsComposition = !composition;
+      let needsSchedule = !existing?.schedule_type || existing.schedule_type === 'None';
+
+      // 0. Local schedule reference — instant, offline, no quota consumed
+      if (needsSchedule) {
+        const local = await matchLocalSchedule(composition || cleanName);
+        if (local) {
+          await this.saveScheduleType(cleanName, local.schedule_type, 'local_reference');
+          needsSchedule = false;
+          console.log(`[Enricher] [Background] Matched ${cleanName} schedule (${local.schedule_type}) from local reference table.`);
+        }
       }
 
-      // 3. Query APIs
-      for (const client of this.apiClients) {
-        try {
-          const enrichedData = await withRetry(
-            () => client.queryMedicine(cleanName),
-            { label: `Enricher/Background/${client.name}` }
-          );
-          if (enrichedData) {
-            // Store in cache for future queries
-            await cacheService.set(cleanName, enrichedData);
-            console.log(`[Enricher] [Background] Successfully enriched ${cleanName} using ${client.name}`);
+      if (!needsComposition && !needsSchedule) {
+        return; // already fully enriched — nothing left to do
+      }
 
-            // Update SQLite medicines table and medicine_reference table
-            if (enrichedData.activeIngredients && enrichedData.activeIngredients.length > 0) {
-              const composition = enrichedData.activeIngredients.join(' + ');
+      // 1. Check cache first (offline capable) for composition
+      if (needsComposition) {
+        const cachedData = await cacheService.get(cleanName);
+        if (cachedData?.activeIngredients?.length) {
+          composition = cachedData.activeIngredients.join(' + ');
+          needsComposition = false;
+        }
+      }
+
+      const attemptedScheduleOnline = needsSchedule;
+
+      if (needsComposition || needsSchedule) {
+        // 2. Check network connectivity
+        this.isOnline = await checkConnectivity();
+        if (!this.isOnline) {
+          return;
+        }
+
+        // 3. Query APIs for composition (OpenFDA/RxNorm carry no Indian schedule data)
+        if (needsComposition) {
+          for (const client of this.apiClients) {
+            try {
+              const enrichedData = await withRetry(
+                () => client.queryMedicine(cleanName),
+                { label: `Enricher/Background/${client.name}` }
+              );
+              if (enrichedData?.activeIngredients?.length) {
+                await cacheService.set(cleanName, enrichedData);
+                composition = enrichedData.activeIngredients.join(' + ');
+                console.log(`[Enricher] [Background] Successfully enriched ${cleanName} using ${client.name}`);
+
+                const db = await dbManager.getConnection();
+                try {
+                  await db.run(
+                    "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.95 WHERE name = ? COLLATE NOCASE",
+                    [composition, cleanName]
+                  );
+                  await db.run(
+                    "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
+                    [cleanName, composition, enrichedData.manufacturer || manufacturer || null]
+                  );
+                } catch (dbErr) {
+                  console.error('[Enricher] [Background] SQLite save failed:', dbErr);
+                } finally {
+                  await dbManager.close();
+                }
+                needsComposition = false;
+                break;
+              }
+            } catch (clientErr) {
+              console.error(`[Enricher] [Background] API Client ${client.name} query failed for ${cleanName}:`, clientErr);
+            }
+          }
+        }
+
+        // 4. Retry local schedule match now that composition may be freshly known
+        if (needsSchedule && composition) {
+          const local = await matchLocalSchedule(composition);
+          if (local) {
+            await this.saveScheduleType(cleanName, local.schedule_type, 'local_reference');
+            needsSchedule = false;
+          }
+        }
+
+        // 5. Google Search fallback — one combined query (name + company),
+        // extracts composition AND schedule from the same result page.
+        if (needsComposition || needsSchedule) {
+          try {
+            console.log(`[Enricher] [Background] Trying Google search discovery fallback for ${cleanName}...`);
+            const combinedTerm = searchTerm || (manufacturer ? `${cleanName} ${manufacturer}` : undefined);
+            const { googleSearchService } = await import('./googleSearchService.js');
+            const googleResult = await withRetry(
+              () => googleSearchService.discoverMedicineInfo(cleanName, combinedTerm),
+              { label: 'Enricher/Background/GoogleSearch' }
+            );
+
+            if (googleResult) {
               const db = await dbManager.getConnection();
               try {
-                await db.run(
-                  "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.95 WHERE name = ? COLLATE NOCASE",
-                  [composition, cleanName]
-                );
-                await db.run(
-                  "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
-                  [cleanName, composition, enrichedData.manufacturer || null]
-                );
-                console.log(`[Enricher] [Background] Saved ${cleanName} composition (${composition}) directly to SQLite.`);
+                if (needsComposition && googleResult.api_reference?.trim()) {
+                  composition = googleResult.api_reference.trim();
+                  await db.run(
+                    "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.80 WHERE name = ? COLLATE NOCASE",
+                    [composition, cleanName]
+                  );
+                  await db.run(
+                    "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
+                    [cleanName, composition, googleResult.manufacturer || manufacturer || null]
+                  );
+                  console.log(`[Enricher] [Background] Discovered and saved ${cleanName} composition (${composition}) via Google search.`);
+                }
+
+                if (needsSchedule && googleResult.schedule_type) {
+                  await db.run(
+                    "UPDATE medicines SET schedule_type = ?, schedule_source = 'google_search', enrichment_status = CASE WHEN enrichment_status = 'matched' THEN enrichment_status ELSE 'needs_review' END WHERE name = ? COLLATE NOCASE",
+                    [googleResult.schedule_type, cleanName]
+                  );
+                  // Learn this substance's schedule for instant local matching next time
+                  await learnSchedule(
+                    composition || cleanName,
+                    googleResult.schedule_type,
+                    googleResult.therapeutic_class || null,
+                    'google_search'
+                  );
+                  console.log(`[Enricher] [Background] Discovered schedule for ${cleanName}: ${googleResult.schedule_type} (saved for review).`);
+                }
               } catch (dbErr) {
-                console.error('[Enricher] [Background] SQLite save failed:', dbErr);
+                console.error('[Enricher] [Background] Google-result save failed:', dbErr);
               } finally {
                 await dbManager.close();
               }
             }
-            return;
+          } catch (googleErr: any) {
+            console.error('[Enricher] [Background] Google search discovery failed:', googleErr.message || googleErr);
           }
-        } catch (clientErr) {
-          console.error(`[Enricher] [Background] API Client ${client.name} query failed for ${cleanName}:`, clientErr);
-        }
-      }
 
-      // 4. Try Google Search Puppeteer discovery fallback
-      try {
-        console.log(`[Enricher] [Background] APIs returned no results for ${cleanName}. Trying Google search discovery fallback...`);
-        const { googleSearchService } = await import('./googleSearchService.js');
-        const googleResult = await withRetry(
-          () => googleSearchService.discoverMedicineInfo(cleanName, searchTerm),
-          { label: 'Enricher/Background/GoogleSearch' }
-        );
-        if (googleResult && googleResult.api_reference && googleResult.api_reference.trim() !== '') {
-          const composition = googleResult.api_reference.trim();
-          const db = await dbManager.getConnection();
-          try {
-            await db.run(
-              "UPDATE medicines SET api_reference = ?, enrichment_status = 'matched', enrichment_confidence = 0.80 WHERE name = ? COLLATE NOCASE",
-              [composition, cleanName]
-            );
-            await db.run(
-              "INSERT OR REPLACE INTO medicine_reference (name, composition1, manufacturer) VALUES (?, ?, ?)",
-              [cleanName, composition, googleResult.manufacturer || null]
-            );
-            console.log(`[Enricher] [Background] Successfully discovered and saved ${cleanName} composition (${composition}) via Google search.`);
-          } catch (dbErr) {
-            console.error('[Enricher] [Background] Google save failed:', dbErr);
-          } finally {
-            await dbManager.close();
+          // Stamp regardless of outcome so the backlog worker deprioritizes this
+          // item instead of retrying the same unresolved medicine every tick.
+          if (attemptedScheduleOnline) {
+            const db = await dbManager.getConnection();
+            try {
+              await db.run(
+                "UPDATE medicines SET schedule_checked_at = CURRENT_TIMESTAMP WHERE name = ? COLLATE NOCASE",
+                [cleanName]
+              );
+            } finally {
+              await dbManager.close();
+            }
           }
         }
-      } catch (googleErr: any) {
-        console.error('[Enricher] [Background] Google search discovery failed:', googleErr.message || googleErr);
       }
     } catch (err) {
       console.error(`[Enricher] [Background] Failed to enrich medicine ${cleanName}:`, err);
+    }
+  }
+
+  private async saveScheduleType(cleanName: string, scheduleType: string, source: string): Promise<void> {
+    const db = await dbManager.getConnection();
+    try {
+      await db.run(
+        "UPDATE medicines SET schedule_type = ?, schedule_source = ? WHERE name = ? COLLATE NOCASE",
+        [scheduleType, source, cleanName]
+      );
+    } finally {
+      await dbManager.close();
     }
   }
 }

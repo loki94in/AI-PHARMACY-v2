@@ -243,6 +243,14 @@ router.post('/medicines', async (req, res) => {
     await dbManager.close();
     inventoryCache.invalidate();
     res.json({ success: true, data: savedMed });
+
+    // Fire-and-forget: auto-discover composition + drug-schedule classification
+    // (Schedule H/H1/X/G) in the background using the name + company the user
+    // just saved. Rate-limited/throttled inside onlineDataEnricher + googleSearchService
+    // so this never blocks the response and never floods external search.
+    import('../services/onlineDataEnricher.js')
+      .then(({ onlineDataEnricher }) => onlineDataEnricher.enrichMedicineByName(adjustedName, undefined, manufacturer || undefined))
+      .catch(err => console.warn('[Enricher] Auto-trigger on medicine create failed:', err));
   } catch (error) {
     await dbManager.close();
     console.error('Failed to create medicine:', error);

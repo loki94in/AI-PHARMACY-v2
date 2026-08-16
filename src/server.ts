@@ -714,6 +714,19 @@ async function setupCrons(db: any) {
     }
   });
 
+  // Drug-schedule backlog discovery: processes one pre-existing medicine
+  // missing a schedule classification roughly every 7 minutes (~8-9/hr,
+  // within the 5-12/hr safe pace) — local reference table first, Google
+  // search fallback last and always under its own hourly/daily quota.
+  cron.schedule('*/7 * * * *', async () => {
+    try {
+      const { processNextScheduleBacklogItem } = await import('./services/scheduleBacklogWorker.js');
+      await processNextScheduleBacklogItem();
+    } catch (err) {
+      console.error('[ScheduleBacklog] Cron error:', err);
+    }
+  });
+
   // Register OCR completion listener for WhatsApp intent service
   try {
     const { eventService } = await import('./services/eventService.js');

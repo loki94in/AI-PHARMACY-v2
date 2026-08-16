@@ -37,6 +37,7 @@ export interface SearchEnrichmentResult {
   dosage_form?: string;
   pack_info?: string;
   therapeutic_class?: string;
+  schedule_type?: string;
   raw_text?: string;
   screenshot_path?: string;
 }
@@ -71,8 +72,29 @@ class GoogleSearchService {
       "SELECT COUNT(*) as count FROM google_search_logs WHERE created_at >= datetime('now', '-1 day')"
     );
     const todayCount = countRow ? countRow.count : 0;
-    
+
     return todayCount >= limit;
+  }
+
+  /**
+   * Check if the rolling hourly search limit is exceeded. This is the primary
+   * throttle keeping automatic enrichment (new-medicine auto-trigger + the
+   * backlog worker) to a slow, human-like pace (default 8/hr, tunable
+   * 5-12/hr) so the app doesn't get rate-limited/blocked by Google.
+   */
+  public async checkHourlyLimit(): Promise<boolean> {
+    const db = await dbManager.getConnection();
+
+    // Default limit is 8 queries per hour (user-configurable in app_settings)
+    const limitRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_search_hourly_limit'");
+    const limit = limitRow ? parseInt(limitRow.value, 10) : 8;
+
+    const countRow = await db.get(
+      "SELECT COUNT(*) as count FROM google_search_logs WHERE created_at >= datetime('now', '-1 hour')"
+    );
+    const hourCount = countRow ? countRow.count : 0;
+
+    return hourCount >= limit;
   }
 
   /**
@@ -198,6 +220,21 @@ class GoogleSearchService {
       }
     }
 
+    // 7. Extract Indian drug-schedule classification (Schedule H / H1 / X / G)
+    // Check the most restrictive/specific classification first so e.g.
+    // "Schedule H1" doesn't get mis-matched as plain "Schedule H".
+    if (/schedule\s*h\s*1|schedule\s*h1\b/i.test(text)) {
+      result.schedule_type = 'Schedule H1';
+    } else if (/schedule\s*x\b/i.test(text)) {
+      result.schedule_type = 'Schedule X';
+    } else if (/schedule\s*g\b/i.test(text)) {
+      result.schedule_type = 'Schedule G';
+    } else if (/schedule\s*h\b/i.test(text)) {
+      result.schedule_type = 'Schedule H';
+    } else if (/\b(otc|over[\s-]the[\s-]counter)\b/i.test(text)) {
+      result.schedule_type = 'None';
+    }
+
     return result;
   }
 
@@ -213,9 +250,15 @@ class GoogleSearchService {
       return null;
     }
 
-    const isLimitExceeded = await this.checkDailyLimit();
-    if (isLimitExceeded) {
+    const isDailyLimitExceeded = await this.checkDailyLimit();
+    if (isDailyLimitExceeded) {
       console.warn('[GoogleSearchService] Daily Google search limit reached. Skipping search.');
+      return null;
+    }
+
+    const isHourlyLimitExceeded = await this.checkHourlyLimit();
+    if (isHourlyLimitExceeded) {
+      console.warn('[GoogleSearchService] Hourly Google search limit reached. Skipping search until next hour.');
       return null;
     }
 

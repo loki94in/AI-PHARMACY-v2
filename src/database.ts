@@ -1016,6 +1016,11 @@ export async function ensureSchema(dbPath: string) {
     ['stock_ledger', 'business_date', 'ALTER TABLE stock_ledger ADD COLUMN business_date DATETIME'],
     ['distributor_dispatch_reminders', 'order_source', "ALTER TABLE distributor_dispatch_reminders ADD COLUMN order_source TEXT DEFAULT 'pharmarack'"],
     ['distributor_dispatch_reminders', 'email_received_at', 'ALTER TABLE distributor_dispatch_reminders ADD COLUMN email_received_at DATETIME'],
+    // Tracks how schedule_type was determined: 'manual' | 'local_reference' | 'google_search'
+    ['medicines', 'schedule_source', "ALTER TABLE medicines ADD COLUMN schedule_source TEXT DEFAULT NULL"],
+    // Stamped whenever schedule discovery is attempted (found or not), so the
+    // backlog worker doesn't retry the same unresolved item every cron tick.
+    ['medicines', 'schedule_checked_at', "ALTER TABLE medicines ADD COLUMN schedule_checked_at DATETIME DEFAULT NULL"],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs
@@ -1191,6 +1196,22 @@ export async function ensureSchema(dbPath: string) {
       query TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Local Indian drug-schedule lookup table (Drugs and Cosmetics Rules, 1945 classification
+    -- by active substance: Schedule H / H1 / X / G). Seeded with a starter set of well-known
+    -- publicly-documented substances and grown over time as online searches discover new ones
+    -- (source='google_search'), so repeat lookups for the same active ingredient resolve
+    -- instantly from this table instead of hitting Google again.
+    CREATE TABLE IF NOT EXISTS schedule_drug_reference (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      substance_name TEXT NOT NULL UNIQUE,
+      schedule_type TEXT NOT NULL,
+      category TEXT,
+      source TEXT DEFAULT 'seed',
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_schedule_ref_substance ON schedule_drug_reference (substance_name);
 
     CREATE TABLE IF NOT EXISTS pending_shortage_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
