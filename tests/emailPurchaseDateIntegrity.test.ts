@@ -3,21 +3,27 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true)),
-  currentQr: null,
-  isReady: false,
-  forceReconnect: jest.fn(),
-  destroyClient: jest.fn(),
-  shouldRouteToBusiness: jest.fn(() => Promise.resolve(false)),
-  isPuppeteerDetachedError: jest.fn(() => false),
-  hasSavedSession: jest.fn(() => false),
-  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isReady: false, initializing: false }))
+  initClient: jest.fn(() => Promise.resolve(true))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
   __esModule: true,
   telegramBotService: {
     sendDefaultNotification: jest.fn(() => Promise.resolve(true))
+  }
+}));
+
+jest.unstable_mockModule('../src/services/inventoryService.js', () => ({
+  __esModule: true,
+  inventoryService: {
+    checkAndTriggerRefillsForMedicine: jest.fn(() => Promise.resolve())
+  }
+}));
+
+jest.unstable_mockModule('../src/services/overlapDetectionService.js', () => ({
+  __esModule: true,
+  overlapDetectionService: {
+    detectOverlap: jest.fn(() => Promise.resolve({ hasOverlap: false }))
   }
 }));
 
@@ -35,18 +41,21 @@ describe('Email Purchase Date Integrity Tests', () => {
   let emailServiceModule: any;
 
   beforeAll(async () => {
+    jest.setTimeout(20000);
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'email-date-integrity-test-'));
     dbPath = path.join(tmpDir, 'app.db');
     process.env.DB_PATH = dbPath;
     await ensureSchema(dbPath);
 
-    const { open } = await import('sqlite');
-    const sqlite3 = await import('sqlite3');
-    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
 
-    // Seed test distributor
+    // Seed test distributor and medicine
     await db.run(
       'INSERT INTO distributors (id, name, email) VALUES (1, "Apex Pharma Distributors", "orders@apexpharma.com")'
+    );
+    await db.run(
+      'INSERT INTO medicines (id, name, mrp, rate) VALUES (1, "Paracetamol 500mg", 20, 10)'
     );
 
     // 1. Seed Email with explicit historical invoice date in body/subject
@@ -77,7 +86,23 @@ describe('Email Purchase Date Integrity Tests', () => {
       { name: 'Amoxicillin 500', batch_no: 'BATCH-NODATE-1', expiry_date: '12/28', quantity: 10, cost_price: 50, mrp: 75 }
     ])]);
 
-    await db.close();
+    // 5. Seed staged purchase dated yesterday
+    const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    await db.run(`
+      INSERT INTO staged_purchases (id, distributor_name, invoice_no, date, total_amount, items_json, status)
+      VALUES (903, 'Apex Pharma Distributors', 'INV-YEST-903', '${yesterdayDate}', 1000, ?, 'pending')
+    `, [JSON.stringify([
+      { name: 'Paracetamol 500mg', batch_no: 'BATCH-YEST-1', expiry_date: '12/28', quantity: 15, cost_price: 10, mrp: 20 }
+    ])]);
+
+    // 6. Seed staged purchase dated last year
+    const lastYearDateStr = `${new Date().getFullYear() - 1}-04-12`;
+    await db.run(`
+      INSERT INTO staged_purchases (id, distributor_name, invoice_no, date, total_amount, items_json, status)
+      VALUES (904, 'Apex Pharma Distributors', 'INV-LASTYEAR-904', '${lastYearDateStr}', 1000, ?, 'pending')
+    `, [JSON.stringify([
+      { name: 'Azithromycin 500', batch_no: 'BATCH-LASTYR-1', expiry_date: '12/28', quantity: 25, cost_price: 40, mrp: 60 }
+    ])]);
 
     const { emailService } = await import('../src/services/emailService.js');
     emailServiceModule = emailService;
@@ -136,17 +161,13 @@ describe('Email Purchase Date Integrity Tests', () => {
     expect(approveSuccess.body.success).toBe(true);
     expect(approveSuccess.body.purchase_id).toBeDefined();
 
-    const { open } = await import('sqlite');
-    const sqlite3 = await import('sqlite3');
-    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
-
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
     const savedPurchase = await db.get('SELECT * FROM purchases WHERE id = ?', [approveSuccess.body.purchase_id]);
     expect(savedPurchase).toBeDefined();
     // Must keep original historical date: 2024-01-10
     expect(savedPurchase.date).toBe('2024-01-10');
     expect(savedPurchase.date).not.toBe(new Date().toISOString().split('T')[0]);
-
-    await db.close();
   });
 
   // Test 4: Approval with user-verified date correctly sets and preserves the verified date
@@ -161,14 +182,82 @@ describe('Email Purchase Date Integrity Tests', () => {
     expect(approveVerified.status).toBe(200);
     expect(approveVerified.body.success).toBe(true);
 
-    const { open } = await import('sqlite');
-    const sqlite3 = await import('sqlite3');
-    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
-
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
     const savedPurchase = await db.get('SELECT * FROM purchases WHERE id = ?', [approveVerified.body.purchase_id]);
     expect(savedPurchase).toBeDefined();
     expect(savedPurchase.date).toBe('2023-11-20');
+  });
 
-    await db.close();
+  // Test 5: Manual purchase saving blocks when invoice date is missing
+  test('5. POST /manual rejects purchase when invoice date is missing', async () => {
+    const res = await request(app)
+      .post('/api/purchases/manual')
+      .send({
+        distributor: 'Apex Pharma Distributors',
+        invoice_no: 'INV-MANUAL-NODATE',
+        date: '', // Missing date
+        items: [
+          { medicine_id: 1, name: 'Paracetamol 500mg', batch_no: 'B-NODATE', qty: 10, rate: 10, mrp: 20 }
+        ]
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/invoice date is required/i);
+  }, 15000);
+
+  // Test 6: Staged purchase dated yesterday preserves exact invoice date
+  test('6. Staged purchase dated yesterday preserves exact invoice date', async () => {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const approveYesterday = await request(app)
+      .post('/api/purchases/staged/903/approve')
+      .send({
+        distributor_name: 'Apex Pharma Distributors',
+        invoice_no: 'INV-YEST-903'
+      });
+    expect(approveYesterday.status).toBe(200);
+    expect(approveYesterday.body.success).toBe(true);
+    expect(approveYesterday.body.purchase_id).toBeDefined();
+
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
+    const saved = await db.get('SELECT * FROM purchases WHERE id = ?', [approveYesterday.body.purchase_id]);
+    expect(saved).toBeDefined();
+    expect(saved.date).toBe(yesterday);
+    expect(saved.date).not.toBe(new Date().toISOString().split('T')[0]);
+  }, 15000);
+
+  // Test 7: Staged purchase dated last year preserves exact invoice date
+  test('7. Staged purchase dated last year preserves exact invoice date', async () => {
+    const lastYearDate = `${new Date().getFullYear() - 1}-04-12`;
+    const approveLastYear = await request(app)
+      .post('/api/purchases/staged/904/approve')
+      .send({
+        distributor_name: 'Apex Pharma Distributors',
+        invoice_no: 'INV-LASTYEAR-904'
+      });
+    expect(approveLastYear.status).toBe(200);
+    expect(approveLastYear.body.success).toBe(true);
+    expect(approveLastYear.body.purchase_id).toBeDefined();
+
+    const { dbManager } = await import('../src/database/connection.js');
+    const db = await dbManager.getConnection();
+    const saved = await db.get('SELECT * FROM purchases WHERE id = ?', [approveLastYear.body.purchase_id]);
+    expect(saved).toBeDefined();
+    expect(saved.date).toBe(lastYearDate);
+    expect(saved.date).not.toBe(new Date().toISOString().split('T')[0]);
+  }, 15000);
+
+  // Test 8: Reissue route blocks when no date is found and none provided
+  test('8. POST /reconciliation/reissue blocks when invoice date is missing', async () => {
+    const res = await request(app)
+      .post('/api/purchases/reconciliation/reissue')
+      .send({
+        email_uid: 202, // Email with NO invoice date
+        items: [
+          { name: 'Paracetamol 500mg', quantity: 10, rate: 10, mrp: 20 }
+        ]
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/invoice date is required/i);
   });
 });

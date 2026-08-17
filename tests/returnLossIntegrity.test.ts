@@ -94,7 +94,7 @@ describe('Task 5: Removal of Hardcoded 3% Return Loss/Commission & Enforcing Exp
       .post(`/api/returns/expiry-reviews/${review.id}/approve`)
       .send({ notes: 'Missing loss percentage' });
     expect(missingRes.status).toBe(400);
-    expect(missingRes.body.error).toContain('loss_percentage');
+    expect(missingRes.body.error).toContain('Return percentage required');
 
     // B. Reject when loss_percentage is invalid (e.g. -2 or 150)
     const invalidRes = await request(app)
@@ -177,7 +177,7 @@ describe('Task 5: Removal of Hardcoded 3% Return Loss/Commission & Enforcing Exp
       .post('/api/returns/process-returns')
       .send({ items });
     expect(missingRes.status).toBe(400);
-    expect(missingRes.body.error).toContain('loss_percentage');
+    expect(missingRes.body.error).toContain('Return percentage required');
 
     // B. Valid 2.5% loss (Total = 5 * 50 = 250; Expected = 250 * 0.975 = 243.75)
     const validRes = await request(app)
@@ -220,7 +220,7 @@ describe('Task 5: Removal of Hardcoded 3% Return Loss/Commission & Enforcing Exp
       .post('/api/expiry/create-return')
       .send({ inventory_id: invRes.lastID, quantity: 4 });
     expect(missingRes.status).toBe(400);
-    expect(missingRes.body.error).toContain('loss_percentage');
+    expect(missingRes.body.error).toContain('Return percentage required');
 
     // B. Valid 7.0% loss (Total = 4 * 100 = 400; Expected = 400 * 0.93 = 372)
     const validRes = await request(app)
@@ -233,6 +233,52 @@ describe('Task 5: Removal of Hardcoded 3% Return Loss/Commission & Enforcing Exp
     const tracking = await db.get('SELECT * FROM expiry_returns_tracking WHERE return_id = ?', [returnRec.id]);
     expect(tracking.loss_percentage).toBe(7.0);
     expect(tracking.expected_credit_amount).toBe(372.0);
+
+    await db.close();
+  });
+
+  test('6. POST /api/returns/expiry-reviews/bulk-approve rejects missing percentage and processes custom percentage', async () => {
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    const distRes = await db.run("INSERT INTO distributors (name) VALUES ('Bulk Dist')");
+    const distId = distRes.lastID;
+    const medRes = await db.run("INSERT INTO medicines (name, mrp) VALUES ('Bulk Loss Med', 200)");
+    const medId = medRes.lastID;
+
+    const purchRes = await db.run("INSERT INTO purchases (distributor_id, invoice_no) VALUES (?, 'BLK-INV-1')", [distId]);
+    await db.run(
+      "INSERT INTO purchase_items (purchase_id, medicine_id, batch_no, expiry_date, quantity, cost_price, mrp) VALUES (?, ?, 'BLK-BATCH-1', '01/20', 10, 150.0, 200.0)",
+      [purchRes.lastID, medId]
+    );
+
+    const invRes = await db.run(
+      "INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, cost_price, mrp, is_active) VALUES (?, 'BLK-BATCH-1', '01/20', 10, 150.0, 200.0, 1)",
+      [medId]
+    );
+
+    await scanAndCreateExpiryReviews(db as any);
+    const review = await db.get('SELECT id FROM expiry_return_reviews WHERE inventory_id = ? AND status = "pending"', [invRes.lastID]);
+
+    // A. Missing loss_percentage
+    const missingRes = await request(app)
+      .post('/api/returns/expiry-reviews/bulk-approve')
+      .send({ ids: [review.id] });
+    expect(missingRes.status).toBe(400);
+    expect(missingRes.body.error).toContain('Return percentage required');
+
+    // B. Valid 4.0% loss (Total = 10 * 150 = 1500; Expected = 1500 * 0.96 = 1440)
+    const validRes = await request(app)
+      .post('/api/returns/expiry-reviews/bulk-approve')
+      .send({ ids: [review.id], loss_percentage: 4.0 });
+    expect(validRes.status).toBe(200);
+    expect(validRes.body.success).toBe(true);
+
+    const updatedReview = await db.get('SELECT return_id FROM expiry_return_reviews WHERE id = ?', [review.id]);
+    const tracking = await db.get('SELECT * FROM expiry_returns_tracking WHERE return_id = ?', [updatedReview.return_id]);
+    expect(tracking.loss_percentage).toBe(4.0);
+    expect(tracking.expected_credit_amount).toBe(1440.0);
 
     await db.close();
   });

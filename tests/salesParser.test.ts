@@ -97,36 +97,30 @@ describe('salesParser', () => {
         expect(rows[0].medicine_id).toBe(101);
     }, 15000); // Increased timeout for cache initialization
 
-    test('should handle missing inventory medicine_id gracefully by auto-creating medicine and inventory records', async () => {
+    test('skips sale item and records audit entry when medicine_id does not exist (no auto-creation)', async () => {
         // Insert a legacy sales invoice to reference
         await db.run("INSERT INTO sales_invoices (invoice_no, customer_id, date, total_amount, tax_amount) VALUES (?, ?, ?, ?, ?)",
-                    ['INV002', 1, '2024-01-16', 300.0, 15.0]);
+                    ['INV002', null, '2024-01-16', 300.0, 15.0]);
 
         // Try to insert a sale item with a medicine_id that doesn't exist in inventory_master
         const sqlLine = "INSERT INTO legacy_saleItems VALUES (2, 'INV002', 999, 1, 50.0);"; // medicine_id 999 doesn't exist
         const result = await processSalesLine(sqlLine, db);
-        expect(result).toBe(true); // Should succeed by auto-creating the missing medicine/inventory
+        // Task 8 contract: unknown medicine → skip, never auto-create
+        expect(result).toBe(false);
 
-        // Verify a record was inserted for this invoice
+        // No sale_items row must be created for this invoice
         const count = await db.get(`
             SELECT COUNT(*) as count FROM sale_items sii
             JOIN sales_invoices si ON sii.invoice_id = si.id
             WHERE si.invoice_no = 'INV002'
         `);
-        expect(count.count).toBe(1);
+        expect(count.count).toBe(0);
 
-        // Verify the inserted record has correct values
-        const saleItem = await db.get(`
-            SELECT sii.quantity, sii.unit_price, im.medicine_id
-            FROM sale_items sii
-            JOIN sales_invoices si ON sii.invoice_id = si.id
-            JOIN inventory_master im ON sii.inventory_id = im.id
-            WHERE si.invoice_no = 'INV002'
-        `);
-        expect(saleItem.quantity).toBe(1);
-        expect(saleItem.unit_price).toBe(50.0);
-        expect(saleItem.medicine_id).toBe(999); // Should reference the auto-created medicine
-    }, 15000); // Increased timeout for cache initialization and auto-creation
+        // No fake medicine or inventory row must be created
+        const medCount = await db.get('SELECT COUNT(*) as count FROM medicines WHERE id = 999');
+        expect(medCount.count).toBe(0);
+    }, 15000);
+
 
     test('should return false for non-sales INSERT statements', async () => {
         const sqlLine = "INSERT INTO some_other_table (col1, col2) VALUES (1, 'test');";

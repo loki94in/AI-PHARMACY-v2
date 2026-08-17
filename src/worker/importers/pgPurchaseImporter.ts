@@ -9,6 +9,7 @@ import { Database } from 'sqlite';
 import { medicineMap, distributorMap } from './pgMasterImporter.js';
 import { formatInvoiceWithFY } from '../../utils/migrationValidation.js';
 import { normalizeDateOrRaw } from '../../utils/migrationUtils.js';
+import { queueMigrationAudit } from '../../utils/migrationAudit.js';
 
 // Maps for cross-referencing
 export const batchMap = new Map<string, number>();     // legacy batch_id → new inventory_master.id
@@ -121,11 +122,36 @@ export async function importInventory(row: Record<string, string | null>, db: Da
 
   const rawDate = row['created_time'] || null;
   const normalizedDate = normalizeDateOrRaw(rawDate);
-  const rawInvoice = row['invoice'] || row['invoice_id'] || legacyId;
+  // invoice_no is a mandatory accounting identifier — never fabricate one.
+  // If the legacy purchase has no real invoice number, skip it and queue a migration review.
+  const rawInvoice = ((row['invoice'] || row['invoice_id'] || '') as string).trim();
+  if (!rawInvoice) {
+    queueMigrationAudit({
+      table: 'purchases',
+      record_identifier: legacyId,
+      entity_type: 'invoice',
+      raw_value: legacyId,
+      status: 'skipped',
+      reason: `Legacy inventory_id "${legacyId}" has no invoice number — record skipped; never fabricate an invoice number`,
+    });
+    return;
+  }
+  const invoiceNo = rawInvoice ? formatInvoiceWithFY(rawInvoice, normalizedDate || '') : rawInvoice;
+
+  if (legacyDistId && !distributorMap.has(legacyDistId)) {
+    queueMigrationAudit({
+      table: 'purchases',
+      record_identifier: invoiceNo || legacyId,
+      entity_type: 'distributor',
+      raw_value: legacyDistId,
+      status: 'preserved_null',
+      reason: `Unresolved legacy distributor ID "${legacyDistId}" not found in distributor master; distributor_id preserved as NULL`,
+    });
+  }
 
   purchaseBatch.push({
     distributor_id: distributorId || null,
-    invoice_no: rawInvoice ? formatInvoiceWithFY(rawInvoice, normalizedDate || '') : rawInvoice,
+    invoice_no: invoiceNo,
     date: normalizedDate,
     total_amount: parseFloat(row['amount'] || '0') || 0,
     cgst_value: parseFloat(row['cgst_value'] || '0') || 0,

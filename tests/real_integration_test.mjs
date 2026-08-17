@@ -1,3 +1,8 @@
+if (process.env.NODE_ENV === 'production') {
+  console.error('[TEST_PROTECTION] FATAL: Real integration tests must never run against a production instance.');
+  process.exit(1);
+}
+
 import { spawn } from 'child_process';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';

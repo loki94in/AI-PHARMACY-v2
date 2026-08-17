@@ -288,4 +288,65 @@ describe('Task 4: Expiry Return Review & Removal of Automatic Returns', () => {
     expect(Array.isArray(res.body.logs)).toBe(true);
     expect(res.body.logs.length).toBeGreaterThanOrEqual(3);
   });
+
+  test('7. Repeated scheduler execution does NOT duplicate pending or approved returns', async () => {
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Seed expired medicine with inventory
+    const medRes = await db.run("INSERT INTO medicines (name, mrp) VALUES ('Idempotency Test Med', 40.0)");
+    const medId = medRes.lastID;
+    const invRes = await db.run(
+      "INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, cost_price, mrp, is_active) VALUES (?, 'IDEMP-001', '01/20', 12, 25.0, 40.0, 1)",
+      [medId]
+    );
+    const invId = invRes.lastID;
+
+    // Run scheduler 1st time
+    const res1 = await scanAndCreateExpiryReviews(db as any);
+    expect(res1.pendingCreated).toBe(1);
+
+    // Verify exactly 1 pending review exists
+    const reviews1 = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ?', [invId]);
+    expect(reviews1.length).toBe(1);
+    expect(reviews1[0].status).toBe('pending');
+    expect(reviews1[0].quantity).toBe(12);
+
+    // Run scheduler 2nd time (should NOT create a duplicate)
+    const res2 = await scanAndCreateExpiryReviews(db as any);
+    expect(res2.pendingCreated).toBe(0);
+
+    const reviews2 = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ?', [invId]);
+    expect(reviews2.length).toBe(1);
+
+    // Verify inventory still unchanged at 12
+    const invBeforeApprove = await db.get('SELECT quantity FROM inventory_master WHERE id = ?', [invId]);
+    expect(invBeforeApprove.quantity).toBe(12);
+
+    // Now Pharmacist approves the pending review
+    const approveRes = await request(app)
+      .post(`/api/returns/expiry-reviews/${reviews1[0].id}/approve`)
+      .send({ loss_percentage: 0.0 });
+    expect(approveRes.status).toBe(200);
+    expect(approveRes.body.success).toBe(true);
+
+    // Verify inventory deducted to 0
+    const invAfterApprove = await db.get('SELECT quantity FROM inventory_master WHERE id = ?', [invId]);
+    expect(invAfterApprove.quantity).toBe(0);
+
+    // Run scheduler 3rd time (after approval: inventory is 0, so no new review created)
+    const res3 = await scanAndCreateExpiryReviews(db as any);
+    expect(res3.pendingCreated).toBe(0);
+
+    const reviews3 = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ?', [invId]);
+    expect(reviews3.length).toBe(1);
+    expect(reviews3[0].status).toBe('approved');
+
+    // Verify exactly 1 return was created for this batch
+    const returnsForMed = await db.all('SELECT * FROM return_items WHERE batch_no = "IDEMP-001"');
+    expect(returnsForMed.length).toBe(1);
+
+    await db.close();
+  });
 });

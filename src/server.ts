@@ -260,6 +260,7 @@ app.use('/api', lazyRoute(() => import('./routes/distributors.js')));
 app.use('/api', lazyRoute(() => import('./routes/notifications.js')));
 app.use('/api/whatsapp/queue', lazyRoute(() => import('./routes/whatsappQueue.js')));
 app.use('/api/investigation', lazyRoute(() => import('./routes/investigation.js')));
+app.use('/api/audit', lazyRoute(() => import('./routes/audit.js')));
 app.use('/api', lazyRoute(() => import('./routes/medicineAvailability.js')));
 
 // Serve the built frontend (frontend/dist) for production-style deployments.

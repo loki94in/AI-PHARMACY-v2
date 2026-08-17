@@ -175,11 +175,28 @@ router.put('/:id/doctor', async (req, res) => {
   if (!doctor_name) {
     return res.status(400).json({ error: 'doctor_name is required' });
   }
+
+  // Reject fake/placeholder license values — never store REG-NA, UNKNOWN, etc.
+  const cleanLicense = license_no && license_no.trim() ? license_no.trim() : null;
+  const FAKE_VALUES = ['REG-NA', 'UNKNOWN', 'N/A', 'NA', '0000', 'NONE', '-'];
+  if (cleanLicense && FAKE_VALUES.some(f => cleanLicense.toUpperCase() === f)) {
+    return res.status(400).json({
+      error: 'Doctor registration/license information required. Placeholder values are not accepted.',
+    });
+  }
+
+  // A record is only complete when both doctor name and a real license number are present.
+  const missingLicense = !cleanLicense ? 1 : 0;
+
   try {
     const db = await dbManager.getConnection();
     await db.run(
-      'UPDATE compliance_logs SET doctor_name = ?, license_no = COALESCE(?, license_no) WHERE id = ?',
-      [doctor_name, license_no || null, id]
+      `UPDATE compliance_logs
+       SET doctor_name    = ?,
+           license_no     = ?,
+           missing_license = ?
+       WHERE id = ?`,
+      [doctor_name, cleanLicense, missingLicense, id]
     );
     res.json({ success: true, message: 'Doctor details updated successfully' });
   } catch (err: any) {

@@ -1,3 +1,8 @@
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DATABASE_RESET !== 'true') {
+  console.error('[DATA_PROTECTION] FATAL: clear-all-data is strictly prohibited in production without explicit ALLOW_DATABASE_RESET=true.');
+  process.exit(1);
+}
+
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';

@@ -55,10 +55,12 @@ describe('Purchase Distributor Integrity Verification', () => {
     await db.close();
 
     const { default: purchasesRouter } = await import('../src/routes/purchases.js');
+    const { default: distributorsRouter } = await import('../src/routes/distributors.js');
 
     app = express();
     app.use(express.json());
     app.use('/api/purchases', purchasesRouter);
+    app.use('/api/distributors', distributorsRouter);
   }, 30000);
 
   afterAll(() => {
@@ -118,7 +120,7 @@ describe('Purchase Distributor Integrity Verification', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Distributor is required/i);
+    expect(res.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
   }, 15000);
 
   test('4. Reject staged purchase approval if distributor is placeholder "Email Import" or "Default Distributor"', async () => {
@@ -127,7 +129,7 @@ describe('Purchase Distributor Integrity Verification', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Distributor is required/i);
+    expect(res.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
   }, 15000);
 
   test('5. Successfully approve staged purchase when legitimate distributor is assigned', async () => {
@@ -184,6 +186,69 @@ describe('Purchase Distributor Integrity Verification', () => {
     // Verify NEVER created Default Distributor
     const defaultDist = await db.get('SELECT * FROM distributors WHERE name = "Default Distributor"');
     expect(defaultDist).toBeUndefined();
+
+    await db.close();
+  }, 15000);
+
+  test('7. Confirm NO inventory and NO purchase record is created when purchase is rejected due to missing distributor', async () => {
+    const res = await request(app)
+      .post('/api/purchases/manual')
+      .send({
+        invoice_no: 'INV-BLOCKED-001',
+        date: '2026-08-16',
+        items: [
+          { medicine_name: 'Paracetamol 650mg', batch_no: 'PARA-BLOCKED-01', qty: 100, rate: 10, mrp: 20 }
+        ]
+      });
+
+    expect(res.status).toBe(400);
+
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Confirm no purchase was inserted
+    const pur = await db.get('SELECT * FROM purchases WHERE invoice_no = ?', ['INV-BLOCKED-001']);
+    expect(pur).toBeUndefined();
+
+    // Confirm no inventory was inserted or created
+    const inv = await db.get('SELECT * FROM inventory_master WHERE batch_no = ?', ['PARA-BLOCKED-01']);
+    expect(inv).toBeUndefined();
+
+    await db.close();
+  }, 15000);
+
+  test('8. Confirm POST /api/distributors/purchases rejects missing and placeholder distributor', async () => {
+    const res1 = await request(app)
+      .post('/api/distributors/purchases')
+      .send({
+        distributor: 'Default Distributor',
+        invoice_no: 'INV-DIST-PUR-01',
+        total_amount: 100
+      });
+    expect(res1.status).toBe(400);
+    expect(res1.body.error).toMatch(/Distributor is required/i);
+
+    const res2 = await request(app)
+      .post('/api/distributors/purchases')
+      .send({
+        distributor: '',
+        invoice_no: 'INV-DIST-PUR-02',
+        total_amount: 100
+      });
+    expect(res2.status).toBe(400);
+    expect(res2.body.error).toMatch(/Distributor is required/i);
+
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Verify neither purchase was created in DB
+    const pur1 = await db.get('SELECT * FROM purchases WHERE invoice_no = ?', ['INV-DIST-PUR-01']);
+    expect(pur1).toBeUndefined();
+
+    const pur2 = await db.get('SELECT * FROM purchases WHERE invoice_no = ?', ['INV-DIST-PUR-02']);
+    expect(pur2).toBeUndefined();
 
     await db.close();
   }, 15000);

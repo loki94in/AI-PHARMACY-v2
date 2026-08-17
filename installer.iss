@@ -88,9 +88,6 @@ Source: "node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion re
 ; Portable production env (auto-opens browser on first launch)
 Source: "packaging\portable.env"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
 
-; Optional seed database (fresh install only)
-Source: "data\app.db"; DestDir: "{app}\data"; Flags: onlyifdoesntexist skipifsourcedoesntexist
-
 ; Bundled reference medicine seed JSON
 Source: "data\medicine_reference_seed.json"; DestDir: "{app}\data"; Flags: ignoreversion skipifsourcedoesntexist
 

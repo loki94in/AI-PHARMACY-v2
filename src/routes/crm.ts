@@ -234,7 +234,7 @@ router.post('/doctors', async (req, res) => {
     const result = await db.run(
       `INSERT INTO doctors (name, speciality, phone, hospital, degree, reg_no, send_daily_summary)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [cleanName, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0]
+        [cleanName, speciality || null, phone || null, hospital || null, degree || null, reg_no || null, send_daily_summary ? 1 : 0]
     );
     res.json({ success: true, message: 'Doctor added successfully', doctorId: result.lastID });
   } catch (error) {
@@ -255,7 +255,7 @@ router.put('/doctors/:id', async (req, res) => {
       `UPDATE doctors 
        SET name = ?, speciality = ?, phone = ?, hospital = ?, degree = ?, reg_no = ?, send_daily_summary = ?
        WHERE id = ?`,
-      [cleanName, speciality || '', phone || '', hospital || '', degree || '', reg_no || '', send_daily_summary ? 1 : 0, id]
+      [cleanName, speciality || null, phone || null, hospital || null, degree || null, reg_no || null, send_daily_summary ? 1 : 0, id]
     );
     const updated = await db.get('SELECT * FROM doctors WHERE id = ?', id);
     res.json({ success: true, doctor: updated });

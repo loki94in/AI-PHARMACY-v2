@@ -63,7 +63,20 @@ export async function importOrder(row: Record<string, string | null>, db: Databa
   const status = (row['order_status'] || '').trim().toUpperCase();
   if (status && !COMPLETED_STATUSES.has(status)) return;
 
-  const rawInvoice = row['invoice'] || legacyId;
+  // invoice_no is a mandatory accounting identifier — never fabricate one.
+  // If the legacy order has no invoice number, skip it and queue a migration review.
+  const rawInvoice = (row['invoice'] || '').trim();
+  if (!rawInvoice) {
+    await recordAuditEntry({
+      table: 'sales_invoices',
+      recordIdentifier: legacyId,
+      entityType: 'invoice',
+      action: 'skipped',
+      reason: `Legacy order_id "${legacyId}" has no invoice number — record skipped; never fabricate an invoice number`,
+      rawId: legacyId,
+    }, db);
+    return;
+  }
   const uniqueInvoice = await ensureInvoiceNoUnique(rawInvoice, legacyId, db);
 
   // Resolve patient → customer (strictly preserve as NULL if unresolved, never fallback to arbitrary numeric ID)

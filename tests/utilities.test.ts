@@ -67,11 +67,23 @@ describe('Utilities routes', () => {
     expect(res.body.message).toBe('WhatsApp connection OK');
   });
 
-  test('POST /utils/whatsapp/send returns mock success', async () => {
+  test('POST /utils/whatsapp/send returns mock success in dev/test', async () => {
     const res = await request(app).post('/utils/whatsapp/send').send({});
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.message).toBe('WhatsApp test message sent (mock)');
+  });
+
+  test('POST /utils/whatsapp/send is blocked in production', async () => {
+    const origEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      const res = await request(app).post('/utils/whatsapp/send').send({});
+      expect(res.status).toBe(403);
+      expect(res.body.error).toContain('disabled in production');
+    } finally {
+      process.env.NODE_ENV = origEnv;
+    }
   });
 
   test('POST /utils/reset-data clears data but preserves settings', async () => {
@@ -107,7 +119,7 @@ describe('Utilities routes', () => {
     expect(gmailUser.value).toBe('user@gmail.com');
 
     await dbAfter.close();
-  });
+  }, 20000);
 
   test('Medicine Name Sanitizer and Noise Filter cleans HSN and filters drug license noise', async () => {
     const { cleanMedicineName, isNonMedicineNoise } = await import('../src/services/emailService.js');

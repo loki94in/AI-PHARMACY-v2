@@ -843,6 +843,20 @@ const Returns: React.FC = () => {
       return;
     }
 
+    let lossPercentage: number | undefined = undefined;
+    if (group.distributor_id) {
+      const lossInput = window.prompt(
+        `Enter agreed Distributor Return Loss / Deduction % for ${group.distributor_name} (0% to 100%, enter 0 for 100% full credit note claim):`,
+        '0'
+      );
+      if (lossInput === null) return;
+      lossPercentage = parseFloat(lossInput);
+      if (isNaN(lossPercentage) || lossPercentage < 0 || lossPercentage > 100) {
+        alert('Return percentage required: Please enter a valid number between 0 and 100.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await api.processReturns(validItems.map(entry => ({
@@ -853,7 +867,7 @@ const Returns: React.FC = () => {
         mrp: parseFloat(entry.item.mrp as any) || 0,
         distributor_id: group.distributor_id,
         invoice_no: group.invoice_no,
-      })));
+      })), lossPercentage);
 
       alert(`Successfully processed return for ${group.distributor_name} (${validItems.length} item(s))!`);
       
@@ -1021,7 +1035,7 @@ const Returns: React.FC = () => {
     if (lossInput === null) return;
     const lossPercentage = parseFloat(lossInput);
     if (isNaN(lossPercentage) || lossPercentage < 0 || lossPercentage > 100) {
-      alert('Invalid percentage. Please enter a valid number between 0 and 100.');
+      alert('Return percentage required: Please enter a valid number between 0 and 100.');
       return;
     }
 

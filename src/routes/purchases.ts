@@ -840,10 +840,7 @@ router.post('/manual', async (req, res) => {
     }
 
     // STRICT VALIDATION: Distributor is required. Never auto-create "Default Distributor" or placeholder
-    if (!distId && !distName) {
-      return res.status(400).json({ error: 'Distributor is required.' });
-    }
-    if (!distId && !isValidDistributorName(distName)) {
+    if (!distName || !isValidDistributorName(distName)) {
       return res.status(400).json({ error: 'Distributor is required. Please select or enter a legitimate distributor.' });
     }
 
@@ -883,6 +880,12 @@ router.post('/manual', async (req, res) => {
       if (existing) {
         return handleUpdatePurchaseFull(req, res, existing.id);
       }
+    }
+
+    // STRICT VALIDATION: Invoice date is required. Never fall back to current date silently.
+    const cleanDate = typeof date === 'string' ? date.trim() : '';
+    if (!cleanDate) {
+      return res.status(400).json({ error: 'Invoice date is required. Please verify and enter the actual invoice date before saving.' });
     }
 
     await db.run('BEGIN TRANSACTION');
@@ -948,8 +951,7 @@ router.post('/manual', async (req, res) => {
 
     const nowLocal = new Date();
     const localTimeStr = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}:${String(nowLocal.getSeconds()).padStart(2, '0')}`;
-    const rawDateStr = date && date.trim() ? date.trim() : `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
-    const purchaseDate = rawDateStr.includes(':') ? rawDateStr : `${rawDateStr} ${localTimeStr}`;
+    const purchaseDate = cleanDate.includes(':') ? cleanDate : `${cleanDate} ${localTimeStr}`;
 
     // 2. Insert into purchases
     const purchRes = await db.run(
@@ -1294,10 +1296,8 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       if (dbDist) distId = dbDist.id;
     }
 
-    if (!distId && !distName) {
-      return res.status(400).json({ error: 'Distributor is required.' });
-    }
-    if (!distId && !isValidDistributorName(distName)) {
+    // STRICT VALIDATION: Distributor is required. Never auto-create "Default Distributor" or placeholder
+    if (!distName || !isValidDistributorName(distName)) {
       return res.status(400).json({ error: 'Distributor is required. Please select or enter a legitimate distributor.' });
     }
 
@@ -1412,10 +1412,16 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       [id]
     );
 
+    // STRICT VALIDATION: Invoice date is required. Never fall back to current date silently.
+    const cleanDate = typeof date === 'string' ? date.trim() : '';
+    if (!cleanDate) {
+      await db.run('ROLLBACK');
+      return res.status(400).json({ error: 'Invoice date is required. Please verify and enter the actual invoice date before saving.' });
+    }
+
     const nowLocal = new Date();
     const localTimeStr = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}:${String(nowLocal.getSeconds()).padStart(2, '0')}`;
-    const rawDateStr = date && date.trim() ? date.trim() : `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
-    const purchaseDate = rawDateStr.includes(':') ? rawDateStr : `${rawDateStr} ${localTimeStr}`;
+    const purchaseDate = cleanDate.includes(':') ? cleanDate : `${cleanDate} ${localTimeStr}`;
 
     // 3. Update purchases record
     await db.run(
@@ -2654,7 +2660,7 @@ router.get('/reconciliation/preview/:email_uid', async (req, res) => {
 
 // POST /reconciliation/reissue - Reprocess order and reissue items to inventory
 router.post('/reconciliation/reissue', async (req, res) => {
-  const { email_uid } = req.body;
+  const { email_uid, invoice_date: bodyInvoiceDate } = req.body;
   if (!email_uid) {
     return res.status(400).json({ error: 'email_uid is required' });
   }
@@ -2747,6 +2753,40 @@ router.post('/reconciliation/reissue', async (req, res) => {
       return res.status(400).json({ error: 'No items could be parsed from email body or attachments.' });
     }
 
+    // Resolve the actual invoice date — never fall back to the email received date or today's date.
+    // Priority: req.body.invoice_date > parsed from attachment > parsed from email body.
+    // If none found, the user must supply it before the purchase can proceed.
+    let resolvedInvoiceDate: string | null = null;
+    if (bodyInvoiceDate && String(bodyInvoiceDate).trim()) {
+      resolvedInvoiceDate = String(bodyInvoiceDate).trim();
+    }
+    if (!resolvedInvoiceDate) {
+      // Try attachments (reuse already-parsed items array for date if populated)
+      const dbAttachmentsForDate = await db.all('SELECT * FROM email_attachments WHERE uid = ?', [email_uid]);
+      for (const att of dbAttachmentsForDate) {
+        if (!resolvedInvoiceDate && att.local_path && fs.existsSync(att.local_path)) {
+          try {
+            const resParse = await emailService.parseAndImportAttachment(att.local_path, false);
+            if (resParse?.success && resParse.invoice_date) {
+              resolvedInvoiceDate = resParse.invoice_date;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    if (!resolvedInvoiceDate) {
+      // Try email body/subject text
+      const extractedFromBody = extractDateFromText((email.subject || '') + ' ' + (email.body || ''));
+      if (extractedFromBody) resolvedInvoiceDate = extractedFromBody;
+    }
+    if (!resolvedInvoiceDate) {
+      // ponytail: no real invoice date found — require user input, never substitute email/import date
+      return res.status(400).json({
+        error: 'Invoice date is required. Please enter the actual invoice date before issuing. The email received date cannot be used as a substitute for the invoice date.'
+      });
+    }
+
     // STRICT VALIDATION: Require valid quantities and non-zero legitimate MRP
     for (let idx = 0; idx < parsedItems.length; idx++) {
       const it = parsedItems[idx];
@@ -2814,11 +2854,11 @@ router.post('/reconciliation/reissue', async (req, res) => {
       }
     }
 
-    // Insert purchase initial record
+    // Insert purchase initial record with actual invoice date
     const purchRes = await db.run(
       `INSERT INTO purchases (distributor_id, invoice_no, app_invoice_no, date, total_amount, cgst_value, sgst_value) 
        VALUES (?, ?, ?, ?, 0, 0, 0)`,
-      [distId, invoiceNo, appInvoiceNo, email.date || new Date().toISOString()]
+      [distId, invoiceNo, appInvoiceNo, resolvedInvoiceDate]
     );
     const purchaseId = purchRes.lastID;
 
@@ -2935,7 +2975,9 @@ router.get('/staged', async (req, res) => {
     const rows = await db.all(`SELECT * FROM staged_purchases WHERE status = 'pending' ORDER BY date DESC`);
     const parsed = rows.map(r => ({
       ...r,
-      items: JSON.parse(r.items_json)
+      items: JSON.parse(r.items_json),
+      // distributor_unresolved signals the UI that an actual distributor must be assigned before approval
+      distributor_unresolved: !r.distributor_name || !isValidDistributorName(r.distributor_name),
     }));
     res.json(parsed);
   } catch (error: any) {
@@ -3057,7 +3099,9 @@ router.post('/staged/:id/approve', async (req, res) => {
 
     // Strict validation: Distributor is required before approving staged purchase
     if (!finalDistName || !isValidDistributorName(finalDistName)) {
-      return res.status(400).json({ error: 'Distributor is required. Please assign a valid distributor before approving.' });
+      return res.status(400).json({
+        error: 'Actual distributor required. The email import source is not a distributor. Please assign the real distributor before approving.'
+      });
     }
 
     // Strict validation: Invoice date is required before approving staged purchase

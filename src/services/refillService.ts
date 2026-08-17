@@ -148,7 +148,7 @@ export async function checkAllRefills(db: Database): Promise<void> {
   }
 }
 
-async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
+export async function createQuickBillForRefill(db: any, refill: any): Promise<number> {
   const invoice_no = `H-REF-${Date.now()}`;
   const temp_label = `Refill - ${refill.patient_name}`;
   

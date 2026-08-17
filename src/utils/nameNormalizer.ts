@@ -98,11 +98,15 @@ export function isValidDistributorName(name: string | null | undefined): boolean
     lower === 'default distributor' ||
     lower === 'unknown distributor' ||
     lower === 'unknown dist.' ||
+    lower === 'unknown dist' ||
     lower === 'unknown supplier' ||
     lower === 'email import' ||
+    lower === 'email supplier' ||
     lower === 'telegram import' ||
+    lower === 'telegram supplier' ||
     lower === 'ocr import' ||
     lower === 'whatsapp import' ||
+    lower === 'whatsapp supplier' ||
     lower === 'csv import' ||
     lower === 'excel import' ||
     lower === 'mobile import' ||
@@ -113,7 +117,8 @@ export function isValidDistributorName(name: string | null | undefined): boolean
     lower === 'null' ||
     lower === 'n/a' ||
     lower === 'na' ||
-    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)?\s*import$/i.test(trimmed)
+    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)?\s*import$/i.test(trimmed) ||
+    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)\s*supplier$/i.test(trimmed)
   ) {
     return false;
   }

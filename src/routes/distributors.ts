@@ -5,6 +5,7 @@ import { reconcileCreditNote } from '../services/creditNoteService.js';
 import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper.js';
 import { eventService } from '../services/eventService.js';
 import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
+import { isValidDistributorName } from '../utils/nameNormalizer.js';
 
 const router = express.Router();
 
@@ -156,10 +157,18 @@ router.delete('/:id', deleteDistributorHandler);
 router.post('/purchases', async (req, res) => {
   const { distributor, invoice_no, total_amount } = req.body;
   try {
+    const cleanDist = (distributor || '').trim();
+    if (!cleanDist || !isValidDistributorName(cleanDist)) {
+      return res.status(400).json({ error: 'Distributor is required. Please select or enter a legitimate distributor.' });
+    }
+
     const db = await dbManager.getConnection();
     // Upsert distributor
-    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', distributor);
-    const distRow = await db.get('SELECT id FROM distributors WHERE name = ?', distributor);
+    await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', cleanDist);
+    const distRow = await db.get('SELECT id FROM distributors WHERE name = ?', cleanDist);
+    if (!distRow) {
+      return res.status(400).json({ error: 'Failed to resolve distributor.' });
+    }
 
     // Insert purchase
     await db.run('INSERT INTO purchases (distributor_id, invoice_no, total_amount) VALUES (?, ?, ?)',

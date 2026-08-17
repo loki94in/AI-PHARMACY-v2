@@ -330,5 +330,105 @@ describe('TASK 6: Remove Fabricated Migration Entities Integrity Tests', () => {
       `);
       expect(distPlaceholders.length).toBe(0);
     });
+
+    it('Scenario 7: Migration Review Result contains all 4 mandatory fields (Source record, Missing entity, Reason unresolved, Suggested user action)', async () => {
+      const {
+        recordAuditEntry,
+        getMigrationAuditRecords,
+        getMigrationAuditSummary,
+        clearMigrationAudit
+      } = await import('../src/utils/migrationAudit.js');
+
+      await clearMigrationAudit(db);
+
+      // Incomplete historical sales invoice missing customer
+      await recordAuditEntry({
+        table: 'sales_invoices',
+        recordIdentifier: 'INV-2024-001',
+        entityType: 'customer',
+        action: 'preserved_null',
+        reason: 'Unresolved placeholder customer name "Walk-in Customer" — customer_id preserved as NULL',
+        rawId: 'Walk-in Customer',
+      }, db);
+
+      // Incomplete historical sales invoice missing doctor
+      await recordAuditEntry({
+        table: 'sales_invoices',
+        recordIdentifier: 'INV-2024-002',
+        entityType: 'doctor',
+        action: 'preserved_null',
+        reason: 'Unresolved placeholder doctor name "Self" — doctor_id preserved as NULL',
+        rawId: 'Self',
+      }, db);
+
+      // Incomplete historical purchase missing distributor
+      await recordAuditEntry({
+        table: 'purchases',
+        recordIdentifier: 'PUR-2024-099',
+        entityType: 'distributor',
+        action: 'preserved_null',
+        reason: 'Unresolved placeholder distributor name "Unknown Supplier" — distributor_id preserved as NULL',
+        rawId: 'Unknown Supplier',
+      }, db);
+
+      // Incomplete customer row skipped
+      await recordAuditEntry({
+        table: 'customers.csv',
+        recordIdentifier: 'Row 15',
+        entityType: 'customer',
+        action: 'skipped',
+        reason: 'Customer row 15 has an invalid or placeholder name "Walk-in"; record skipped',
+        rawId: 'Walk-in',
+      }, db);
+
+      const reviewResults = await getMigrationAuditRecords(db);
+      expect(reviewResults.total).toBe(4);
+      expect(reviewResults.rows.length).toBe(4);
+
+      for (const item of reviewResults.rows) {
+        // 1. Source record
+        expect(item.source_record).toBeDefined();
+        expect(typeof item.source_record).toBe('string');
+        expect(item.source_record.length).toBeGreaterThan(0);
+
+        // 2. Missing entity
+        expect(item.missing_entity).toBeDefined();
+        expect(typeof item.missing_entity).toBe('string');
+        expect(item.missing_entity.length).toBeGreaterThan(0);
+
+        // 3. Reason unresolved
+        expect(item.reason_unresolved).toBeDefined();
+        expect(typeof item.reason_unresolved).toBe('string');
+        expect(item.reason_unresolved.length).toBeGreaterThan(0);
+
+        // 4. Suggested user action
+        expect(item.suggested_user_action).toBeDefined();
+        expect(typeof item.suggested_user_action).toBe('string');
+        expect(item.suggested_user_action.length).toBeGreaterThan(0);
+      }
+
+      // Verify specific content for customer preserved null review item
+      const custReview = reviewResults.rows.find((r: any) => r.recordIdentifier === 'INV-2024-001');
+      expect(custReview).toBeDefined();
+      expect(custReview.source_record).toContain('sales_invoices: INV-2024-001');
+      expect(custReview.missing_entity).toContain('customer ("Walk-in Customer")');
+      expect(custReview.reason_unresolved).toContain('Walk-in Customer');
+      expect(custReview.suggested_user_action).toContain('Review original sales invoice receipt');
+
+      // Verify specific content for distributor preserved null review item
+      const distReview = reviewResults.rows.find((r: any) => r.recordIdentifier === 'PUR-2024-099');
+      expect(distReview).toBeDefined();
+      expect(distReview.source_record).toContain('purchases: PUR-2024-099');
+      expect(distReview.missing_entity).toContain('distributor ("Unknown Supplier")');
+      expect(distReview.suggested_user_action).toContain('Verify distributor in vendor directory');
+
+      // Verify summary structure
+      const summary = await getMigrationAuditSummary(db);
+      expect(summary.unresolvedCustomers).toBe(2);
+      expect(summary.unresolvedDoctors).toBe(1);
+      expect(summary.unresolvedDistributors).toBe(1);
+      expect(summary.preservedNullRecords).toBe(3);
+      expect(summary.skippedRecords).toBe(1);
+    });
   });
 });

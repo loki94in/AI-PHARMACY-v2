@@ -16,6 +16,7 @@ import { toastEvent } from '../../services/events';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
+import { isValidDistributorName } from '../../utils/distributorValidator';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -1800,14 +1801,14 @@ const Purchases: React.FC = () => {
     }
 
     if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
-      toastEvent.trigger('Distributor is required. Please select or enter a legitimate distributor.', 'error', '/purchases');
-      alert('Distributor is required. Please select or enter a legitimate distributor.');
+      toastEvent.trigger('Distributor required before purchase can be finalized.', 'error', '/purchases');
+      alert('Distributor required before purchase can be finalized.');
       return;
     }
 
-    if (distNameToSave.trim().toLowerCase() === 'default distributor' || distNameToSave.trim().toLowerCase() === 'unknown distributor') {
-      toastEvent.trigger('Distributor is required. Please select or enter a legitimate distributor.', 'error', '/purchases');
-      alert('Distributor is required. Please select or enter a legitimate distributor.');
+    if (!isValidDistributorName(distNameToSave)) {
+      toastEvent.trigger('Distributor required before purchase can be finalized.', 'error', '/purchases');
+      alert('Distributor required before purchase can be finalized.');
       return;
     }
 
@@ -2350,7 +2351,7 @@ const Purchases: React.FC = () => {
               <label className="text-sm font-medium text-gray-300">
                 Distributor <span className="text-rose-400 font-bold">*</span>
               </label>
-              {(!selectedDistributor && !distributorSearch.trim()) ? (
+              {(!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch))) ? (
                 <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
                   ⚠️ Required
                 </span>
@@ -2376,7 +2377,7 @@ const Purchases: React.FC = () => {
                   onClick={() => setShowDistributorDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDistributorDropdown(false), 200)}
                   className={`w-full bg-bg3 border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 transition-all ${
-                    (!selectedDistributor && !distributorSearch.trim())
+                    (!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch)))
                       ? 'border-rose-500/40 focus:ring-rose-500'
                       : 'border-glass-border focus:ring-sky'
                   }`}
@@ -3012,21 +3013,28 @@ const Purchases: React.FC = () => {
                     {(() => {
                       const isMrpMissing = (item.medicine_name || item.qty) && (!item.mrp || parseFloat(String(item.mrp || 0)) <= 0);
                       return (
-                        <input
-                          type="number"
-                          data-row-index={index}
-                          data-field="mrp"
-                          value={item.mrp}
-                          placeholder={isMrpMissing ? "Req. MRP" : ""}
-                          onChange={(e) => updateItem(index, 'mrp', e.target.value)}
-                          onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
-                          className={`w-20 rounded px-1.5 py-1 text-white text-sm text-right h-8 transition-colors ${
-                            isMrpMissing 
-                              ? 'border-2 border-amber-400/90 bg-amber-500/10 placeholder-amber-400/70' 
-                              : 'bg-white/10 border border-white/20'
-                          }`}
-                          title={isMrpMissing ? `MRP is required for "${item.medicine_name || 'this item'}"` : 'MRP'}
-                        />
+                        <div className="relative">
+                          {isMrpMissing && (
+                            <span className="absolute -top-3 right-0 text-[8px] font-extrabold uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-400/40 pointer-events-none whitespace-nowrap z-10">
+                              MRP required
+                            </span>
+                          )}
+                          <input
+                            type="number"
+                            data-row-index={index}
+                            data-field="mrp"
+                            value={item.mrp}
+                            placeholder={isMrpMissing ? "MRP required" : ""}
+                            onChange={(e) => updateItem(index, 'mrp', e.target.value)}
+                            onKeyDown={(e) => handleRowInputKeyDown(e, index, 'mrp')}
+                            className={`w-20 rounded px-1.5 py-1 text-white text-sm text-right h-8 transition-colors ${
+                              isMrpMissing 
+                                ? 'border-2 border-amber-400/90 bg-amber-500/10 placeholder-amber-400/70 font-semibold' 
+                                : 'bg-white/10 border border-white/20'
+                            }`}
+                            title={isMrpMissing ? `MRP is required for "${item.medicine_name || 'this item'}"` : 'MRP'}
+                          />
+                        </div>
                       );
                     })()}
                     {item.medicine_name && (
@@ -3230,9 +3238,9 @@ const Purchases: React.FC = () => {
                 <span>Print Product Barcodes</span>
               </button>
             )}
-            {(!selectedDistributor && !distributorSearch.trim()) && (
+            {(!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch))) && (
               <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 px-3 py-2 rounded-xl border border-rose-500/20 shadow-sm">
-                <span>⚠️ Distributor required to save</span>
+                <span>⚠️ Distributor required before purchase can be finalized.</span>
               </div>
             )}
             <button

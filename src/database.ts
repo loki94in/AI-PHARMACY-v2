@@ -1016,6 +1016,9 @@ export async function ensureSchema(dbPath: string) {
     ['stock_ledger', 'business_date', 'ALTER TABLE stock_ledger ADD COLUMN business_date DATETIME'],
     ['distributor_dispatch_reminders', 'order_source', "ALTER TABLE distributor_dispatch_reminders ADD COLUMN order_source TEXT DEFAULT 'pharmarack'"],
     ['distributor_dispatch_reminders', 'email_received_at', 'ALTER TABLE distributor_dispatch_reminders ADD COLUMN email_received_at DATETIME'],
+    // ponytail: source_type records where a staged purchase originated (e.g. 'email', 'telegram')
+    // without mixing that into the distributor identity field
+    ['staged_purchases', 'source_type', "ALTER TABLE staged_purchases ADD COLUMN source_type TEXT DEFAULT NULL"],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs
@@ -1066,15 +1069,16 @@ export async function ensureSchema(dbPath: string) {
 
   // Unify patient contact storage — Backfill customer_id across patient_refills, special_orders, held_bills
   try {
+    const { isValidCustomerName } = await import('./utils/nameNormalizer.js');
     const unlinkedRefills = await db.all('SELECT id, patient_name, patient_phone FROM patient_refills WHERE customer_id IS NULL AND patient_phone IS NOT NULL AND patient_phone != ""');
     for (const refill of unlinkedRefills) {
       const phoneClean = refill.patient_phone.trim();
       let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
-      if (!cust && refill.patient_name) {
+      if (!cust && refill.patient_name && isValidCustomerName(refill.patient_name)) {
         cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [refill.patient_name]);
       }
-      if (!cust && phoneClean) {
-        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [refill.patient_name || 'Walk-in Patient', phoneClean]);
+      if (!cust && phoneClean && refill.patient_name && isValidCustomerName(refill.patient_name)) {
+        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [refill.patient_name.trim(), phoneClean]);
         cust = { id: res.lastID };
       }
       if (cust) {
@@ -1088,11 +1092,11 @@ export async function ensureSchema(dbPath: string) {
       for (const order of unlinkedOrders) {
         const phoneClean = (order.phone || '').trim();
         let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
-        if (!cust && order.requester) {
+        if (!cust && order.requester && isValidCustomerName(order.requester)) {
           cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [order.requester]);
         }
-        if (!cust && phoneClean) {
-          const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [order.requester || 'Customer', phoneClean]);
+        if (!cust && phoneClean && order.requester && isValidCustomerName(order.requester)) {
+          const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [order.requester.trim(), phoneClean]);
           cust = { id: res.lastID };
         }
         if (cust) {
@@ -1105,11 +1109,11 @@ export async function ensureSchema(dbPath: string) {
     for (const bill of unlinkedBills) {
       const phoneClean = (bill.patient_phone || '').trim();
       let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [phoneClean]);
-      if (!cust && bill.patient_name) {
+      if (!cust && bill.patient_name && isValidCustomerName(bill.patient_name)) {
         cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [bill.patient_name]);
       }
-      if (!cust && phoneClean) {
-        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [bill.patient_name || 'Walk-in Patient', phoneClean]);
+      if (!cust && phoneClean && bill.patient_name && isValidCustomerName(bill.patient_name)) {
+        const res = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [bill.patient_name.trim(), phoneClean]);
         cust = { id: res.lastID };
       }
       if (cust) {

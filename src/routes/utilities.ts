@@ -477,13 +477,16 @@ router.get('/whatsapp/test', async (req, res) => {
   }
 });
 
-// WhatsApp send‑test‑message endpoint as requested
+// WhatsApp send‑test‑message endpoint as requested (blocked in production)
 router.post('/whatsapp/send', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Mock test message endpoint is disabled in production' });
+  }
   try {
     // payload could contain chatId/message but we just mock success
     const db = await dbManager.getConnection();
     await db.run('INSERT INTO action_logs (action_type, description) VALUES (?, ?)', ['WHATSAPP_SEND', 'Mock WhatsApp test message sent']);
-        res.json({ success: true, message: 'WhatsApp test message sent (mock)' });
+    res.json({ success: true, message: 'WhatsApp test message sent (mock)' });
   } catch (e) {
     console.error('WhatsApp send‑test error:', e);
     res.status(500).json({ error: 'Failed to send WhatsApp test message' });

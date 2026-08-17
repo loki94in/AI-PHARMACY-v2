@@ -1,4 +1,4 @@
-// Security utility routes - placeholders
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -60,9 +60,13 @@ router.post('/admin/login', async (req, res) => {
       await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('admin_authorized_device_name', ?)", [`${deviceName} (${os})`]);
     }
 
-    // Fetch session token for API requests
-    const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'license_session_token'");
-    const sessionToken = tokenRow?.value || 'mock-dev-session-token'; // Fallback for local development
+    // Fetch or generate persistent session token for API requests
+    let tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'license_session_token'");
+    let sessionToken = tokenRow?.value;
+    if (!sessionToken) {
+      sessionToken = crypto.randomUUID();
+      await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('license_session_token', ?)", [sessionToken]);
+    }
 
     await db.run(
       'INSERT INTO action_logs (action_type, description) VALUES (?, ?)', 

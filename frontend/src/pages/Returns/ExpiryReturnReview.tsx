@@ -154,7 +154,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
     if (!approvingItem) return;
     const lossNum = parseFloat(approveLossPercentage);
     if (approveLossPercentage.trim() === '' || isNaN(lossNum) || lossNum < 0 || lossNum > 100) {
-      setApproveError('Please enter a valid percentage between 0% and 100% (use 0% for full recovery).');
+      setApproveError('Return percentage required: Please enter a valid percentage between 0% and 100% (use 0% for full recovery).');
       return;
     }
 
@@ -225,7 +225,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
   const handleConfirmBulkApprove = async () => {
     const lossNum = parseFloat(bulkLossPercentage);
     if (bulkLossPercentage.trim() === '' || isNaN(lossNum) || lossNum < 0 || lossNum > 100) {
-      setBulkError('Please enter a valid percentage between 0% and 100% (use 0% for full recovery).');
+      setBulkError('Return percentage required: Please enter a valid percentage between 0% and 100% (use 0% for full recovery).');
       return;
     }
 

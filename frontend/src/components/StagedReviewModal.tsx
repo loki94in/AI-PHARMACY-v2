@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, User, Calendar, Plus, Pill } from 'lucide-react';
 import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
+import { isValidDistributorName } from '../utils/distributorValidator';
 
 interface Props {
   onClose: () => void;
@@ -11,29 +12,7 @@ interface Props {
 }
 
 const isUnresolvedDistributor = (name: string | null | undefined): boolean => {
-  if (!name || !name.trim()) return true;
-  const lower = name.trim().toLowerCase();
-  return (
-    lower === 'default distributor' ||
-    lower === 'unknown distributor' ||
-    lower === 'unknown dist.' ||
-    lower === 'unknown supplier' ||
-    lower === 'email import' ||
-    lower === 'telegram import' ||
-    lower === 'ocr import' ||
-    lower === 'whatsapp import' ||
-    lower === 'csv import' ||
-    lower === 'excel import' ||
-    lower === 'mobile import' ||
-    lower === 'import' ||
-    lower === 'unassigned' ||
-    lower === 'default' ||
-    lower === 'undefined' ||
-    lower === 'null' ||
-    lower === 'n/a' ||
-    lower === 'na' ||
-    /^(email|telegram|ocr|whatsapp|csv|excel|mobile)?\s*import$/i.test(name.trim())
-  );
+  return !isValidDistributorName(name);
 };
 
 export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }) => {
@@ -41,6 +20,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
   const [activeTab, setActiveTab] = useState<'sales' | 'purchases'>('sales');
   const [sales, setSales] = useState<any[]>([]);
   const [purchases, setPurchases] = useState<any[]>([]);
+  const [registeredDistributors, setRegisteredDistributors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,12 +39,14 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     setLoading(true);
     setError(null);
     try {
-      const [stagedSales, stagedPurchases] = await Promise.all([
+      const [stagedSales, stagedPurchases, distList] = await Promise.all([
         api.getStagedSales(),
         api.getStagedPurchases(),
+        api.getDistributors().catch(() => []),
       ]);
       setSales(stagedSales || []);
       setPurchases(stagedPurchases || []);
+      setRegisteredDistributors(Array.isArray(distList) ? distList : []);
     } catch (err: any) {
       console.error('Failed to load staged transactions:', err);
       setError(err.message || 'Failed to load staged transactions');
@@ -160,7 +142,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       } else {
         const cleanDist = (distributorName || '').trim();
         if (isUnresolvedDistributor(cleanDist)) {
-          setError('Distributor is required. Please enter a legitimate distributor before approving.');
+          setError('Distributor unresolved. Please select the actual distributor before approving.');
           setSaving(false);
           return;
         }
@@ -170,6 +152,19 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
           setSaving(false);
           return;
         }
+
+        // Strict validation: Require legitimate MRP > 0 for all purchase items
+        for (let i = 0; i < editingItems.length; i++) {
+          const it = editingItems[i];
+          const itName = it.name || it.medicine_name || `Item #${i + 1}`;
+          const itMrp = Number(it.mrp || 0);
+          if (isNaN(itMrp) || itMrp <= 0) {
+            setError(`MRP is required for "${itName}". Please enter the actual MRP from invoice before approving.`);
+            setSaving(false);
+            return;
+          }
+        }
+
         const total_amount = editingItems.reduce((sum, item) => sum + (item.quantity * (item.rate || item.unit_price || 0)), 0);
         await api.approveStagedPurchase(selectedTx.id, {
           items: editingItems,
@@ -321,9 +316,12 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                           {activeTab === 'sales' ? (
                             tx.patient_name || 'Walk-in Customer'
                           ) : !isUnresolvedDistributor(tx.distributor_name) ? (
-                            tx.distributor_name
+                            <div className="flex flex-col">
+                              <span className="truncate">{tx.distributor_name}</span>
+                              <span className="text-[10px] text-emerald-400 font-semibold">✓ Distributor verified</span>
+                            </div>
                           ) : (
-                            <span className="text-amber-500 font-bold text-xs">⚠️ Unresolved Distributor</span>
+                            <span className="text-amber-500 font-bold text-xs">⚠️ Distributor unresolved</span>
                           )}
                         </div>
                         <div className="text-xs text-muted flex items-center gap-1">
@@ -414,21 +412,33 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                       <div>
                         <div className="flex justify-between items-center mb-1">
                           <label className="block text-xs font-bold text-muted">Distributor Name <span className="text-red-500">*</span></label>
-                          {isUnresolvedDistributor(distributorName) && (
-                            <span className="text-[10px] text-amber-500 font-bold">Required</span>
+                          {isUnresolvedDistributor(distributorName) ? (
+                            <span className="text-[10px] text-amber-500 font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">
+                              ⚠️ Distributor unresolved
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">
+                              ✓ Distributor verified
+                            </span>
                           )}
                         </div>
                         <input
                           type="text"
+                          list="registered-distributors-list"
                           placeholder="Select or enter legitimate distributor..."
                           value={distributorName}
                           onChange={(e) => setDistributorName(e.target.value)}
                           className={`w-full px-3 py-2 bg-bg border rounded-lg text-sm focus:border-primary focus:outline-none ${
                             isUnresolvedDistributor(distributorName)
-                              ? 'border-amber-500/50 bg-amber-500/5'
+                              ? 'border-amber-500/50 bg-amber-500/5 ring-1 ring-amber-500/30'
                               : 'border-border'
                           }`}
                         />
+                        <datalist id="registered-distributors-list">
+                          {registeredDistributors.map((d: any) => (
+                            <option key={d.id} value={d.name || d.distributor_name} />
+                          ))}
+                        </datalist>
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-muted mb-1">Invoice Number</label>
@@ -554,13 +564,23 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
 
                           {selectedTx.type === 'purchases' && (
                             <div>
-                              <label className="block text-[10px] text-muted mb-1">MRP (₹)</label>
+                              <div className="flex justify-between items-center mb-1">
+                                <label className="block text-[10px] text-muted">MRP (₹) <span className="text-red-500">*</span></label>
+                                {(!item.mrp || Number(item.mrp) <= 0) && (
+                                  <span className="text-[9px] text-amber-500 font-bold">MRP required</span>
+                                )}
+                              </div>
                               <input
                                 type="number"
                                 step="0.01"
-                                value={item.mrp || 0}
+                                placeholder={(!item.mrp || Number(item.mrp) <= 0) ? "MRP required" : ""}
+                                value={item.mrp !== undefined && item.mrp !== null ? item.mrp : ''}
                                 onChange={(e) => handleUpdateItemField(index, 'mrp', e.target.value)}
-                                className="w-full px-2 py-1 bg-bg border border-border rounded text-xs text-center"
+                                className={`w-full px-2 py-1 bg-bg border rounded text-xs text-center ${
+                                  (!item.mrp || Number(item.mrp) <= 0)
+                                    ? 'border-amber-500/60 bg-amber-500/10 placeholder-amber-500/70 font-semibold'
+                                    : 'border-border'
+                                }`}
                               />
                             </div>
                           )}

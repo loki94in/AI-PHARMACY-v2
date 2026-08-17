@@ -1809,6 +1809,17 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             if (isValidDistributorName(distributorName)) {
               const distributor = await findOrCreateDistributor(db, distributorName);
               distributorId = distributor ? distributor.id : null;
+            } else if (distributorName) {
+              distributorId = null;
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'purchases',
+                record_identifier: invoiceNo,
+                entity_type: 'distributor',
+                raw_value: distributorName,
+                status: 'preserved_null',
+                reason: `Unresolved or invalid distributor name "${distributorName}"; distributor_id preserved as NULL`,
+              });
             }
 
             let purchase = await db.get(
@@ -1922,6 +1933,17 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
             if (isValidDistributorName(distributorName)) {
               const distributor = await findOrCreateDistributor(db, distributorName);
               distributorId = distributor ? distributor.id : null;
+            } else if (distributorName) {
+              distributorId = null;
+              queueMigrationAudit({
+                file_name: path.basename(csvPath),
+                record_type: 'returns',
+                record_identifier: returnNo,
+                entity_type: 'distributor',
+                raw_value: distributorName,
+                status: 'preserved_null',
+                reason: `Unresolved or invalid distributor name "${distributorName}"; distributor_id preserved as NULL`,
+              });
             }
 
             let retRecord = await db.get('SELECT id FROM returns WHERE return_no = ?', [returnNo]);
@@ -2120,6 +2142,17 @@ async function parseAndImportCSV(csvPath: string, targetDbPath: string, dataType
               if (isValidDistributorName(distributorName)) {
                 const distributor = await findOrCreateDistributor(db, distributorName);
                 distributorId = distributor ? distributor.id : null;
+              } else if (distributorName) {
+                distributorId = null;
+                queueMigrationAudit({
+                  file_name: path.basename(csvPath),
+                  record_type: 'purchases',
+                  record_identifier: String(cleanRow[Object.keys(mapping || {}).find(k => mapping?.[k] === 'invoice_no' || mapping?.[k] === 'bill_no') || ''] || 'ROW-' + (insertCount + 1)),
+                  entity_type: 'distributor',
+                  raw_value: distributorName,
+                  status: 'preserved_null',
+                  reason: `Unresolved or invalid distributor name "${distributorName}"; distributor_id preserved as NULL`,
+                });
               }
             }
 

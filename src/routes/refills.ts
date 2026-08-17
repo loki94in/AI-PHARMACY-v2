@@ -173,7 +173,7 @@ router.post('/:id/send', async (req, res) => {
     const storeName = await getConfiguredPharmacyName(db);
     if (!storeName) {
       return res.status(400).json({
-        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
       });
     }
     const lang = (refill.language === 'hi' || refill.language === 'mr') ? refill.language : 'en';
@@ -549,7 +549,7 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
     const medicalName = await getConfiguredPharmacyName(db);
     if (!medicalName) {
       return res.status(400).json({
-        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
       });
     }
 
@@ -612,7 +612,7 @@ router.post('/send-reminder-now', async (req, res) => {
     const medicalName = await getConfiguredPharmacyName(db);
     if (!medicalName) {
       return res.status(400).json({
-        error: 'Pharmacy name is not configured in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
       });
     }
 

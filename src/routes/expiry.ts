@@ -295,7 +295,7 @@ router.post('/create-return', async (req, res) => {
         Number(loss_percentage) < 0 ||
         Number(loss_percentage) > 100
       ) {
-        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to create return with distributor credit note tracking.' });
+        return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required to create return with distributor credit note tracking.' });
       }
     }
 

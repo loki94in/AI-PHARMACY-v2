@@ -22,6 +22,7 @@ import {
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useFetchMode } from '../../hooks/useFetchMode';
+import { isValidDistributorName } from '../../utils/distributorValidator';
 
 // Local midnight, as a UTC ISO string — the mailbox strictly shows today's/present-date emails only.
 const getTodayStartIso = () => new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
@@ -209,7 +210,7 @@ const Mail = () => {
         prefilledPurchase: {
           distributorName: review.distributor_name || '',
           invoiceNo: review.invoice_number || '',
-          date: review.email_date ? getLocalDateString(new Date(review.email_date)) : getTodayString(),
+          date: '', // Unresolved: invoice date missing from review, user must verify/enter actual date
           totalAmount: 0,
           globalCdPer: 0,
           items: meds.map(m => ({
@@ -682,11 +683,13 @@ const Mail = () => {
                   <div key={review.id} className="flex items-center justify-between gap-3 bg-bg3 border border-glass-border rounded-lg p-2.5 text-xs">
                     <div className="min-w-0">
                       <div className="font-semibold text-text truncate flex items-center gap-1.5">
-                        {review.distributor_name && review.distributor_name !== 'Unknown Distributor' && review.distributor_name !== 'Default Distributor' ? (
-                          <span>{review.distributor_name}</span>
+                        {review.distributor_name && isValidDistributorName(review.distributor_name) ? (
+                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                            ✓ Distributor verified: {review.distributor_name}
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                            ⚠️ Unresolved Distributor
+                            ⚠️ Distributor unresolved
                           </span>
                         )}
                         {review.invoice_number ? <span className="text-muted font-normal">— {review.invoice_number}</span> : ''}
@@ -1010,11 +1013,11 @@ const Mail = () => {
                   </div>
                   <div>
                     <span className="font-bold text-muted mr-1.5">Distributor:</span>
-                    {selectedEmail.distributorName && selectedEmail.distributorName !== 'Unknown Distributor' && selectedEmail.distributorName !== 'Default Distributor' ? (
-                      <span className="font-semibold text-text">{selectedEmail.distributorName}</span>
+                    {selectedEmail.distributorName && isValidDistributorName(selectedEmail.distributorName) ? (
+                      <span className="font-semibold text-emerald-400">✓ Distributor verified: {selectedEmail.distributorName}</span>
                     ) : (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                        ⚠️ Unresolved Distributor
+                        ⚠️ Distributor unresolved
                       </span>
                     )}
                   </div>

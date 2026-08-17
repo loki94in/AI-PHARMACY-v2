@@ -12,6 +12,16 @@ export interface MigrationAuditRecord {
   reason: string;
   rawId?: string | number | null;
   timestamp: string;
+  suggestedAction?: string;
+  suggested_action?: string;
+  suggested_user_action?: string;
+  suggestedUserAction?: string;
+  source_record?: string;
+  sourceRecord?: string;
+  missing_entity?: string;
+  missingEntity?: string;
+  reason_unresolved?: string;
+  reasonUnresolved?: string;
 }
 
 export interface MigrationAuditSummary {
@@ -23,6 +33,31 @@ export interface MigrationAuditSummary {
   preservedNullRecords: number;
   totalAuditEntries: number;
   records: MigrationAuditRecord[];
+}
+
+export function getDefaultSuggestedAction(entityType: string, action: string, rawVal?: any): string {
+  if (entityType === 'customer') {
+    return action === 'preserved_null'
+      ? 'Review original sales invoice receipt to verify customer details, or leave as direct OTC walk-in sale.'
+      : 'Provide a legitimate customer name in the source file and re-import this record.';
+  }
+  if (entityType === 'doctor') {
+    return action === 'preserved_null'
+      ? 'Verify prescriber details on original prescription and link doctor, or leave as OTC without doctor.'
+      : 'Provide a legitimate doctor name in the source file and re-import this record.';
+  }
+  if (entityType === 'distributor') {
+    return action === 'preserved_null'
+      ? 'Verify distributor in vendor directory, or manually link distributor to this purchase/return invoice.'
+      : 'Provide a legitimate distributor name in the source file and re-import this record.';
+  }
+  if (entityType === 'medicine') {
+    return 'Add medicine master entry or correct medicine name mapping before re-importing this item.';
+  }
+  if (entityType === 'invoice') {
+    return 'Check source file for missing or empty invoice number; provide invoice number before importing.';
+  }
+  return 'Review source record and resolve missing entity manually.';
 }
 
 const inMemoryRecords: MigrationAuditRecord[] = [];
@@ -45,9 +80,15 @@ export async function ensureMigrationAuditTable(db: any): Promise<void> {
       action TEXT,
       reason TEXT,
       raw_id TEXT,
+      suggested_action TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  try {
+    await db.exec('ALTER TABLE migration_audit_log ADD COLUMN suggested_action TEXT');
+  } catch (_) {
+    // Column already exists
+  }
 }
 
 export async function clearMigrationAudit(db?: any): Promise<void> {
@@ -72,11 +113,32 @@ export async function clearMigrationAudit(db?: any): Promise<void> {
 }
 
 export async function recordAuditEntry(
-  entry: Omit<MigrationAuditRecord, 'timestamp'>,
+  entry: Omit<MigrationAuditRecord, 'timestamp'> & { suggested_action?: string },
   db?: any
 ): Promise<void> {
+  const suggestedAction =
+    entry.suggestedAction ||
+    entry.suggested_action ||
+    entry.suggested_user_action ||
+    entry.suggestedUserAction ||
+    getDefaultSuggestedAction(entry.entityType, entry.action, entry.rawId);
+
+  const sourceRecord = `${entry.table}: ${entry.recordIdentifier}`;
+  const rawIdStr = entry.rawId !== undefined && entry.rawId !== null ? String(entry.rawId) : '';
+  const missingEntity = rawIdStr ? `${entry.entityType} ("${rawIdStr}")` : entry.entityType;
+
   const fullRecord: MigrationAuditRecord = {
     ...entry,
+    suggestedAction,
+    suggested_action: suggestedAction,
+    suggested_user_action: suggestedAction,
+    suggestedUserAction: suggestedAction,
+    source_record: sourceRecord,
+    sourceRecord: sourceRecord,
+    missing_entity: missingEntity,
+    missingEntity: missingEntity,
+    reason_unresolved: entry.reason,
+    reasonUnresolved: entry.reason,
     timestamp: new Date().toISOString(),
   };
 
@@ -102,8 +164,8 @@ export async function recordAuditEntry(
     try {
       await ensureMigrationAuditTable(db);
       await db.run(
-        `INSERT INTO migration_audit_log (table_name, record_identifier, entity_type, action, reason, raw_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO migration_audit_log (table_name, record_identifier, entity_type, action, reason, raw_id, suggested_action)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.table,
           entry.recordIdentifier,
@@ -111,6 +173,7 @@ export async function recordAuditEntry(
           entry.action,
           entry.reason,
           entry.rawId !== undefined && entry.rawId !== null ? String(entry.rawId) : null,
+          suggestedAction,
         ]
       );
     } catch (_) {
@@ -141,7 +204,7 @@ export async function getMigrationAuditSummary(db?: any): Promise<MigrationAudit
     try {
       await ensureMigrationAuditTable(db);
       const rows = await db.all(
-        'SELECT table_name as "table", record_identifier as recordIdentifier, entity_type as entityType, action, reason, raw_id as rawId, created_at as timestamp FROM migration_audit_log ORDER BY id ASC'
+        'SELECT table_name as "table", record_identifier as recordIdentifier, entity_type as entityType, action, reason, raw_id as rawId, suggested_action as suggestedAction, created_at as timestamp FROM migration_audit_log ORDER BY id ASC'
       );
 
       let custCount = 0;
@@ -159,6 +222,11 @@ export async function getMigrationAuditSummary(db?: any): Promise<MigrationAudit
         if (r.action === 'skipped') skipped++;
         if (r.action === 'preserved_null') preservedNull++;
 
+        const suggestedAction = r.suggestedAction || getDefaultSuggestedAction(r.entityType, r.action, r.rawId);
+        const sourceRecord = `${r.table}: ${r.recordIdentifier}`;
+        const rawIdStr = r.rawId !== undefined && r.rawId !== null ? String(r.rawId) : '';
+        const missingEntity = rawIdStr ? `${r.entityType} ("${rawIdStr}")` : r.entityType;
+
         return {
           table: r.table,
           recordIdentifier: r.recordIdentifier,
@@ -166,6 +234,16 @@ export async function getMigrationAuditSummary(db?: any): Promise<MigrationAudit
           action: r.action,
           reason: r.reason,
           rawId: r.rawId,
+          suggestedAction,
+          suggested_action: suggestedAction,
+          suggested_user_action: suggestedAction,
+          suggestedUserAction: suggestedAction,
+          source_record: sourceRecord,
+          sourceRecord: sourceRecord,
+          missing_entity: missingEntity,
+          missingEntity: missingEntity,
+          reason_unresolved: r.reason,
+          reasonUnresolved: r.reason,
           timestamp: r.timestamp,
         };
       });
@@ -227,6 +305,10 @@ export function queueMigrationAudit(entry: {
   status?: 'preserved_null' | 'skipped';
   action?: 'preserved_null' | 'skipped';
   reason: string;
+  suggested_action?: string;
+  suggestedAction?: string;
+  suggested_user_action?: string;
+  suggestedUserAction?: string;
 }): void {
   recordAuditEntry({
     table: entry.table || entry.record_type || 'sales_invoices',
@@ -235,6 +317,7 @@ export function queueMigrationAudit(entry: {
     action: entry.action || entry.status || 'preserved_null',
     reason: entry.reason,
     rawId: entry.rawId !== undefined ? entry.rawId : entry.raw_value,
+    suggestedAction: entry.suggestedAction || entry.suggested_action || entry.suggested_user_action || entry.suggestedUserAction,
   });
 }
 
@@ -251,6 +334,10 @@ export async function recordMigrationAudit(
     status?: 'preserved_null' | 'skipped';
     action?: 'preserved_null' | 'skipped';
     reason: string;
+    suggested_action?: string;
+    suggestedAction?: string;
+    suggested_user_action?: string;
+    suggestedUserAction?: string;
   }
 ): Promise<void> {
   await recordAuditEntry(
@@ -261,6 +348,7 @@ export async function recordMigrationAudit(
       action: entry.action || entry.status || 'preserved_null',
       reason: entry.reason,
       rawId: entry.rawId !== undefined ? entry.rawId : entry.raw_value,
+      suggestedAction: entry.suggestedAction || entry.suggested_action || entry.suggested_user_action || entry.suggestedUserAction,
     },
     db
   );
@@ -277,30 +365,90 @@ export async function getMigrationAuditRecords(
       const countRow = await db.get('SELECT COUNT(*) as cnt FROM migration_audit_log');
       const total = countRow?.cnt || 0;
       const dbRows = await db.all(
-        `SELECT id, table_name as record_type, record_identifier, entity_type, raw_id as raw_value, action as status, reason, created_at
+        `SELECT id, table_name as record_type, table_name, record_identifier, entity_type, raw_id as raw_value, raw_id, action as status, action, reason, suggested_action, created_at
          FROM migration_audit_log
          ORDER BY id DESC
          LIMIT ? OFFSET ?`,
         [limit, offset]
       );
       if (total > 0) {
-        return { rows: dbRows, total };
+        const enriched = dbRows.map((r: any) => {
+          const suggestedAction = r.suggested_action || getDefaultSuggestedAction(r.entity_type, r.action, r.raw_value);
+          const sourceRecord = `${r.table_name || r.record_type}: ${r.record_identifier}`;
+          const rawIdStr = r.raw_value !== undefined && r.raw_value !== null ? String(r.raw_value) : '';
+          const missingEntity = rawIdStr ? `${r.entity_type} ("${rawIdStr}")` : r.entity_type;
+
+          return {
+            id: r.id,
+            table: r.table_name,
+            table_name: r.table_name,
+            record_type: r.record_type,
+            recordIdentifier: r.record_identifier,
+            record_identifier: r.record_identifier,
+            source_record: sourceRecord,
+            sourceRecord: sourceRecord,
+            entityType: r.entity_type,
+            entity_type: r.entity_type,
+            missing_entity: missingEntity,
+            missingEntity: missingEntity,
+            rawId: r.raw_value,
+            raw_id: r.raw_value,
+            raw_value: r.raw_value,
+            action: r.action,
+            status: r.status,
+            reason: r.reason,
+            reason_unresolved: r.reason,
+            reasonUnresolved: r.reason,
+            suggested_action: suggestedAction,
+            suggestedAction: suggestedAction,
+            suggested_user_action: suggestedAction,
+            suggestedUserAction: suggestedAction,
+            created_at: r.created_at,
+            timestamp: r.created_at,
+          };
+        });
+        return { rows: enriched, total };
       }
     } catch (_) {}
   }
 
   // Fallback to in-memory records
   const total = inMemoryRecords.length;
-  const sliced = inMemoryRecords.slice(offset, offset + limit).map((r, i) => ({
-    id: offset + i + 1,
-    record_type: r.table,
-    record_identifier: r.recordIdentifier,
-    entity_type: r.entityType,
-    raw_value: r.rawId,
-    status: r.action,
-    reason: r.reason,
-    created_at: r.timestamp,
-  }));
+  const sliced = inMemoryRecords.slice(offset, offset + limit).map((r, i) => {
+    const suggestedAction = r.suggestedAction || getDefaultSuggestedAction(r.entityType, r.action, r.rawId);
+    const sourceRecord = `${r.table}: ${r.recordIdentifier}`;
+    const rawIdStr = r.rawId !== undefined && r.rawId !== null ? String(r.rawId) : '';
+    const missingEntity = rawIdStr ? `${r.entityType} ("${rawIdStr}")` : r.entityType;
+
+    return {
+      id: offset + i + 1,
+      table: r.table,
+      table_name: r.table,
+      record_type: r.table,
+      recordIdentifier: r.recordIdentifier,
+      record_identifier: r.recordIdentifier,
+      source_record: sourceRecord,
+      sourceRecord: sourceRecord,
+      entityType: r.entityType,
+      entity_type: r.entityType,
+      missing_entity: missingEntity,
+      missingEntity: missingEntity,
+      rawId: r.rawId,
+      raw_id: r.rawId,
+      raw_value: r.rawId,
+      action: r.action,
+      status: r.action,
+      reason: r.reason,
+      reason_unresolved: r.reason,
+      reasonUnresolved: r.reason,
+      suggested_action: suggestedAction,
+      suggestedAction: suggestedAction,
+      suggested_user_action: suggestedAction,
+      suggestedUserAction: suggestedAction,
+      created_at: r.timestamp,
+      timestamp: r.timestamp,
+    };
+  });
 
   return { rows: sliced, total };
 }
@@ -310,10 +458,15 @@ export async function flushMigrationAudits(db?: any): Promise<void> {
     await ensureMigrationAuditTable(db);
     while (pendingQueue.length > 0) {
       const entry = pendingQueue.shift()!;
+      const suggestedAction =
+        entry.suggestedAction ||
+        entry.suggested_action ||
+        entry.suggested_user_action ||
+        getDefaultSuggestedAction(entry.entityType, entry.action, entry.rawId);
       try {
         await db.run(
-          `INSERT INTO migration_audit_log (table_name, record_identifier, entity_type, action, reason, raw_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO migration_audit_log (table_name, record_identifier, entity_type, action, reason, raw_id, suggested_action)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             entry.table,
             entry.recordIdentifier,
@@ -321,6 +474,7 @@ export async function flushMigrationAudits(db?: any): Promise<void> {
             entry.action,
             entry.reason,
             entry.rawId !== undefined && entry.rawId !== null ? String(entry.rawId) : null,
+            suggestedAction,
           ]
         );
       } catch (_) {}
@@ -332,4 +486,5 @@ export async function flushMigrationAudits(db?: any): Promise<void> {
 export function clearMigrationAuditQueue(): void {
   clearMigrationAudit();
 }
+
 

@@ -12,6 +12,7 @@ import { Database } from 'sqlite';
 import { normalizeDistributorName } from '../../utils/migrationValidation.js';
 import { parsePackSizeFromPackaging } from '../../utils/packaging.js';
 import { sanitizeDoctorName } from '../../utils/doctorUtils.js';
+import { isValidCustomerName, isValidDoctorName, isValidDistributorName } from '../../utils/nameNormalizer.js';
 
 // In-memory lookup maps (legacy_id → new SQLite id)
 export const categoryMap = new Map<string, string>();       // legacy_id → category_name
@@ -70,7 +71,7 @@ export async function importDistributor(row: Record<string, string | null>, db: 
   const legacyId = row['distributor_id'];
   const name = row['distributor_name'];
   const deleted = row['deleted'];
-  if (!legacyId || !name || deleted === 't') return;
+  if (!legacyId || !name || deleted === 't' || !isValidDistributorName(name)) return;
 
   const normName = normalizeDistributorName(name);
   if (normalizedDistributorMap.has(normName)) {
@@ -153,7 +154,7 @@ export async function importDoctor(row: Record<string, string | null>, db: Datab
   const legacyId = row['doctor_id'];
   const name = row['doctor_name'];
   const deleted = row['deleted'];
-  if (!legacyId || !name || deleted === 't') return;
+  if (!legacyId || !name || deleted === 't' || !isValidDoctorName(name)) return;
 
   const cleanName = sanitizeDoctorName(name) || name.trim();
 
@@ -210,7 +211,7 @@ export async function importPatient(row: Record<string, string | null>, db: Data
   const legacyId = row['patient_id'];
   const name = row['patient_name'] || row['name'] || row['customer_name'];
   const deleted = row['deleted'];
-  if (!legacyId || !name || deleted === 't') return;
+  if (!legacyId || !name || deleted === 't' || !isValidCustomerName(name)) return;
 
   patientBatch.push({
     name,
@@ -266,7 +267,7 @@ export async function importCustomer(row: Record<string, string | null>, db: Dat
   const legacyId = row['customer_id'];
   const name = row['customer_name'] || row['name'];
   const deleted = row['deleted'];
-  if (!legacyId || !name || deleted === 't') return;
+  if (!legacyId || !name || deleted === 't' || !isValidCustomerName(name)) return;
 
   customerBatch.push({
     name,

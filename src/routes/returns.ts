@@ -96,7 +96,7 @@ router.post('/', async (req, res) => {
         Number(loss_percentage) < 0 ||
         Number(loss_percentage) > 100
       ) {
-        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required for supplier expiry returns and cannot be assumed.' });
+        return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required for supplier expiry returns and cannot be assumed.' });
       }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
       await trackExpiryReturn(db, result.lastID as number, distributor_id as number, total_amount || 0, Number(loss_percentage));
@@ -348,7 +348,7 @@ router.post('/process-returns', async (req, res) => {
       const parsedLoss = loss_percentage !== undefined ? Number(loss_percentage) : (firstItem?.loss_percentage !== undefined ? Number(firstItem.loss_percentage) : NaN);
       if (isNaN(parsedLoss) || parsedLoss < 0 || parsedLoss > 100) {
         await db.run('ROLLBACK');
-        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to process supplier returns and track credit notes.' });
+        return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required to process supplier returns and track credit notes.' });
       }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
       await trackExpiryReturn(db, returnId as number, distributorId as number, totalAmount, parsedLoss);
@@ -868,7 +868,7 @@ router.post('/expiry-reviews/:id/approve', async (req, res) => {
       Number(loss_percentage) < 0 ||
       Number(loss_percentage) > 100
     ) {
-      return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to approve expiry return and track expected credit note.' });
+      return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required to approve expiry return and track expected credit note.' });
     }
 
     // Check inventory stock
@@ -960,7 +960,7 @@ router.post('/expiry-reviews/:id/approve', async (req, res) => {
         Number(loss_percentage) > 100
       ) {
         await db.run('ROLLBACK');
-        return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required to approve expiry return and calculate credit note expectation.' });
+        return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required to approve expiry return and calculate credit note expectation.' });
       }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
       await trackExpiryReturn(db, returnId as number, review.distributor_id, totalAmount, Number(loss_percentage));
@@ -1069,7 +1069,7 @@ router.post('/expiry-reviews/bulk-approve', async (req, res) => {
       Number(loss_percentage) < 0 ||
       Number(loss_percentage) > 100
     ) {
-      return res.status(400).json({ error: 'A valid loss_percentage between 0 and 100 is required for bulk approval and credit note tracking.' });
+      return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required for bulk approval and credit note tracking.' });
     }
 
     db = await dbManager.getConnection();

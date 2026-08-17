@@ -78,7 +78,7 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
 
     const res = await request(app).post('/api/refills/1/send');
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Pharmacy name is not configured in Settings');
+    expect(res.body.error).toContain('Pharmacy name required in Settings.');
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
@@ -96,7 +96,7 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
 
     const res = await request(app).post('/api/refills/1/send');
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Pharmacy name is not configured in Settings');
+    expect(res.body.error).toContain('Pharmacy name required in Settings.');
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
@@ -143,7 +143,7 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
       .post('/api/refills/send-reminder-now')
       .send({ patient_phone: '919123456780' });
     expect(resBlocked.status).toBe(400);
-    expect(resBlocked.body.error).toContain('Pharmacy name is not configured in Settings');
+    expect(resBlocked.body.error).toContain('Pharmacy name required in Settings.');
 
     // Set pharmacy name in settings
     const db2 = await open({ filename: dbPath, driver: sqlite3.default.Database });
@@ -185,7 +185,7 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
       .post('/api/refills/send-tomorrow-reminder')
       .send({ patient_phone: '919988776655' });
     expect(resBlocked.status).toBe(400);
-    expect(resBlocked.body.error).toContain('Pharmacy name is not configured in Settings');
+    expect(resBlocked.body.error).toContain('Pharmacy name required in Settings.');
 
     // Set pharmacy name in settings
     const db2 = await open({ filename: dbPath, driver: sqlite3.default.Database });
@@ -205,5 +205,45 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
     expect(notification).toBeDefined();
     expect(notification.message).toContain('WELLNESS FOREVER');
     expect(notification.message).not.toContain('XYZ MEDICAL');
+  });
+
+  test('6. Staged refill collection notification is not created when pharmacy name is missing or placeholder', async () => {
+    const { createQuickBillForRefill } = await import('../src/services/refillService.js');
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    await db.run('INSERT INTO medicines (id, name, mrp) VALUES (10, "Cough Syrup", 120)');
+    await db.run('INSERT INTO inventory_master (id, medicine_id, quantity, batch_no, expiry_date, mrp) VALUES (101, 10, 10, "CS-101", "12/28", 120)');
+
+    const refillObj = {
+      id: 50,
+      medicine_id: 10,
+      medicine_name: 'Cough Syrup',
+      patient_name: 'Suresh Raina',
+      patient_phone: '919876500000',
+      quantity: 1
+    };
+
+    // Case A: Missing pharmacy name in settings
+    await createQuickBillForRefill(db, refillObj);
+    const notifA = await db.get('SELECT * FROM automation_notifications WHERE reference_id = "50"');
+    expect(notifA).toBeUndefined();
+
+    // Case B: Placeholder "XYZ MEDICAL"
+    await db.run("INSERT INTO app_settings (key, value) VALUES ('shop_name', 'XYZ MEDICAL')");
+    await createQuickBillForRefill(db, refillObj);
+    const notifB = await db.get('SELECT * FROM automation_notifications WHERE reference_id = "50"');
+    expect(notifB).toBeUndefined();
+
+    // Case C: Legitimate configured pharmacy name
+    await db.run("UPDATE app_settings SET value = 'LIFELINE PHARMACY' WHERE key = 'shop_name'");
+    await createQuickBillForRefill(db, refillObj);
+    const notifC = await db.get('SELECT * FROM automation_notifications WHERE reference_id = "50"');
+    expect(notifC).toBeDefined();
+    expect(notifC.message).toContain('LIFELINE PHARMACY');
+    expect(notifC.message).not.toContain('XYZ MEDICAL');
+
+    await db.close();
   });
 });

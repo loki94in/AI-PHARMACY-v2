@@ -1478,7 +1478,7 @@ export class EmailService {
   const displayMeds = resolvedMedicines.slice(0, 15);
 
     return {
-      distributorName,
+      distributorName: (distributorName && isValidDistributorName(distributorName)) ? distributorName.trim() : '',
       invoiceNumber,
       timeStr,
       medicines: displayMeds,
@@ -1814,7 +1814,7 @@ export class EmailService {
       }));
 
       await db.run(
-        `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json, source_type) VALUES (?, ?, ?, ?, ?, 'email')`,
         [validDistName, orderInfo.invoiceNumber, billDate, 0, JSON.stringify(stagedItems)]
       );
 
@@ -2733,7 +2733,7 @@ export class EmailService {
           ? distributor_name.trim()
           : null;
         await db.run(
-          `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json, source_type) VALUES (?, ?, ?, ?, ?, 'email')`,
           [validDistName, invoice_no || filename, invoice_date ? invoice_date : null, total_amount || 0, JSON.stringify(items)]
         );
 

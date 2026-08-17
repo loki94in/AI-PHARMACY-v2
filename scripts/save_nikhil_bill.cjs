@@ -1,3 +1,8 @@
+if (process.env.NODE_ENV === 'production' || (process.env.ALLOW_MOCK_SEED !== 'true' && process.env.NODE_ENV !== 'test')) {
+  console.error('[MOCK_DATA_PROTECTION] FATAL: save_nikhil_bill is a mock seed script and is hard-blocked in production and outside test environments.');
+  process.exit(1);
+}
+
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 

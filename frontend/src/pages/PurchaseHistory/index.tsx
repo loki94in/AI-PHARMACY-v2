@@ -189,7 +189,7 @@ const PurchaseHistory = () => {
           prefilledPurchase: {
             distributorName: previewData.distributorName || '',
             invoiceNo: previewData.invoiceNo || '',
-            date: previewData.date || getTodayString(),
+            date: previewData.date || '',
             totalAmount: previewData.totalAmount || 0,
             globalCdPer: previewData.globalCdPer || 0,
             items: previewData.items || []

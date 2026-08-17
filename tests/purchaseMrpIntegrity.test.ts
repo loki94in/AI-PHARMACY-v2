@@ -148,6 +148,7 @@ describe('Purchase MRP Integrity Verification', () => {
       .send({
         email_uid: 201,
         distributor_name: 'Sun Pharma Distributors',
+        invoice_date: '2026-08-16',
         items: [
           { name: 'Paracetamol 650mg', quantity: 10, rate: 12.50, mrp: 0, batch_no: 'PCM-201', expiry_date: '10/28' }
         ]
@@ -168,6 +169,7 @@ describe('Purchase MRP Integrity Verification', () => {
       .send({
         email_uid: 201,
         distributor_name: 'Sun Pharma Distributors',
+        invoice_date: '2026-08-16',
         items: [
           { name: 'Paracetamol 650mg', quantity: 10, rate: 12.50, mrp: 22.00, batch_no: 'PCM-201', expiry_date: '10/28' }
         ]

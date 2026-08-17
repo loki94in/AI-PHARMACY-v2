@@ -166,7 +166,7 @@ describe('Email Purchase Distributor Integrity Tests', () => {
       .send({});
 
     expect(res1.status).toBe(400);
-    expect(res1.body.error).toMatch(/Distributor is required/i);
+    expect(res1.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
 
     // Placeholder "Default Distributor" in staged purchase
     const res2 = await request(app)
@@ -174,7 +174,7 @@ describe('Email Purchase Distributor Integrity Tests', () => {
       .send({});
 
     expect(res2.status).toBe(400);
-    expect(res2.body.error).toMatch(/Distributor is required/i);
+    expect(res2.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
   });
 
   test('7. Confirm NO fake distributor ("Default Distributor", "Unknown Distributor", "Email Import") was created in DB', async () => {
@@ -196,6 +196,7 @@ describe('Email Purchase Distributor Integrity Tests', () => {
       .send({
         email_uid: 102,
         distributor_name: 'Nitin Agency',
+        invoice_date: '2026-08-16',
         items: [
           { name: 'Amoxicillin 500mg', quantity: 50, rate: 10, mrp: 20, batch_no: 'B-AMX-1', expiry_date: '10/28' }
         ]
@@ -273,13 +274,81 @@ describe('Email Purchase Distributor Integrity Tests', () => {
         .send({});
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/Distributor is required/i);
+      expect(res.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
     }
 
     // Confirm no fake entity was created
     const fakeDist = await db.get(
       `SELECT * FROM distributors WHERE name IN ('Email Import', 'Default Distributor', 'Unknown Distributor', 'TELEGRAM IMPORT')`
     );
+    expect(fakeDist).toBeUndefined();
+
+    await db.close();
+  });
+
+  test('11. Email with unreadable/garbled distributor preserves staged data, creates no fake distributor, and creates no inventory before approval', async () => {
+    const orderInfo = await emailServiceModule.extractOrderInfo({
+      from: 'billing@unrecognized-server-404.info',
+      subject: 'Bill INV-GARBLED-505',
+      body: 'DL NO: 20B/21B-98765 GSTIN: 27AABCT1234F1Z9\nInvoice for Pantoprazole 40mg qty: 25 rate: 12 mrp: 22',
+      attachments: []
+    });
+
+    // Unreadable distributor must be empty / unresolved
+    expect(orderInfo.distributorName).toBe('');
+    expect(orderInfo.invoiceNumber).toBe('INV-GARBLED-505');
+
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Stage the purchase with unreadable/unresolved distributor
+    const stagedRes = await db.run(`
+      INSERT INTO staged_purchases (distributor_name, invoice_no, date, total_amount, items_json, status)
+      VALUES (?, 'INV-GARBLED-505', '2026-08-16', 300, ?, 'pending')
+    `, [orderInfo.distributorName || null, JSON.stringify([
+      { name: 'Pantoprazole 40mg', batch_no: 'PAN-505', expiry_date: '10/28', quantity: 25, cost_price: 12, mrp: 22 }
+    ])]);
+    const stagedId = stagedRes.lastID;
+
+    // Verify staged data is preserved
+    const staged = await db.get('SELECT * FROM staged_purchases WHERE id = ?', [stagedId]);
+    expect(staged).toBeDefined();
+    expect(staged.invoice_no).toBe('INV-GARBLED-505');
+    const items = JSON.parse(staged.items_json);
+    expect(items).toHaveLength(1);
+    expect(items[0].name).toBe('Pantoprazole 40mg');
+    expect(items[0].quantity).toBe(25);
+
+    // Confirm inventory has NOT been created yet
+    const invBefore = await db.get('SELECT * FROM inventory_master WHERE batch_no = "PAN-505"');
+    expect(invBefore).toBeUndefined();
+
+    // Verify approval without resolving distributor is rejected
+    const resBlocked = await request(app)
+      .post(`/api/purchases/staged/${stagedId}/approve`)
+      .send({});
+    expect(resBlocked.status).toBe(400);
+    expect(resBlocked.body.error).toMatch(/(Distributor is required|Actual distributor required)/i);
+
+    // Inventory MUST still not exist
+    const invStillBlocked = await db.get('SELECT * FROM inventory_master WHERE batch_no = "PAN-505"');
+    expect(invStillBlocked).toBeUndefined();
+
+    // Now resolve distributor and approve legitimately
+    const resApproved = await request(app)
+      .post(`/api/purchases/staged/${stagedId}/approve`)
+      .send({ distributor_name: 'Metro Pharma Logistics' });
+    expect(resApproved.status).toBe(200);
+    expect(resApproved.body.success).toBe(true);
+
+    // Inventory MUST now exist
+    const invAfter = await db.get('SELECT * FROM inventory_master WHERE batch_no = "PAN-505"');
+    expect(invAfter).toBeDefined();
+    expect(invAfter.quantity).toBe(25);
+
+    // Verify no Default Distributor was created
+    const fakeDist = await db.get('SELECT * FROM distributors WHERE name = "Default Distributor"');
     expect(fakeDist).toBeUndefined();
 
     await db.close();
