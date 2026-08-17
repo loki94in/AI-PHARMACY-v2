@@ -1201,7 +1201,7 @@ const InvestigationCenter = () => {
                   </div>
 
                   {/* Right Panel: Audit Logs Timeline (Col span 4) */}
-                  <div className="lg:col-span-4 bg-glass-bg border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl self-stretch min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300 relative overflow-hidden">
+                  <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl sticky top-0 self-start min-h-[450px] animate-in fade-in slide-in-from-right-4 duration-300 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
 
                     <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
@@ -1260,10 +1260,10 @@ const InvestigationCenter = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full items-start">
 
                   {/* Left Panel: Autocomplete and Item List (Col span 8) */}
-                  <div className="lg:col-span-8 flex flex-col gap-4 w-full animate-in fade-in slide-in-from-left-4 duration-300">
+                  <div className="lg:col-span-8 flex flex-col gap-5 w-full animate-in fade-in slide-in-from-left-4 duration-300">
 
                     {/* Medicine Search Card */}
-                    <div className="bg-bg2 border border-glass-border p-4 rounded-2xl shadow-xl flex flex-col gap-3">
+                    <div className="bg-bg2 border border-glass-border p-5 rounded-2xl shadow-xl flex flex-col gap-3 relative z-30">
                       <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Search & Add Medicines</label>
                       <div className="relative" ref={medicineSearchRef}>
                         <Search className="absolute left-3 top-3.5 text-muted" size={14} />
@@ -1275,7 +1275,7 @@ const InvestigationCenter = () => {
                           className="w-full bg-bg3 border border-glass-border rounded-xl pl-9 pr-4 py-2.5 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-colors"
                         />
                         {searchMedicineResults.length > 0 && (
-                          <div className="absolute top-full left-0 right-0 z-[100] mt-2 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto p-1.5 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <div className="absolute top-full left-0 right-0 z-50 mt-2 bg-bg2/95 backdrop-blur-xl border border-glass-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto p-1.5 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2 duration-200">
                             {searchMedicineResults.map((med, idx) => (
                               <button
                                 key={idx}
@@ -1306,7 +1306,7 @@ const InvestigationCenter = () => {
                         </h3>
                       </div>
 
-                      <div className="p-4 flex flex-col gap-3 max-h-[500px] overflow-y-auto custom-scrollbar">
+                      <div className="p-4 flex flex-col gap-3 max-h-[520px] overflow-y-auto custom-scrollbar">
                         {billItems.length === 0 ? (
                           <div className="p-8 text-center text-muted text-xs flex flex-col items-center justify-center gap-2">
                             <AlertCircle size={24} className="opacity-30" />
@@ -1318,8 +1318,8 @@ const InvestigationCenter = () => {
                             const qtyDiff = item.quantity - originalQty;
 
                             return (
-                              <div key={index} className="p-3.5 bg-bg2 border border-glass-border/35 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs hover:border-glass-border/60 transition-all shadow-sm relative overflow-hidden group">
-                                <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                              <div key={index} className="p-3.5 bg-bg3/60 border border-glass-border/40 hover:border-glass-border/70 hover:bg-bg3/80 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs transition-all shadow-sm relative overflow-hidden group">
+                                <div className="min-w-0 flex-1 flex flex-col gap-1">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <p className="font-bold text-text truncate text-sm">{item.medicine_name}</p>
                                     {originalQty === 0 ? (
@@ -1334,21 +1334,21 @@ const InvestigationCenter = () => {
                                     ) : null}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-[10px] bg-bg3 border border-glass-border/40 px-2 py-0.5 rounded text-muted font-semibold">
+                                    <span className="text-[10px] bg-bg2 border border-glass-border/40 px-2 py-0.5 rounded text-muted font-semibold">
                                       Batch: {item.batch_no}
                                     </span>
                                   </div>
                                 </div>
 
-                                <div className="flex flex-wrap items-center gap-4 shrink-0 justify-between sm:justify-end">
+                                <div className="flex items-center flex-wrap sm:flex-nowrap gap-3.5 shrink-0 justify-between sm:justify-end">
                                   {/* Quantity Stepper */}
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1.5">
                                     <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Qty</span>
-                                    <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
+                                    <div className="flex items-center bg-bg2 border border-glass-border rounded-lg overflow-hidden h-8">
                                       <button
                                         type="button"
                                         onClick={() => handleItemQtyChange(index, Math.max(0, item.quantity - 1))}
-                                        className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                        className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
                                       >
                                         <Minus size={11} />
                                       </button>
@@ -1361,7 +1361,7 @@ const InvestigationCenter = () => {
                                       <button
                                         type="button"
                                         onClick={() => handleItemQtyChange(index, item.quantity + 1)}
-                                        className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                        className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
                                       >
                                         <Plus size={11} />
                                       </button>
@@ -1370,13 +1370,13 @@ const InvestigationCenter = () => {
 
                                   {/* Loose Quantity Stepper (Sales only) */}
                                   {editingType === 'sale' && (
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5">
                                       <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Loose</span>
-                                      <div className="flex items-center bg-bg3 border border-glass-border rounded-lg overflow-hidden h-8">
+                                      <div className="flex items-center bg-bg2 border border-glass-border rounded-lg overflow-hidden h-8">
                                         <button
                                           type="button"
                                           onClick={() => handleItemLooseQtyChange(index, Math.max(0, item.loose_qty - 1))}
-                                          className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
+                                          className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
                                         >
                                           <Minus size={11} />
                                         </button>
@@ -1389,7 +1389,7 @@ const InvestigationCenter = () => {
                                         <button
                                           type="button"
                                           onClick={() => handleItemLooseQtyChange(index, item.loose_qty + 1)}
-                                          className="px-2.5 hover:bg-bg2 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
+                                          className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
                                         >
                                           <Plus size={11} />
                                         </button>
@@ -1398,7 +1398,7 @@ const InvestigationCenter = () => {
                                   )}
 
                                   {/* Price Monospace */}
-                                  <div className="flex flex-col text-right">
+                                  <div className="flex flex-col text-right min-w-[65px]">
                                     <span className="text-[9px] text-muted uppercase font-bold tracking-wider">
                                       {editingType === 'sale' ? 'Unit Price' : 'Unit Cost'}
                                     </span>
@@ -1425,7 +1425,7 @@ const InvestigationCenter = () => {
                   </div>
 
                   {/* Right Panel: Invoice Summary / Checkout Receipt Card (Col span 4) */}
-                  <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-5 shadow-xl sticky top-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                  <div className="lg:col-span-4 bg-bg2 border border-glass-border rounded-2xl p-5 flex flex-col gap-5 shadow-xl sticky top-0 self-start animate-in fade-in slide-in-from-right-4 duration-300">
                     <div className="flex items-center gap-2 border-b border-glass-border/30 pb-3 shrink-0">
                       <FileText size={14} className="text-primary" />
                       <h3 className="text-xs font-bold text-text uppercase tracking-wider">Reconciliation Summary</h3>

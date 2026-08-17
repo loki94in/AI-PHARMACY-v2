@@ -43,21 +43,29 @@ export class WhatsappInvoiceService {
       }
 
       // Format instant WhatsApp text message
-      const invoiceDate = invoice.date ? invoice.date.split('T')[0] : new Date().toISOString().split('T')[0];
-      const barcodeText = `${invoice.invoice_no}|${invoiceDate}`;
+      const formatDate = (dStr?: string) => {
+        if (!dStr) return '';
+        try {
+          const d = new Date(dStr);
+          return isNaN(d.getTime()) ? dStr : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        } catch {
+          return dStr || '';
+        }
+      };
+
+      const formattedDate = formatDate(invoice.date || new Date().toISOString());
 
       let caption = `Dear ${invoice.customer_name || 'Customer'},\n\n`;
       if (invoice.payment_medium === 'CREDIT' || invoice.payment_status === 'UNPAID') {
-        const totalDues = (invoice.credit_balance || invoice.total_amount || 0);
-        caption += `📌 *Credit Purchase Bill: #${invoice.invoice_no}*\n`;
-        caption += `Bill Amount: *₹${(invoice.total_amount || 0).toFixed(2)}*\n`;
-        caption += `Total Outstanding Dues: *₹${totalDues.toFixed(2)}*\n`;
-        caption += `🔍 Scannable Bill Barcode: *${barcodeText}*\n\n`;
-        caption += `This bill has been posted to your credit ledger account.\n\n`;
+        const totalDues = Number(invoice.credit_balance !== undefined && invoice.credit_balance !== null ? invoice.credit_balance : (invoice.total_amount || 0));
+        caption += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
+        caption += `🧾 *Current Bill (#${invoice.invoice_no})*\n`;
+        caption += `• Date: *${formattedDate}*\n`;
+        caption += `💰 *Total Outstanding Balance: ₹${totalDues.toFixed(2)}*\n\n`;
+        caption += `This bill has been posted to your credit ledger account.\n`;
       } else {
         caption += `📄 *Sale Invoice: #${invoice.invoice_no}*\n`;
-        caption += `Bill Amount Paid: *₹${(invoice.total_amount || 0).toFixed(2)}*\n`;
-        caption += `🔍 Scannable Bill Barcode: *${barcodeText}*\n\n`;
+        caption += `Bill Amount Paid: *₹${(invoice.total_amount || 0).toFixed(2)}*\n\n`;
         caption += `Thank you for your purchase!\n\n`;
       }
       caption += `— AI Pharmacy OS`;

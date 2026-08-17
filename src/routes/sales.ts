@@ -572,50 +572,29 @@ router.post('/', async (req, res) => {
             let waMsg = `Dear ${nameForWA},\n\n`;
 
             if (isCredit) {
-              // Fetch old/previous unpaid bills for this customer
-              const oldInvoices = customerId
-                ? await db.all(
-                    `SELECT invoice_no, total_amount, date FROM sales_invoices
-                     WHERE customer_id = ? AND id != ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'
-                     ORDER BY date ASC, id ASC`,
-                    [customerId, invoiceId]
-                  )
-                : [];
-
-              let oldDuesSum = 0;
-              let oldBillsListStr = '';
-              for (const inv of oldInvoices) {
-                const amt = Number(inv.total_amount || 0);
-                oldDuesSum += amt;
-                const dFormatted = formatDate(inv.date);
-                oldBillsListStr += `• Bill #${inv.invoice_no} (${dFormatted}): ₹${amt.toFixed(2)}\n`;
+              const custRow = customerId ? await db.get('SELECT credit_balance FROM customers WHERE id = ?', [customerId]) : null;
+              let finalOutstanding = 0;
+              if (custRow?.credit_balance !== undefined && custRow?.credit_balance !== null) {
+                finalOutstanding = Number(custRow.credit_balance);
+              } else {
+                const oldInvoices = customerId
+                  ? await db.all(
+                      `SELECT total_amount FROM sales_invoices
+                       WHERE customer_id = ? AND id != ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'`,
+                      [customerId, invoiceId]
+                    )
+                  : [];
+                const oldDuesSum = oldInvoices.reduce((sum: number, inv: any) => sum + Number(inv.total_amount || 0), 0);
+                finalOutstanding = oldDuesSum + Number(total);
               }
 
-              const currentBillAmt = Number(total);
-              const finalOutstanding = oldDuesSum + currentBillAmt;
               const todayStr = formatDate(invoiceDateValue);
 
               waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
               waMsg += `🧾 *Current Bill (#${invoice_no})*\n`;
               waMsg += `• Date: *${todayStr}*\n`;
-              waMsg += `• Amount: *₹${currentBillAmt.toFixed(2)}*\n\n`;
-              waMsg += itemLines;
-
-              if (oldInvoices.length > 0) {
-                waMsg += `📜 *Previous Unpaid Bills (${oldInvoices.length})*\n`;
-                waMsg += `${oldBillsListStr}\n`;
-
-                waMsg += `📊 *Total Calculation Summary*\n`;
-                waMsg += `Previous Dues: ₹${oldDuesSum.toFixed(2)}\n`;
-                waMsg += `Current Bill:  ₹${currentBillAmt.toFixed(2)}\n`;
-                waMsg += `───────────────────\n`;
-                waMsg += `💰 *Final Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
-              } else {
-                waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
-              }
-
+              waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
               waMsg += `This bill has been posted to your credit ledger account.\n`;
-              waMsg += `Kindly arrange payment at your convenience.\n\n`;
             } else {
               waMsg += `🧾 *Sale Invoice: #${invoice_no}*\n`;
               waMsg += itemLines;
@@ -2155,13 +2134,41 @@ router.put('/:id', async (req, res) => {
       await db.run('UPDATE sales_invoices SET customer_id = ?, doctor_id = ? WHERE id = ?', [customerId, resolvedDoctorId, id]);
     }
 
+    // Recalculate customer credit balance for affected customers
+    const custIdsToRecalc = new Set<number>();
+    if (customerId) custIdsToRecalc.add(customerId);
+    if (existing.customer_id) custIdsToRecalc.add(existing.customer_id);
+
+    for (const cId of custIdsToRecalc) {
+      const unpaidRow = await db.get(
+        `SELECT COALESCE(SUM(total_amount), 0) as total 
+         FROM sales_invoices 
+         WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
+        [cId]
+      );
+      const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
+      await db.run(
+        'UPDATE customers SET credit_balance = ? WHERE id = ?',
+        [newBalance, cId]
+      );
+    }
+
     await db.run('COMMIT');
     inventoryCache.invalidate();
-        res.json({ success: true, message: 'Invoice updated' });
+
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('sales_sync', { success: true, action: 'update', id: Number(id) });
+      eventService.broadcast('inventory_sync', { success: true });
+    } catch (sseErr) {
+      console.warn('Could not broadcast sale update:', sseErr);
+    }
+
+    res.json({ success: true, message: 'Invoice updated' });
   } catch (error) {
     if (db) {
       try { await db.run('ROLLBACK'); } catch(e){}
-          }
+    }
     const err = error as Error;
     console.error(JSON.stringify({ message: 'Failed to update sale', error: err.message, timestamp: new Date().toISOString() }));
     res.status(500).json({ error: err.message || 'Internal server error' });

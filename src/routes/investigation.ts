@@ -848,9 +848,9 @@ router.put('/sales/:invoiceId', async (req, res) => {
     }
 
     // Step 1: Fetch old items to calculate deltas
-    const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?', [invoiceId]);
+    const oldItems = await db.all('SELECT inventory_id, quantity, loose_qty, batch_no FROM sale_items WHERE invoice_id = ?', [invoiceId]);
 
-    // Group items by inventory_id to calculate net changes
+    // Group items by inventory_id to calculate net changes (accumulating duplicates if any)
     const deltaMap = new Map<number, {
       inventory_id: number;
       oldQty: number;
@@ -860,41 +860,63 @@ router.put('/sales/:invoiceId', async (req, res) => {
     }>();
 
     for (const oi of oldItems) {
-      deltaMap.set(oi.inventory_id, {
-        inventory_id: oi.inventory_id,
-        oldQty: oi.quantity || 0,
-        oldLoose: oi.loose_qty || 0,
-        newQty: 0,
-        newLoose: 0
-      });
+      if (!oi.inventory_id) continue;
+      const invId = Number(oi.inventory_id);
+      const existing = deltaMap.get(invId);
+      if (existing) {
+        existing.oldQty += Number(oi.quantity || 0);
+        existing.oldLoose += Number(oi.loose_qty || 0);
+      } else {
+        deltaMap.set(invId, {
+          inventory_id: invId,
+          oldQty: Number(oi.quantity || 0),
+          oldLoose: Number(oi.loose_qty || 0),
+          newQty: 0,
+          newLoose: 0
+        });
+      }
     }
 
+    // Resolve any item in `items` missing inventory_id
     for (const ni of items) {
-      const invId = ni.inventory_id;
-      if (deltaMap.has(invId)) {
-        const entry = deltaMap.get(invId)!;
-        entry.newQty = ni.quantity || 0;
-        entry.newLoose = ni.loose_qty || 0;
+      if (!ni.inventory_id && (ni.medicine_id || ni.medicine_name) && ni.batch_no) {
+        const invRow = await db.get(
+          `SELECT id FROM inventory_master 
+           WHERE (medicine_id = ? OR medicine_id IN (SELECT id FROM medicines WHERE LOWER(name) = LOWER(?))) 
+             AND batch_no = ? LIMIT 1`,
+          [ni.medicine_id || 0, (ni.medicine_name || '').trim(), (ni.batch_no || '').trim()]
+        );
+        if (invRow) ni.inventory_id = invRow.id;
+      }
+
+      if (!ni.inventory_id) continue;
+      const invId = Number(ni.inventory_id);
+      const existing = deltaMap.get(invId);
+      if (existing) {
+        existing.newQty += Number(ni.quantity || 0);
+        existing.newLoose += Number(ni.loose_qty || 0);
       } else {
         deltaMap.set(invId, {
           inventory_id: invId,
           oldQty: 0,
           oldLoose: 0,
-          newQty: ni.quantity || 0,
-          newLoose: ni.loose_qty || 0
+          newQty: Number(ni.quantity || 0),
+          newLoose: Number(ni.loose_qty || 0)
         });
       }
     }
 
     // Step 2: Validate and apply net changes in inventory_master
-    const { applyStockDelta } = await import('../utils/stockRebuild.js');
+    const { applyStockDelta, recordStockLedger } = await import('../utils/stockRebuild.js');
+    const itemAdjustments: Array<{ inventoryId: number; medicineName: string; qtyDelta: number; looseDelta: number }> = [];
+
     for (const [invId, entry] of deltaMap.entries()) {
       const netQty = entry.newQty - entry.oldQty;
       const netLoose = entry.newLoose - entry.oldLoose;
       if (netQty === 0 && netLoose === 0) continue;
 
       const currentStock = await db.get(
-        `SELECT im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size, m.name as medicine_name
+        `SELECT im.quantity, im.loose_quantity, im.batch_no, im.medicine_id, COALESCE(m.pack_size, 1) as pack_size, m.name as medicine_name
          FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?`,
         [invId]
       );
@@ -930,37 +952,73 @@ router.put('/sales/:invoiceId', async (req, res) => {
         'UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?',
         [newStock.quantity, newStock.loose_quantity, invId]
       );
+
+      await recordStockLedger(db, {
+        medicine_id: currentStock.medicine_id,
+        batch_no: currentStock.batch_no,
+        quantity: -netQty,
+        loose_quantity: -netLoose,
+        transaction_type: 'investigation_sale_edit',
+        transaction_id: invoiceId
+      });
+
+      itemAdjustments.push({
+        inventoryId: invId,
+        medicineName: currentStock.medicine_name,
+        qtyDelta: netQty,
+        looseDelta: netLoose
+      });
     }
 
     // Step 3: Remove old items and insert corrected items
     await db.run('DELETE FROM sale_items WHERE invoice_id = ?', [invoiceId]);
     let subtotal = 0;
     for (const item of items) {
-      const { inventory_id, quantity, unit_price, loose_qty = 0 } = item;
-      await db.run(
-        'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty) VALUES (?, ?, ?, ?, ?)',
-        [invoiceId, inventory_id, quantity, unit_price, loose_qty]
-      );
+      const { inventory_id, quantity = 0, unit_price = 0, loose_qty = 0, batch_no } = item;
+      const cleanInvId = inventory_id ? Number(inventory_id) : null;
       
-      const currentStock = await db.get(
-        'SELECT COALESCE(m.pack_size, 1) as pack_size FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?',
-        [inventory_id]
-      );
+      const currentStock = cleanInvId ? await db.get(
+        'SELECT im.batch_no, COALESCE(m.pack_size, 1) as pack_size FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id = ?',
+        [cleanInvId]
+      ) : null;
+
       const pSize = currentStock ? (currentStock.pack_size || 1) : 1;
-      subtotal += (quantity * unit_price) + (loose_qty * (unit_price / pSize));
+      const bNo = batch_no || currentStock?.batch_no || null;
+
+      await db.run(
+        'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, batch_no) VALUES (?, ?, ?, ?, ?, ?)',
+        [invoiceId, cleanInvId, Number(quantity), Number(unit_price), Number(loose_qty), bNo]
+      );
+
+      subtotal += (Number(quantity) * Number(unit_price)) + (Number(loose_qty) * (Number(unit_price) / pSize));
     }
 
     // Recalculate totals
     const taxRate = 0.05;
     const tax = subtotal * taxRate;
-    const total = Math.round(subtotal + tax - discount);
+    const total = Math.round(subtotal + tax - Number(discount || 0));
 
     await db.run(
       `UPDATE sales_invoices
        SET total_amount = ?, tax_amount = ?, discount = ?, subtotal = ?
        WHERE id = ?`,
-      [total, tax, discount, subtotal, invoiceId]
+      [total, tax, Number(discount || 0), subtotal, invoiceId]
     );
+
+    // Recalculate customer credit balance if customer exists
+    if (existingBill.customer_id) {
+      const unpaidRow = await db.get(
+        `SELECT COALESCE(SUM(total_amount), 0) as total 
+         FROM sales_invoices 
+         WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING')`,
+        [existingBill.customer_id]
+      );
+      const newBalance = Math.max(0, Number(unpaidRow?.total || 0));
+      await db.run(
+        'UPDATE customers SET credit_balance = ? WHERE id = ?',
+        [newBalance, existingBill.customer_id]
+      );
+    }
 
     // Save snapshot of the edit in history for backup
     const originalData = JSON.stringify({
@@ -968,7 +1026,7 @@ router.put('/sales/:invoiceId', async (req, res) => {
       items: oldItems
     });
     const updatedData = JSON.stringify({
-      bill: { total_amount: total, tax_amount: tax, discount, subtotal },
+      bill: { total_amount: total, tax_amount: tax, discount: Number(discount || 0), subtotal },
       items: items
     });
     await db.run(
@@ -979,15 +1037,23 @@ router.put('/sales/:invoiceId', async (req, res) => {
     // Audit logging
     const desc = `Corrected Sales Invoice #${existingBill.invoice_no}. Subtotal: ₹${existingBill.subtotal} -> ₹${subtotal}, Discount: ₹${existingBill.discount} -> ₹${discount}, Total: ₹${existingBill.total_amount} -> ₹${total}.`;
     await logAction(db, 'SALES_BILL_CORRECTION', desc, {
-      invoiceId,
+      invoiceId: Number(invoiceId),
       invoiceNo: existingBill.invoice_no,
       subtotal: { from: existingBill.subtotal, to: subtotal },
-      discount: { from: existingBill.discount, to: discount },
-      total: { from: existingBill.total_amount, to: total }
+      discount: { from: existingBill.discount, to: Number(discount || 0) },
+      total: { from: existingBill.total_amount, to: total },
+      itemAdjustments
     });
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('sales_sync', { success: true, action: 'update', id: Number(invoiceId) });
+      eventService.broadcast('inventory_sync', { success: true });
+    } catch (_e) {}
+
     res.json({ success: true, message: 'Sales invoice corrected and inventory reconciled successfully', total, tax });
   } catch (error) {
     if (db) {
@@ -1029,7 +1095,7 @@ router.put('/purchases/:purchaseId', async (req, res) => {
       [purchaseId]
     );
 
-    // Group items by medicine_id and batch_no to calculate net changes
+    // Group items by medicine_id and batch_no to calculate net changes (accumulating duplicates if any)
     const deltaMap = new Map<string, {
       medicine_id: number;
       batch_no: string;
@@ -1042,15 +1108,20 @@ router.put('/purchases/:purchaseId', async (req, res) => {
 
     for (const oi of oldItems) {
       const key = `${oi.medicine_id}_${oi.batch_no}`;
-      deltaMap.set(key, {
-        medicine_id: oi.medicine_id,
-        batch_no: oi.batch_no,
-        oldQty: oi.quantity || 0,
-        newQty: 0,
-        expiry_date: oi.expiry_date || null,
-        mrp: oi.mrp || 0,
-        cost_price: oi.cost_price || 0
-      });
+      const existing = deltaMap.get(key);
+      if (existing) {
+        existing.oldQty += Number(oi.quantity || 0);
+      } else {
+        deltaMap.set(key, {
+          medicine_id: Number(oi.medicine_id),
+          batch_no: oi.batch_no,
+          oldQty: Number(oi.quantity || 0),
+          newQty: 0,
+          expiry_date: oi.expiry_date || null,
+          mrp: Number(oi.mrp || 0),
+          cost_price: Number(oi.cost_price || 0)
+        });
+      }
     }
 
     for (const ni of items) {
@@ -1058,16 +1129,17 @@ router.put('/purchases/:purchaseId', async (req, res) => {
         throw new Error('Batch number is required for all purchase items.');
       }
       const batchNo = String(ni.batch_no).trim();
-      const key = `${ni.medicine_id}_${batchNo}`;
-      if (deltaMap.has(key)) {
-        const entry = deltaMap.get(key)!;
-        entry.newQty = Number(ni.quantity) || 0;
-        entry.expiry_date = ni.expiry_date || entry.expiry_date;
-        entry.mrp = Number(ni.mrp) || entry.mrp;
-        entry.cost_price = Number(ni.cost_price) || entry.cost_price;
+      const medId = Number(ni.medicine_id);
+      const key = `${medId}_${batchNo}`;
+      const existing = deltaMap.get(key);
+      if (existing) {
+        existing.newQty += Number(ni.quantity) || 0;
+        existing.expiry_date = ni.expiry_date || existing.expiry_date;
+        existing.mrp = Number(ni.mrp) || existing.mrp;
+        existing.cost_price = Number(ni.cost_price) || existing.cost_price;
       } else {
         deltaMap.set(key, {
-          medicine_id: Number(ni.medicine_id),
+          medicine_id: medId,
           batch_no: batchNo,
           oldQty: 0,
           newQty: Number(ni.quantity) || 0,
@@ -1079,6 +1151,7 @@ router.put('/purchases/:purchaseId', async (req, res) => {
     }
 
     // Step 2: Validate and apply net changes in inventory_master
+    const { recordStockLedger } = await import('../utils/stockRebuild.js');
     for (const [_, entry] of deltaMap.entries()) {
       const netChange = entry.newQty - entry.oldQty;
       if (netChange === 0) continue;
@@ -1117,6 +1190,15 @@ router.put('/purchases/:purchaseId', async (req, res) => {
           );
         }
       }
+
+      await recordStockLedger(db, {
+        medicine_id: entry.medicine_id,
+        batch_no: entry.batch_no,
+        quantity: netChange,
+        loose_quantity: 0,
+        transaction_type: 'investigation_purchase_edit',
+        transaction_id: purchaseId
+      });
     }
 
     // Step 3: Remove old and insert new purchase items
@@ -1165,6 +1247,13 @@ router.put('/purchases/:purchaseId', async (req, res) => {
     inventoryCache.invalidate();
     await rebuildPurchaseSummaryCache();
     triggerBackgroundSummaryRebuild();
+
+    try {
+      const { eventService } = await import('../services/eventService.js');
+      eventService.broadcast('purchase_sync', { success: true, action: 'update', id: Number(purchaseId) });
+      eventService.broadcast('inventory_sync', { success: true });
+    } catch (_e) {}
+
     res.json({ success: true, message: 'Purchase bill corrected and inventory reconciled successfully', totalAmount });
   } catch (error) {
     if (db) {

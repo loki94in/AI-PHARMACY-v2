@@ -618,24 +618,6 @@ const POS = () => {
     { enabled: mountFetchesReady && specialOrdersControl.shouldFetch }
   );
 
-  const matchedCustomerOrders = useMemo(() => {
-    const nameQuery = patientName.trim().toLowerCase();
-    const phoneQuery = patientPhone.replace(/\D/g, '');
-
-    if (!nameQuery && !phoneQuery) return [];
-
-    return (specialOrders || []).filter((order: any) => {
-      if (order.status === 'Fulfilled' || order.status === 'Cancelled' || order.status === 'Completed') return false;
-      const orderName = (order.requester || '').toLowerCase();
-      const orderPhone = (order.phone || '').replace(/\D/g, '');
-
-      const nameMatch = nameQuery.length >= 2 && (orderName.includes(nameQuery) || nameQuery.includes(orderName));
-      const phoneMatch = phoneQuery.length >= 4 && (orderPhone.includes(phoneQuery) || phoneQuery.includes(orderPhone));
-
-      return nameMatch || phoneMatch;
-    });
-  }, [specialOrders, patientName, patientPhone]);
-
   const { data: commonCombinations = [] } = useApiQuery<any[]>(
     'pos-common-combinations',
     async () => {
@@ -2396,17 +2378,6 @@ const POS = () => {
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
-
-      // Auto-fulfill matching special orders for customer & queue WhatsApp delivery notification
-      if (matchedCustomerOrders.length > 0) {
-        for (const order of matchedCustomerOrders) {
-          api.fulfillSpecialOrder(order.id, { invoiceNo, grandTotal }).catch(err => {
-            console.error(`Failed to auto-fulfill special order #${order.id}:`, err);
-          });
-        }
-        queryClient.invalidateQueries({ queryKey: ['pos-special-orders'] });
-        toastEvent.trigger(`Special order for ${patientName || 'Customer'} fulfilled & WhatsApp delivery message queued!`, 'success');
-      }
       
       const isWaSent = paymentMedium === 'CREDIT' || (sendWhatsApp && !!phoneToUse.trim());
 
