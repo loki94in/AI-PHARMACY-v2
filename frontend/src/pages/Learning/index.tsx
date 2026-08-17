@@ -53,7 +53,9 @@ interface LearningProfileSummary {
   distributor_phone: string | null;
   last_updated: string | null;
   files_count: number;
+  last_file_name?: string | null;
   last_status: string | null;
+  mapped_store_names?: string | null;
 }
 
 interface ProfileDetail {
@@ -124,6 +126,16 @@ const Learning: React.FC = () => {
   const [primaryMergeId, setPrimaryMergeId] = useState<number | null>(null);
   const [secondaryMergeId, setSecondaryMergeId] = useState<number | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+
+  // Add Distributor modal state
+  const [showAddDistributorModal, setShowAddDistributorModal] = useState(false);
+  const [newDistName, setNewDistName] = useState('');
+  const [newDistPhone, setNewDistPhone] = useState('');
+  const [newDistEmail, setNewDistEmail] = useState('');
+  const [newDistGstin, setNewDistGstin] = useState('');
+  const [newDistAddress, setNewDistAddress] = useState('');
+  const [isCreatingDistributor, setIsCreatingDistributor] = useState(false);
+  const [shakeNewDistributorPhone, setShakeNewDistributorPhone] = useState(false);
 
   // Edit Distributor modal state
   const [editingDistributor, setEditingDistributor] = useState<{
@@ -226,6 +238,45 @@ const Learning: React.FC = () => {
       refetchProfiles();
     } catch (err: any) {
       toastEvent.trigger('Failed to delete distributor layout: ' + (err.message || 'Server error'), 'error');
+    }
+  };
+
+  const handleCreateDistributor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDistName.trim()) {
+      toastEvent.trigger('Distributor name is required', 'error');
+      return;
+    }
+    if (newDistPhone.trim() && !isValid10DigitPhone(newDistPhone)) {
+      setShakeNewDistributorPhone(true);
+      setTimeout(() => setShakeNewDistributorPhone(false), 400);
+      toastEvent.trigger('Distributor phone number must be exactly 10 digits (or leave blank)', 'error');
+      return;
+    }
+
+    setIsCreatingDistributor(true);
+    try {
+      await apiClient.post('/distributors', {
+        name: newDistName.trim(),
+        phone: newDistPhone.trim(),
+        email: newDistEmail.trim(),
+        gstin: newDistGstin.trim(),
+        address: newDistAddress.trim()
+      });
+
+      toastEvent.trigger(`Distributor "${newDistName.trim()}" registered successfully!`, 'success');
+      setShowAddDistributorModal(false);
+      setNewDistName('');
+      setNewDistPhone('');
+      setNewDistEmail('');
+      setNewDistGstin('');
+      setNewDistAddress('');
+      await broadcastContactDataChanged();
+      refetchProfiles();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to register distributor: ' + (err.message || 'Server error'), 'error');
+    } finally {
+      setIsCreatingDistributor(false);
     }
   };
 
@@ -565,6 +616,21 @@ const Learning: React.FC = () => {
       (normQ && normDist && (normDist.includes(normQ) || normQ.includes(normDist)))
     );
   });
+
+  // Check if distributor has an active placed order today
+  const hasOrderToday = (p: LearningProfileSummary) => {
+    if (!todaySentOrdersList || todaySentOrdersList.length === 0) return false;
+    const pName = (p.distributor_name || '').toLowerCase().trim();
+    const pMapped = (p.mapped_store_names || '').toLowerCase();
+    return todaySentOrdersList.some((o: any) => {
+      if (o.store_id && o.store_id === p.distributor_id) return true;
+      const sName = (o.store_name || '').toLowerCase().trim();
+      if (!sName) return false;
+      if (pName && (sName === pName || sName.includes(pName) || pName.includes(sName))) return true;
+      if (pMapped && pMapped.includes(sName)) return true;
+      return false;
+    });
+  };
 
   return (
     <div className="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-fadeIn">
@@ -1056,6 +1122,14 @@ const Learning: React.FC = () => {
                   />
                 </div>
                 <button
+                  onClick={() => setShowAddDistributorModal(true)}
+                  className="px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-md hover:bg-primary/90"
+                  title="Add new distributor to database"
+                >
+                  <Plus size={14} />
+                  <span className="hidden sm:inline">Add</span>
+                </button>
+                <button
                   onClick={() => setShowMergeModal(true)}
                   className="px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                   title="Merge redundant distributor profiles"
@@ -1073,6 +1147,7 @@ const Learning: React.FC = () => {
                 ) : (
                   filteredProfiles.map(p => {
                     const isSelected = selectedProfileId === p.distributor_id;
+                    const isOrderedToday = hasOrderToday(p);
                     return (
                       <div
                         key={p.distributor_id}
@@ -1125,9 +1200,16 @@ const Learning: React.FC = () => {
                         </div>
                         <div className="text-[11px] text-muted flex items-center justify-between border-t border-border/40 pt-2">
                           <span>{p.distributor_phone || 'No phone'}</span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">
-                            {p.files_count} files
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {isOrderedToday && (
+                              <span className="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky border border-sky-500/30 text-[10px] font-bold">
+                                🛒 Active Today
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">
+                              {p.files_count} files
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1218,6 +1300,138 @@ const Learning: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ADD DISTRIBUTOR MODAL PORTAL */}
+      {/* ========================================================================= */}
+      {showAddDistributorModal && createPortal(
+        <div className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-glass-bg border border-glass-border rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl backdrop-blur-xl animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="font-bold text-text text-base flex items-center gap-2">
+                <Building2 size={18} className="text-primary" />
+                <span>Register New Distributor</span>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddDistributorModal(false);
+                  setNewDistName('');
+                  setNewDistPhone('');
+                  setNewDistEmail('');
+                  setNewDistGstin('');
+                  setNewDistAddress('');
+                }}
+                className="text-muted hover:text-text cursor-pointer p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted">
+              Add distributor details directly to your database. This distributor will be immediately available across Purchase Bills, OCR Auto-Learning, and Pharmarack.
+            </p>
+
+            <form onSubmit={handleCreateDistributor} className="space-y-3.5">
+              <div>
+                <label className="text-[11px] font-bold text-text block mb-1">
+                  Distributor / Agency Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Mahavir Pharma Distributors"
+                  value={newDistName}
+                  onChange={e => setNewDistName(e.target.value)}
+                  className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary font-bold"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <PhoneInputWithBadge
+                  label="WhatsApp / Mobile Phone"
+                  value={newDistPhone}
+                  onChange={val => setNewDistPhone(val)}
+                  placeholder="10 digits"
+                  shakeOnError={shakeNewDistributorPhone}
+                  allowEmpty={true}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. orders@mahavirpharma.com"
+                    value={newDistEmail}
+                    onChange={e => setNewDistEmail(e.target.value)}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-text block mb-1">
+                    GSTIN / Party Code
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 27AAAAA0000A1Z5"
+                    value={newDistGstin}
+                    onChange={e => setNewDistGstin(e.target.value.toUpperCase())}
+                    className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary font-mono uppercase"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-text block mb-1">
+                  Business Address
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Shop 12, Wholesale Market, Mumbai"
+                  value={newDistAddress}
+                  onChange={e => setNewDistAddress(e.target.value)}
+                  className="w-full bg-bg border border-border rounded-xl px-3.5 py-2 text-xs text-text focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddDistributorModal(false);
+                    setNewDistName('');
+                    setNewDistPhone('');
+                    setNewDistEmail('');
+                    setNewDistGstin('');
+                    setNewDistAddress('');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-bg2 border border-border text-text font-bold text-xs cursor-pointer hover:bg-bg3"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingDistributor || !newDistName.trim()}
+                  className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5 shadow-md"
+                >
+                  {isCreatingDistributor ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                  <span>Save Distributor</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* ========================================================================= */}
