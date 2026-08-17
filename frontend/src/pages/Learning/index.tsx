@@ -568,12 +568,13 @@ const Learning: React.FC = () => {
     try {
       await apiClient.post('/learning/profiles/merge', {
         primaryId: primaryMergeId,
-        secondaryId: secondaryMergeId
+        secondaryIds: [secondaryMergeId]
       });
       toastEvent.trigger('Distributor profiles merged successfully!', 'success');
       setShowMergeModal(false);
       setPrimaryMergeId(null);
       setSecondaryMergeId(null);
+      await broadcastContactDataChanged();
       refetchProfiles();
     } catch (err: any) {
       toastEvent.trigger('Merge failed: ' + (err.message || 'Server error'), 'error');

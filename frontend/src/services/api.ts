@@ -809,6 +809,8 @@ export const api = {
   getIgnoredWords: () => apiClient.get('/purchases/ignored-words').then(res => res.data),
   addIgnoredWord: (word: string, source = 'recon') => apiClient.post('/purchases/ignored-words', { word, source }).then(res => res.data),
   removeIgnoredWord: (id: number) => apiClient.delete(`/purchases/ignored-words/${id}`).then(res => res.data),
+  mergeMedicines: (data: { primaryMedicineId: number; secondaryMedicineId?: number; secondaryMedicineIds?: number[]; distributorId?: number; billName?: string }) => apiClient.post('/medicines/merge', data).then(res => res.data),
+  mergeDistributors: (data: { primaryId: number; secondaryIds?: number[]; secondaryId?: number; newName?: string }) => apiClient.post('/learning/profiles/merge', data).then(res => res.data),
 
   // Staged / Offline Sync Review
   getStagedSales: (all?: boolean) => apiClient.get(all ? '/sales/staged?all=true' : '/sales/staged').then(res => res.data),

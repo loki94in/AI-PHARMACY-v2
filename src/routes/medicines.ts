@@ -776,6 +776,154 @@ router.patch('/medicines/:id/allow-loose-sale', async (req, res) => {
   }
 });
 
+// POST /api/medicines/merge - merge duplicate/variant medicine into canonical master medicine
+router.post('/medicines/merge', async (req, res) => {
+  const { primaryMedicineId, secondaryMedicineId, secondaryMedicineIds: rawSecondaryIds, distributorId, billName } = req.body;
+  const secondaryIds: number[] = Array.isArray(rawSecondaryIds)
+    ? rawSecondaryIds.map(Number).filter(n => !isNaN(n) && n > 0)
+    : (secondaryMedicineId && !isNaN(Number(secondaryMedicineId)) && Number(secondaryMedicineId) > 0 ? [Number(secondaryMedicineId)] : []);
+
+  if (!primaryMedicineId || isNaN(Number(primaryMedicineId)) || secondaryIds.length === 0) {
+    return res.status(400).json({ error: 'primaryMedicineId and valid secondaryMedicineId(s) are required' });
+  }
+
+  const cleanPrimaryId = Number(primaryMedicineId);
+  if (secondaryIds.includes(cleanPrimaryId)) {
+    return res.status(400).json({ error: 'Primary medicine cannot be merged into itself' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    await db.run('BEGIN TRANSACTION');
+
+    const primary = await db.get('SELECT * FROM medicines WHERE id = ?', [cleanPrimaryId]);
+    if (!primary) {
+      await db.run('ROLLBACK');
+      return res.status(404).json({ error: 'Primary master medicine not found' });
+    }
+
+    const placeholders = secondaryIds.map(() => '?').join(',');
+    const secondaries = await db.all(`SELECT * FROM medicines WHERE id IN (${placeholders})`, secondaryIds);
+    if (!secondaries || secondaries.length === 0) {
+      await db.run('ROLLBACK');
+      return res.status(404).json({ error: 'No valid secondary medicines found to merge' });
+    }
+
+    const params = [cleanPrimaryId, ...secondaryIds];
+
+    // 1. Re-link inventory_master batches and stock
+    await db.run(`UPDATE inventory_master SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+
+    // 2. Re-link purchase_items (preserves original bill raw names in purchase line)
+    await db.run(`UPDATE purchase_items SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+
+    // 3. Re-link stock ledger
+    try {
+      await db.run(`UPDATE stock_ledger SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+    } catch (_) {}
+
+    // 4. Re-link special orders and shortage requests
+    try {
+      await db.run(`UPDATE special_orders SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+    } catch (_) {}
+
+    // 5. Clean up pre-computed substitutes referencing secondaries
+    try {
+      await db.run(`DELETE FROM substitutes WHERE source_medicine_id IN (${placeholders}) OR substitute_medicine_id IN (${placeholders})`, [...secondaryIds, ...secondaryIds]);
+    } catch (_) {}
+
+    // 6. Register aliases in medicine_aliases
+    for (const sec of secondaries) {
+      if (sec.name && sec.name.trim()) {
+        await db.run(
+          'INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)',
+          [sec.name.trim(), cleanPrimaryId]
+        );
+      }
+    }
+    if (billName && typeof billName === 'string' && billName.trim()) {
+      await db.run(
+        'INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)',
+        [billName.trim(), cleanPrimaryId]
+      );
+    }
+
+    // Re-link existing medicine_aliases safely
+    try {
+      await db.run(
+        `DELETE FROM medicine_aliases 
+         WHERE medicine_id IN (${placeholders}) 
+           AND alias_name IN (SELECT alias_name FROM medicine_aliases WHERE medicine_id = ?)`,
+        [...secondaryIds, cleanPrimaryId]
+      );
+      await db.run(`UPDATE medicine_aliases SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+    } catch (_) {}
+
+    // 7. Register distributor specific alias if distributorId is provided
+    if (distributorId && !isNaN(Number(distributorId)) && Number(distributorId) > 0) {
+      const cleanDistId = Number(distributorId);
+      if (billName && typeof billName === 'string' && billName.trim()) {
+        await db.run(
+          `INSERT INTO distributor_medicine_aliases (distributor_id, alias_name, medicine_id) 
+           VALUES (?, ?, ?) 
+           ON CONFLICT(distributor_id, alias_name) DO UPDATE SET medicine_id = excluded.medicine_id`,
+          [cleanDistId, billName.trim(), cleanPrimaryId]
+        );
+      }
+      for (const sec of secondaries) {
+        if (sec.name && sec.name.trim()) {
+          await db.run(
+            `INSERT INTO distributor_medicine_aliases (distributor_id, alias_name, medicine_id) 
+             VALUES (?, ?, ?) 
+             ON CONFLICT(distributor_id, alias_name) DO UPDATE SET medicine_id = excluded.medicine_id`,
+            [cleanDistId, sec.name.trim(), cleanPrimaryId]
+          );
+        }
+      }
+    }
+
+    // Re-link existing distributor_medicine_aliases safely
+    try {
+      await db.run(
+        `DELETE FROM distributor_medicine_aliases 
+         WHERE medicine_id IN (${placeholders}) 
+           AND (distributor_id, alias_name) IN (SELECT distributor_id, alias_name FROM distributor_medicine_aliases WHERE medicine_id = ?)`,
+        [...secondaryIds, cleanPrimaryId]
+      );
+      await db.run(`UPDATE distributor_medicine_aliases SET medicine_id = ? WHERE medicine_id IN (${placeholders})`, params);
+    } catch (_) {}
+
+    // 8. Delete secondary medicine master rows
+    await db.run(`DELETE FROM medicines WHERE id IN (${placeholders})`, secondaryIds);
+
+    // 9. Log action in audit logs
+    try {
+      const secondaryNames = secondaries.map(s => `"${s.name}" (#${s.id})`).join(', ');
+      await db.run(
+        'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+        ['MEDICINE_MERGE', `Merged ${secondaryNames} into master "${primary.name}" (#${cleanPrimaryId})`]
+      );
+    } catch (_) {}
+
+    await db.run('COMMIT');
+    inventoryCache.invalidate();
+
+    res.json({
+      success: true,
+      message: `Successfully merged ${secondaries.length} medicine(s) into master "${primary.name}"`,
+      primaryMedicineId: cleanPrimaryId,
+      primaryName: primary.name
+    });
+  } catch (error: any) {
+    if (db) {
+      try { await db.run('ROLLBACK'); } catch (_) {}
+    }
+    console.error('Medicine merge error:', error);
+    res.status(500).json({ error: 'Failed to merge medicines: ' + error.message });
+  }
+});
+
 export default router;
 
 

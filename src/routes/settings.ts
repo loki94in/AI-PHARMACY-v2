@@ -557,24 +557,33 @@ router.delete('/distributors/:id', async (req, res) => {
 
 // Merge duplicate distributors into a single master distributor
 router.post('/distributors/merge', async (req, res) => {
-  const { primaryId, secondaryIds, newName } = req.body;
-  if (!primaryId || !Array.isArray(secondaryIds) || secondaryIds.length === 0) {
-    return res.status(400).json({ error: 'primaryId and secondaryIds array are required' });
+  const { primaryId, secondaryIds: rawSecondaryIds, secondaryId, newName } = req.body;
+  const secondaryIds: number[] = Array.isArray(rawSecondaryIds)
+    ? rawSecondaryIds.map(Number).filter(n => !isNaN(n) && n > 0)
+    : (secondaryId && !isNaN(Number(secondaryId)) && Number(secondaryId) > 0 ? [Number(secondaryId)] : []);
+
+  if (!primaryId || isNaN(Number(primaryId)) || secondaryIds.length === 0) {
+    return res.status(400).json({ error: 'primaryId and valid secondaryIds (or secondaryId) are required' });
   }
+  const cleanPrimaryId = Number(primaryId);
+  if (secondaryIds.includes(cleanPrimaryId)) {
+    return res.status(400).json({ error: 'Primary distributor cannot be included in secondary distributors' });
+  }
+
   try {
     const db = await dbManager.getConnection();
-    let primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+    let primary = await db.get('SELECT * FROM distributors WHERE id = ?', [cleanPrimaryId]);
     if (!primary) return res.status(404).json({ error: 'Primary distributor not found' });
 
     // Optionally rename primary distributor to Pharmarack/custom name during merge
     if (newName && typeof newName === 'string' && newName.trim() && newName.trim() !== primary.name) {
       const cleanNewName = newName.trim();
-      await db.run('UPDATE distributors SET name = ? WHERE id = ?', [cleanNewName, primaryId]);
-      primary = await db.get('SELECT * FROM distributors WHERE id = ?', [primaryId]);
+      await db.run('UPDATE distributors SET name = ? WHERE id = ?', [cleanNewName, cleanPrimaryId]);
+      primary = await db.get('SELECT * FROM distributors WHERE id = ?', [cleanPrimaryId]);
     }
 
     const placeholders = secondaryIds.map(() => '?').join(',');
-    const params = [primaryId, ...secondaryIds];
+    const params = [cleanPrimaryId, ...secondaryIds];
 
     // Re-link all related records to primaryId
     await db.run(`UPDATE purchases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
@@ -583,13 +592,36 @@ router.post('/distributors/merge', async (req, res) => {
     await db.run(`UPDATE distributor_payments SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
     await db.run(`UPDATE distributor_payment_details SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
     await db.run(`UPDATE distributor_historical_files SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+
+    // Safe re-linking for distributor_medicine_aliases (has UNIQUE(distributor_id, alias_name))
     try {
-      await db.run(`UPDATE pharmarack_distributor_mappings SET distributor_id = ? WHERE distributor_id IN (${placeholders})`, params);
+      await db.run(
+        `DELETE FROM distributor_medicine_aliases 
+         WHERE distributor_id IN (${placeholders}) 
+           AND alias_name IN (SELECT alias_name FROM distributor_medicine_aliases WHERE distributor_id = ?)`,
+        [...secondaryIds, cleanPrimaryId]
+      );
+      await db.run(
+        `UPDATE distributor_medicine_aliases SET distributor_id = ? WHERE distributor_id IN (${placeholders})`,
+        params
+      );
+    } catch (_) {}
+
+    // Safe re-linking for pharmarack_distributor_mappings
+    try {
+      await db.run(
+        `UPDATE OR IGNORE pharmarack_distributor_mappings SET distributor_id = ? WHERE distributor_id IN (${placeholders})`,
+        params
+      );
+      await db.run(
+        `DELETE FROM pharmarack_distributor_mappings WHERE distributor_id IN (${placeholders})`,
+        secondaryIds
+      );
     } catch (_) {}
 
     // Remove secondary learning profiles and ensure primary profile exists
     await db.run(`DELETE FROM distributor_learning_profiles WHERE distributor_id IN (${placeholders})`, secondaryIds);
-    await db.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [primaryId]);
+    await db.run(`INSERT OR IGNORE INTO distributor_learning_profiles (distributor_id) VALUES (?)`, [cleanPrimaryId]);
 
     // Delete secondary duplicate distributor rows
     await db.run(`DELETE FROM distributors WHERE id IN (${placeholders})`, secondaryIds);
@@ -602,7 +634,7 @@ router.post('/distributors/merge', async (req, res) => {
       } catch (_) { }
     }
 
-    res.json({ success: true, message: `Successfully merged ${secondaryIds.length} duplicate distributor(s) into '${primary.name}'`, primaryId });
+    res.json({ success: true, message: `Successfully merged ${secondaryIds.length} duplicate distributor(s) into '${primary.name}'`, primaryId: cleanPrimaryId });
   } catch (error: any) {
     console.error('Failed to merge distributors:', error);
     res.status(500).json({ error: 'Failed to merge distributors: ' + error.message });
